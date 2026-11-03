@@ -41,6 +41,11 @@
 
 WeightLang 主要面向 AI 编程模型，因此语法小而严格，以行为单位，也方便人审阅。
 
+**Bootstrap 目标**：用 WeightLang 训练能理解、编写和调试本语言的专用语言模型，
+保留现代指令、多轮对话和工具调用能力；对外只要求 Open Responses 协议（兼容 OpenAI Responses API）。
+这是待完成的目标，能力与协议验收见 [bootstrap 约定](docs/bootstrap.md)。
+首个[本地训练与文本接口实验](examples/bootstrap/README.md) 已跑通，但尚未通过语言能力验收。
+
 ```text
  xor.wgt ──weightc build --no-store──▶ weights/xor_mlp/ ──weightc run──▶ {"prob": [[0.00003], [0.9999], ...]}
                               ├─ manifest.json        结构、输入输出、来源、哈希

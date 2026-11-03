@@ -43,6 +43,14 @@ Go-style, and their weights reused by other programs.
 WeightLang is meant to be written mostly by AI coding models, so the syntax is
 small, line-oriented and strict. It should still be easy for a person to review.
 
+**Bootstrap goal:** train a dedicated language model with WeightLang that can
+understand, write and debug the language while retaining modern instruction,
+conversation and tool-calling capabilities. Open Responses (OpenAI Responses API compatible)
+is the sole external protocol target. This is a goal, not a shipped capability;
+see the [bootstrap acceptance criteria](docs/bootstrap.md) (Chinese).
+The first [local training and text API experiment](examples/bootstrap/README.md)
+runs end to end, but has not passed the language-capability acceptance gate.
+
 ```text
  xor.wgt ──weightc build --no-store──▶ weights/xor_mlp/ ──weightc run──▶ {"prob": [[0.00003], [0.9999], ...]}
                               ├─ manifest.json        structure · I/O · provenance · hashes
