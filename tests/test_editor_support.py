@@ -66,3 +66,16 @@ qa!
         result = subprocess.run([editor, '-u', 'NONE', '-i', 'NONE', '-n', '-es', '-S', str(script)], capture_output=True, text=True)
         errors = Path(temp) / 'errors'
         assert result.returncode == 0, errors.read_text() if errors.exists() else result.stderr
+
+
+def test_marketplace_icon_limits():
+    # vsce can package icons that the Marketplace later refuses to publish.
+    import struct
+
+    extension = ROOT / 'editors/vscode'
+    manifest = json.loads((extension / 'package.json').read_text())
+    icon = (extension / manifest['icon']).read_bytes()
+    assert icon[:8] == b'\x89PNG\r\n\x1a\n'
+    width, height = struct.unpack('>II', icon[16:24])
+    assert 128 <= width <= 1024 and 128 <= height <= 1024
+    assert len(icon) <= 1024 * 1024

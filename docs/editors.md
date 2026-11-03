@@ -9,7 +9,7 @@ TextMate 还区分参数、调用名称、标点和运算符。高亮不判断�
 
 | 编辑器 | 文件/方式 | 状态 |
 | --- | --- | --- |
-| VS Code、VSCodium，以及兼容 VS Code 扩展的编辑器 | `editors/vscode/`，本地 VSIX | TextMate 引擎测试通过；未上架 |
+| VS Code、VSCodium，以及兼容 VS Code 扩展的编辑器 | `editors/vscode/`，本地 VSIX | TextMate 引擎测试通过；0.1.0 已提交 Marketplace 验证 |
 | Sublime Text | `editors/WeightLang.tmbundle/Syntaxes/WeightLang.tmLanguage` | 格式已验证，未逐一 GUI 验收 |
 | TextMate | `editors/WeightLang.tmbundle/` | 同上 |
 | JetBrains IDE（启用 TextMate Bundles 插件） | 导入 `editors/WeightLang.tmbundle/` | 同上 |
@@ -39,7 +39,10 @@ code --install-extension weightlang-0.1.0.vsix
 也可以在编辑器中执行 **Extensions: Install from VSIX**，选择生成的文件。
 VSCodium 用 `codium` 替代 `code`；其他兼容编辑器使用自己的安装入口。
 扩展提供 `.wgt` 自动识别、注释切换、括号和双引号配对，无可执行扩展代码。
-`publisher` 目前只是本地包元数据，不代表已在 Marketplace/Open VSX 注册或发布。
+发布者为 `LIghtJUNction`，安装 ID 为 `LIghtJUNction.weightlang`。
+0.1.0 已上传 Marketplace，正在等待平台验证；这不等于已经可以搜索或安装。
+[Marketplace 页面](https://marketplace.visualstudio.com/items?itemName=LIghtJUNction.weightlang)
+在验证完成后可用。Open VSX 尚未发布。
 
 ### Sublime Text / TextMate / JetBrains
 
