@@ -64,9 +64,10 @@ Old CLI-dependent `wgt check/build/package/install/train/export/test/trace/debug
 commands report that they are retired. Use the native script commands above.
 
 `std/` retains WGT library sources; `language/primitive_specs.json` holds operator
-signatures. Historical declarative models and artifact fixtures are retained as
-migration material, not proof of execution support. Documentation marked as
-historical may describe removed Python APIs and examples.
+signatures. Retained library sources and artifact fixtures are migration material,
+not proof of execution support. See the [WGT 0.5 reference](docs/reference.zh-CN.md),
+[package guide](docs/packages.md), [command guide](docs/wgt.md), and
+[editor guide](docs/editors.md).
 
 Complete models and retained experiment results belong in `weights/`.
 Large build/download caches must be disk-backed; small scratch files use

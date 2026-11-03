@@ -58,8 +58,9 @@ cargo build --locked --workspace --bins
 明确报错；执行训练请使用上述原生脚本入口。
 
 WGT 标准库源码保留在 `std/`，算子签名保留在 `language/primitive_specs.json`。
-历史声明式模型及制品夹具作为迁移资料保留，不表示原生执行器已经支持。
-标为历史说明的文档可能包含已删除的 Python API 和示例。
+保留的标准库源码及制品夹具作为迁移资料，不表示原生执行器已经支持。
+参见 [WGT 0.5 参考](docs/reference.zh-CN.md)、[包依赖](docs/packages.md)、
+[命令行](docs/wgt.md)和[编辑器支持](docs/editors.md)。
 
 完整模型和保留实验结果放在 `weights/`。大型构建、下载缓存必须在磁盘上，
 小临时文件放在 `/tmp/weightlang/`，详见 [存储约定](docs/storage.md)。
