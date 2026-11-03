@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WeightLang architecture reuse report v1",
+  "type": "object",
+  "required": [
+    "format",
+    "format_version",
+    "status",
+    "policy",
+    "execution",
+    "stage",
+    "quality",
+    "tensors"
+  ],
+  "properties": {
+    "format": {
+      "const": "weightlang.reuse"
+    },
+    "format_version": {
+      "const": 1
+    },
+    "status": {
+      "enum": [
+        "complete",
+        "partial",
+        "no_reuse",
+        "no_baseline",
+        "disabled",
+        "explicit_only",
+        "failed"
+      ]
+    },
+    "policy": {
+      "enum": [
+        "exact",
+        "overlap",
+        "none"
+      ]
+    },
+    "execution": {
+      "enum": [
+        "planned",
+        "applied"
+      ]
+    },
+    "stage": {
+      "const": "initialization_before_training"
+    },
+    "quality": {
+      "const": "not_evaluated"
+    },
+    "strict": {
+      "type": "boolean"
+    },
+    "architecture_changed": {
+      "type": "boolean"
+    },
+    "interface_changed": {
+      "type": "boolean"
+    },
+    "mapping": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "source": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "weights_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "target_tensors",
+        "target_values",
+        "copied_values",
+        "initialized_values",
+        "explicit_import_values",
+        "reused_tensors",
+        "partial_tensors",
+        "initialized_tensors",
+        "copied_fraction"
+      ],
+      "properties": {
+        "target_tensors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_values": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "copied_values": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "initialized_values": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "explicit_import_values": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reused_tensors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "partial_tensors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "initialized_tensors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "copied_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "tensors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "target",
+          "source",
+          "target_shape",
+          "target_values",
+          "status",
+          "reason",
+          "copied_values",
+          "initialized_values"
+        ],
+        "properties": {
+          "target": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target_shape": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "source_shape": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "status": {
+            "enum": [
+              "reused",
+              "partial",
+              "initialized",
+              "explicit_import"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "extents": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "source_origin": {
+            "type": "object"
+          },
+          "target_values": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "copied_values": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "initialized_values": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source_unused_values": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "unused_source_tensors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failure": {
+      "enum": [
+        "strict_requires_exact_reuse",
+        "baseline_validation_failed"
+      ]
+    },
+    "error": {
+      "type": "string"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "failure"
+        ]
+      },
+      "else": {
+        "required": [
+          "strict",
+          "source",
+          "summary",
+          "architecture_changed",
+          "interface_changed",
+          "mapping",
+          "unused_source_tensors"
+        ]
+      }
+    }
+  ]
+}

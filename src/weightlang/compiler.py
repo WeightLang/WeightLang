@@ -262,7 +262,7 @@ def _library_records(program: Program) -> dict[str, Any]:
     return records
 
 
-def compile_program(program: Program, out_dir: str | Path, *, force: bool = False, trainers=None) -> BuildResult:
+def compile_program(program: Program, out_dir: str | Path, *, force: bool = False, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None) -> BuildResult:
     """Build ``program`` and write its artifact to ``out_dir/<model>``."""
 
     if program.path is None:
@@ -296,7 +296,16 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
             del inherited
         torch.manual_seed(program.seed)
         module = build_module(layers)
+        reuse_report, reused_upstream = None, {}
+        if reuse_policy is not None or reuse_source is not None or reuse_mapping or reuse_strict or reuse_revision is not None:
+            from .reuse import apply as apply_reuse
+
+            reuse_report, reused_upstream = apply_reuse(
+                program, module, reuse_source, policy=reuse_policy or "exact", mapping=reuse_mapping,
+                strict=reuse_strict, revision=reuse_revision,
+            )
         import_records, upstream = _apply_imports(program, module, layers, base)
+        upstream = {**reused_upstream, **upstream}
         apply_freezing(program, module)
         training = _train(program, module, trainers) if program.train is not None else None
 
@@ -304,7 +313,7 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
     trainable = {name for name, param in module.named_parameters() if param.requires_grad}
     tensors_meta: dict[str, dict[str, Any]] = {}
     for name, value in module.state_dict().items():
-        is_imported = any(_under(name, p) for p in imported)
+        is_imported = name in reused_upstream or any(_under(name, p) for p in imported)
         trained = training is not None and name in trainable
         if is_imported:
             origin = ORIGIN_IMPORTED_TRAINED if trained else ORIGIN_IMPORTED
@@ -351,6 +360,8 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
             "training": training,
             "weights": {"file": WEIGHTS_FILE, "sha256": sha256_file(tmp / WEIGHTS_FILE), "tensors": tensors_meta},
         }
+        if reuse_report is not None:
+            manifest["reuse"] = reuse_report
         if program.freezing:
             manifest["training_policy"] = {
                 "format": "weightlang.training-policy",
@@ -374,5 +385,5 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
     return BuildResult(dest, manifest, module)
 
 
-def compile_file(source: str | Path, out_dir: str | Path = "weights", *, force: bool = False, trainers=None) -> BuildResult:
-    return compile_program(parse_file(source), out_dir, force=force, trainers=trainers)
+def compile_file(source: str | Path, out_dir: str | Path = "weights", *, force: bool = False, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None) -> BuildResult:
+    return compile_program(parse_file(source), out_dir, force=force, trainers=trainers, reuse_source=reuse_source, reuse_policy=reuse_policy, reuse_mapping=reuse_mapping, reuse_strict=reuse_strict, reuse_revision=reuse_revision)

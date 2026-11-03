@@ -34,6 +34,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
 
 def _cmd_build(args: argparse.Namespace) -> int:
     from .compiler import compile_file  # imports torch training code lazily
+    from .reuse_cli import build_with_reuse
     from .trainers import load_trainers
 
     trainers = load_trainers(args.trainer)
@@ -53,13 +54,15 @@ def _cmd_build(args: argparse.Namespace) -> int:
         repository = WeightRepository(args.store)
         expected = repository.prepare(args.parent)
         with tempfile.TemporaryDirectory(prefix=".build-", dir=repository.root) as tmp:
-            result = compile_file(args.source, tmp, trainers=trainers)
+            result = build_with_reuse(compile_file, args, tmp, repository=repository, expected=expected, trainers=trainers)
             report = repository.commit(result.path, message=args.message, parent=args.parent, expected=expected)
+        report["reuse"] = result.manifest["reuse"]
         print(json.dumps(report, indent=2))
         return 0
-    result = compile_file(args.source, args.out, force=args.force, trainers=trainers)
+    result = build_with_reuse(compile_file, args, args.out, force=args.force, trainers=trainers)
     m = result.manifest
     print(f"built {result.path}")
+    print("  reuse " + json.dumps(m["reuse"], sort_keys=True))
     print(f"  weights sha256 {m['weights']['sha256']}")
     origins: dict[str, int] = {}
     for meta in m["weights"]["tensors"].values():
@@ -124,6 +127,8 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
             f"edit {number}: {edit['patch']['author']} (self-reported), "
             f"{len(edit['changes'])} scalar changes, patch sha256={edit['patch_sha256']}"
         )
+    if "reuse" in m:
+        print("reuse " + json.dumps(m["reuse"], sort_keys=True))
     print("tensors:")
     for name, meta in m["weights"]["tensors"].items():
         extra = f" (upstream: {meta['upstream_origin']})" if "upstream_origin" in meta else ""
@@ -285,6 +290,8 @@ def _cmd_revision(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .reuse_cli import add_options as add_reuse_options, command_plan
+
     parser = argparse.ArgumentParser(prog="weightc", description="WeightLang compiler (prototype)")
     parser.add_argument("--version", action="version", version=f"weightc {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -321,6 +328,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="load a trusted local Python training algorithm (repeatable)")
     p.add_argument("--parent", help="optional expected HEAD; normally inferred automatically")
     p.add_argument("-m", "--message", default="", help="weight version commit message")
+    add_reuse_options(p)
     p.set_defaults(func=_cmd_build)
 
     p = sub.add_parser("run", help="run inference with an artifact")
@@ -430,10 +438,18 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("-o", "--output", required=True, help="NEW artifact directory")
         command.set_defaults(func=_cmd_revision)
 
+    p = sub.add_parser("reuse-plan", help="preview architecture reuse without training or writing a model")
+    p.add_argument("source")
+    p.add_argument("--store", default="weights/.revisions")
+    add_reuse_options(p)
+    p.set_defaults(func=command_plan)
+
     args = parser.parse_args(argv)
     try:
         return args.func(args)
     except WgtError as exc:
+        if hasattr(exc, "reuse_report"):
+            print(json.dumps({"reuse": exc.reuse_report}, indent=2), file=sys.stderr)
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

@@ -29,9 +29,11 @@ The default repository is `weights/.revisions`. Every command accepts
 builds only a standalone artifact at `weights/<model>/` (or a custom `-o ROOT`).
 `--no-store` cannot be combined with `--store`, `-m` or `--parent`. Use one
 repository per model lineage; intentionally distinct experiments can be branches.
-The parent records history; it does not change the training program, automatically
-reuse prior weights or restore optimizer state. Continue weights using `inherit`
-or `import` as described in [selective training](weight-iterations.md).
+Builds now automatically reuse compatible weights from the captured HEAD before
+training. Architecture changes produce a per-tensor [reuse report](architecture-reuse.md).
+The parent records history; optimizer state is not restored. Use `--reuse none`
+for fresh initialization. Explicit `inherit`/`import` directives take precedence;
+see [selective training](weight-iterations.md).
 
 ## Commands
 
