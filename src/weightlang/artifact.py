@@ -107,6 +107,11 @@ def _build_layer(layer: dict[str, Any]) -> nn.Module:
     op, args = layer["op"], layer.get("args", {})
     from .syntax import _V03_OPS
 
+    if op in {"rearrange", "reduce"}:
+        from .axes import AxisTransform
+
+        return AxisTransform(args["pattern"], args.get("sizes", {}), tuple(layer["input"]["shape"]),
+                             args.get("reduction") if op == "reduce" else None)
     if op in _V03_OPS:
         from .modern import build_modern
 
@@ -276,6 +281,8 @@ def load_artifact(path: str | Path, *, warn_untrained: bool = True) -> Artifact:
         from .syntax import Layer, output_contract
 
         def decode_layer(item):
+            if item["op"] == "linear" and "in" not in item.get("args", {}):
+                raise ValueError("artifact linear requires explicit in")
             return Layer(
                 name=item["name"],
                 op=item["op"],
@@ -296,6 +303,9 @@ def load_artifact(path: str | Path, *, warn_untrained: bool = True) -> Artifact:
             inp = manifest["interface"]["input"]
             out = manifest["interface"]["output"]
             for spec in (inp, out):
+                if "axes" in spec:
+                    _check(isinstance(spec["axes"], list) and len(spec["axes"]) == len(spec["shape"]),
+                           "axis metadata must match sample rank", root)
                 _check(
                     spec["dtype"] in ("f32", "i64")
                     and bool(spec["shape"])
@@ -303,8 +313,14 @@ def load_artifact(path: str | Path, *, warn_untrained: bool = True) -> Artifact:
                     "invalid interface",
                     root,
                 )
-            dtype, shape = output_contract(layers, inp["dtype"], tuple(inp["shape"]))
+            dtype, shape = output_contract(layers, inp["dtype"], tuple(inp["shape"]), axes=inp.get("axes", ()))
             _check(dtype == out["dtype"] and list(shape) == out["shape"], "output shape/dtype mismatch", root)
+            # Reuse the contract validator for output metadata too, including
+            # identifier spelling and uniqueness, without executing any weights.
+            output_contract([], out["dtype"], tuple(out["shape"]), axes=out.get("axes", ()))
+            output_axes = out.get("axes", [None] * len(shape))
+            inferred_axes = layers[-1].output_spec.get("axes", [None] * len(shape))
+            _check(len(output_axes) == len(shape) and all(a is None or b is None or a == b for a, b in zip(output_axes, inferred_axes)), "output axis mismatch", root)
             verify_contracts(manifest["layers"], layers)
         except (KeyError, TypeError, ValueError, IndexError, ZeroDivisionError) as exc:
             raise WgtError(f"invalid v3 architecture: {exc}", None, str(root)) from None

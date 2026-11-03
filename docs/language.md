@@ -175,3 +175,22 @@ hash-pinned whole-model `inherit`. See [weight iterations](weight-iterations.md)
 for exact selectors, precedence, runnable workflows and limitations. The separate
 [revision store v1](specs/revision-v1.md) deduplicates unchanged weight chunks;
 checkout produces an unchanged standard artifact for existing consumers.
+
+## Named dimensions and transforms (wgt 0.3, local source)
+
+Ports may name sample axes, for example `input x: f32[time=8, feature=32]`.
+`linear(out=64)` infers its input width from the actual incoming tensor; explicit
+`in=` remains checked. Names propagate through layers and incompatible known
+names are rejected even when axis sizes happen to match. A grouped/flattened
+axis has no inferred semantic name.
+
+- `rearrange("time feature -> feature time")` permutes sample axes.
+- `rearrange("time (head width) -> head time width", head=4)` splits an axis;
+  exactly one missing size per input group can be inferred by exact division.
+- `reduce("time feature -> feature", op=mean)` averages the omitted axis;
+  `op=sum` sums it. Retain at least one output axis.
+
+Batch axes are implicit and never rearranged or reduced. No new axes, implicit
+broadcasting, ellipsis or dynamic shapes are supported. Run
+`weightc check examples/dimensions.wgt --shapes` to see all expanded layer contracts.
+See [the annotated dimensions guide](dimensions.md) for complete examples.

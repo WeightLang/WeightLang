@@ -70,3 +70,8 @@ Next candidates, not implemented:
 Validation covers old syntax, expression precedence, invalid inputs, lexical
 library scopes, default overrides, source locations, and forward/backward
 execution of an expanded residual block.
+
+Implemented dimension follow-up: [named dimensions and transforms](dimensions.md)
+adds named sample axes, inferred `linear` input widths, explicit `rearrange` and
+`reduce`, plus per-layer shape display. Source examples and the latest-only
+WGT development skill are maintained with the implementation.

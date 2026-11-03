@@ -29,6 +29,10 @@ def _cmd_check(args: argparse.Namespace) -> int:
     if program.imports:
         weights += f", {len(program.imports)} imported layer(s)"
     print(f"ok: model {program.model}, {len(program.layers)} layers, {params} parameters, weights: {weights}")
+    if getattr(args, "shapes", False):
+        from .shape_display import shape_rows
+        for row in shape_rows(program):
+            print(row)
     return 0
 
 
@@ -329,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("check", help="parse and type-check a .wgt file without building")
     p.add_argument("source")
+    p.add_argument("--shapes", action="store_true", help="show each layer input/output shape and named axes")
     p.set_defaults(func=_cmd_check)
 
     p = sub.add_parser("build", help="build and record a weight version; --no-store writes a standalone artifact")

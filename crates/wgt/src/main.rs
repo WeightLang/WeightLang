@@ -91,7 +91,12 @@ enum Cmd {
     /// Print project metadata as JSON
     Metadata,
     /// Check all sources using weightc, without training
-    Check { source: Option<PathBuf> },
+    Check {
+        source: Option<PathBuf>,
+        /// Display inferred input/output shapes for each layer
+        #[arg(long)]
+        shapes: bool,
+    },
     /// Build model sources using weightc (training directives execute)
     Build {
         source: Option<PathBuf>,
@@ -460,10 +465,14 @@ fn execute(cli: Cli) -> Result<u8> {
                     )?;
                     println!("verified {} dependency artifacts", entries.len());
                 }
-                Cmd::Check { source } => {
+                Cmd::Check { source, shapes } => {
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
                     for p in sources(&project, source)? {
-                        compiler(&project, &["check".into(), p.into_os_string()])?;
+                        let mut args = vec!["check".into(), p.into_os_string()];
+                        if shapes {
+                            args.push("--shapes".into());
+                        }
+                        compiler(&project, &args)?;
                     }
                 }
                 Cmd::Build {

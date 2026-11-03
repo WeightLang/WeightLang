@@ -373,6 +373,10 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
             "training": training,
             "weights": {"file": WEIGHTS_FILE, "sha256": sha256_file(tmp / WEIGHTS_FILE), "tensors": tensors_meta},
         }
+        # Axis names describe samples, never the optional runtime batch dimension.
+        for direction, port in (("input", program.input), ("output", program.output)):
+            if port.axes:
+                manifest["interface"][direction]["axes"] = list(port.axes)
         if reuse_report is not None:
             manifest["reuse"] = reuse_report
         if derivation_record is not None:

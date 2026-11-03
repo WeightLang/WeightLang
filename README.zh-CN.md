@@ -187,6 +187,10 @@ train data=train loss=cross_entropy optimizer=adam lr=0.03 epochs=200
 
 完整语法见 [语言文档](docs/language.md)。
 
+当前源码的 `wgt 0.3` 支持命名轴、`linear(out=...)` 输入宽度推导、
+`rearrange` 重排与 `reduce` 归约。见 [带注释的维度教程](docs/dimensions.md)，
+运行 `weightc check examples/dimensions.wgt --shapes` 可逐层查看形状。
+
 ## 标准库
 
 `use std/nn`、`use std/heads` 和 `use std/blocks` 提供多层感知机（MLP）、

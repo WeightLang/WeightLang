@@ -9,6 +9,11 @@ use std::collections::BTreeMap;
 pub struct TensorType {
     pub dtype: String,
     pub shape: Vec<u64>,
+    #[serde(skip_serializing_if = "unnamed")]
+    pub axes: Vec<Option<String>>,
+}
+fn unnamed(axes: &[Option<String>]) -> bool {
+    axes.iter().all(Option::is_none)
 }
 pub type Contracts = BTreeMap<String, (TensorType, TensorType)>;
 impl TensorType {
@@ -25,7 +30,51 @@ impl TensorType {
             .map(dimension)
             .collect::<Result<Vec<_>>>()?;
         ensure!(!shape.is_empty(), "sample shape cannot be empty");
-        Ok(Self { dtype, shape })
+        let axes = if let Some(value) = v.get("axes") {
+            let names = value.as_array().context("axes must be an array")?;
+            ensure!(names.len() == shape.len(), "axes rank mismatch");
+            let mut seen = std::collections::BTreeSet::new();
+            names
+                .iter()
+                .map(|name| {
+                    if name.is_null() {
+                        return Ok(None);
+                    }
+                    let name = name.as_str().context("axis must be a name or null")?;
+                    ensure!(
+                        identifier(name) && seen.insert(name),
+                        "invalid or duplicate axis name"
+                    );
+                    Ok(Some(name.to_owned()))
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            vec![None; shape.len()]
+        };
+        Ok(Self { dtype, shape, axes })
+    }
+    pub fn compatible(&self, other: &Self) -> bool {
+        self.dtype == other.dtype
+            && self.shape == other.shape
+            && self.axes.len() == self.shape.len()
+            && other.axes.len() == other.shape.len()
+            && self
+                .axes
+                .iter()
+                .zip(&other.axes)
+                .all(|(a, b)| a.is_none() || b.is_none() || a == b)
+    }
+    fn refine(&mut self, other: &Self) -> Result<()> {
+        ensure!(self.compatible(other), "shape/dtype/axis mismatch");
+        for (a, b) in self.axes.iter_mut().zip(&other.axes) {
+            if a.is_none() {
+                *a = b.clone();
+            }
+        }
+        let names: Vec<_> = self.axes.iter().flatten().collect();
+        let unique: std::collections::BTreeSet<_> = names.iter().collect();
+        ensure!(unique.len() == names.len(), "duplicate inferred axis name");
+        Ok(())
     }
     pub fn label(&self) -> String {
         format!(
@@ -33,7 +82,11 @@ impl TensorType {
             self.dtype,
             self.shape
                 .iter()
-                .map(u64::to_string)
+                .zip(&self.axes)
+                .map(|(size, name)| match name {
+                    Some(name) => format!("{name}={size}"),
+                    None => size.to_string(),
+                })
                 .collect::<Vec<_>>()
                 .join(",")
         )
@@ -43,6 +96,40 @@ impl TensorType {
     }
 }
 pub fn infer(
+    layers: &Value,
+    prefix: &str,
+    typ: TensorType,
+    tensors: &mut BTreeMap<String, Vec<u64>>,
+    contracts: &mut Contracts,
+) -> Result<TensorType> {
+    let output = infer_sequence(layers, prefix, typ, tensors, contracts)?;
+    validate_records(layers, prefix, contracts)?;
+    Ok(output)
+}
+fn validate_records(layers: &Value, prefix: &str, contracts: &Contracts) -> Result<()> {
+    for layer in layers.as_array().context("layers must be an array")? {
+        let name = string(layer, "name")?;
+        let path = if prefix.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{prefix}.{name}")
+        };
+        let (input, output) = contracts.get(&path).context("missing layer contract")?;
+        for (key, inferred) in [("input", input), ("output", output)] {
+            if let Some(recorded) = layer.get(key) {
+                ensure!(
+                    recorded == &serde_json::to_value(inferred)?,
+                    "recorded {key} contract mismatch at {path}"
+                );
+            }
+        }
+        if matches!(layer["op"].as_str(), Some("seq" | "residual")) {
+            validate_records(&layer["layers"], &path, contracts)?;
+        }
+    }
+    Ok(())
+}
+fn infer_sequence(
     layers: &Value,
     prefix: &str,
     mut typ: TensorType,
@@ -65,12 +152,21 @@ pub fn infer(
         let op = string(l, "op")?;
         let a = &l["args"];
         let arg = |key: &str| dimension(&a[key]);
-        if op == "seq" || op == "residual" {
-            typ = infer(&l["layers"], &path, typ, tensors, contracts)?;
-            ensure!(
-                op != "residual" || typ == before,
-                "residual shape/dtype mismatch"
-            );
+        if op == "residual" {
+            typ = infer_sequence(&l["layers"], &path, typ, tensors, contracts)?;
+            let mut entry = before.clone();
+            entry
+                .refine(&typ)
+                .context("residual must preserve shape, dtype and axes")?;
+            if entry != before {
+                typ = infer_sequence(&l["layers"], &path, entry.clone(), tensors, contracts)?;
+                ensure!(
+                    typ.compatible(&entry),
+                    "residual body conflicts with refined input axes"
+                );
+            }
+        } else if op == "seq" {
+            typ = infer_sequence(&l["layers"], &path, typ, tensors, contracts)?;
         } else if op == "embedding" {
             ensure!(
                 typ.dtype == "i64" && typ.shape.len() == 1,
@@ -80,6 +176,10 @@ pub fn infer(
             tensors.insert(format!("{path}.weight"), vec![arg("vocab")?, dim]);
             typ.dtype = "f32".into();
             typ.shape.push(dim);
+            typ.axes.push(None);
+        } else if matches!(op, "rearrange" | "reduce") {
+            typ = crate::transforms::infer(&typ, op, a)
+                .with_context(|| format!("invalid {op} at {path}"))?;
         } else {
             ensure!(typ.dtype == "f32", "{op} requires f32");
             let width = typ.width();
@@ -122,6 +222,7 @@ pub fn infer(
                 "meanpool" => {
                     ensure!(typ.shape.len() == 2, "meanpool expects [sequence,dim]");
                     typ.shape = vec![width];
+                    typ.axes = vec![typ.axes.last().cloned().unwrap()];
                 }
                 "flatten" => {
                     typ.shape = vec![typ
@@ -129,12 +230,14 @@ pub fn infer(
                         .iter()
                         .try_fold(1u64, |a, b| a.checked_mul(*b))
                         .context("shape size overflow")?];
+                    typ.axes = vec![None];
                 }
                 "conv2d" | "maxpool2d" | "globalavgpool2d" => {
                     ensure!(typ.shape.len() == 3, "{op} expects [channels,height,width]");
                     let channels = typ.shape[0];
                     if op == "globalavgpool2d" {
                         typ.shape = vec![channels];
+                        typ.axes = vec![typ.axes[0].clone()];
                     } else {
                         let kernel = arg("kernel")?;
                         let stride = arg("stride")?;
@@ -170,18 +273,6 @@ pub fn infer(
                 "relu" | "tanh" | "sigmoid" | "gelu" | "silu" | "softmax" | "identity" => {}
                 _ => anyhow::bail!("unsupported op {op:?}"),
             }
-        }
-        if l.get("input").is_some() {
-            ensure!(
-                TensorType::parse(&l["input"])? == before,
-                "recorded input contract mismatch at {path}"
-            );
-        }
-        if l.get("output").is_some() {
-            ensure!(
-                TensorType::parse(&l["output"])? == typ,
-                "recorded output contract mismatch at {path}"
-            );
         }
         contracts.insert(path, (before, typ.clone()));
     }

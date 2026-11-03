@@ -39,6 +39,8 @@ _V03_OPS = {
     "globalavgpool2d",
     "meanpool",
     "flatten",
+    "rearrange",
+    "reduce",
 }
 ARG_OPS.update(
     {
@@ -51,7 +53,7 @@ ARG_OPS.update(
 )
 OP_DEFAULTS = {"self_attention": {"causal": 0}, "conv2d": {"stride": 1, "padding": 0}}
 PARAM_FREE_OPS |= {"globalavgpool2d", "meanpool", "flatten"}
-BUILTIN_OPS = PARAM_FREE_OPS | set(ARG_OPS)
+BUILTIN_OPS = PARAM_FREE_OPS | set(ARG_OPS) | {"rearrange", "reduce"}
 PARAM_OPS = {
     "linear",
     "layernorm",
@@ -107,6 +109,7 @@ class Port:
     dtype: str
     shape: tuple[int, ...]
     line: int
+    axes: tuple[str | None, ...] = ()
 
 
 @dataclass
@@ -127,7 +130,7 @@ class Layer:
 
     name: str
     op: str
-    args: dict[str, int | float]
+    args: dict[str, object]
     line: int
     path: str | None = None
     children: list[Layer] = field(default_factory=list)
@@ -335,7 +338,7 @@ def _number(text: str) -> int | float:
     return int(text) if re.fullmatch(r"-?\d+", text) else float(text)
 
 
-def _parse_port(cur: _Cursor, constants: dict[str, int | float]) -> tuple[str, str, tuple[int, ...]]:
+def _parse_port(cur: _Cursor, constants: dict[str, int | float]) -> tuple[str, str, tuple[int, ...], tuple[str | None, ...]]:
     name = cur.ident("port name")
     cur.expect("punct", ":")
     dtype = cur.ident("dtype")
@@ -351,15 +354,29 @@ def _parse_port(cur: _Cursor, constants: dict[str, int | float]) -> tuple[str, s
             raise cur.error("dimension must be an integer")
         return value
 
-    dims = [dimension()]
+    axes = []
+
+    def named_dimension():
+        axis = None
+        if cur.peek() and cur.peek()[0] == "ident" and cur.tokens[cur.i + 1:cur.i + 2] == [("punct", "=")]:
+            if cur.version != "0.3":
+                raise cur.error("named axes require 'wgt 0.3'")
+            axis = cur.ident("axis name")
+            cur.expect("punct", "=")
+            if axis in axes:
+                raise cur.error(f"duplicate axis {axis!r}")
+        axes.append(axis)
+        return dimension()
+
+    dims = [named_dimension()]
     while cur.peek() == ("punct", ","):
         cur.next(",")
-        dims.append(dimension())
+        dims.append(named_dimension())
     cur.expect("punct", "]")
     cur.done()
     if any(dim <= 0 for dim in dims):
         raise cur.error("dimensions must be positive")
-    return name, dtype, tuple(dims)
+    return name, dtype, tuple(dims), tuple(axes) if any(axes) else ()
 
 
 def _parse_kv(cur: _Cursor) -> dict[str, str]:
@@ -401,7 +418,22 @@ def _parse_spec(cur: _Cursor) -> Spec:
     inner = None
     if cur.peek() == ("punct", "("):
         cur.next("(")
-        if name == "residual" and ns is None:
+        if ns is None and name in {"rearrange", "reduce"}:
+            if cur.version != "0.3":
+                raise cur.error(f"{name} requires 'wgt 0.3'")
+            args["pattern"] = cur.expect("string", what="quoted axis pattern")[1:-1]
+            while cur.peek() == ("punct", ","):
+                cur.next(",")
+                if cur.peek() == ("punct", ")"):
+                    break
+                key = cur.ident("axis size or reduction op")
+                cur.expect("punct", "=")
+                if key in args:
+                    raise cur.error(f"duplicate argument {key!r}")
+                args[key] = cur.ident("mean or sum") if name == "reduce" and key == "op" else parse_expression(cur)
+            if name == "reduce" and args.get("op") not in {"mean", "sum"}:
+                raise cur.error("reduce requires op=mean or op=sum")
+        elif name == "residual" and ns is None:
             inner = _parse_spec(cur)
         else:
             while cur.peek() != ("punct", ")"):
@@ -546,10 +578,10 @@ class _FileParser:
     def _port(self, kind: str, cur: _Cursor, line: int) -> None:
         if kind in self.ports:
             raise cur.error(f"only one {kind} is supported")
-        name, dtype, shape = _parse_port(cur, self.scope.constants)
+        name, dtype, shape, axes = _parse_port(cur, self.scope.constants)
         if self.version != "0.3" and (dtype != "f32" or len(shape) != 1):
             raise cur.error("only 1-D f32 ports in this version; this interface requires 'wgt 0.3'")
-        self.ports[kind] = Port(name, dtype, shape, line)
+        self.ports[kind] = Port(name, dtype, shape, line, axes)
 
     def _stmt_layer(self, cur: _Cursor, line: int) -> None:
         name = cur.ident("layer name")
@@ -802,9 +834,21 @@ def _resolve(name: str, spec: Spec, scope: Scope, env: dict[str, int | float], s
             raise WgtError("residual(...) takes a block call, e.g. residual(nn.mlp(...))", spec.line, spec.path)
         return Layer(name, "residual", {}, spec.line, spec.path, inner.children, inner.block)
 
+    if spec.ns is None and spec.op in {"rearrange", "reduce"}:
+        if "pattern" not in spec.args:
+            raise WgtError(f"{spec.op} requires a quoted axis pattern", spec.line, spec.path)
+        sizes = {k: _value(v, env, spec) for k, v in spec.args.items() if k not in {"pattern", "op"}}
+        if any(type(v) is not int or v <= 0 for v in sizes.values()):
+            raise WgtError("axis sizes must be positive integers", spec.line, spec.path)
+        args = {"pattern": spec.args["pattern"], "sizes": sizes}
+        if spec.op == "reduce":
+            args["reduction"] = spec.args.get("op")
+        return Layer(name, spec.op, args, spec.line, spec.path)
     if spec.ns is None and spec.op in BUILTIN_OPS:
         args = {**OP_DEFAULTS.get(spec.op, {}), **{k: _value(v, env, spec) for k, v in spec.args.items()}}
         signature = ARG_OPS.get(spec.op, {})
+        if spec.op == "linear" and "in" not in args:
+            signature = {"out": int}
         if set(args) != set(signature):
             if not signature:
                 raise WgtError(f"{spec.op} takes no arguments", spec.line, spec.path)
@@ -934,7 +978,8 @@ def parse(source: str, path: str | None = None) -> Program:
         resolved = _resolve(name, spec, fp.scope, {}, ())
 
         def needs_v03(layer):
-            return layer.op in _V03_OPS or any(needs_v03(c) for c in layer.children)
+            return (layer.op in _V03_OPS or (layer.op == "linear" and "in" not in layer.args)
+                    or any(needs_v03(c) for c in layer.children))
 
         if fp.version != "0.3" and needs_v03(resolved):
             raise WgtError(f"{spec.op!r} requires 'wgt 0.3'", spec.line, path)
@@ -1016,7 +1061,7 @@ def check(program: Program) -> None:
     if not any(layer.has_params for layer in program.layers):
         raise WgtError("model has no parameters (add at least one linear layer)", program.layers[0].line, path)
     if program.version == "0.3":
-        dtype, shape = output_contract(program.layers, program.input.dtype, program.input.shape)
+        dtype, shape = output_contract(program.layers, program.input.dtype, program.input.shape, axes=program.input.axes)
         if dtype != program.output.dtype or shape != program.output.shape:
             raise WgtError(
                 f"shape/dtype mismatch: network produces {dtype}{list(shape)}, output declares "
@@ -1032,6 +1077,10 @@ def check(program: Program) -> None:
                 program.output.line,
                 path,
             )
+    if program.output.axes:
+        inferred = program.layers[-1].output_spec.get("axes", [None] * len(program.output.shape))
+        if any(a and b and a != b for a, b in zip(inferred, program.output.axes)):
+            raise WgtError(f"output axis mismatch: inferred {inferred}, declared {list(program.output.axes)}", program.output.line, path)
     input_size = math.prod(program.input.shape)
     output_size = math.prod(program.output.shape)
 
@@ -1153,9 +1202,13 @@ def is_library_source(text: str) -> bool:
     return not any(_strip_comment(line).split()[:1] == ["model"] for line in text.splitlines())
 
 
-def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...]) -> tuple[str, tuple[int, ...]]:
+def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...], axes=()) -> tuple[str, tuple[int, ...]]:
     """Static per-sample contracts: batch is always an optional leading runtime dimension."""
+    axes = list(axes or [None] * len(shape))
+    if len(axes) != len(shape) or any(a is not None and (not isinstance(a, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", a)) for a in axes) or len([a for a in axes if a]) != len(set(a for a in axes if a)):
+        raise WgtError("invalid or duplicate axis names")
     for layer in layers:
+        before_axes = list(axes)
         layer.input_spec = {"dtype": dtype, "shape": list(shape)}
         args, op = layer.args, layer.op
 
@@ -1163,17 +1216,34 @@ def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...]) -> 
             if not ok:
                 raise WgtError(f"{layer.name}: {message}", layer.line, layer.path)
 
-        if op in STRUCTURAL_OPS:
-            new_dtype, new_shape = output_contract(layer.children, dtype, shape)
+        if op in {"rearrange", "reduce"}:
+            from .axes import plan
+            require(dtype == "f32" or op == "rearrange", "reduce expects f32 tensors")
+            require(op != "reduce" or args.get("reduction") in {"mean", "sum"}, "reduce requires mean or sum")
+            try:
+                transform = plan(args["pattern"], shape, args.get("sizes", {}), args.get("reduction") if op == "reduce" else None)
+            except (ValueError, TypeError, KeyError) as exc:
+                require(False, str(exc))
+            require(all(a is None or b is None or a == b for a, b in zip(axes, transform["input_axes"])),
+                    f"axis pattern does not match input axes {axes}")
+            require(bool(transform["output_shape"]), "scalar output is unsupported; retain at least one sample axis")
+            shape = tuple(transform["output_shape"])
+            axes = transform["output_axes"]
+        elif op in STRUCTURAL_OPS:
+            new_dtype, new_shape = output_contract(layer.children, dtype, shape, axes=axes)
             if op == "residual":
                 require((new_dtype, new_shape) == (dtype, shape), "residual must preserve complete shape and dtype")
+                result_axes = layer.children[-1].output_spec.get("axes", [None] * len(shape))
+                require(all(a is None or b is None or a == b for a, b in zip(axes, result_axes)), "residual must preserve axis names")
             dtype, shape = new_dtype, new_shape
         elif op == "embedding":
             require(dtype == "i64" and len(shape) == 1, "embedding expects i64[sequence]")
             dtype, shape = "f32", (*shape, int(args["dim"]))
         else:
+            require(op in BUILTIN_OPS, f"unknown operation {op!r}")
             require(dtype == "f32", f"{op} expects f32; convert tokens with embedding first")
             if op == "linear":
+                args.setdefault("in", shape[-1])
                 require(shape[-1] == args["in"], f"linear expects last dimension {args['in']}, got {shape[-1]}")
                 shape = (*shape[:-1], int(args["out"]))
             elif op == "layernorm":
@@ -1203,7 +1273,34 @@ def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...]) -> 
                     )
                     require(height > 0 and width > 0, "kernel produces an empty spatial dimension")
                     shape = (int(args.get("out", channels)), height, width)
+        if op == "residual":
+            # A body can supply names for an unnamed input. Check that boundary
+            # again with those names: otherwise a square transpose can silently
+            # swap meanings on residual addition.
+            result_axes = layer.children[-1].output_spec.get("axes", [None] * len(shape))
+            refined_axes = [a or b for a, b in zip(before_axes, result_axes)]
+            if refined_axes != before_axes:
+                output_contract(layer.children, dtype, shape, axes=refined_axes)
+
+        # Preserve semantic names when an operation preserves axis identity. New
+        # feature axes remain unnamed until an explicit pattern supplies a name.
+        if op in STRUCTURAL_OPS:
+            axes = list(layer.children[-1].output_spec.get("axes", [None] * len(shape)))
+        elif op == "embedding":
+            axes = [*before_axes, None]
+        elif op == "meanpool":
+            axes = before_axes[-1:]
+        elif op == "globalavgpool2d":
+            axes = before_axes[:1]
+        elif op == "flatten":
+            axes = [None]
+        if any(before_axes):
+            layer.input_spec["axes"] = before_axes
+        if len(axes) != len(shape):
+            axes = [None] * len(shape)
         layer.output_spec = {"dtype": dtype, "shape": list(shape)}
+        if any(axes):
+            layer.output_spec["axes"] = list(axes)
     return dtype, shape
 
 

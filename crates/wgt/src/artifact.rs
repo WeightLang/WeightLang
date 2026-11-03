@@ -88,7 +88,7 @@ impl Artifact {
         let mut contracts = crate::contracts::Contracts::new();
         let inferred =
             crate::contracts::infer(&m["layers"], "", input, &mut shapes, &mut contracts)?;
-        ensure!(inferred == output, "output shape/dtype mismatch");
+        ensure!(inferred.compatible(&output), "output shape/dtype/axis mismatch");
         let tensors = m["weights"]["tensors"]
             .as_object()
             .context("missing tensor metadata")?;
