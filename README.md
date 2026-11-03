@@ -352,3 +352,10 @@ edit, diff and evaluation without training. See [the patch guide](docs/weight-sp
 ## Output directories
 
 Models are saved in `weights/<model>/`; `-o ROOT` changes the output root. Existing models require explicit `--force` to replace. Large disposable work stays in the disk-backed `.cache/weightlang/`; small previews use `/tmp/weightlang/`. See [storage conventions](docs/storage.md).
+
+## Ablation experiments
+
+Source builds support `weightc ablate weights/my_model --suite ablation.json`:
+zero layer outputs, bypass modules or zero tensors, then compare independent
+variants on fixed data without changing model files or retraining.
+See [ablation experiments](docs/ablation.md) for configuration and report semantics.

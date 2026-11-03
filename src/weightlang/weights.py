@@ -131,16 +131,37 @@ def _array(values, shape, label, *, integer=False, bound=None):
 
 def evaluate_artifact(path: str | Path, data_path: str | Path, loss: str, *, compare: str | Path | None = None) -> dict:
     """Evaluate exactly the same file on candidate and optional baseline; never train."""
+    try:
+        raw = Path(data_path).read_bytes()
+    except OSError as exc:
+        raise WgtError(f"cannot read evaluation data: {exc}") from None
+    candidate = load_artifact(path, warn_untrained=False)
+    report = _evaluate_loaded(candidate, data_path, loss, raw=raw)
+    if compare is not None:
+        baseline = load_artifact(compare, warn_untrained=False)
+        _compatible(baseline, candidate)
+        report["baseline"] = _evaluate_loaded(baseline, data_path, loss, raw=raw)["candidate"]
+        report["delta"] = {
+            key: report["candidate"][key] - report["baseline"][key]
+            for key in ("loss", "accuracy")
+            if key in report["candidate"]
+        }
+        report["delta_direction"] = "candidate minus baseline; lower loss and higher accuracy are better"
+    return report
+
+
+def _evaluate_loaded(candidate: Artifact, data_path, loss: str, *, raw: bytes | None = None) -> dict:
+    """Shared evaluator for a loaded model, optionally using a fixed dataset snapshot."""
     if loss not in ("mse", "bce", "cross_entropy"):
         raise WgtError(f"unsupported evaluation loss {loss!r}")
     try:
-        raw = Path(data_path).read_bytes()
+        if raw is None:
+            raw = Path(data_path).read_bytes()
         data = json.loads(raw)
     except (OSError, ValueError) as exc:
         raise WgtError(f"cannot read evaluation data: {exc}") from None
     if not isinstance(data, dict) or set(data) != {"inputs", "targets"}:
         raise WgtError("evaluation data must contain exactly inputs and targets")
-    candidate = load_artifact(path, warn_untrained=False)
     inp = candidate.manifest["interface"]["input"]
     outshape = candidate.manifest["interface"]["output"]["shape"]
     width = outshape[-1]
@@ -191,14 +212,4 @@ def evaluate_artifact(path: str | Path, data_path: str | Path, loss: str, *, com
         "candidate": metrics(candidate),
         "note": "Read-only evaluation. Dataset independence and model quality are not inferred.",
     }
-    if compare is not None:
-        baseline = load_artifact(compare, warn_untrained=False)
-        _compatible(baseline, candidate)
-        report["baseline"] = metrics(baseline)
-        report["delta"] = {
-            key: report["candidate"][key] - report["baseline"][key]
-            for key in ("loss", "accuracy")
-            if key in report["candidate"]
-        }
-        report["delta_direction"] = "candidate minus baseline; lower loss and higher accuracy are better"
     return report

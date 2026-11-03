@@ -215,10 +215,22 @@ def _cmd_patch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ablate(args: argparse.Namespace) -> int:
+    from .ablation import run_ablation
+
+    print(json.dumps(run_ablation(args.artifact, args.suite), indent=2, allow_nan=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="weightc", description="WeightLang compiler (prototype)")
     parser.add_argument("--version", action="version", version=f"weightc {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("ablate", help="compare independent inference-time ablations with a fixed baseline")
+    p.add_argument("artifact")
+    p.add_argument("--suite", required=True, help="weightlang.ablation v1 JSON file")
+    p.set_defaults(func=_cmd_ablate)
 
     p = sub.add_parser("check", help="parse and type-check a .wgt file without building")
     p.add_argument("source")

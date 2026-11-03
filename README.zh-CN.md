@@ -356,3 +356,9 @@ y = 2x + 1 的参数，再比较和评估结果。详见 [补丁指南](docs/wei
 ## 输出目录
 
 模型默认保存到 `weights/<模型名>/`，用 `-o ROOT` 修改输出根目录。已有模型默认不覆盖，重建需显式传 `--force`。大型临时工作放磁盘上的 `.cache/weightlang/`，小型预览放 `/tmp/weightlang/`。详见[目录规范](docs/storage.md)。
+
+## 消融实验
+
+源码版支持 `weightc ablate weights/my_model --suite ablation.json`。
+可屏蔽层输出、跳过层或清零指定权重；每个变体从同一基线独立运行，报告损失、准确率及变化量，保留配置和数据哈希，不改原模型。
+目前是推理时消融，不包含重新训练。配置见[消融实验](docs/ablation.md)。
