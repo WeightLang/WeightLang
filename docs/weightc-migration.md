@@ -64,8 +64,9 @@ sh scripts/package_wgt.sh --binary target/release/wgt --output dist/native-relea
 
 原生构建默认输出 `weights/<source stem>/`，已有目录和符号链接一律拒绝覆盖。
 制品包含 `model.json`、`checkpoint.json`、`source.wgt`、`manifest.json`。
-仍依赖旧 CLI 的 `wgt check/build/package/install/train/export/test/trace/debug`
+仍依赖旧 CLI 的 `wgt check/build/package/install/train/export/trace/debug`
 明确报错，不通过 PATH、`WEIGHTC` 或托管环境回退。
+`wgt test` 现为原生项目测试入口，详见[原生测试](native-testing.md)。
 
 Python 清退不宣称所有历史能力已经迁移。旧声明式源码、标准库和制品夹具保留为
 迁移材料；旧 Python 文档不是当前可调用 API。仅以实际 Rust 实现和行为测试为准。
