@@ -1,0 +1,17 @@
+[project]
+module = "github.com/WeightLang/WeightLang/examples/hello_world"
+edition = "0.2"
+description = "Train a tiny position-to-character network to say hello_world"
+
+[model]
+source = "main.wgt"
+output = "weights"
+
+[environment]
+python = "3.12"
+backend = "cpu"
+
+[runtime]
+device = "cpu"
+
+[dependencies]

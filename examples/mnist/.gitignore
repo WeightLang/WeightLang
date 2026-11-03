@@ -1,0 +1,4 @@
+/weights/
+/.cache/
+/dist/
+__pycache__/

@@ -1,0 +1,13 @@
+[project]
+module = "github.com/WeightLang/WeightLang/examples/mnist"
+edition = "0.2"
+description = "MNIST with verified offline data and Python training interoperability"
+
+[model]
+source = "main.wgt"
+output = "weights"
+
+[runtime]
+device = "cpu"
+
+[dependencies]
