@@ -97,7 +97,14 @@ python scripts/package_wgt.py --binary target/release/wgt --output dist/native-l
 On Windows use `target/release/wgt.exe`. Combine each platform's `SHA256SUMS`
 entries into a single release file and upload it with the executables. The
 packager refuses to overwrite an output directory. Missing releases/assets fail
-explicitly; this change does not publish releases or manufacture older binaries.
+explicitly; older binaries are never manufactured.
+
+[Native wgt 0.1.1](https://github.com/WeightLang/WeightLang/releases/tag/wgt-v0.1.1)
+provides a static Linux x86_64 executable and SHA256SUMS. Other target assets are
+not published in this release; build from source or import a trusted local binary
+on those systems. Native package management works independently of Python; this
+release uses external weightc for model compilation.
+
 Local imports work before releases exist. Linux switching is tested locally;
 Windows/macOS naming is tested, but native execution needs those systems.
 
