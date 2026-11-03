@@ -230,6 +230,7 @@ Design, lock-file format and known gaps: [docs/packages.md](docs/packages.md).
 | [docs/language.md](docs/language.md) | Syntax, checks, weight sources and origins |
 | [docs/artifact.md](docs/artifact.md) | Artifact files, manifest fields, verification, loading without WeightLang |
 | [docs/packages.md](docs/packages.md) | Module paths, `wgt.mod`, `wgt.sum`, publishing, fetching, open design |
+| [docs/stdlib.md](docs/stdlib.md) | Standard library design (proposal): built-ins, `std` blocks, standard weights, roadmap |
 
 ## Development
 
