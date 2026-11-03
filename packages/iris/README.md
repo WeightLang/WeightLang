@@ -15,7 +15,7 @@ with Python random.Random(42), 40 training and 10 test rows per class, shuffled.
 No feature normalization or other corrections applied. prepare.py reproduces the
 CSV files from the UCI iris.zip download. Both CSV hashes are pinned in iris.wgt.
 
-Reference local build (PyTorch 2.15.0, Python 3.14.9, CPU): 118/120 training accuracy (98.33%), 29/30 held-out test
+Reference local build (PyTorch 2.15.0, Python 3.14.9, CPU): 117/120 training accuracy (97.5%), 29/30 held-out test
 accuracy (96.67%), validation loss approximately 0.0694. Seed 42, 200 epochs,
 AdamW, lr=0.01, batch=16, weight_decay=0.01. The split and training settings were
 fixed before this evaluation. The manifest records the exact runtime versions
@@ -32,3 +32,8 @@ weightc audit build/iris
 All four mechanical admission checks pass. Reproduce on the recorded PyTorch
 version/CPU; results may differ across runtimes. Validation rows are not used
 by the optimizer.
+
+Correction: the immutable v0.1.0 release description and tagged README mistakenly
+reported 118/120 training accuracy. The published manifest records approximately
+0.97500002, i.e. 117/120. Held-out accuracy remains 29/30. No weights or release
+assets were changed for this documentation correction.
