@@ -320,3 +320,35 @@ weightc --offline --locked compile demo.wgt -o demo
 `one_hot(index,classes)`，类别数 1..1000000，索引为 [0,classes) 整数，分配前扣除 classes 操作预算。
 两者不使离散动作可微；onehot 目标可用于 MSE/自定义损失，cross_entropy/reinforce 仍接收类别索引。
 详见[语法与边界](differentiable-programs.md)，可运行例子 [sample_branch.wgt](../examples/native_training/sample_branch.wgt)。
+
+## 标量数值辅助函数
+
+脚本可直接使用 [原生数学标准库](standard-library.md) 中的倒平方根、融合乘加、
+稳定指数/对数、欧氏长度和稳定激活。仅处理 f64 标量，无参数默认值、张量广播或梯度。
+
+向量监控可直接使用 `dot`、`norm`、`mean`、`softmax`、`log_softmax`、
+`logsumexp`、`l2_normalize`、`mse`、`mae`、`cross_entropy`。
+这些函数接受非空一维 f64 列表，返回标量或同形列表；不连接训练梯度。
+完整签名、必填参数及预算见[向量算法](standard-library.md#向量算法)。
+
+数据分析与监控另可使用 `min/max`、`variance/stddev`、`median/quantile`、
+`sort/argsort`、`argmin/argmax`、`cumsum`、`clip` 和 `cosine_similarity`。
+所有参数必填，仅处理有限 f64 一维列表；无训练梯度。
+完整定义及排序计费规则见[统计、排序与变换](standard-library.md#统计排序与变换)。
+
+监控和预处理新增 `bce_logits(logits,targets)`、`huber(x,y,delta)`、`log_cosh(x,y)`、
+`diff(x)`、`ema(x,alpha)`、`moving_mean(x,window)`；所有参数必填。
+另有标量 `relu`、`leaky_relu`、`elu`、`hard_sigmoid`、`hard_swish`。
+损失函数不自动求梯度，不可把函数名直接当作新增 `fit` 目标。
+完整公式、形状、参数范围与预算见[标准库](standard-library.md#分段激活稳健损失与信号处理)。
+
+数据准备可调用 `zeros`、`ones`、`full`、`linspace`、`one_hot`、`concat`、
+`vector_slice`、`gather`、`compress`、`reverse`。输入输出为数值列表，无张量梯度。
+允许空筛选结果；传给要求非空的统计或训练接口前须自行处理。
+完整签名、参数、长度上限及预算见[数据构造与索引](standard-library.md#数据构造与索引)。
+
+
+模型输出分析可使用 `normalize_probabilities`、`entropy`、`kl_divergence`、
+`js_divergence`、`cross_entropy_probs` 和 `temperature_softmax`。
+完整签名、分布检查、零概率及预算规则见[概率分布分析](standard-library.md#概率分布分析)。
+这些接口仅计算脚本数值；不能作为新增 `fit` 损失名称或自动微分表达式使用。

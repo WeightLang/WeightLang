@@ -1,0 +1,11 @@
+wgt 0.5
+# 标量 f64，无张量轴、参数或训练状态。原生函数无需 import。
+fn main() {
+    assert(rsqrt(4) == 0.5, "inverse square root");
+    assert(fma(2, 3, 4) == 10, "fused multiply add");
+    assert(hypot(3, 4) == 5, "scaled Euclidean norm");
+    # 小量直接计算 exp(x)-1 或 log(1+x) 会丢失有效位。
+    assert(expm1(1e-16) > 0, "small exponential increment");
+    assert(log1p(1e-16) > 0, "small logarithmic increment");
+    return rsqrt(4);
+}

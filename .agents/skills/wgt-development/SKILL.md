@@ -25,3 +25,19 @@ description: 编写和验证本仓库当前原生 WGT 0.5 模型、训练与概�
 独热编码使用 `onehot[N] index`（N 为 1..1000000 字面量），例如 `onehot[4] 2`。
 复杂索引用括号；等价 `one_hot(index,classes)` 支持动态类别数。只限普通函数，不对索引求导。
 输出长度按类别数扣预算，索引必须为 [0,N) 整数；参考 sample_branch.wgt。
+
+普通脚本标准库另见 docs/standard-library.md；不要把列表函数当作 forward/loss 张量算子。
+数据接口：zeros(count)、ones(count)、full(count,value)、linspace(start,end,count)、
+one_hot(index,classes)、concat(x,y)、vector_slice(x,start,end)、gather(x,indices)、
+compress(x,mask)、reverse(x)。参数全部必填；有限 f64 一维列表，允许空列表；
+mask 必须 bool，索引为合法零起始整数，切片左闭右开；输出上限 100 万项。
+linspace 含端点，count=1 只给起点；独热 classes>=1。预算在输出分配前检查。
+完整可运行例子：std/data/construction.wgt、std/data/indexing.wgt。
+
+
+概率分析标准库：normalize_probabilities(weights)、entropy(p)、kl_divergence(p,q)、
+js_divergence(p,q)、cross_entropy_probs(p,q)、temperature_softmax(logits,temperature)。
+全部参数必填，非空有限 f64 一维列表，双分布等长；分布项 [0,1]、总和绝对误差<=1e-9，
+通过后修正总和；权重归一化要求非负且有正质量，温度有限且>0。单位 nat。
+KL/交叉熵 p>0 且 q=0 报错，JS 支持不相交分布。无张量梯度或新增 fit 目标。
+例子 std/probability/distributions.wgt、temperature.wgt；完整契约见 docs/standard-library.md。

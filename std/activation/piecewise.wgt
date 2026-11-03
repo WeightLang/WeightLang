@@ -1,0 +1,11 @@
+wgt 0.5
+# 标量激活无权重；负半轴斜率/指数幅度 alpha 显式传入。
+# hard_* 使用分段线性门控；不意味着已有硬件专用内核。
+fn main() {
+    assert(relu(-2) == 0, "relu");
+    assert(leaky_relu(-2, 0.1) == -0.2, "negative slope");
+    assert(elu(0, 1) == 0, "elu origin");
+    assert(hard_sigmoid(0) == 0.5, "gate midpoint");
+    assert(hard_swish(6) == 6, "open gate");
+    return hard_swish(-6);
+}

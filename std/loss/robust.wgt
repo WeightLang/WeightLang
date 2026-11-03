@@ -1,0 +1,9 @@
+wgt 0.5
+# 单条 [元素] 轴取平均，无自动微分；BCE 输入 logits，标签允许 [0,1] 软标签。
+# Huber 的 delta 控制平方误差到线性误差的过渡，log_cosh 平滑抑制大残差。
+fn main() {
+    assert(bce_logits([1000, -1000], [1, 0]) == 0, "correct extreme logits");
+    assert(huber([0, 3], [0, 0], 1) == 1.25, "robust mean");
+    assert(log_cosh([0], [0]) == 0, "zero residual");
+    return bce_logits([0], [1]);
+}

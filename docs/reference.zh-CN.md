@@ -6,8 +6,8 @@
 工具包版本、模型 JSON 的 `version` 和训练断点版本是独立概念，不随语言版本替换。
 
 当前实现为纯 Rust。原 Python 前端的完整图算子、block/import 等尚未全部迁入原生构造器；
-`std/` 和其他模型示例保留为迁移材料，
-不能因为文件头改为 0.5 就宣称可执行。不支持的声明显式报错，不回退 Python。
+`std/` 根目录的旧图源码作为迁移材料保留，不能因为文件头改为 0.5 就宣称可执行；
+分类子目录中的原生标准库示例可单独运行，完整目录见[标准库](standard-library.md)。不支持的声明显式报错，不回退 Python。
 
 ## 编译单元与入口
 
@@ -169,3 +169,48 @@ forward/loss 新增 `square(x)`（等长平方）、`mean(x)`（唯一向量轴�
 N 为 1..1000000 整数字面量，index 是运行时 [0,N) 整数；优先级同一元负号，复杂索引用括号。
 原生等价调用 `one_hot(index,classes)` 支持运行时类别数。无默认值，不对索引求导，forward/loss 不支持。
 完整边界、预算与示例见[独热编码](differentiable-programs.md#独热编码)。
+
+## 原生标量数学标准库
+
+WGT 0.5 新增 `rsqrt(x)`、`fma(x,y,z)`、`hypot(x,y)`、`expm1(x)`、
+`log1p(x)`、`sigmoid(x)`、`softplus(x)`、`silu(x)`，全部参数必填且为有限 f64。
+原生直接调用、解释/AOT 共用实现；不表示同名图算子或张量自动微分已支持。
+完整定义、定义域、硬件边界及分类示例见[标准库](standard-library.md)。
+
+向量标准库新增 `dot(x,y)`、`norm(x)`、`mean(x)`、`softmax(x)`、
+`log_softmax(x)`、`logsumexp(x)`、`l2_normalize(x,eps)`、`mse(x,y)`、
+`mae(x,y)`、`cross_entropy(logits,target)`。向量是非空一维有限 f64 列表；
+双向量必须等长，eps>0，target 为合法零起始整数类别。参数无默认值。
+返回形状、数值与预算边界及完整示例见[向量算法](standard-library.md#向量算法)。
+
+统计与排序新增 `min(x)`、`max(x)`、`variance(x,ddof)`、`stddev(x,ddof)`、
+`median(x)`、`quantile(x,q)`、`sort(x)`、`argsort(x)`、`argmin(x)`、`argmax(x)`、
+`cumsum(x)`、`clip(x,lower,upper)`、`cosine_similarity(x,y)`。
+输入沿用非空有限 f64 一维列表；所有参数必填。ddof 是 0<=ddof<N 的整数，
+q 在 [0,1]，裁剪边界有限且有序；余弦要求等长非零向量。
+排序稳定，极值索引取首次。完整签名、复杂度、数值边界和预算见
+[统计、排序与变换](standard-library.md#统计排序与变换)。
+
+分段激活、损失与信号新增 `relu(x)`、`leaky_relu(x,alpha)`、`elu(x,alpha)`、
+`hard_sigmoid(x)`、`hard_swish(x)`、`bce_logits(logits,targets)`、`huber(x,y,delta)`、
+`log_cosh(x,y)`、`diff(x)`、`ema(x,alpha)`、`moving_mean(x,window)`。
+激活处理有限 f64 标量；其余接受非空一维有限 f64 列表。所有参数必填；
+完整参数范围、形状、公式与计费见[分段激活、稳健损失与信号处理](standard-library.md#分段激活稳健损失与信号处理)。
+这些普通脚本函数不新增声明式图层支持、张量梯度或 `fit` 训练目标。
+
+
+数据标准库新增 `zeros(count)`、`ones(count)`、`full(count,value)`、
+`linspace(start,end,count)`、`one_hot(index,classes)`、`concat(x,y)`、
+`vector_slice(x,start,end)`、`gather(x,indices)`、`compress(x,mask)`、`reverse(x)`。
+全部参数必填；输入为一维有限 f64 列表，数据操作允许空列表，掩码严格为 bool。
+索引为零起始整数，切片左闭右开；单次输出不超过 100 万项。
+完整参数范围、输出形状、预算和运行例子见[数据构造与索引](standard-library.md#数据构造与索引)。
+这些是普通脚本列表操作，不是 forward/loss 张量算子或零拷贝视图。
+
+
+概率分析新增 `normalize_probabilities(weights)`、`entropy(p)`、`kl_divergence(p,q)`、
+`js_divergence(p,q)`、`cross_entropy_probs(p,q)`、`temperature_softmax(logits,temperature)`。
+所有参数必填，输入非空一维有限 f64 列表；双分布必须等长，温度有限且>0。
+分布逐项在 [0,1]，总和允许 1e-9 绝对误差，计算前修正该误差；任意权重须显式归一化。
+零概率、公式、预算和例子见[概率分布分析](standard-library.md#概率分布分析)。
+这些是普通脚本分析函数，不提供张量自动微分或新的 `fit` 目标。

@@ -2,6 +2,7 @@
 pub mod codegen;
 pub mod compiled;
 mod dataset;
+mod math;
 mod one_hot;
 pub(crate) mod parse;
 use crate::training::{mlp, random, Objective, Optimizer, Trainer};
@@ -37,7 +38,6 @@ use std::{
 };
 
 const BUILTINS: &[&str] = &[
-    "one_hot",
     "__graph",
     "__adaptive",
     "dependency",
@@ -47,6 +47,12 @@ const BUILTINS: &[&str] = &[
     "column",
     "sum",
     "sqrt",
+    "rsqrt", "fma", "hypot", "expm1", "log1p", "sigmoid", "softplus", "silu",
+    "dot", "norm", "mean", "softmax", "log_softmax", "logsumexp", "l2_normalize", "mse", "mae", "cross_entropy",
+    "min", "max", "argmin", "argmax", "variance", "stddev", "median", "quantile", "sort", "argsort", "cumsum", "cosine_similarity", "clip",
+    "relu", "leaky_relu", "elu", "hard_sigmoid", "hard_swish", "bce_logits", "huber", "log_cosh", "diff", "ema", "moving_mean",
+    "zeros", "ones", "full", "linspace", "concat", "vector_slice", "gather", "compress", "one_hot", "reverse",
+    "entropy", "normalize_probabilities", "kl_divergence", "js_divergence", "cross_entropy_probs", "temperature_softmax",
     "log",
     "exp",
     "assert",
@@ -449,10 +455,19 @@ impl Runtime {
         let count = match name {
             "random" => 0,
             "dependency" | "len" | "sum" | "sqrt" | "log" | "exp" | "seed" | "jsonl" | "close"
-            | "restore" => 1,
+            | "restore" | "rsqrt" | "expm1" | "log1p" | "sigmoid" | "softplus" | "silu"
+            | "norm" | "mean" | "softmax" | "log_softmax" | "logsumexp"
+            | "min" | "max" | "argmin" | "argmax" | "median" | "sort" | "argsort" | "cumsum"
+            | "relu" | "hard_sigmoid" | "hard_swish" | "diff" | "zeros" | "ones" | "reverse"
+            | "entropy" | "normalize_probabilities" => 1,
             "__graph" | "__adaptive" | "model" | "save_model" | "range" | "append" | "column" | "assert" | "metric"
-            | "predict" | "sample" | "batch" | "save" | "one_hot" => 2,
-            "hf_dataset" => 3,
+            | "predict" | "sample" | "batch" | "save" | "hypot"
+            | "dot" | "l2_normalize" | "mse" | "mae" | "cross_entropy"
+            | "variance" | "stddev" | "quantile" | "cosine_similarity"
+            | "leaky_relu" | "elu" | "bce_logits" | "log_cosh" | "ema" | "moving_mean"
+            | "full" | "concat" | "gather" | "compress" | "one_hot"
+            | "kl_divergence" | "js_divergence" | "cross_entropy_probs" | "temperature_softmax" => 2,
+            "hf_dataset" | "fma" | "clip" | "huber" | "linspace" | "vector_slice" => 3,
             "mlp" => 4,
             "fit" | "reinforce" | "benchmark" => 5,
             "gae" => 7,
@@ -464,7 +479,47 @@ impl Runtime {
             a.len()
         );
         match name {
+            "entropy" | "normalize_probabilities" | "kl_divergence" | "js_divergence" | "cross_entropy_probs" | "temperature_softmax" => {
+                let n = a[0].list()?.len() as u64;
+                let work = a.iter().try_fold(n, |sum, v| -> Result<u64> {
+                    Ok(sum.saturating_add(match v { Value::List(xs) => xs.len() as u64, _ => 0 }))
+                })?;
+                ensure!(self.remaining >= work, "operation budget exhausted");
+                self.remaining -= work;
+                math::probability::call(name, a)
+            }
             "one_hot" => one_hot::encode(&a[0], &a[1], &mut self.remaining),
+            "zeros" | "ones" | "full" | "linspace" | "concat" | "vector_slice" | "gather" | "compress" | "reverse" => math::data::call(name, a, &mut self.remaining),
+            "relu" | "leaky_relu" | "elu" | "hard_sigmoid" | "hard_swish" => math::activation::call(name, a),
+            "bce_logits" | "huber" | "log_cosh" | "diff" | "ema" | "moving_mean" => {
+                let n = a[0].list()?.len();
+                let work = if name == "moving_mean" {
+                    let window = a[1].integer()?;
+                    ensure!(window > 0 && window <= n, "window must be in 1..=N");
+                    ((n-window+1) as u64).saturating_mul(window as u64)
+                } else { n as u64 };
+                ensure!(self.remaining >= work, "operation budget exhausted");
+                self.remaining -= work;
+                if matches!(name, "diff" | "ema" | "moving_mean") {
+                    math::signal::call(name, a)
+                } else {
+                    math::loss::call(name, a)
+                }
+            }
+            "min" | "max" | "argmin" | "argmax" | "variance" | "stddev" | "median" | "quantile" | "sort" | "argsort" | "cumsum" | "cosine_similarity" | "clip" => {
+                let work = math::algorithms::work(name, a[0].list()?.len());
+                ensure!(self.remaining >= work, "operation budget exhausted");
+                self.remaining -= work;
+                math::algorithms::call(name, a)
+            }
+            "dot" | "norm" | "mean" | "softmax" | "log_softmax" | "logsumexp" | "l2_normalize" | "mse" | "mae" | "cross_entropy" => {
+                // Charge linear work before allocating or traversing input vectors.
+                let work = a[0].list()?.len() as u64;
+                ensure!(self.remaining >= work, "operation budget exhausted");
+                self.remaining -= work;
+                math::vector::call(name, a)
+            }
+            "rsqrt" | "fma" | "hypot" | "expm1" | "log1p" | "sigmoid" | "softplus" | "silu" => math::call(name, a),
             "dependency" => Ok(Value::Text(
                 self.dependencies
                     .get(a[0].text()?)

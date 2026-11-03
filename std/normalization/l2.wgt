@@ -1,0 +1,7 @@
+wgt 0.5
+# [特征] -> [特征]，除以 max(L2范数, eps)，无仿射参数与训练状态。
+# eps 显式指定，零向量仍为零；不是旧 tensor_math 的 sqrt(sum(x*x)+eps)。
+fn main() {
+    assert(l2_normalize([0, 0], 1e-6) == [0, 0], "zero vector");
+    return l2_normalize([3, 4], 1e-6);
+}
