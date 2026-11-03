@@ -97,3 +97,10 @@ The source must select `trainer=custom` in its training directive. The callback
 runs inside the existing compiler workflow, which checks its changes and records
 training provenance. A complete executable example is in
 [`examples/custom_trainer`](../examples/custom_trainer/).
+
+## Export standalone Python source
+
+`weightc export-python model.wgt -o weights/python_model/model.py` exports architecture only.
+Pass a built artifact directory instead to copy its weights and generate `load_model()`.
+The output runs without WeightLang; see [Python export](python-export.md) for dependencies,
+examples, batch conventions and limitations. The Python API is `export_python(source, output)`.

@@ -299,12 +299,28 @@ def _cmd_revision(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_export_python(args: argparse.Namespace) -> int:
+    from .python_export import export_python
+
+    try:
+        result = export_python(args.source, args.output)
+    except OSError as exc:
+        raise WgtError(f"Python export failed: {exc}") from exc
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     from .reuse_cli import add_options as add_reuse_options
 
     parser = argparse.ArgumentParser(prog="weightc", description="WeightLang compiler (prototype)")
     parser.add_argument("--version", action="version", version=f"weightc {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("export-python", help="export standalone PyTorch source and optional artifact weights")
+    p.add_argument("source", help=".wgt architecture or verified model artifact directory")
+    p.add_argument("-o", "--output", required=True, help="new .py file; never overwrite")
+    p.set_defaults(func=_cmd_export_python)
 
     p = sub.add_parser("ablate", help="compare independent inference-time ablations with a fixed baseline")
     p.add_argument("artifact")

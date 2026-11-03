@@ -8,7 +8,10 @@ from .compiler import BuildResult, compile_file, compile_program  # noqa: E402
 from .interop import save_artifact  # noqa: E402
 from .trainers import Trainer, TrainingContext  # noqa: E402
 
+from .python_export import export_python  # noqa: E402
+
 __all__ = [
+    "export_python",
     "Artifact",
     "BuildResult",
     "Trainer",

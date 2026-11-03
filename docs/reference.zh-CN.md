@@ -315,3 +315,13 @@ init seed=42
 新增、删除或修改上述公开能力时，同一次变更更新本文对应条目和示例；
 维护流程由根目录 [AGENTS.md](../AGENTS.md) 约束。它要求开发助手主动同步，
 不是后台自动生成器；文档未验证的能力不得标成已实现或已发布。
+
+## 导出 Python 源文件
+
+`weightc export-python SOURCE -o NEW.py`：SOURCE 为 `.wgt` 时只导出结构，不运行训练或权重导入；
+SOURCE 为已构建模型目录时，导出独立 PyTorch 类和同名 `.safetensors` 权重。
+生成代码无需安装 WeightLang。使用 `Model()` 创建新初始化结构；模型目录导出额外提供
+`load_model(weights_path=None, device="cpu")`，核对权重哈希并恢复冻结参数。
+输入必须显式带 batch 维；不会导出训练算法、优化器状态或设备分片。
+Python API 为 `export_python(source, output)`，拒绝覆盖现有文件。
+完整用法及支持范围见[Python 导出](python-export.md)。
