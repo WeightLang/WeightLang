@@ -12,6 +12,8 @@ try {
   await page.goto(pathToFileURL(resolve(process.argv[2]||"weights/transformer-edit/preview.html")).href);
   await page.waitForSelector(".wl-node");
   await page.selectOption(".wl-language","en");
+  // Details live in a popup opened by clicking a node.
+  await page.locator(".wl-node").first().click();
   await page.locator(".wl-inspect-toggle").click();
   assert.equal(await page.locator("details").count(),0);
   assert.equal(await page.getByText("Agent-readable").count(),0);
@@ -33,6 +35,7 @@ try {
     document.head.append(theme);
   });
   assert.equal(await page.locator(".wl-node .wl-node-background").evaluate(e=>getComputedStyle(e).fill),"rgb(12, 34, 56)");
+  await page.locator(".wl-node").click(); // load() closes the previous model's popup
   await page.selectOption(".wl-row","1");await page.selectOption(".wl-column","3");
   for(const [axis,value] of [[0,1],[2,2],[4,1]]){const input=page.getByLabel("Axis "+axis+" slice",{exact:true});await input.fill(String(value));await input.dispatchEvent("change");}
   assert.equal(await page.evaluate(()=>document.querySelector("weightlang-viewer").plane.values[0]),141);

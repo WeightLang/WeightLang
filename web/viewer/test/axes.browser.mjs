@@ -11,6 +11,7 @@ try {
  await page.evaluate(()=>document.querySelector('weightlang-viewer').load({model:'5-D axes',nodes:[{
   id:'tensor',path:'tensor',op:'input',input_shape:'f32[2,3,4,5,6]',output_shape:'f32[2,3,4,5,6]'
  }],edges:[],tensor_data:[]}));
+ await page.locator('.wl-node').click(); // axis controls live in the details popup
  const glyph=page.locator('.wl-tensor-glyph');
  assert.equal(await glyph.getAttribute('data-visible-axes'),'0,1,2');
  assert.equal(await glyph.locator('.wl-tensor-cell').count(),24);

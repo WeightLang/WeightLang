@@ -29,12 +29,50 @@ published files and load the stylesheet with a `<link>`.
   import './viewer/viewer.js';
   const viewer = document.querySelector('#model');
   // graph is the JSON object emitted by `wgt graph MODEL --format json --stdout`.
-  viewer.configure({theme: 'auto', presentation: 'tensors'}).load(graph);
+  viewer.configure({theme: 'auto'}).load(graph);
 </script>
 ```
 
 `graph` is supplied by the embedding application, not downloaded by the component.
 Serve ES modules over HTTP when embedding; the CLI's standalone HTML works offline.
+The viewer is a full-bleed stage (default `height: 100vh`); set the element's
+`height` to embed it in a smaller area.
+
+## Layout of the stage
+
+The whole viewer is one dotted canvas. The model title floats top-left; search,
+expand and view settings float top-right; the legend floats bottom-left; zoom and
+export float bottom-right. Floating layers let clicks through except on their
+controls. Nothing is framed: nodes are borderless cards lifted by shadow.
+
+Clicking a node opens a **floating details popup**. Drag it by its top bar; it
+remembers its position until reload. × or Escape closes it and clears the
+selection. `load()` and switching between overview and expanded mode close it
+when the selected node no longer exists. On screens up to 760px it becomes a
+bottom sheet.
+
+## Control flow
+
+Expanded graphs make the four kinds of control explicit:
+
+- **Flow:** solid edges with arrowheads; edges of the selected node animate in the
+  direction data travels (disabled with reduced motion).
+- **Loops** (`scan`, `recur`, `ponder`, `scan_state`): a green tinted region
+  encloses the loop head and body, labeled “↻ … · weights shared across steps”. The
+  feedback edge is green and dotted, labeled *next step*. The scan state node sits
+  directly under its loop instead of at the top.
+- **Gates:** `mix` inputs are labeled `g`, `× g` and `× (1−g)`; a sigmoid into
+  `mul` is labeled *gate*; a ponder halting edge is labeled *halt probability*.
+  Gate signals are amber and dashed.
+- **Routes:** `graph.rs` returns each branch to its route with a `conditional`
+  edge. The viewer adds a virtual `route_merge` node (`<route id>::merge`),
+  so branches fan out from the route (*Branch 0*, *Branch 1*, …) and rejoin before
+  the next layer. A teal region marks the route; only the selected branch runs.
+
+Small operators (add, mul, mix, concat, activations, state, results) render as
+compact pills with their formula. The legend shows only the edge roles present.
+`normalizeGraph`, `annotateEdges`, `graphRegions` and `junctionOps` are
+exported for reuse.
 
 ## What is visualized
 
@@ -57,7 +95,7 @@ Serve ES modules over HTTP when embedding; the CLI's standalone HTML works offli
   Skip, recurrent and long forward edges run in separate side lanes instead of
   crossing behind nodes. Each node carries a category color (input/output,
   projection, attention, normalization, activation, pooling, merge, structure,
-  recurrent, other); the legend lists only the categories present.
+  recurrent, gate, route, other); the legend lists only the categories present.
 
 ## Navigate the canvas
 
@@ -71,8 +109,10 @@ Serve ES modules over HTTP when embedding; the CLI's standalone HTML works offli
 - **Search:** matches node paths, operators, titles, std blocks, shapes and parameter
   tensor names (`qkv`). In the overview, a module matches when any collapsed inner
   node or tensor matches. Enter / Shift+Enter cycles matches; Escape clears.
-- **Details:** the side panel lists shape, parameters, block, operators,
-  configuration, and clickable upstream/downstream neighbours.
+- **Details:** the popup lists shape, parameters, block, operators,
+  configuration, and clickable upstream/downstream neighbours, then the shape-axis
+  controls and the optional weight inspector.
+- **Help:** the ? button in the legend shows the reading and shape notes.
 - **Layout:** top-to-bottom or left-to-right.
 - **Export:** SVG (computed theme colors inlined, no stylesheet needed) or 2× PNG.
   Search dimming and selection emphasis are not exported.
@@ -82,7 +122,8 @@ Serve ES modules over HTTP when embedding; the CLI's standalone HTML works offli
 ```js
 viewer.configure({
   theme: 'dark',                       // 'light' | 'dark' | 'auto'
-  presentation: 'tensors',             // 'tensors' | 'compact'
+  presentation: 'auto',                // 'auto' (tensor cards in overview, compact
+                                       // when expanded) | 'tensors' | 'compact'
   direction: 'TB',                     // 'TB' top-to-bottom | 'LR' left-to-right
   layout: null,                        // custom layout function; null = built-in
   tensorLimits: {rows: 6, columns: 8, planes: 3},
@@ -93,7 +134,8 @@ viewer.setLanguage('en');              // 'zh-CN' | 'en'
 viewer.setTheme('light');
 viewer.setTensorAxes('f32[2,3,4,5,6]', [0, 2, 4]); // at most 3 original axes
 viewer.setExpanded(true);              // overview ⇄ all internal nodes
-viewer.selectNode(id);                 // selects, expands if internal, scrolls into view
+viewer.selectNode(id);                 // selects, opens the popup, expands if internal
+viewer.closePopup();
 viewer.setZoom(1.5); viewer.fitView();
 const svgText = viewer.exportSVG();    // standalone SVG string
 const pngBlob = await viewer.exportPNG(2);
@@ -222,10 +264,13 @@ Color tokens: `--page-bg`, `--panel-bg`, `--text`, `--muted`, `--line`,
 `--node-fill`, `--node-border`, `--module-fill`, `--io-fill`, `--io-border`,
 `--selection`, `--edge-color`, `--skip-color`, `--recurrent-color`,
 `--tensor-cell`, `--tensor-plane`, `--tensor-outline`, `--tensor-positive`,
-`--tensor-negative`, `--tensor-zero`, `--heatmap-contrast`, `--error-color`, `--shadow`.
+`--tensor-negative`, `--tensor-zero`, `--heatmap-contrast`, `--error-color`, `--shadow`,
+`--dot` (canvas grid), `--glass` (floating legend/select backing), `--control-bg`,
+`--control-hover`, `--node-shadow`, `--node-shadow-raised`.
 Category tokens: `--cat-io`, `--cat-dense`, `--cat-attention`, `--cat-norm`,
 `--cat-activation`, `--cat-pool`, `--cat-merge`, `--cat-structure`,
-`--cat-recurrent`, `--cat-other`; per node, override `--accent`.
+`--cat-recurrent`, `--cat-gate`, `--cat-route`, `--cat-other`; per node, override `--accent`.
+Loop, gate and route edges, labels and regions use the matching category tokens.
 Font tokens: `--font-ui`, `--font-mono`.
 Geometry tokens: `--tensor-node-width`, `--tensor-node-height`,
 `--node-width`, `--node-height` (the latter two apply to compact mode).
@@ -243,7 +288,7 @@ Use `wgt graph MODEL --open` for discovery or
 ## Events and verification
 
 Bubbling events: `node-select` (node), `tensor-select` (tensor),
-`theme-change` (`{theme, resolved}`), `graph-render` (`{expanded, direction, nodes}`). `load(graph)` validates and replaces model data.
+`theme-change` (`{theme, resolved}`), `graph-render` (`{expanded, direction, nodes}`), `popup-change` (`{open}`). `load(graph)` validates and replaces model data.
 Local tests: `npm test`; browser tests in `test/*.browser.mjs` plus `test/browser.mjs`
 use `WEIGHTLANG_PLAYWRIGHT` pointing to an installed Playwright module, with Chromium.
 No browser dependency or network request is needed by the viewer itself.

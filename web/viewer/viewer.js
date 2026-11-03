@@ -443,6 +443,18 @@ translations.push(['搜索节点', 'Search nodes'],
   ['下游', 'Outputs to'], ['输入输出', 'Input / output'], ['映射', 'Projection'], ['注意力', 'Attention'],
   ['归一化', 'Normalization'], ['激活', 'Activation'], ['汇聚', 'Pooling'], ['合并', 'Merge'], ['组合', 'Structure'],
   ['循环', 'Recurrent'], ['其他', 'Other']);
+translations.push(['自动视图', 'Auto view'], ['数据流', 'Data flow'], ['残差旁路', 'Residual skip'], ['循环反馈', 'Loop feedback'],
+  ['门控信号', 'Gate signal'], ['路由分支', 'Route branch'], ['说明', 'Help'], ['关闭', 'Close'],
+  ['各步共享权重', 'weights shared across steps'], ['路由', 'Route'], ['只执行被选中的分支', 'only the selected branch runs'],
+  ['分支', 'Branch'], ['下一步', 'next step'], ['停止概率', 'halt probability'], ['门', 'gate'], ['门控', 'Gate'],
+  ['条件选择', 'Conditional select'], ['路由汇合', 'Route merge'], ['自适应循环', 'Adaptive loop'], ['状态扫描', 'State scan'],
+  ['块参数', 'Block argument'], ['结果字段', 'Result field'], ['SiLU 激活', 'SiLU activation'], ['恒等', 'Identity'],
+  ['按选择器只执行其中一个分支；所有分支保持相同的形状和类型。', 'A selector runs exactly one branch; every branch preserves shape and dtype.'],
+  ['被选中分支的结果从这里继续向后传递。', 'The selected branch result continues from here.'],
+  ['重复执行内部模块，各轮共享权重；停止概率决定各步结果的加权。', 'Repeat the inner module with shared weights; halting probabilities weight each step result.'],
+  ['沿时间轴逐步执行，显式传递状态字段，各步共享同一套权重。', 'Scan along time, passing explicit state fields with weights shared across steps.'],
+  ['把外部张量或上一步状态送入内部模块。', 'Feed an outer tensor or previous state into the inner module.'],
+  ['模块额外导出的命名结果。', 'A named result exported by the module.']);
 const translationIndex = new Map(translations.flatMap(([zh, en]) => [[zh, [zh, en]], [en, [zh, en]]]));
 export function translate(text, language = 'zh-CN') {
   const pair = translationIndex.get(text);
@@ -502,6 +514,84 @@ export function overviewGraph(data) {
   }
   return {nodes, edges};
 }
+/**
+ * Make control flow acyclic for display. `graph.rs` returns each route branch to the
+ * route node with a `conditional` edge; a virtual `route_merge` node receives those
+ * edges and takes over the route's downstream edges, so branches visibly fan out
+ * and rejoin. Graphs without routes are returned unchanged.
+ */
+export function normalizeGraph(data) {
+  const routes = data.nodes.filter((n) => n.op === 'route');
+  if (!routes.length) return data;
+  const nodes = [...data.nodes], merges = new Map();
+  for (const route of routes) {
+    const path = route.path || route.id;
+    const merge = {id: `${route.id}::merge`, path: `${path}.$merge`, op: 'route_merge', parent: path,
+      input_shape: route.output_shape, output_shape: route.output_shape, parameters: 0, virtual: true};
+    nodes.push(merge);
+    merges.set(route.id, {merge, prefix: path + '.'});
+  }
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const edges = data.edges.map((edge) => {
+    const target = merges.get(edge.to), source = merges.get(edge.from);
+    if (target && edge.kind === 'conditional') return {...edge, to: target.merge.id};
+    if (source && !(byId.get(edge.to)?.path || '').startsWith(source.prefix)) return {...edge, from: source.merge.id};
+    return edge;
+  });
+  return {...data, nodes, edges};
+}
+/** Operators drawn as small junction pills instead of full tensor cards. */
+export const junctionOps = new Set(['add', 'mul', 'mix', 'where', 'concat', 'route_merge', 'state', 'argument', 'result',
+  'loop_output', 'last', 'relu', 'gelu', 'tanh', 'sigmoid', 'silu', 'identity']);
+const loopOps = new Set(['scan', 'recur', 'ponder', 'scan_state']);
+const within = (node, prefix) => (node?.path || node?.id || '').startsWith(prefix);
+/**
+ * Explain control signals on edges: gate inputs of mix/mul, loop feedback, halting
+ * probabilities, route branches and concat order. Returns {role, label} per edge.
+ */
+export function annotateEdges(nodes, edges) {
+  const byId = new Map(nodes.map((n) => [n.id, n])), incoming = new Map();
+  for (const edge of edges) {
+    if (!incoming.has(edge.to)) incoming.set(edge.to, []);
+    incoming.get(edge.to).push(edge);
+  }
+  return edges.map((edge) => {
+    const from = byId.get(edge.from), to = byId.get(edge.to), inputs = incoming.get(edge.to), index = inputs.indexOf(edge);
+    if (edge.kind === 'recurrent') return {role: 'loop', label: '下一步'};
+    if (edge.kind === 'halt') return {role: 'gate', label: '停止概率'};
+    if (edge.kind === 'conditional') return {role: 'route'};
+    if (from?.op === 'route' && within(to, (from.path || from.id) + '.'))
+      return {role: 'route', label: '分支', index: edges.filter((e) => e.from === edge.from && within(byId.get(e.to), (from.path || from.id) + '.')).indexOf(edge)};
+    if (to?.op === 'mix') return [{role: 'gate', label: 'g'}, {label: '× g'}, {label: '× (1−g)'}][index] || {};
+    if (to?.op === 'mul' && from?.op === 'sigmoid') return {role: 'gate', label: '门'};
+    if (to?.op === 'concat' && inputs.length > 1) return {label: String(index + 1)};
+    return {};
+  });
+}
+/**
+ * Background regions for expanded control flow: loop bodies (scan/recur/ponder/
+ * scan_state), whole routes and each route branch. Coordinates come from the layout.
+ */
+export function graphRegions(nodes, edges, positions) {
+  const regions = [];
+  const bounds = (members, pad, top) => {
+    const boxes = members.map((n) => positions.get(n.id)).filter(Boolean);
+    if (!boxes.length) return null;
+    const x = Math.min(...boxes.map((p) => p.x)) - pad, y = Math.min(...boxes.map((p) => p.y)) - top;
+    return {x, y, width: Math.max(...boxes.map((p) => p.x + p.width)) + pad - x, height: Math.max(...boxes.map((p) => p.y + p.height)) + pad - y};
+  };
+  for (const head of nodes) {
+    const prefix = (head.path || head.id) + '.';
+    if (loopOps.has(head.op)) {
+      const box = bounds(nodes.filter((n) => n === head || (within(n, prefix) && !n.path?.endsWith('.$output'))), 22, 34);
+      if (box) regions.push({kind: 'loop', node: head, ...box});
+    } else if (head.op === 'route') {
+      const box = bounds(nodes.filter((n) => n === head || within(n, prefix)), 22, 34);
+      if (box) regions.push({kind: 'route', node: head, ...box});
+    }
+  }
+  return regions.sort((a, b) => b.width * b.height - a.width * a.height);
+}
 /* Extensible vocabulary: operators, std blocks and visual categories are data, not
    hard-coded branches. Embedders register their own entries; unknown operators
    still render with the generic category. Titles and descriptions may be a
@@ -543,7 +633,7 @@ export function addTranslations(pairs) {
 }
 for (const [name, title] of Object.entries({
   io: '输入输出', dense: '映射', attention: '注意力', norm: '归一化', activation: '激活',
-  pool: '汇聚', merge: '合并', structure: '组合', recurrent: '循环', other: '其他',
+  pool: '汇聚', merge: '合并', structure: '组合', recurrent: '循环', gate: '门控', route: '路由', other: '其他',
 })) registerCategory(name, {title});
 for (const [op, [title, category, description]] of Object.entries({
   input: ['输入', 'io', '模型接收的数据。形状不包含批次维度。'],
@@ -564,7 +654,15 @@ for (const [op, [title, category, description]] of Object.entries({
   state: ['上一步记忆', 'recurrent', '保存上一时间步的隐藏状态，初始值为零。'],
   loop_output: ['循环输出', 'recurrent'],
   add: ['逐元素相加', 'merge'], mul: ['逐元素相乘', 'merge'],
-  mix: ['门控混合', 'merge', '按门值 g 混合两个输入：g × a + (1 − g) × b。'],
+  mix: ['门控混合', 'gate', '按门值 g 混合两个输入：g × a + (1 − g) × b。'],
+  where: ['条件选择', 'gate'],
+  route: ['路由', 'route', '按选择器只执行其中一个分支；所有分支保持相同的形状和类型。'],
+  route_merge: ['路由汇合', 'route', '被选中分支的结果从这里继续向后传递。'],
+  ponder: ['自适应循环', 'recurrent', '重复执行内部模块，各轮共享权重；停止概率决定各步结果的加权。'],
+  scan_state: ['状态扫描', 'recurrent', '沿时间轴逐步执行，显式传递状态字段，各步共享同一套权重。'],
+  argument: ['块参数', 'structure', '把外部张量或上一步状态送入内部模块。'],
+  result: ['结果字段', 'structure', '模块额外导出的命名结果。'],
+  silu: ['SiLU 激活', 'activation'], identity: ['恒等', 'structure'],
   concat: ['拼接', 'merge'],
   relu: ['ReLU 激活', 'activation'], gelu: ['GELU 激活', 'activation'],
   tanh: ['Tanh 激活', 'activation'], sigmoid: ['Sigmoid 激活', 'activation'],
@@ -617,6 +715,15 @@ export function layoutGraph(nodes, edges, width = 260, height = 76, gap = 54, op
     outgoing.get(e.from).push(e.to);
     preds.get(e.to).push(e.from);
   }
+  // Entry nodes inside a module (scan state, block arguments) rank just below that module.
+  const byPath = new Map(nodes.map((n) => [n.path || n.id, n.id]));
+  for (const n of nodes) {
+    const owner = n.parent && byPath.get(n.parent);
+    if (incoming.get(n.id) === 0 && owner && owner !== n.id) {
+      incoming.set(n.id, 1);
+      outgoing.get(owner).push(n.id);
+    }
+  }
   const queue = nodes.filter((n) => incoming.get(n.id) === 0).map((n) => n.id);
   for (let i = 0; i < queue.length; i++) {
     const id = queue[i];
@@ -657,7 +764,9 @@ export function layoutGraph(nodes, edges, width = 260, height = 76, gap = 54, op
     for (const n of row) {
       const across = 24 + slot.get(n.id) * ((horizontal ? height : width) + spacing),
         along = 28 + r * ((horizontal ? width : height) + gap);
-      positions.set(n.id, horizontal ? {x: along, y: across, width, height, rank: r} : {x: across, y: along, width, height, rank: r});
+      const size = options.size?.(n) || {width, height};
+      const x = (horizontal ? along : across) + (width - size.width) / 2, y = (horizontal ? across : along) + (height - size.height) / 2;
+      positions.set(n.id, {x, y, width: size.width, height: size.height, rank: r});
     }
   const acrossSize = columns * ((horizontal ? height : width) + spacing) + 40,
     alongSize = (last + 1) * ((horizontal ? width : height) + gap) + 32;
@@ -688,7 +797,8 @@ export function routeEdges(edges, positions, direction = 'TB') {
   const boxes = [...positions.values()];
   const toSvg = ([a, b]) => lr ? [b, a] : [a, b];
   let extent = Math.max(0, ...boxes.map((p) => across(p) + acrossSize(p)));
-  const lanes = [], bypass = [];
+  const lanes = {[-1]: [], 1: []}, bypass = [];
+  let start = Math.min(...boxes.map(across));
   const routes = edges.map((edge) => {
     const a = positions.get(edge.from), b = positions.get(edge.to);
     const route = {edge, kind: edge.kind || 'flow'};
@@ -700,23 +810,32 @@ export function routeEdges(edges, positions, direction = 'TB') {
     if (route.kind !== 'skip' && route.kind !== 'recurrent' && y2 >= y1 && !blocked) {
       const [p0, p1, p2, p3] = [[x1, y1], [x1, m], [x2, m], [x2, y2]].map(toSvg);
       route.d = `M${p0} C${p1} ${p2} ${p3}`;
+      const t = 0.72, u = 1 - t;
+      route.label = [0, 1].map((k) => u * u * u * p0[k] + 3 * u * u * t * p1[k] + 3 * u * t * t * p2[k] + t * t * t * p3[k]);
     } else bypass.push({route, a, b, lo: Math.min(along(a), along(b)), hi: Math.max(along(a) + alongSize(a), along(b) + alongSize(b))});
     return route;
   });
   bypass.sort((m, n) => (m.hi - m.lo) - (n.hi - n.lo));
   for (const item of bypass) {
     const {route, a, b, lo, hi} = item;
-    const base = Math.max(0, ...boxes.filter((p) => along(p) < hi && along(p) + alongSize(p) > lo).map((p) => across(p) + acrossSize(p)));
-    let lane = lanes.findIndex((used) => used.every(([l, h]) => h <= lo || l >= hi));
-    if (lane < 0) { lane = lanes.length; lanes.push([]); }
-    lanes[lane].push([lo, hi]);
-    const c = base + 22 + lane * 14;
+    const passed = boxes.filter((p) => along(p) < hi && along(p) + alongSize(p) > lo);
+    const near = Math.min(...passed.map(across)), far = Math.max(...passed.map((p) => across(p) + acrossSize(p)));
+    const middle = (across(a) + acrossSize(a) / 2 + across(b) + acrossSize(b) / 2) / 2;
+    const side = middle < (near + far) / 2 - 1 ? -1 : 1, pool = lanes[side];
+    let lane = pool.findIndex((used) => used.every(([l, h]) => h <= lo || l >= hi));
+    if (lane < 0) { lane = pool.length; pool.push([]); }
+    pool[lane].push([lo, hi]);
+    const c = side > 0 ? far + 22 + lane * 14 : near - 22 - lane * 14;
     extent = Math.max(extent, c);
+    start = Math.min(start, c);
     const y1 = along(a) + alongSize(a) / 2, y2 = along(b) + alongSize(b) / 2;
+    const edgeOf = (p) => side > 0 ? across(p) + acrossSize(p) : across(p);
     route.lane = lane;
-    route.d = roundedPath([[across(a) + acrossSize(a), y1], [c, y1], [c, y2], [across(b) + acrossSize(b), y2]].map(toSvg));
+    route.side = side;
+    route.d = roundedPath([[edgeOf(a), y1], [c, y1], [c, y2], [edgeOf(b), y2]].map(toSvg));
+    route.label = toSvg([c, (y1 + y2) / 2]);
   }
-  return {routes, extent};
+  return {routes, extent, start};
 }
 export function flatIndex(shape, coordinates) {
   if (shape.length !== coordinates.length)
@@ -873,22 +992,18 @@ function num(v) {
       ? v.toExponential(3)
       : Number(v.toPrecision(5)).toString();
 }
-const template =
-  '<header class="wl-header"><div class="wl-title"><span class="wl-eyebrow">WEIGHTLANG · MODEL EXPLORER</span><h1></h1><div class="wl-summary"></div></div><div class="wl-header-tools"><label><span>主题</span> <select class="wl-theme" aria-label="Theme / 主题"><option value="auto">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></label><label>Language / 语言 <select class="wl-language" aria-label="Language / 语言"><option value="zh-CN">中文</option><option value="en">English</option></select></label></div></header>' +
-  '<div class="wl-workspace"><section class="wl-architecture"><div class="wl-panel-heading"><h2>模型架构</h2><div class="wl-actions"><label class="wl-search-box"><input class="wl-search" type="search" data-label="搜索节点" autocomplete="off"><span class="wl-search-count" aria-live="polite"></span></label><select class="wl-presentation" aria-label="Display / 显示"><option value="tensors">张量视图</option><option value="compact">紧凑视图</option></select><select class="wl-direction" aria-label="Layout / 布局"><option value="TB">纵向布局</option><option value="LR">横向布局</option></select><button class="wl-expand" aria-pressed="false">展开内部层</button></div></div>' +
-  '<p class="wl-note">沿箭头阅读：输入 → 特征处理 → 输出。点击模块查看说明，方向键沿连线移动；Ctrl + 滚轮缩放，拖动空白处平移。形状不含批次维度。</p><div class="wl-key"><span>实线 → 数据流</span><span>虚线 → 残差旁路</span><span>点线 → 循环记忆</span></div><div class="wl-categories"></div><p class="wl-shape-note">格子表示元素位置，不是运行值；省略号表示只展示部分元素。</p>' +
-  '<div class="wl-canvas"><div class="wl-flow"></div><div class="wl-zoom" role="toolbar"><button class="wl-zoom-out" data-label="缩小">−</button><button class="wl-zoom-level" data-label="实际大小">100%</button><button class="wl-zoom-in" data-label="放大">+</button><button class="wl-fit" data-label="适应画布">⤢</button><span class="wl-zoom-separator"></span><button class="wl-export-svg" data-label="导出 SVG">SVG</button><button class="wl-export-png" data-label="导出 PNG">PNG</button></div></div></section>' +
-  '<section class="wl-explorer"><div class="wl-node-info" aria-live="polite"><h2>从输入开始看</h2><p>选择左侧模块，查看它的作用和形状变化。</p></div><button class="wl-inspect-toggle" aria-expanded="false">查看参数值</button><div class="wl-weight-tools" hidden><div class="wl-panel-heading"><h2>权重检查</h2><span class="wl-origin"></span></div><label class="wl-tensor-label">参数张量<select class="wl-tensor"></select></label><div class="wl-statistics"></div><div class="wl-controls"><label>View <select class="wl-mode"></select></label><label class="wl-row-control">Rows <select class="wl-row"></select></label><label class="wl-column-control">Columns <select class="wl-column"></select></label></div><div class="wl-fixed"></div><div class="wl-presets"></div><p class="wl-description"></p><div class="wl-plot"><canvas tabindex="0" aria-label="Tensor values"></canvas></div><div class="wl-legend"><span class="wl-low"></span><span class="wl-gradient"></span><span class="wl-high"></span></div><output class="wl-readout" aria-live="polite">Point at a cell to inspect its coordinates and value.</output><div class="wl-files"><label>Full weights for exact large-tensor slices<input class="wl-current-file" type="file" accept=".safetensors"></label><label class="wl-baseline-file-label">Baseline weights<input class="wl-baseline-file" type="file" accept=".safetensors"></label></div><p class="wl-note">下图是参数值，不是模型运行时的激活或注意力概率；不能据此判断训练效果。</p></div></section></div><p class="wl-error" role="alert"></p>';
+const template = "<header class=\"wl-header\"><div class=\"wl-title\"><span class=\"wl-eyebrow\">WEIGHTLANG</span><h1></h1><div class=\"wl-summary\"></div></div></header><div class=\"wl-hud\"><div class=\"wl-actions\"><label class=\"wl-search-box\"><input class=\"wl-search\" type=\"search\" data-label=\"搜索节点\" autocomplete=\"off\"><span class=\"wl-search-count\" aria-live=\"polite\"></span></label><button class=\"wl-expand\" aria-pressed=\"false\">展开内部层</button></div><div class=\"wl-header-tools\"><select class=\"wl-presentation\" aria-label=\"Display / 显示\"><option value=\"auto\">自动视图</option><option value=\"tensors\">张量视图</option><option value=\"compact\">紧凑视图</option></select><select class=\"wl-direction\" aria-label=\"Layout / 布局\"><option value=\"TB\">纵向布局</option><option value=\"LR\">横向布局</option></select><select class=\"wl-theme\" aria-label=\"Theme / 主题\"><option value=\"auto\">跟随系统</option><option value=\"light\">亮色</option><option value=\"dark\">暗色</option></select><select class=\"wl-language\" aria-label=\"Language / 语言\"><option value=\"zh-CN\">中文</option><option value=\"en\">English</option></select></div></div><div class=\"wl-workspace\"><div class=\"wl-flow\"></div><div class=\"wl-legend-row\"><div class=\"wl-key\"><span data-kind=\"flow\">数据流</span><span data-kind=\"skip\">残差旁路</span><span data-kind=\"loop\">循环反馈</span><span data-kind=\"gate\">门控信号</span><span data-kind=\"route\">路由分支</span></div><div class=\"wl-categories\"></div><button class=\"wl-help\" aria-expanded=\"false\" data-label=\"说明\">?</button><div class=\"wl-footnotes\" hidden><p class=\"wl-note\">沿箭头阅读：输入 → 特征处理 → 输出。点击模块查看说明，方向键沿连线移动；Ctrl + 滚轮缩放，拖动空白处平移。形状不含批次维度。</p><p class=\"wl-shape-note\">格子表示元素位置，不是运行值；省略号表示只展示部分元素。</p></div></div><div class=\"wl-zoom\" role=\"toolbar\"><button class=\"wl-zoom-out\" data-label=\"缩小\">−</button><button class=\"wl-zoom-level\" data-label=\"实际大小\">100%</button><button class=\"wl-zoom-in\" data-label=\"放大\">+</button><button class=\"wl-fit\" data-label=\"适应画布\">⤢</button><button class=\"wl-export-svg\" data-label=\"导出 SVG\">SVG</button><button class=\"wl-export-png\" data-label=\"导出 PNG\">PNG</button></div><section class=\"wl-explorer wl-popup\" role=\"dialog\" hidden><div class=\"wl-popup-bar\"><span class=\"wl-popup-grip\"></span><button class=\"wl-popup-close\" data-label=\"关闭\">×</button></div><div class=\"wl-popup-body\"><div class=\"wl-node-info\" aria-live=\"polite\"><h2>从输入开始看</h2><p>选择左侧模块，查看它的作用和形状变化。</p></div><button class=\"wl-inspect-toggle\" aria-expanded=\"false\">查看参数值</button><div class=\"wl-weight-tools\" hidden><div class=\"wl-panel-heading\"><h2>权重检查</h2><span class=\"wl-origin\"></span></div><label class=\"wl-tensor-label\">参数张量<select class=\"wl-tensor\"></select></label><div class=\"wl-statistics\"></div><div class=\"wl-controls\"><label>View <select class=\"wl-mode\"></select></label><label class=\"wl-row-control\">Rows <select class=\"wl-row\"></select></label><label class=\"wl-column-control\">Columns <select class=\"wl-column\"></select></label></div><div class=\"wl-fixed\"></div><div class=\"wl-presets\"></div><p class=\"wl-description\"></p><div class=\"wl-plot\"><canvas tabindex=\"0\" aria-label=\"Tensor values\"></canvas></div><div class=\"wl-legend\"><span class=\"wl-low\"></span><span class=\"wl-gradient\"></span><span class=\"wl-high\"></span></div><output class=\"wl-readout\" aria-live=\"polite\">Point at a cell to inspect its coordinates and value.</output><div class=\"wl-files\"><label>Full weights for exact large-tensor slices<input class=\"wl-current-file\" type=\"file\" accept=\".safetensors\"></label><label class=\"wl-baseline-file-label\">Baseline weights<input class=\"wl-baseline-file\" type=\"file\" accept=\".safetensors\"></label></div><p class=\"wl-note\">下图是参数值，不是模型运行时的激活或注意力概率；不能据此判断训练效果。</p></div></div></section></div><p class=\"wl-error\" role=\"alert\"></p>";
 let viewerCount = 0;
-const edgeKinds = ['flow', 'skip', 'recurrent', 'active'];
+const edgeKinds = ['flow', 'skip', 'recurrent', 'conditional', 'halt', 'gate', 'active'];
+const kindRoles = {skip: 'skip', recurrent: 'loop', conditional: 'route', halt: 'gate'};
 const exportedStyles = ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-linecap',
-  'stroke-opacity', 'opacity', 'font-family', 'font-size', 'font-weight', 'visibility'];
+  'stroke-opacity', 'stroke-linejoin', 'paint-order', 'opacity', 'font-family', 'font-size', 'font-weight', 'visibility'];
 export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
   constructor() {
     super();
     this.language = globalThis.navigator?.language?.startsWith('zh') ? 'zh-CN' : 'en';
     try { const saved = localStorage.getItem('weightlang.language'); if (['zh-CN', 'en'].includes(saved)) this.language = saved; } catch {}
-    this.options = {presentation: 'tensors', direction: 'TB', layout: null, tensorLimits: {rows: 6, columns: 8, planes: 3}};
+    this.options = {presentation: 'auto', direction: 'TB', layout: null, tensorLimits: {rows: 6, columns: 8, planes: 3}};
     this.tensorAxes = new Map();
     this.theme = 'auto';
     try { const saved = localStorage.getItem('weightlang.theme'); if (['auto', 'light', 'dark'].includes(saved)) this.theme = saved; } catch {}
@@ -939,6 +1054,7 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
         };
       this.q(".wl-expand").onclick = () => this.setExpanded(!this.expanded);
       this.bindCanvas();
+      this.bindPopup();
       this.q("canvas").onpointermove = (e) => this.inspectCell(e);
       for (const kind of ["current", "baseline"])
         this.q(".wl-" + kind + "-file").onchange = (e) =>
@@ -956,6 +1072,54 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
   disconnectedCallback() {
     this.observer?.disconnect();
     this.media?.removeEventListener("change", this.themeChanged);
+  }
+  /** Floating details popup: opened by clicking a node, dragged by its bar, closed with × or Escape. */
+  bindPopup() {
+    const popup = this.q('.wl-popup'), bar = this.q('.wl-popup-bar');
+    this.q('.wl-popup-close').onclick = () => this.closePopup();
+    popup.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); this.closePopup(); } });
+    let drag = null;
+    bar.onpointerdown = (e) => {
+      if (e.button !== 0 || e.target.closest('button') || matchMedia('(max-width: 640px)').matches) return;
+      const box = popup.getBoundingClientRect();
+      drag = {dx: e.clientX - box.left, dy: e.clientY - box.top};
+      bar.setPointerCapture(e.pointerId);
+      popup.classList.add('wl-dragging');
+      e.preventDefault();
+    };
+    bar.onpointermove = (e) => {
+      if (!drag) return;
+      const host = this.getBoundingClientRect();
+      const left = Math.min(Math.max(0, e.clientX - host.left - drag.dx), host.width - popup.offsetWidth);
+      const top = Math.min(Math.max(0, e.clientY - host.top - drag.dy), host.height - 48);
+      this.popupPosition = {left, top};
+      Object.assign(popup.style, {left: left + 'px', top: top + 'px', right: 'auto'});
+    };
+    bar.onpointerup = bar.onpointercancel = () => { drag = null; popup.classList.remove('wl-dragging'); };
+    const help = this.q('.wl-help');
+    help.onclick = () => {
+      const notes = this.q('.wl-footnotes');
+      notes.hidden = !notes.hidden;
+      help.setAttribute('aria-expanded', String(!notes.hidden));
+    };
+  }
+  openPopup() {
+    const popup = this.q('.wl-popup');
+    if (!popup.hidden) return;
+    popup.hidden = false;
+    if (this.popupPosition) Object.assign(popup.style, {left: this.popupPosition.left + 'px', top: this.popupPosition.top + 'px', right: 'auto'});
+    this.dispatchEvent(new CustomEvent('popup-change', {detail: {open: true}, bubbles: true}));
+  }
+  closePopup() {
+    const popup = this.q('.wl-popup');
+    if (popup.hidden) return this;
+    popup.hidden = true;
+    const selected = this.q('.wl-selected');
+    this.querySelectorAll('.wl-selected').forEach((n) => n.classList.remove('wl-selected'));
+    this.markSelection(null);
+    selected?.focus({preventScroll: true});
+    this.dispatchEvent(new CustomEvent('popup-change', {detail: {open: false}, bubbles: true}));
+    return this;
   }
   /** Canvas interaction: Ctrl/⌘ + wheel zoom, mouse drag pan, keyboard shortcuts, search and export. */
   bindCanvas() {
@@ -981,6 +1145,7 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     flow.onpointerup = flow.onpointercancel = () => { drag = null; flow.classList.remove('wl-panning'); };
     flow.onkeydown = (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'Escape') { this.closePopup(); return; }
       if (e.key === '+' || e.key === '=') this.setZoom(this.zoom * 1.2);
       else if (e.key === '-') this.setZoom(this.zoom / 1.2);
       else if (e.key === '0') this.fitView();
@@ -1005,7 +1170,7 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     };
   }
   configure(options = {}) {
-    if (options.presentation && !['tensors', 'compact'].includes(options.presentation)) throw Error('Invalid presentation');
+    if (options.presentation && !['auto', 'tensors', 'compact'].includes(options.presentation)) throw Error('Invalid presentation');
     if (options.direction && !['TB', 'LR'].includes(options.direction)) throw Error('Invalid direction');
     for (const key of ['nodeRenderer', 'tensorRenderer', 'layout'])
       if (options[key] != null && typeof options[key] !== 'function') throw Error(`${key} must be a function or null`);
@@ -1080,6 +1245,11 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     }
     return container;
   }
+  /** Tensor cards in the overview; compact cards for expanded graphs unless chosen explicitly. */
+  tensorView() {
+    const mode = this.options.presentation;
+    return mode === 'tensors' || (mode === 'auto' && !this.expanded);
+  }
   renderTensor(label, width, height, side, node) {
     const visibleAxes = this.tensorAxes.get(label);
     const context = {label, visibleAxes, geometry: tensorGeometry(label, this.options.tensorLimits, visibleAxes), width, height, side, node,
@@ -1087,15 +1257,28 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     return this.options.tensorRenderer?.(context) || renderTensorShape(context);
   }
   renderNodeContent(node, width, height) {
-    const group = svg('g', {class: 'wl-node-content'}), path = node.path || node.id;
-    group.append(svg('rect', {width, height, rx: 12, class: 'wl-node-background'}));
-    group.append(svg('rect', {x: 6, y: 14, width: 3, height: Math.max(8, height - 28), rx: 1.5, class: 'wl-node-accent'}));
-    group.append(svg('title', {}, `${path}\n${node.input_shape || ''} → ${node.output_shape || ''}`));
-    group.append(svg('text', {x: 18, y: 25, class: 'wl-node-title'}, nodeTitle(node, this.language)));
-    group.append(svg('text', {x: width - 16, y: 24, 'text-anchor': 'end', class: 'wl-node-chip'}, categoryTitle(nodeCategory(node), this.language)));
-    if (this.options.presentation === 'compact') {
-      group.append(svg('text', {x: 16, y: 46, class: 'wl-node-op'}, path.length > 36 ? '…' + path.slice(-35) : path));
-      group.append(svg('text', {x: 16, y: 65, class: 'wl-node-shape'}, `${node.input_shape || ''} → ${node.output_shape || ''}`));
+    const group = svg('g', {class: 'wl-node-content'}), path = node.path || node.id, category = nodeCategory(node);
+    const junction = junctionOps.has(node.op);
+    group.append(svg('rect', {width, height, rx: junction ? height / 2 : 14, class: 'wl-node-background'}));
+    group.append(svg('title', {}, `${categoryTitle(category, this.language)} · ${path}\n${node.input_shape || ''} → ${node.output_shape || ''}`));
+    // Loops and routes carry a glyph; other nodes a category dot. No borders or badges.
+    const glyph = {recurrent: '↻', route: '⑂'}[category];
+    const cy = junction ? height / 2 - 7 : 20.5, cx = junction ? 22 : 20;
+    if (glyph) group.append(svg('text', {x: cx, y: cy + 5, 'text-anchor': 'middle', class: 'wl-node-glyph'}, glyph));
+    else group.append(svg('circle', {cx, cy, r: 4, class: 'wl-node-dot'}));
+    group.append(svg('text', {x: cx + 13, y: cy + 5, class: 'wl-node-title'}, nodeTitle(node, this.language)));
+    if (junction) {
+      const formula = {add: 'a + b', mul: 'a ⊙ g', mix: 'g·a + (1−g)·b', concat: '[ a ‖ b ]', where: 'c ? a : b'}[node.op];
+      group.append(svg('text', {x: cx + 13, y: cy + 23, class: 'wl-node-shape'}, formula ? `${formula}  ·  ${node.output_shape || ''}` : node.output_shape || ''));
+      return group;
+    }
+    if (!this.tensorView()) {
+      group.append(svg('text', {x: 16, y: 47, class: 'wl-node-op'}, path.length > 36 ? '…' + path.slice(-35) : path));
+      group.append(svg('text', {x: 16, y: 68, class: 'wl-node-shape'}, `${node.input_shape || ''} → ${node.output_shape || ''}`));
+      if (node.parameters > 0)
+        group.append(svg('text', {x: width - 16, y: 25, 'text-anchor': 'end', class: 'wl-node-meta'},
+          `${node.parameters.toLocaleString()} ${this.language === 'en' ? 'params' : '参数'}`));
+      return group;
     } else {
       const single = node.op === 'input' || node.op === 'output';
       const glyphWidth = single ? width - 40 : (width - 80) / 2;
@@ -1143,7 +1326,7 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     if (!this.data) return;
     this.render();
     const selectedNode = this.nodeElement(nodeId);
-    selectedNode?.dispatchEvent(new Event('click'));
+    this.reselect(nodeId);
     const hasParameters = !this.q('.wl-plot').hidden;
     if (tensor) {
       this.selectTensor(tensor);
@@ -1154,13 +1337,17 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
       const preset = this.q('.wl-presets select');
       if (preset) preset.value = range ? String(this.selected.views.indexOf(range)) : '';
       this.draw();
-      if (!hasParameters) selectedNode?.dispatchEvent(new Event('click'));
+      if (!hasParameters) this.reselect(nodeId);
     }
     this.q('.wl-inspect-toggle').textContent = this.t(this.q('.wl-weight-tools').hidden ? '查看参数值' : '收起参数值');
     flow.scrollTop = top; flow.scrollLeft = left;
   }
   q(s) {
     return this.querySelector(s);
+  }
+  reselect(id) {
+    const element = this.nodeElement(id);
+    if (element) this.activateNode(this.nodeIndex.get(id), element, false);
   }
   nodeElement(id) {
     return [...this.querySelectorAll('.wl-node')].find((n) => n.dataset.id === id) || null;
@@ -1218,18 +1405,21 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
   }
   renderGraph() {
     const selectedId = this.q('.wl-selected')?.dataset.id;
-    const style = getComputedStyle(this), tensorView = this.options.presentation === 'tensors',
+    const style = getComputedStyle(this), tensorView = this.tensorView(),
       width = parseFloat(style.getPropertyValue(tensorView ? '--tensor-node-width' : '--node-width')) || (tensorView ? 420 : 320),
       height = parseFloat(style.getPropertyValue(tensorView ? '--tensor-node-height' : '--node-height')) || (tensorView ? 184 : 88);
     this.q('.wl-shape-note').hidden = !tensorView;
     const direction = this.options.direction;
-    const visible = this.expanded ? this.data : overviewGraph(this.data);
+    const graph = normalizeGraph(this.data);
+    const visible = this.expanded ? graph : overviewGraph(graph);
+    const pill = {width: Math.min(width, 236), height: tensorView ? 62 : 56};
     const gap = this.expanded ? 54 : direction === 'LR' ? 56 : 28;
     const layout = this.options.layout?.({nodes: visible.nodes, edges: visible.edges, width, height, gap, direction}) ||
-      layoutGraph(visible.nodes, visible.edges, width, height, gap, {direction});
-    const {routes, extent} = routeEdges(visible.edges, layout.positions, direction);
-    const canvasWidth = direction === 'LR' ? layout.width : Math.max(layout.width, extent + 24),
-      canvasHeight = direction === 'LR' ? Math.max(layout.height, extent + 24) : layout.height;
+      layoutGraph(visible.nodes, visible.edges, width, height, gap, {direction, size: (n) => junctionOps.has(n.op) ? pill : null});
+    const {routes, extent, start} = routeEdges(visible.edges, layout.positions, direction);
+    const shift = Math.max(0, 16 - start);
+    const canvasWidth = direction === 'LR' ? layout.width : Math.max(layout.width, extent + 24) + shift,
+      canvasHeight = direction === 'LR' ? Math.max(layout.height, extent + 24) + shift : layout.height;
     this.visible = visible;
     this.layout = layout;
     this.canvasSize = {width: canvasWidth, height: canvasHeight};
@@ -1250,15 +1440,35 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
       defs.append(marker);
     }
     diagram.append(defs);
-    const edgeLayer = svg('g', {class: 'wl-edges'});
-    for (const route of routes) {
-      const kind = edgeKinds.includes(route.kind) ? route.kind : 'flow';
-      edgeLayer.append(svg("path", {
-        d: route.d, class: "wl-edge", "data-kind": route.kind, "data-from": route.edge.from, "data-to": route.edge.to,
-        "marker-end": `url(#${this.uid}-arrow-${kind})`,
-      }));
+    // Control-flow regions sit beneath everything: loop bodies, routes and their branches.
+    const regionLayer = svg('g', {class: 'wl-regions'});
+    if (this.expanded) for (const region of graphRegions(visible.nodes, visible.edges, layout.positions)) {
+      const group = svg('g', {class: 'wl-region', 'data-kind': region.kind});
+      group.append(svg('rect', {x: region.x, y: region.y, width: region.width, height: region.height, rx: region.kind === 'branch' ? 14 : 22}));
+      const label = region.kind === 'loop' ? `↻  ${nodeTitle(region.node, this.language)} · ${this.t('各步共享权重')}`
+        : region.kind === 'route' ? `⑂  ${this.t('路由')} · ${this.t('只执行被选中的分支')}` : `${this.t('分支')} ${region.index}`;
+      group.append(svg('text', {x: region.x + 14, y: region.y + (region.kind === 'branch' ? 17 : 21), class: 'wl-region-label'}, label));
+      regionLayer.append(group);
     }
-    diagram.append(edgeLayer);
+    const content = svg('g', {class: 'wl-content', transform: direction === 'LR' ? `translate(0 ${shift})` : `translate(${shift} 0)`});
+    diagram.append(content);
+    content.append(regionLayer);
+    const edgeLayer = svg('g', {class: 'wl-edges'}), labelLayer = svg('g', {class: 'wl-edge-labels'});
+    const notes = annotateEdges(visible.nodes, visible.edges), roles = new Set();
+    routes.forEach((route, i) => {
+      const role = notes[i].role || kindRoles[route.kind] || 'flow';
+      roles.add(role);
+      const marker = role === 'gate' ? 'gate' : edgeKinds.includes(route.kind) ? route.kind : 'flow';
+      edgeLayer.append(svg("path", {
+        d: route.d, class: "wl-edge", "data-kind": route.kind, "data-role": role, "data-marker": marker,
+        "data-from": route.edge.from, "data-to": route.edge.to, "marker-end": `url(#${this.uid}-arrow-${marker})`,
+      }));
+      if (notes[i].label && route.label)
+        labelLayer.append(svg('text', {x: route.label[0] + 6, y: route.label[1] + 4, class: 'wl-edge-label', 'data-role': role,
+          'data-from': route.edge.from, 'data-to': route.edge.to}, this.t(notes[i].label) + (notes[i].index != null ? ' ' + notes[i].index : '')));
+    });
+    content.append(edgeLayer);
+    for (const item of this.querySelectorAll('.wl-key [data-kind]')) item.hidden = !roles.has(item.dataset.kind);
     const present = new Set();
     for (const node of visible.nodes) {
       const p = layout.positions.get(node.id),
@@ -1279,21 +1489,23 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
       });
       const color = categoryRegistry.get(category)?.color;
       if (color) group.style.setProperty('--accent', color);
-      const context = {node, width, height, language: this.language, svg, category,
-        defaultRender: () => this.renderNodeContent(node, width, height)};
+      const context = {node, width: p.width, height: p.height, language: this.language, svg, category,
+        defaultRender: () => this.renderNodeContent(node, p.width, p.height)};
       group.append(this.options.nodeRenderer?.(context) || context.defaultRender());
-      group.onclick = () => this.activateNode(node, group);
+      group.onclick = () => this.activateNode(node, group, true);
       group.onkeydown = (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          this.activateNode(node, group);
+          this.activateNode(node, group, true);
         } else if (e.key.startsWith('Arrow')) {
           e.preventDefault();
           this.navigate(node.id, e.key);
         }
       };
-      diagram.append(group);
+      content.append(group);
     }
+    // Labels last so they read above nodes and edges.
+    content.append(labelLayer);
     const legend = this.q('.wl-categories');
     legend.replaceChildren();
     for (const category of [...categoryRegistry.keys(), ...present].filter((c, i, all) => present.has(c) && all.indexOf(c) === i)) {
@@ -1308,10 +1520,12 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     if (this.pendingFit) this.fitView();
     else this.setZoom(this.zoom);
     this.applySearch();
-    (this.nodeElement(selectedId) || this.q('.wl-node'))?.dispatchEvent(new Event('click'));
+    if (this.nodeElement(selectedId)) this.reselect(selectedId);
+    else this.closePopup();
     this.dispatchEvent(new CustomEvent('graph-render', {detail: {expanded: !!this.expanded, direction, nodes: visible.nodes.length}, bubbles: true}));
   }
-  activateNode(node, group) {
+  activateNode(node, group, open = false) {
+    if (open) this.openPopup();
     const path = node.path || node.id, en = this.language === 'en';
     this.querySelectorAll(".wl-node").forEach((n) => n.classList.toggle("wl-selected", n === group));
     this.markSelection(node.id);
@@ -1384,8 +1598,7 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     for (const edge of this.querySelectorAll('.wl-edge')) {
       const active = edge.dataset.from === id || edge.dataset.to === id;
       edge.classList.toggle('wl-edge-active', active);
-      const kind = edgeKinds.includes(edge.dataset.kind) ? edge.dataset.kind : 'flow';
-      edge.setAttribute('marker-end', `url(#${this.uid}-arrow-${active ? 'active' : kind})`);
+      edge.setAttribute('marker-end', `url(#${this.uid}-arrow-${active ? 'active' : edge.dataset.marker || 'flow'})`);
     }
   }
   /** Select a node by id, expanding the graph when the node is internal. */
@@ -1394,7 +1607,7 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     if (!this.nodeElement(id) && !this.expanded && this.data.nodes.some((n) => n.id === id)) this.setExpanded(true);
     const element = this.nodeElement(id);
     if (!element) return this;
-    element.dispatchEvent(new Event('click'));
+    this.activateNode(this.nodeIndex.get(id), element, true);
     if (focus) element.focus({preventScroll: true});
     this.revealNode(element);
     return this;
@@ -1443,7 +1656,7 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     this.pendingFit = false;
     const flow = this.q('.wl-flow');
     if (!this.canvasSize || !flow?.clientWidth) return this.setZoom(1);
-    const width = (flow.clientWidth - 24) / this.canvasSize.width, height = (flow.clientHeight - 72) / this.canvasSize.height;
+    const width = (flow.clientWidth - 24) / this.canvasSize.width, height = (flow.clientHeight - 190) / this.canvasSize.height;
     const whole = Math.min(width, height), across = this.options.direction === 'LR' ? height : width;
     // Below 75% node labels become hard to read; fit the cross axis and scroll along the flow instead.
     this.setZoom(Math.min(1, whole >= 0.75 ? whole : across));
@@ -1496,7 +1709,7 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     for (const [element, name] of marked) element.classList.add(name);
     flow.classList.remove('wl-exporting');
     for (const edge of clone.querySelectorAll('.wl-edge'))
-      edge.setAttribute('marker-end', `url(#${this.uid}-arrow-${edgeKinds.includes(edge.dataset.kind) ? edge.dataset.kind : 'flow'})`);
+      edge.setAttribute('marker-end', `url(#${this.uid}-arrow-${edge.dataset.marker || 'flow'})`);
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
     clone.setAttribute('width', this.canvasSize.width);
     clone.setAttribute('height', this.canvasSize.height);

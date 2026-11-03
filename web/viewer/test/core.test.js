@@ -179,3 +179,55 @@ test('registries extend operators, blocks and categories without core changes', 
   assert.equal(nodeCategory({op:'never_seen'}),'other');
   assert.throws(()=>registerOperator('x',{category:'Bad Name'}),/Category/);
 });
+
+test('routes gain a merge node so branches fan out and rejoin acyclically', async () => {
+  const {normalizeGraph,layoutGraph,overviewGraph} = await import('../viewer.js');
+  const fixture = JSON.parse((await import('node:fs')).readFileSync(new URL('./fixtures/control-flow.json', import.meta.url)));
+  const graph = normalizeGraph(fixture);
+  const merge = graph.nodes.find(n=>n.op==='route_merge');
+  assert.equal(merge.id,'r::merge');
+  // Conditional edges return to the merge, never to the route itself.
+  assert.ok(graph.edges.filter(e=>e.kind==='conditional').every(e=>e.to==='r::merge'));
+  assert.ok(graph.edges.some(e=>e.from==='r::merge' && e.to==='t'));
+  assert.ok(!graph.edges.some(e=>e.from==='r' && e.to==='t'));
+  const {positions:p} = layoutGraph(graph.nodes, graph.edges, 100, 50, 20);
+  assert.ok(p.get('b0act').y < p.get('r::merge').y && p.get('b1mix').y < p.get('r::merge').y);
+  assert.ok(p.get('r::merge').y < p.get('t').y);
+  // The overview still collapses the whole route into one module.
+  assert.ok(!overviewGraph(graph).nodes.some(n=>n.op==='route_merge'));
+  assert.equal(normalizeGraph({nodes:[{id:'a'}],edges:[]}).nodes.length,1);
+});
+
+test('edge annotations name gates, loop feedback, halting and route branches', async () => {
+  const {normalizeGraph,annotateEdges} = await import('../viewer.js');
+  const fixture = JSON.parse((await import('node:fs')).readFileSync(new URL('./fixtures/control-flow.json', import.meta.url)));
+  const graph = normalizeGraph(fixture), notes = annotateEdges(graph.nodes, graph.edges);
+  const note = (from,to,kind) => notes[graph.edges.findIndex(e=>e.from===from && e.to===to && (!kind || e.kind===kind))];
+  assert.deepEqual(note('b1gate','b1mix'),{role:'gate',label:'g'});
+  assert.deepEqual(note('b1fc','b1mix'),{label:'× g'});
+  assert.deepEqual(note('b1','b1mix'),{label:'× (1−g)'});
+  assert.deepEqual(note('r','b0'),{role:'route',label:'分支',index:0});
+  assert.deepEqual(note('r','b1'),{role:'route',label:'分支',index:1});
+  assert.deepEqual(note('thalt','t'),{role:'loop',label:'下一步'});
+  assert.deepEqual(note('thalt','tout','halt'),{role:'gate',label:'停止概率'});
+  assert.equal(note('b0act','r::merge').role,'route');
+});
+
+test('loop and route regions enclose their bodies; entry state ranks under its loop', async () => {
+  const {normalizeGraph,layoutGraph,graphRegions} = await import('../viewer.js');
+  const fixture = JSON.parse((await import('node:fs')).readFileSync(new URL('./fixtures/control-flow.json', import.meta.url)));
+  const graph = normalizeGraph(fixture);
+  const {positions} = layoutGraph(graph.nodes, graph.edges, 100, 50, 20);
+  const regions = graphRegions(graph.nodes, graph.edges, positions);
+  assert.deepEqual(regions.map(r=>r.kind).sort(),['loop','route']);
+  const inside = (r,id) => { const p=positions.get(id); return p.x>=r.x && p.y>=r.y && p.x+p.width<=r.x+r.width && p.y+p.height<=r.y+r.height; };
+  const loop = regions.find(r=>r.kind==='loop'), route = regions.find(r=>r.kind==='route');
+  assert.ok(['t','tcell','thalt'].every(id=>inside(loop,id)) && !inside(loop,'tout'));
+  assert.ok(['r','b0','b0act','b1mix','r::merge'].every(id=>inside(route,id)));
+  // A scan state with only a recurrent input sits right below its scan, not at the top.
+  const nodes=[{id:'in',path:'input'},{id:'s',path:'seq',op:'scan'},{id:'st',path:'seq.$state',op:'state',parent:'seq'},
+    {id:'c',path:'seq.cell',parent:'seq'},{id:'o',path:'seq.$output',op:'loop_output'}];
+  const edges=[{from:'in',to:'s'},{from:'s',to:'c'},{from:'st',to:'c'},{from:'c',to:'st',kind:'recurrent'},{from:'c',to:'o'}];
+  const {positions:q} = layoutGraph(nodes, edges, 100, 50, 20);
+  assert.ok(q.get('st').y > q.get('s').y && q.get('st').y < q.get('c').y);
+});

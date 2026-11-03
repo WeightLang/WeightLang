@@ -1,0 +1,43 @@
+{
+  "model": "control_flow_demo",
+  "parameters": 132,
+  "nodes": [
+    {"id": "x", "path": "input", "op": "input", "parent": "", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 0},
+    {"id": "sel", "path": "selector", "op": "input", "parent": "", "input_shape": "i64[]", "output_shape": "i64[]", "parameters": 0},
+    {"id": "r", "path": "router", "op": "route", "parent": "", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 56},
+    {"id": "b0", "path": "router.branch0", "op": "seq", "parent": "router", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 20},
+    {"id": "b0fc", "path": "router.branch0.fc", "op": "linear", "parent": "router.branch0", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 20},
+    {"id": "b0act", "path": "router.branch0.act", "op": "gelu", "parent": "router.branch0", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 0},
+    {"id": "b1", "path": "router.branch1", "op": "seq", "parent": "router", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 36},
+    {"id": "b1fc", "path": "router.branch1.fc", "op": "linear", "parent": "router.branch1", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 20},
+    {"id": "b1gate", "path": "router.branch1.gate", "op": "sigmoid", "parent": "router.branch1", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 0},
+    {"id": "b1mix", "path": "router.branch1.mix", "op": "mix", "parent": "router.branch1", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 0},
+    {"id": "t", "path": "think", "op": "ponder", "parent": "", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 25},
+    {"id": "tcell", "path": "think.cell", "op": "linear", "parent": "think", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 20},
+    {"id": "thalt", "path": "think.halt", "op": "sigmoid", "parent": "think", "input_shape": "f32[4]", "output_shape": "f32[1]", "parameters": 5},
+    {"id": "tout", "path": "think.$output", "op": "loop_output", "parent": "", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 0},
+    {"id": "y", "path": "output", "op": "output", "parent": "", "input_shape": "f32[4]", "output_shape": "f32[4]", "parameters": 0}
+  ],
+  "edges": [
+    {"from": "sel", "to": "r", "kind": "flow"},
+    {"from": "x", "to": "r", "kind": "flow"},
+    {"from": "r", "to": "b0", "kind": "flow"},
+    {"from": "b0", "to": "b0fc", "kind": "flow"},
+    {"from": "b0fc", "to": "b0act", "kind": "flow"},
+    {"from": "b0act", "to": "r", "kind": "conditional"},
+    {"from": "r", "to": "b1", "kind": "flow"},
+    {"from": "b1", "to": "b1fc", "kind": "flow"},
+    {"from": "b1fc", "to": "b1gate", "kind": "flow"},
+    {"from": "b1gate", "to": "b1mix", "kind": "flow"},
+    {"from": "b1fc", "to": "b1mix", "kind": "flow"},
+    {"from": "b1", "to": "b1mix", "kind": "flow"},
+    {"from": "b1mix", "to": "r", "kind": "conditional"},
+    {"from": "r", "to": "t", "kind": "flow"},
+    {"from": "t", "to": "tcell", "kind": "flow"},
+    {"from": "tcell", "to": "thalt", "kind": "flow"},
+    {"from": "thalt", "to": "t", "kind": "recurrent"},
+    {"from": "thalt", "to": "tout", "kind": "flow"},
+    {"from": "thalt", "to": "tout", "kind": "halt"},
+    {"from": "tout", "to": "y", "kind": "flow"}
+  ]
+}
