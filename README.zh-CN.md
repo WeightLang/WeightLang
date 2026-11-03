@@ -54,8 +54,9 @@ cargo build --locked --workspace --bins
 当前子集见 [原生训练](docs/native-training.md)、[原生推理](docs/native-backend.md)、
 [量化](docs/quantization.md) 和 [自适应执行](docs/self-modifying-runtime.md)。
 清退 Python 不意味着全部历史算子、训练器或 CLI 功能已有原生替代。
-仍依赖旧 CLI 的 `wgt check/build/package/install/train/export/test/trace/debug`
+仍依赖旧 CLI 的 `wgt check/build/package/install/train/export/trace/debug`
 明确报错；执行训练请使用上述原生脚本入口。
+当前原生 `wgt test` 用于运行项目测试，详见[原生测试](docs/native-testing.md)。
 
 Linux 的 [weightfs](docs/weightfs.md) 可将运行中的权重展示为可编辑的 JSON 文件。
 运行时默认尝试挂载；持久化仍需显式保存模型或断点。

@@ -15,4 +15,4 @@ wgt examples/native_training/supervised.wgt
 
 `wgt new PATH` 创建新项目，`wgt init` 初始化现有目录；`wgt sync` 同步项目包依赖，`wgt add`、`wgt remove`、`wgt update` 管理依赖。`--offline` 禁止包网络访问，`--locked` 要求沿用现有锁；两者不能保证脚本本身没有网络操作。详见[包与脚本依赖](packages.md)。
 
-`weightc compile SOURCE -o EXECUTABLE` 只编译，不执行训练或保存。`weightc legacy-build SOURCE` 显式执行返回模型的 `main`，构建模型目录且拒绝覆盖；它与训练脚本主动调用 `save` / `save_model` 的工作流不同。`wgt` 中仍列出的旧 `check/build/package/install/train/export/test/trace/debug` 子命令会报迁移错误，不能作为原生训练入口。完整工具链和发行契约见[工具链说明](weightc-migration.md)。
+`weightc compile SOURCE -o EXECUTABLE` 只编译，不执行训练或保存。`weightc legacy-build SOURCE` 显式执行返回模型的 `main`，构建模型目录且拒绝覆盖；它与训练脚本主动调用 `save` / `save_model` 的工作流不同。`wgt` 中仍列出的旧 `check/build/package/install/train/export/trace/debug` 子命令会报迁移错误，不能作为原生训练入口。原生 `wgt test` 用于运行项目测试，见[原生测试](native-testing.md)。完整工具链和发行契约见[工具链说明](weightc-migration.md)。

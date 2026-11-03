@@ -60,8 +60,9 @@ The native runtime supports the subset described in [native training](docs/nativ
 [native inference](docs/native-backend.md), [quantization](docs/quantization.md)
 and [adaptive execution](docs/self-modifying-runtime.md). Python removal does
 not mean every historical operator, trainer or CLI command has a native replacement.
-Old CLI-dependent `wgt check/build/package/install/train/export/test/trace/debug`
+Old CLI-dependent `wgt check/build/package/install/train/export/trace/debug`
 commands report that they are retired. Use the native script commands above.
+The native `wgt test` command runs project tests; see [native testing](docs/native-testing.md).
 
 On Linux, [weightfs](docs/weightfs.md) can expose live weights as editable JSON
 files. The runtime attempts to mount it by default; an explicit model or
