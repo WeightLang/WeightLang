@@ -64,5 +64,5 @@ GPU 私有队列在计时前完成一次不计时的同步前向，即使 warmup
 
 训练计时只支持 CPU MSE，rate 为正有限 f32，inputs=[样本,特征]，targets=[样本,输出]。
 SGD/Adam 沿用模型优化器；warmup 与 repeats 均真实更新同一模型，不重置或保存。
-GPU trainer 不允许伪装成 train:cpu；GPU 训练步计时留待 T4 公开 API 稳定后接入。
+GPU trainer 不允许作为 train:cpu 计时；GPU 训练步计时尚未接入。
 没有新增内置名称或图 primitive，因此 primitive_specs.json 和编辑器词表保持不变。
