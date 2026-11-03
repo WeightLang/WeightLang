@@ -34,7 +34,7 @@ from .artifact import (
     write_safetensors,
 )
 from .packages import is_module_import, resolve_module_import
-from .syntax import Program, WgtError, parse_file
+from .syntax import Program, WgtError, apply_freezing, parse_file
 
 
 @dataclass
@@ -277,17 +277,33 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
 
     # Initialisation uses a private RNG stream so builds do not disturb caller state.
     with torch.random.fork_rng(devices=[]):
+        if program.inherit:
+            inherited = load_artifact((base / program.inherit.source).resolve(), warn_untrained=False)
+            if inherited.manifest["weights"]["sha256"] != program.inherit.sha256:
+                raise WgtError("inherit pin mismatch", program.inherit.line, program.path)
+            if inherited.manifest["layers"] != layers or any(
+                inherited.manifest["interface"][role]["shape"] != list(port.shape)
+                or inherited.manifest["interface"][role]["dtype"] != port.dtype
+                for role, port in (("input", program.input), ("output", program.output))
+            ):
+                raise WgtError(
+                    "inherit requires identical architecture and input/output contracts",
+                    program.inherit.line,
+                    program.path,
+                )
+            del inherited
         torch.manual_seed(program.seed)
         module = build_module(layers)
         import_records, upstream = _apply_imports(program, module, layers, base)
+        apply_freezing(program, module)
         training = _train(program, module) if program.train is not None else None
 
     imported = [r["layer"] for r in import_records]
-    frozen = [r["layer"] for r in import_records if r["frozen"]]
+    trainable = {name for name, param in module.named_parameters() if param.requires_grad}
     tensors_meta: dict[str, dict[str, Any]] = {}
     for name, value in module.state_dict().items():
         is_imported = any(_under(name, p) for p in imported)
-        trained = training is not None and not any(_under(name, p) for p in frozen)
+        trained = training is not None and name in trainable
         if is_imported:
             origin = ORIGIN_IMPORTED_TRAINED if trained else ORIGIN_IMPORTED
         else:
@@ -333,6 +349,14 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
             "training": training,
             "weights": {"file": WEIGHTS_FILE, "sha256": sha256_file(tmp / WEIGHTS_FILE), "tensors": tensors_meta},
         }
+        if program.freezing:
+            manifest["training_policy"] = {
+                "format": "weightlang.training-policy",
+                "format_version": 1,
+                "rules": [{"target": r.target, "frozen": r.frozen} for r in program.freezing],
+                "trainable": sorted(trainable),
+                "frozen": sorted(set(dict(module.named_parameters())) - trainable),
+            }
         (tmp / MANIFEST_FILE).write_text(json.dumps(manifest, indent=2, sort_keys=False) + "\n", encoding="utf-8")
         if dest.is_symlink():
             raise WgtError(f"refusing to overwrite symlink {dest}")

@@ -164,3 +164,11 @@ uses nested arrays with shape [N, *sample_shape], and CE targets omit the class 
 Runnable synthetic examples: [Transformer](../examples/transformer.wgt) and
 [CNN](../examples/cnn.wgt). Both demonstrate training and deterministic rebuilds
 on their tiny training sets; neither supplies pretrained weights or a quality benchmark.
+
+## Selective training and weight iterations (main, unreleased)
+
+`wgt 0.3` additionally supports standalone `freeze`/`unfreeze` rules and
+hash-pinned whole-model `inherit`. See [weight iterations](weight-iterations.md)
+for exact selectors, precedence, runnable workflows and limitations. The separate
+[revision store v1](specs/revision-v1.md) deduplicates unchanged weight chunks;
+checkout produces an unchanged standard artifact for existing consumers.

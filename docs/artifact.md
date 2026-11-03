@@ -150,3 +150,12 @@ Current training metrics are cleared. Untouched tensors retain origins; imported
 edited tensors retain upstream_origin "edited" and require v3 even with a
 vector-only wgt 0.2 source. History is not a signature. See
 [the patch workflow](weight-space.md#direct-edits-main-unreleased).
+
+## Lossless revision storage
+
+Artifacts can be retained in a separate content-addressed
+[revision store v1](specs/revision-v1.md). Each revision references complete files
+through shared byte objects and optionally records a parent. This does not change
+artifact versions 1–3: checkout restores all three original files byte-for-byte.
+Use checkout before passing a stored revision to existing loaders, Rust tools or
+package publishers. [Selective training and examples](weight-iterations.md).

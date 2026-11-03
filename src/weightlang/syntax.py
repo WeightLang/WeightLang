@@ -193,6 +193,13 @@ class ImportStmt:
 
 
 @dataclass
+class FreezeStmt:
+    target: str
+    frozen: bool
+    line: int
+
+
+@dataclass
 class TrainStmt:
     data: str
     loss: str
@@ -218,6 +225,9 @@ class Program:
     train: TrainStmt | None = None
     path: str | None = None
     uses: dict[str, str] = field(default_factory=dict)  # alias -> library name
+
+    freezing: list[FreezeStmt] = field(default_factory=list)
+    inherit: ImportStmt | None = None
 
     def find(self, dotted: str) -> Layer | None:
         return find_layer(self.layers, dotted)
@@ -419,6 +429,8 @@ class _FileParser:
         self.seed: int | None = None
         self.imports: list[ImportStmt] = []
         self.train: TrainStmt | None = None
+        self.freezing: list[FreezeStmt] = []
+        self.inherit: ImportStmt | None = None
         self.uses: dict[str, str] = {}
 
     def need_v02(self, what: str, line: int) -> None:
@@ -629,6 +641,31 @@ class _FileParser:
         if any(i.target == target for i in self.imports):
             raise cur.error(f"layer {target!r} is imported twice")
         self.imports.append(ImportStmt(target, src, source_layer, sha, freeze, line))
+
+    def _stmt_inherit(self, cur: _Cursor, line: int) -> None:
+        if self.version != "0.3":
+            raise cur.error("inherit requires 'wgt 0.3'")
+        if self.inherit is not None:
+            raise cur.error("only one inherit statement is supported")
+        cur.expect("ident", "from")
+        src = cur.expect("string", what="quoted artifact path")[1:-1]
+        kv = _parse_kv(cur)
+        if set(kv) != {"sha256"} or not re.fullmatch(r"[0-9a-f]{64}", kv["sha256"]):
+            raise cur.error("inherit requires sha256=<64 lowercase hex characters>")
+        self.inherit = ImportStmt("", src, "", kv["sha256"], False, line)
+
+    def _freeze_rule(self, cur: _Cursor, line: int, frozen: bool) -> None:
+        if self.version != "0.3":
+            raise cur.error("standalone freeze/unfreeze requires 'wgt 0.3'")
+        target = cur.dotted("layer, parameter or all")
+        cur.done()
+        self.freezing.append(FreezeStmt(target, frozen, line))
+
+    def _stmt_freeze(self, cur: _Cursor, line: int) -> None:
+        self._freeze_rule(cur, line, True)
+
+    def _stmt_unfreeze(self, cur: _Cursor, line: int) -> None:
+        self._freeze_rule(cur, line, False)
 
     def _stmt_train(self, cur: _Cursor, line: int) -> None:
         if self.train is not None:
@@ -862,6 +899,17 @@ def parse(source: str, path: str | None = None) -> Program:
         if ds.file:
             _load_csv(ds, math.prod(fp.ports["input"].shape), path)
 
+    if fp.inherit:
+        if fp.imports:
+            raise WgtError(
+                "inherit cannot be combined with import; use imports for partial reuse", fp.inherit.line, path
+            )
+        fp.imports = [
+            ImportStmt(layer.name, fp.inherit.source, layer.name, fp.inherit.sha256, False, fp.inherit.line)
+            for layer in layers
+            if layer.has_params
+        ]
+
     program = Program(
         version=fp.version or LANGUAGE_VERSION,
         model=fp.model,
@@ -874,6 +922,8 @@ def parse(source: str, path: str | None = None) -> Program:
         train=fp.train,
         path=path,
         uses=fp.uses,
+        freezing=fp.freezing,
+        inherit=fp.inherit,
     )
     check(program)
     return program
@@ -978,9 +1028,19 @@ def check(program: Program) -> None:
         if not layer.has_params:
             raise WgtError(f"import target {imp.target!r} has no parameters", imp.line, path)
 
+    if program.freezing:
+        # Resolve against the same parameter names used by the runtime, including
+        # packed attention projections. Do not silently accept an empty selector.
+        from .artifact import build_module
+        import torch
+
+        with torch.random.fork_rng(devices=[]):
+            module = build_module([layer.to_dict() for layer in program.layers])
+        apply_freezing(program, module)
+
     train = program.train
     if train is None:
-        frozen = [i for i in program.imports if i.freeze]
+        frozen = [i for i in program.imports if i.freeze] + program.freezing
         if frozen:
             raise WgtError("freeze only makes sense together with a train statement", frozen[0].line, path)
         return
@@ -1011,7 +1071,7 @@ def check(program: Program) -> None:
                 return True
         return False
 
-    if not has_trainable(program.layers, ""):
+    if not program.freezing and not has_trainable(program.layers, ""):
         raise WgtError("train has nothing to update: every parameter layer is frozen", train.line, path)
 
 
@@ -1100,3 +1160,25 @@ def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...]) -> 
                     shape = (int(args.get("out", channels)), height, width)
         layer.output_spec = {"dtype": dtype, "shape": list(shape)}
     return dtype, shape
+
+
+def apply_freezing(program: Program, module) -> None:
+    """Imports establish defaults; ordered explicit rules override them."""
+    parameters = dict(module.named_parameters())
+    for imp in program.imports:
+        if imp.freeze:
+            for name, param in parameters.items():
+                if name == imp.target or name.startswith(imp.target + "."):
+                    param.requires_grad_(False)
+    for rule in program.freezing:
+        matches = [
+            p
+            for name, p in parameters.items()
+            if rule.target == "all" or name == rule.target or name.startswith(rule.target + ".")
+        ]
+        if not matches:
+            raise WgtError(f"freeze selector {rule.target!r} matches no parameters", rule.line, program.path)
+        for param in matches:
+            param.requires_grad_(not rule.frozen)
+    if program.train and not any(p.requires_grad for p in parameters.values()):
+        raise WgtError("train has nothing to update: every parameter is frozen", program.train.line, program.path)

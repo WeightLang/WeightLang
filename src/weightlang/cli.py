@@ -35,6 +35,23 @@ def _cmd_check(args: argparse.Namespace) -> int:
 def _cmd_build(args: argparse.Namespace) -> int:
     from .compiler import compile_file  # imports torch training code lazily
 
+    if args.parent and not args.store:
+        raise WgtError("--parent requires --store")
+    if args.store:
+        import tempfile
+        from .revisions import RevisionStore
+
+        if args.force or args.out != "weights":
+            raise WgtError("--store cannot be combined with --force or a custom -o")
+        store = RevisionStore(args.store)
+        if args.parent:
+            store.read(args.parent)
+        store.root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".build-", dir=store.root) as tmp:
+            result = compile_file(args.source, tmp)
+            report = store.save(result.path, parent=args.parent)
+        print(json.dumps(report, indent=2))
+        return 0
     result = compile_file(args.source, args.out, force=args.force)
     m = result.manifest
     print(f"built {result.path}")
@@ -222,6 +239,25 @@ def _cmd_ablate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_revision(args: argparse.Namespace) -> int:
+    from .revisions import RevisionStore
+
+    store = RevisionStore(args.store)
+    try:
+        if args.action == "save":
+            result = store.save(args.artifact, parent=args.parent)
+        elif args.action == "checkout":
+            result = store.checkout(args.revision, args.output)
+        elif args.action == "inspect":
+            result = store.read(args.revision)
+        else:
+            result = store.verify(args.revision)
+    except OSError as exc:
+        raise WgtError(f"revision store: {exc}") from None
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="weightc", description="WeightLang compiler (prototype)")
     parser.add_argument("--version", action="version", version=f"weightc {__version__}")
@@ -240,6 +276,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("source")
     p.add_argument("-o", "--out", default="weights", help="output root; writes <root>/<model>/ (default: weights)")
     p.add_argument("--force", action="store_true", help="replace an existing WeightLang model directory")
+    p.add_argument("--store", help="save directly to a revision store; remove temporary full artifact")
+    p.add_argument("--parent", help="parent revision SHA256 (requires --store)")
     p.set_defaults(func=_cmd_build)
 
     p = sub.add_parser("run", help="run inference with an artifact")
@@ -301,6 +339,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--loss", required=True, choices=["mse", "bce", "cross_entropy"])
     p.add_argument("--compare", help="optional baseline artifact, evaluated on the same data")
     p.set_defaults(func=_cmd_evaluate)
+
+    p = sub.add_parser("revision", help="lossless content-addressed weight versions")
+    actions = p.add_subparsers(dest="action", required=True)
+    for action in ("save", "checkout", "verify", "inspect"):
+        command = actions.add_parser(action)
+        command.add_argument("--store", default="weights/.revisions", help="durable object store")
+        if action == "save":
+            command.add_argument("artifact")
+            command.add_argument("--parent", help="full parent revision SHA256")
+        else:
+            command.add_argument("revision", help="full revision SHA256")
+        if action == "checkout":
+            command.add_argument("-o", "--output", required=True, help="NEW artifact directory")
+        command.set_defaults(func=_cmd_revision)
 
     args = parser.parse_args(argv)
     try:
