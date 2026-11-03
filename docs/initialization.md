@@ -21,3 +21,5 @@ fn main() {
 构造时优化器参数必填，普通顺序模型支持 `"sgd"` 和 `"adam"`。两个构造调用创建独立模型；复用同一个句柄会共享参数和优化器状态。`weightc check` 不构造模型或训练，保存必须显式调用 `save_model` 或 `save`。初始化不等于训练；保存格式和覆盖保护见[原生训练](native-training.md#保存与续训)。
 
 使用 `fn forward` 的自更新模型使用显式 `parameter` / `frozen` 初值，不能与 `layer` / `init` 混用。其构造和状态规则见[语言参考](reference.zh-CN.md#自更新前向函数)。
+
+概率参数可写成 `parameter p: prob = 0.7`：初值必须严格位于 `(0,1)`，训练的是内部 logit，读取时得到概率。固定概率可写 `frozen p: prob = 1`，允许精确端点。普通 `f32` 权重不会默认限制到 `[0,1]`；概率参数也不能直接作为 `linear` 权重。完整约束见[概率参数](differentiable-programs.md#概率混合自定义损失与采样语法)。
