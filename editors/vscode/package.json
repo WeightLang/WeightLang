@@ -3,7 +3,7 @@
   "displayName": "WeightLang",
   "description": "Syntax highlighting and basic editing support for WeightLang (.wgt)",
   "version": "0.1.0",
-  "publisher": "WeightLang",
+  "publisher": "LIghtJUNction",
   "license": "MIT",
   "engines": {
     "vscode": "^1.75.0"

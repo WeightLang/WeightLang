@@ -10,7 +10,7 @@ npm run package
 
 The resulting `weightlang-0.1.0.vsix` can be installed via **Extensions: Install
 from VSIX**, or uploaded to the VS Code Marketplace publisher management page.
-The `WeightLang` publisher ID must belong to the account used for publication;
+The `LIghtJUNction` publisher ID must belong to the account used for publication;
 confirm the ID before uploading. A local package is not proof of publication.
 
 The package command sets explicit README content/image URLs because this
@@ -34,7 +34,8 @@ rsvg-convert media/preview.svg -o media/preview.png
 
 `media/example.wgt` is an initialized, untrained model example. Validate it from
 the repository root with `weightc check editors/vscode/media/example.wgt --shapes`.
-The icon is the unchanged project logo from `assets/logo.png`.
+The icon uses the project logo from `assets/logo.png`, losslessly PNG-compressed
+to satisfy the Marketplace 1 MB icon limit; decoded pixels are unchanged.
 
 Grammar maintenance is documented in `../../docs/editors.md`. For extension
 host testing, use `code --extensionDevelopmentPath=/absolute/path/to/editors/vscode`.
