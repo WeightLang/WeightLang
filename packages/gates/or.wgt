@@ -1,4 +1,4 @@
-wgt 0.1
+wgt 0.5
 # Published as github.com/WeightLang/WeightLang/packages/gates/or_mlp.
 model or_mlp
 
@@ -10,11 +10,24 @@ layer act:    tanh
 layer head:   linear(in=8, out=1)
 layer out:    sigmoid
 
-data or:
-  [0, 0] -> [0]
-  [0, 1] -> [1]
-  [1, 0] -> [1]
-  [1, 1] -> [1]
-
-init  seed=42
-train data=or loss=bce optimizer=adam lr=0.05 epochs=1000
+# 使用同一组参数学习完整真值表；不是通用逻辑实现或泛化评估。
+init seed=42
+fn main() {
+    let net = or_mlp("adam");
+    let inputs = [[0,0], [0,1], [1,0], [1,1]];
+    let targets = [[0], [1], [1], [1]];
+    let loss = 0;
+    for step in range(0, 1500) {
+        loss = fit(net, inputs, targets, 0.05, "mse");
+    }
+    let correct = 0;
+    for i in range(0, 4) {
+        let prediction = predict(net, inputs[i])[0] >= 0.5;
+        if prediction == (targets[i][0] >= 0.5) { correct = correct + 1; }
+    }
+    metric("truth_table_correct", correct);
+    metric("truth_table_total", 4);
+    metric("final_mse", loss);
+    assert(correct == 4, "truth table failed");
+    return net;
+}

@@ -1,2 +1,2 @@
 module github.com/WeightLang/WeightLang/packages/gates
-wgt 0.1
+wgt 0.5
