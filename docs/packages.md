@@ -1,104 +1,130 @@
-# Package distribution (design only — not implemented)
+# Packages
 
-Status: proposal. `weightc` 0.1 only imports from local artifact directories.
-Nothing here is implemented, and no network access happens during builds.
+Status: a first, deliberately small version works end to end — publishing a
+package as a GitHub release, fetching it with hash checks, and building
+offline against it. Items under [Not implemented yet](#not-implemented-yet) are
+still design.
 
-## Goals
-
-- Identify packages by GitHub repository path, as Go does.
-- Builds are reproducible: a version resolves to the same bytes forever.
-- Every downloaded byte is checked against a recorded hash before use.
-- Large weight files do not have to live in Git history.
-- Loading third-party weights never executes third-party code.
+The first published package is `github.com/WeightLang/WeightLang/packages/gates`
+(`packages/gates/` in this repository, tag `packages/gates/v0.1.0`), consumed by
+`examples/remote_reuse/`.
 
 ## Package identity and versions
 
-A package is a repository (optionally a subdirectory) with a `wgt.mod` at its root:
+A package is a directory with a `wgt.mod` inside a GitHub repository:
 
 ```
-module github.com/acme/logic-gates
-wgt 0.2
-
-require github.com/acme/features v1.4.0
+module github.com/WeightLang/WeightLang/packages/gates
+wgt 0.1
 ```
 
-Versions are semantic-version Git tags (`v1.4.0`). As in Go, a breaking major
-version changes the path (`github.com/acme/features/v2`), and dependency
-selection uses minimal version selection: the build uses the highest *required*
-version of each module, never "latest".
+The module path is `github.com/<owner>/<repo>[/<subdir>]` and must match the
+package's location in the repository. Versions are Git tags
+`v<major>.<minor>.<patch>`; for a package in a subdirectory the tag is prefixed
+with the subdirectory (`packages/gates/v0.1.0`), as Go does.
 
-Source would reference artifacts by package path plus artifact name:
+A consumer lists requirements in its own `wgt.mod`:
+
+```
+module github.com/WeightLang/WeightLang/examples/remote_reuse
+wgt 0.1
+
+require github.com/WeightLang/WeightLang/packages/gates v0.1.0
+```
+
+and imports `<module>/<artifact>`:
 
 ```wgt
-import hidden from "github.com/acme/logic-gates/xor_mlp" layer=hidden freeze
+import hidden from "github.com/WeightLang/WeightLang/packages/gates/xor_mlp" layer=hidden freeze
 ```
 
-The version comes from `wgt.mod`, not from the import line, so one file cannot
-silently mix versions of the same package.
+The version comes only from `wgt.mod`, so one program cannot mix versions of a
+package. Import paths starting with `./`, `../` or `/` are local artifact
+directories; anything else is a package path.
 
-## Lock file and integrity
+## Publishing
 
-`weightc` writes `wgt.sum`, one line per fetched item:
-
-```
-github.com/acme/logic-gates v1.2.0 commit 3f9c...e1        # tag resolved to commit
-github.com/acme/logic-gates v1.2.0 xor_mlp/manifest.json sha256:94ab...
-github.com/acme/logic-gates v1.2.0 xor_mlp/weights.safetensors sha256:7969...
+```sh
+weightc publish packages/gates --version v0.1.0 -o dist
 ```
 
-- Tags can be moved; the commit SHA recorded on first resolution is
-  authoritative. A tag that later points elsewhere is a hard error.
-- Each artifact's manifest and weights are pinned by sha256 (the same hash the
-  0.1 `import ... sha256=` option already verifies). Byte-stable artifact
-  writing (see `artifact.md`) is a prerequisite and is already in place.
-- `wgt.sum` is committed. A later checksum database or transparency log (like
-  `sum.golang.org`) can detect a publisher serving different bytes to
-  different users; it is out of scope until the basic flow works.
+`publish` checks that the package directory matches the module path and has no
+uncommitted changes, records `HEAD`, builds every `.wgt` in the package, refuses
+artifacts with untrained tensors unless `--allow-untrained` is given, and writes
+to `dist/`:
 
-## Large files
+- `<artifact>.manifest.json`, `<artifact>.weights.safetensors`, `<artifact>.source.wgt`
+- `wgt.index.json`: module, version, tag, source commit, and for each artifact
+  its source file and the sha256 and size of each asset.
 
-Git stores source and small files: `.wgt`, `wgt.mod`, published `manifest.json`.
-Weights are referenced by hash and URL from a published manifest:
+It then prints the commands to tag that commit and upload the assets as a GitHub
+release (`git tag …`, `gh release create … --verify-tag dist/*`). Weights live in
+release assets, not in Git history.
 
-```json
-"weights": {
-  "file": "weights.safetensors",
-  "sha256": "7969...",
-  "size": 476,
-  "urls": ["https://github.com/acme/logic-gates/releases/download/v1.2.0/xor_mlp.safetensors"]
-}
+## Fetching and the lock file
+
+```sh
+weightc get examples/remote_reuse
 ```
 
-- Default host: GitHub Release assets attached to the version tag (per-asset
-  size limit applies; very large models would need sharding or another host).
-- Mirrors may be listed; any URL is acceptable because the hash, not the host,
-  decides validity.
-- Git LFS is allowed but not required (bandwidth quotas, and LFS pointers in
-  Git history do not by themselves give the lock-file guarantees above).
-- Local cache is content-addressed: `~/.cache/weightlang/sha256/<hash>`.
-  Identical weights shared by many packages are stored once.
+For each `require`:
 
-## Safety and compatibility
+1. Resolve the tag to a commit with `git ls-remote` (annotated tags are peeled).
+2. Download `wgt.index.json` from the release; it must name the same module,
+   version and commit.
+3. Download every asset, rejecting any whose size or sha256 differs from the index.
+4. Download the artifact's `.wgt` from `raw.githubusercontent.com` **at that
+   commit** and require it to be byte-identical to `source.wgt`. This ties the
+   prebuilt weights to the tagged source; it does not prove the weights were
+   produced by that source (see below).
+5. Run the full artifact verification (`load_artifact`) and move the result into
+   the cache: `$WEIGHTLANG_CACHE` or `~/.cache/weightlang/pkg/<module>@<version>/<artifact>/`.
+6. Write `wgt.sum`:
 
-- Only `safetensors` weights and the declarative manifest are accepted; no
-  pickle, no custom Python layers from packages.
-- Imports check layer signatures (op and sizes) before copying, as 0.1 already does.
-- Published manifests must carry a license field; `weightc` reports the license
-  of every imported tensor. Policy (allow/deny lists) is a later decision.
-- Provenance (`origin`, `upstream_origin`) travels with imported tensors, so a
-  package cannot launder random weights as trained ones.
+```
+github.com/WeightLang/WeightLang/packages/gates v0.1.0 commit <40-hex sha>
+github.com/WeightLang/WeightLang/packages/gates v0.1.0 wgt.index.json sha256:<hex>
+github.com/WeightLang/WeightLang/packages/gates v0.1.0 xor_mlp/manifest.json sha256:<hex>
+github.com/WeightLang/WeightLang/packages/gates v0.1.0 xor_mlp/source.wgt sha256:<hex>
+github.com/WeightLang/WeightLang/packages/gates v0.1.0 xor_mlp/weights.safetensors sha256:<hex>
+```
 
-## Planned commands
+Commit `wgt.sum`. If it already exists, every value fetched later must equal it:
+a moved tag or a replaced release asset is a hard error, not an update. The first
+fetch is trust-on-first-use.
 
-`weightc mod init <path>`, `weightc get <path>@<version>`, `weightc mod verify`,
-`weightc publish` (build, hash, produce the release asset list). Fetching is an
-explicit step; `weightc build` would only read the cache and fail if something
-is missing or does not match `wgt.sum`.
+`weightc build` never uses the network. A package import is resolved through
+`wgt.mod`, must have entries in `wgt.sum`, and every cached file is re-hashed
+against `wgt.sum` before loading. The built artifact's manifest records the
+module, version and commit in `imports[].package`.
 
-## Open questions
+## Safety
 
-- Whether artifacts are published prebuilt or rebuilt from source by consumers
-  (rebuild is reproducible only on matching PyTorch/hardware).
-- Signing of release assets in addition to hashes.
+- Only safetensors weights and declarative manifests are loaded; no pickle, no
+  package-provided Python.
+- Imports check layer op and sizes before copying.
+- Provenance (`origin`, `upstream_origin`) travels with imported tensors, so
+  random weights cannot be passed off as trained through a package.
+- Downloads are size-limited by the index before hashing.
+
+## Known gaps in this version
+
+- The publisher builds the weights; consumers trust them. Checking the source
+  binding (step 4) does not prove the weights came from that source. Rebuilding
+  and comparing hashes would, but only on the same PyTorch version and hardware.
+- Trust is per-consumer (TOFU + `wgt.sum`). There is no checksum database or
+  transparency log, and assets are not signed.
+- Release assets can be deleted by the repository owner; there is no mirror or proxy.
+
+## Not implemented yet
+
+- Packages that themselves `require` other packages, and minimal version
+  selection across a dependency graph. `publish` refuses packages with requirements.
+- Major-version path suffixes (`/v2`) enforcement.
+- Mirror URLs and hosts other than GitHub releases; sharding of very large
+  weights (GitHub limits the size of each release asset).
+- A content-addressed blob store shared across packages (the cache is per
+  module version today).
+- License fields in published manifests and license reporting for imports.
 - Private repositories and authentication.
-- How datasets, which may be large or restricted, are referenced and hashed.
+- Referencing large or restricted datasets.

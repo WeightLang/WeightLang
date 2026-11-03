@@ -29,6 +29,7 @@ from .artifact import (
     sha256_file,
     write_safetensors,
 )
+from .packages import is_module_import, resolve_module_import
 from .syntax import Program, WgtError, parse_file
 
 
@@ -59,8 +60,14 @@ def _apply_imports(program: Program, module: nn.Sequential, base: Path) -> tuple
     records: list[dict[str, Any]] = []
     upstream: dict[str, str] = {}
     for imp in program.imports:
-        src_path = (base / imp.source).resolve()
+        package: dict[str, str] | None = None
         try:
+            if is_module_import(imp.source):
+                resolved = resolve_module_import(imp.source, Path(program.path or "."))
+                src_path = resolved.path
+                package = {"module": resolved.module, "version": resolved.version, "commit": resolved.commit}
+            else:
+                src_path = (base / imp.source).resolve()
             src = load_artifact(src_path, warn_untrained=False)
         except WgtError as exc:
             raise WgtError(f"cannot import {imp.target!r}: {exc}", imp.line, program.path) from None
@@ -104,6 +111,7 @@ def _apply_imports(program: Program, module: nn.Sequential, base: Path) -> tuple
                 "source_layer": imp.source_layer,
                 "source_weights_sha256": weights_sha,
                 "source_manifest_sha256": sha256_file(src_path / MANIFEST_FILE),
+                "package": package,
                 "pinned": imp.sha256 is not None,
                 "frozen": imp.freeze,
             }

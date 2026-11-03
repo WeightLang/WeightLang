@@ -50,7 +50,7 @@ train data=xor loss=bce optimizer=adam lr=0.05 epochs=1000
 | layer | `layer <name>: relu` / `tanh` / `sigmoid` | Element-wise activations, no parameters. |
 | data | `data <name>:` then indented `[x...] -> [y...]` rows | Inline training data; row widths must match input/output. |
 | init | `init seed=<int>` | Required. PyTorch's default `nn.Linear` initialisation, seeded. |
-| import | `import <layer> from "<artifact dir>" [layer=<src>] [sha256=<hex>] [freeze]` | Copy a linear layer's weights from a built artifact. |
+| import | `import <layer> from "<artifact dir or package path>" [layer=<src>] [sha256=<hex>] [freeze]` | Copy a linear layer's weights from a built artifact. Local paths start with `./`, `../` or `/`; other paths are packages (see packages.md). |
 | train | `train data=<d> loss=<mse\|bce> optimizer=<sgd\|adam> lr=<x> epochs=<n>` | Optional, at most one. Full-batch training. |
 
 Comments start with `#` and run to the end of the line.
@@ -97,4 +97,4 @@ show that optimisation converged on those rows, not that the model generalises.
 Multiple inputs/outputs, non-sequential graphs, convolutions, attention,
 normalisation, dropout, dtypes other than `f32`, multi-dimensional tensors,
 external datasets, mini-batches, validation splits, learning-rate schedules,
-custom initialisers, partial-tensor imports, and package paths in `import`.
+custom initialisers and partial-tensor imports.
