@@ -22,4 +22,4 @@ fn main() {
 
 使用 `fn forward` 的自更新模型使用显式 `parameter` / `frozen` 初值，不能与 `layer` / `init` 混用。其构造和状态规则见[语言参考](reference.zh-CN.md#自更新前向函数)。
 
-概率参数可写成 `parameter p: prob = 0.7`：初值必须严格位于 `(0,1)`，训练的是内部 logit，读取时得到概率。固定概率可写 `frozen p: prob = 1`，允许精确端点。普通 `f32` 权重不会默认限制到 `[0,1]`；概率参数也不能直接作为 `linear` 权重。完整约束见[概率参数](differentiable-programs.md#概率混合自定义损失与采样语法)。
+概率参数可写成 `parameter p: prob = 0.7`：初值必须严格位于 `(0,1)`，训练的是内部 logit，读取时得到概率。固定概率可写 `frozen p: prob = 1`，允许精确端点。普通 `f32` 权重不会默认限制到 `[0,1]`；目前也没有 `{0,1}` 布尔参数类型或自定义参数范围声明。概率参数不能直接作为 `linear` 权重。完整约束见[概率参数](differentiable-programs.md#概率混合自定义损失与采样语法)。
