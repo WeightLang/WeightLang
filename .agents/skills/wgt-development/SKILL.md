@@ -8,6 +8,7 @@ description: 编写和验证本仓库当前原生 WGT 0.5 模型、训练与概�
 
 - parameter p: prob = 0.7 使用可训练 logit，初值必须在 (0,1)；frozen p: prob = 1 支持精确端点。
   读取为 f32[1] 概率，底层参数/梯度暴露 logit；不得 write(prob) 或直接作为 linear 的参数。
+- 普通 f32 权重不默认限制到 [0,1]；当前没有 0/1 布尔参数或自定义权重范围声明。区间含零不能防止除零，普通脚本的除零和非有限结果报错。
 - mix p { then { a } else { b } } 用于 forward/loss 张量混合，每支一个表达式。
   与 route 相同，推理在精确端点短路内联分支；训练/VJP 保留完整梯度。提前 let 的计算不会省略。
 - fn loss(prediction,target) 是无模型参数的张量损失，返回 f32[1]；显式 fit(m,x,y,lr,"loss") 或 train 才训练。
