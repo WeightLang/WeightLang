@@ -347,6 +347,72 @@ weightc --offline --locked compile demo.wgt -o demo
 允许空筛选结果；传给要求非空的统计或训练接口前须自行处理。
 完整签名、参数、长度上限及预算见[数据构造与索引](standard-library.md#数据构造与索引)。
 
+## 实验性 Rust GPU 训练 API
+
+**Rust API 实验性，WGT 绑定尚未接入**。`training::Trainer::new` 与 `restore` 默认 CPU，
+CPU 的运算顺序、SGD/Adam 和 `weightlang.native-training.v1` 断点格式保持不变。
+开启 runtime 的 `gpu` feature 后，可显式选择 `TrainingBackend::Gpu`；不增加脚本语法或 CLI 参数，
+不依赖设备池。这里只支持顺序 IR 的 linear/relu/tanh/sigmoid/identity、f32、MSE 和无动量 SGD。
+不支持 GPU Adam、交叉熵、REINFORCE、任意 forward 程序或多 GPU，也不自动回退 CPU。
+
+```rust,no_run
+use std::path::Path;
+use weightlang_runtime::training::{
+    mlp, GpuTraining, Objective, Optimizer, Trainer, TrainingBackend,
+};
+# fn main() -> anyhow::Result<()> {
+let budget = 64 * 1024 * 1024;
+let mut trainer = Trainer::new(mlp(&[2, 4, 1], "tanh", 42)?, Path::new("."), budget, Optimizer::Sgd)?;
+// 使用 execution::devices() 当前枚举的精确硬件 ID；编号不代表永久设备身份。
+let gpu = GpuTraining::new("vulkan:0", 32, budget)?;
+trainer.set_backend(TrainingBackend::Gpu(gpu))?;
+let inputs = [vec![0.2, -0.1], vec![0.3, 0.4]];
+let targets = [vec![0.5], vec![-0.2]];
+let (loss, gradients) = trainer.gradients(&inputs, Objective::Mse(&targets))?;
+let before_update_loss = trainer.step(&inputs, Objective::Mse(&targets), 0.01)?;
+// 父目录须存在，目标须为新文件；回读后的权重可导出为 CPU Model 的原生 IR。
+trainer.export(Path::new("weights/my-experiment/model.json"))?;
+# Ok(())
+# }
+```
+
+- `GpuTraining::new(device: &str, max_batch: usize, budget_bytes: usize)`：三个参数必填，无隐式默认。
+  device 必须是当前硬件枚举的精确 ID，不接受 cpu/auto/gpu；不选择软件 Vulkan。
+  max_batch 在 `1..=u32::MAX`，budget_bytes 正数；模型尺寸还须满足设备 buffer、u32 索引和 dispatch 上限。
+  构造仅准备设备及内核，不训练。`device_info()` 返回实际 ID、名称与后端信息。
+- `Trainer::set_backend(TrainingBackend) -> Result<()>`：GPU 只允许 SGD；切换保留权重、步数、revision、
+  优化器历史。`backend()` 返回当前后端。设备选择不写入断点，恢复后显式重选 GPU。
+- `gradients(inputs, Objective::Mse(targets))`：输入 `[B,I]`、目标 `[B,O]`，B 非零且不超过上限；
+  返回 batch/output 双重平均损失及按参数声明顺序排列的梯度。view/add 梯度在 GPU 上逆序汇总到 owner，
+  冻结链截断；重复 owner 只更新一次。此调用不改变权重、步数或 revision。
+- `step(inputs, objective, rate)`：rate 正有限，返回更新前损失。前向 tape、MSE、反传和候选 SGD
+  更新在 GPU 执行；全部阶段、回读与有限性检查成功后才一次性提交 CPU 权重、步数和 revision。
+  溢出检测在 WGSL 算术前执行，回读再检查有限性；不依赖 GPU 对 NaN/Inf 的传播约定。
+  设备错误、非法输入、超预算或非有限数值均不提交任何候选权重。
+- 训练 GPU 错误保留为 `TrainingError::{Unavailable,Unsupported,InvalidInput,OutOfBudget,NonFinite,Device}`，
+  可从既有 anyhow 错误链 downcast；原有 CPU、学习率和步数检查保留原错误契约。
+
+第一阶段 CPU Session 是已提交权重的权威副本：每次 GPU 事务上传当前参数，设备内保留整个批次的 tape，
+事务结束回读并释放临时设备 arena；没有跨步常驻权重或吞吐量提升承诺。`predict` 仍用 CPU，
+`export`/`save` 使用已提交 CPU 副本，设备丢失后仍可保存；后续 GPU 调用报错，可显式切回 CPU。
+外部 Session 参数写入会被下一次训练读取，保留现有 weightfs/优化器语义。
+冻结 file/packed 参数可物化用于计算，可训练 file 仍拒绝。
+
+GPU budget 是每次调用的保守数值 payload 上界：Session managed bytes、两个既有优化器数组，
+以及 host/device arena、回读、返回梯度/候选、物化暂存和操作 uniform 的预留。
+不包括调用者 inputs/targets、对象元数据、allocator 多余容量、驱动与命令分配，不能当进程内存硬隔离。
+默认 CPU 训练的预算范围不变。
+
+数值测试对 CPU 梯度使用 `atol=2e-5, rtol=2e-4`，20 步权重对照使用 `3e-5, 3e-4`；
+容差涵盖 f32 归约顺序及设备激活函数差异，不保证逐位相同或适用于任意病态模型。
+GPU 损失中心有限差分取 h=1e-3，使用 `atol=rtol=2e-3`，平衡 f32 相减舍入与二阶截断误差，
+ReLU 测试避开零点。真实硬件测试默认 ignored；显式运行，缺硬件时打印 SKIP，验收设置
+`WGT_REQUIRE_GPU=1` 则缺硬件失败：
+
+```sh
+WGT_REQUIRE_GPU=1 cargo test -p weightlang-runtime --features gpu --test gpu_training -- --ignored --nocapture
+WGT_REQUIRE_GPU=1 cargo test -p weightlang-runtime --features gpu --lib training::gpu::tests::device_loss_preserves_last_committed_model -- --ignored --nocapture
+```
 
 模型输出分析可使用 `normalize_probabilities`、`entropy`、`kl_divergence`、
 `js_divergence`、`cross_entropy_probs` 和 `temperature_softmax`。
