@@ -12,7 +12,7 @@ use weightlang_wgt::{
     artifact::Artifact,
     graph::Graph,
     manifest::{self, Manifest},
-    registry,
+    registry, toolchain,
 };
 
 #[derive(Parser)]
@@ -44,6 +44,15 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Cmd {
+    /// Show the project pin, or write an exact wgt version to .wgt-version
+    Version { version: Option<String> },
+    /// Install a native wgt version from a release or a trusted local executable
+    Toolchain {
+        version: String,
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+
     /// Create a new project directory
     New {
         path: PathBuf,
@@ -65,13 +74,17 @@ enum Cmd {
     },
     /// Remove a dependency and its lock entries (does not edit imports)
     Remove { module: String },
-    /// Change a dependency to an explicit version; never silently upgrade
+    /// Update wgt (latest or --version), or an explicit dependency
     Update {
-        module: String,
+        #[arg(requires = "version")]
+        module: Option<String>,
         #[arg(long)]
-        version: String,
+        version: Option<String>,
     },
+    /// Download and verify a wgt version without selecting it
+    Download { version: String },
     /// Fetch and verify every pinned dependency
+    #[command(alias = "sync")]
     Fetch,
     /// Print direct dependency tree
     Tree,
@@ -168,6 +181,14 @@ impl Format {
 }
 
 fn main() -> ExitCode {
+    match toolchain::dispatch(&std::env::args_os().skip(1).collect::<Vec<_>>()) {
+        Ok(Some(code)) => return ExitCode::from(code),
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            return ExitCode::FAILURE;
+        }
+    }
     let cli = Cli::parse();
     match execute(cli) {
         Ok(code) => ExitCode::from(code),
@@ -185,6 +206,30 @@ fn execute(cli: Cli) -> Result<u8> {
     let command = cli.command.context("choose a command; see wgt --help")?;
     let base = fs::canonicalize(&cli.directory).context("project directory does not exist")?;
     match command {
+        Cmd::Update {
+            module: None,
+            version,
+        } => {
+            ensure!(
+                !cli.locked,
+                "toolchain selection changes are incompatible with --locked"
+            );
+            toolchain::update(&base, version.as_deref(), cli.offline)?;
+        }
+        Cmd::Download { version } => {
+            println!(
+                "downloaded {}",
+                toolchain::install(&version, None, cli.offline)?.display()
+            );
+        }
+        Cmd::Version { version } => toolchain::pin(&base, version.as_deref())?,
+        Cmd::Toolchain { version, path } => {
+            let path = path.map(|p| base.join(p));
+            println!(
+                "installed {}",
+                toolchain::install(&version, path.as_deref(), cli.offline)?.display()
+            );
+        }
         Cmd::New { path, module } => {
             let p = base.join(path);
             ensure!(!p.exists(), "destination already exists");
@@ -313,7 +358,11 @@ fn execute(cli: Cli) -> Result<u8> {
             let manifest = Manifest::read(&project.join("wgt.mod"))?;
             let update = matches!(command, Cmd::Update { .. });
             match command {
-                Cmd::Add { module, version } | Cmd::Update { module, version } => {
+                Cmd::Add { module, version }
+                | Cmd::Update {
+                    module: Some(module),
+                    version: Some(version),
+                } => {
                     ensure!(
                         !cli.locked,
                         "dependency edits are incompatible with --locked"
@@ -497,10 +546,14 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
         !module.chars().any(char::is_whitespace) && !module.contains('#') && !module.is_empty(),
         "invalid module name"
     );
-    for file in ["wgt.mod", "main.wgt", "tests/main.json"] {
+    for file in ["wgt.mod", "main.wgt", "tests/main.json", toolchain::PIN] {
         ensure!(!path.join(file).exists(), "refusing to overwrite {file}");
     }
     fs::create_dir_all(path.join("tests"))?;
+    fs::write(
+        path.join(toolchain::PIN),
+        format!("{}\n", toolchain::CURRENT),
+    )?;
     fs::write(path.join("wgt.mod"), format!("module {module}\nwgt 0.2\n"))?;
     fs::write(path.join("main.wgt"),format!("wgt 0.2\n# Learn a tiny identity map on four explicit training rows.\nmodel {name}\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ndata identity:\n  [0, 0] -> [0, 0]\n  [0, 1] -> [0, 1]\n  [1, 0] -> [1, 0]\n  [1, 1] -> [1, 1]\ninit seed=42\ntrain data=identity loss=mse optimizer=adam lr=0.05 epochs=400\n"))?;
     fs::write(
@@ -718,7 +771,7 @@ fn executable(path: &Path) -> bool {
     }
 }
 fn list_commands() {
-    println!("Built-in: new init add remove update fetch tree metadata check build run test verify graph package publish cache doctor");
+    println!("Built-in: version toolchain download sync new init add remove update fetch tree metadata check build run test verify graph package publish cache doctor");
     let mut names = std::collections::BTreeSet::new();
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {

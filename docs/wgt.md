@@ -214,3 +214,10 @@ Attention parameter counts include its QKV and output projections.
 ## Storage and replacement
 
 See [storage conventions](storage.md). wgt build [-o ROOT] [--force] writes weights/<model>/ by default and refuses an existing model unless --force is supplied. run and test rebuild only disposable copies under .cache/weightlang/. Package defaults also use weights/.
+
+## Native tool versions
+
+`wgt update` selects the latest stable native release;
+`wgt update --version X.Y.Z` switches to an exact version;
+`wgt download X.Y.Z` downloads without switching.
+See [toolchain versions](toolchains.md) for pins, offline use and local imports.
