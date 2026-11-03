@@ -239,7 +239,7 @@ fn update_download_selection_and_failure_preservation() {
     run(&["download", "8.9.0", "--offline"]);
     assert!(!root.join(PIN).exists());
     assert!(!cache.join("toolchains/default").exists());
-    run(&["self-update", "--version", "8.9.0", "--offline"]);
+    run(&["self", "update", "--version", "8.9.0", "--offline"]);
     assert_eq!(
         fs::read_to_string(cache.join("toolchains/default")).unwrap(),
         "8.9.0\n"
@@ -260,8 +260,8 @@ fn update_download_selection_and_failure_preservation() {
     );
     for args in [
         vec!["update", "--offline"],
-        vec!["self-update", "--version", "latest", "--offline"],
-        vec!["self-update", "--locked"],
+        vec!["self", "update", "--version", "latest", "--offline"],
+        vec!["self", "update", "--locked"],
         vec!["update", "--version", "7.0.0", "--offline"],
         vec!["update", "--version", "8.9.0", "--locked"],
         vec!["download", "../oops"],
@@ -335,4 +335,28 @@ fn latest_native_release_filters_and_orders_versions() {
         }
     }
     assert_eq!(toolchain::latest_for(&Releases, "linux", "x86_64").unwrap(), "1.10.0");
+}
+
+#[test]
+fn self_subcommands_bypass_missing_project_toolchain() {
+    let tmp = scratch();
+    let root = tmp.path();
+    let cache = root.join("cache");
+    fs::write(root.join(PIN), "9.9.9\n").unwrap();
+    for args in [vec!["self", "--help"], vec!["self", "update", "--help"]] {
+        let result = command(root, &cache).args(args).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(String::from_utf8_lossy(&result.stdout).contains("update"));
+    }
+    for args in [vec!["self"], vec!["self", "unknown"]] {
+        let result = command(root, &cache).args(args).output().unwrap();
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("wgt self"));
+    }
+    assert_eq!(fs::read_to_string(root.join(PIN)).unwrap(), "9.9.9\n");
+    assert!(!cache.exists());
 }

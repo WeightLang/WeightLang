@@ -338,7 +338,7 @@ pub fn dispatch(args: &[OsString]) -> Result<Option<u8>> {
     }
     if matches!(
         command.as_deref(),
-        Some("version" | "toolchain" | "download" | "self-update")
+        Some("version" | "toolchain" | "download" | "self")
     ) || (command.as_deref() == Some("update") && !dependency_update)
     {
         return Ok(None);

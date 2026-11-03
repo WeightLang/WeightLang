@@ -412,7 +412,7 @@ standalone initialization is `wgt export`. These changes are not yet released.
 
 ```sh
 wgt update --all   # 升级所有模型包依赖，重新锁定精确版本和哈希
-wgt self-update   # 下载、校验并切换到本平台最新稳定版 wgt
+wgt self update   # 下载、校验并切换到本平台最新稳定版 wgt
 ```
 
 原有 `wgt update` 自更新用法继续兼容。批量升级保留各包的注册来源，全部校验

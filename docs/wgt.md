@@ -263,7 +263,7 @@ output is not subject to revision cleanup. See
 
 ```sh
 wgt update --all     # upgrade all direct model packages and lock exact results
-wgt self-update      # download, verify and select latest native wgt for this platform
+wgt self update      # download, verify and select latest native wgt for this platform
 ```
 
 `wgt update` remains a self-update shorthand; `wgt update owner/name` updates one

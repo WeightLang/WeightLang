@@ -28,14 +28,14 @@ streams and exit status. Ordinary commands never download a missing toolchain;
 they ask you to run `wgt sync` first. `--locked` still permits installing the
 exact pinned toolchain; the selected version enforces dependency locks.
 
-`version`, `toolchain`, `download`, `self-update`, and tool-only `update` deliberately run in the launcher itself, so you can
+`version`, `toolchain`, `download`, `self`, and tool-only `update` deliberately run in the launcher itself, so you can
 repair a broken pin or install a missing version. The global `--version` flag
 selects the pinned executable, whereas the `version` command inspects the pin.
 
 ## Update, switch, or download only
 
 ```sh
-wgt self-update                    # select latest stable native release for this platform
+wgt self update                    # select latest stable native release for this platform
 wgt update                         # compatible shorthand for self-update
 wgt update --version 0.1.0          # select an exact released version, including downgrades
 wgt download 0.1.0                  # cache and verify only; do not change selection
@@ -99,7 +99,7 @@ entries into a single release file and upload it with the executables. The
 packager refuses to overwrite an output directory. Missing releases/assets fail
 explicitly; older binaries are never manufactured.
 
-[Native wgt 0.1.1](https://github.com/WeightLang/WeightLang/releases/tag/wgt-v0.1.1)
+[Native wgt 0.1.2](https://github.com/WeightLang/WeightLang/releases/tag/wgt-v0.1.2)
 provides a static Linux x86_64 executable and SHA256SUMS. Other target assets are
 not published in this release; build from source or import a trusted local binary
 on those systems. Native package management works independently of Python; this
@@ -109,10 +109,10 @@ Older installations that require a module and `--version` for `wgt update`
 predate toolchain management. Bootstrap once from the release executable or:
 
 ```sh
-cargo install --git https://github.com/WeightLang/WeightLang --tag wgt-v0.1.1 --locked --force weightlang-wgt
+cargo install --git https://github.com/WeightLang/WeightLang --tag wgt-v0.1.2 --locked --force weightlang-wgt
 ```
 
-Then use `wgt self-update` for subsequent toolchain updates.
+Then use `wgt self update` for subsequent toolchain updates.
 
 Local imports work before releases exist. Linux switching is tested locally;
 Windows/macOS naming is tested, but native execution needs those systems.
@@ -121,7 +121,7 @@ Windows/macOS naming is tested, but native execution needs those systems.
 
 ```sh
 wgt update --all     # latest versions of every direct model dependency
-wgt self-update      # latest native tool; does not edit model dependencies
+wgt self update      # latest native tool; does not edit model dependencies
 ```
 
 Bulk upgrade uses each registered dependency's locked registry and name; direct

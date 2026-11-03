@@ -46,6 +46,15 @@ struct Cli {
     command: Option<Cmd>,
 }
 #[derive(Subcommand)]
+enum SelfCommand {
+    /// Download, verify and select the latest stable native wgt
+    Update {
+        #[arg(long)]
+        version: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum Cmd {
     /// Show the project pin, or write an exact wgt version to .wgt-version
     Version { version: Option<String> },
@@ -86,10 +95,11 @@ enum Cmd {
         #[arg(long, conflicts_with_all = ["module", "version"])]
         all: bool,
     },
-    /// Download, verify and select the latest stable native wgt
-    SelfUpdate {
-        #[arg(long)]
-        version: Option<String>,
+    /// Manage the wgt executable itself
+    #[command(name = "self")]
+    SelfManage {
+        #[command(subcommand)]
+        command: SelfCommand,
     },
     /// Download and verify a wgt version without selecting it
     Download { version: String },
@@ -285,7 +295,9 @@ fn execute(cli: Cli) -> Result<u8> {
             module: None,
             version,
             all: false,
-        } | Cmd::SelfUpdate { version } => {
+        } | Cmd::SelfManage {
+            command: SelfCommand::Update { version },
+        } => {
             ensure!(
                 !cli.locked,
                 "toolchain selection changes are incompatible with --locked"
@@ -967,7 +979,7 @@ fn executable(path: &Path) -> bool {
     }
 }
 fn list_commands() {
-    println!("Built-in: version toolchain self-update download sync new init add remove update fetch tree metadata check build run test verify graph package install train export release-assets publish register cache doctor");
+    println!("Built-in: version toolchain self download sync new init add remove update fetch tree metadata check build run test verify graph package install train export release-assets publish register cache doctor");
     let mut names = std::collections::BTreeSet::new();
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {

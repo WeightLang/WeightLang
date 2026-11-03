@@ -411,7 +411,7 @@ standalone initialization is `wgt export`. These changes are not yet released.
 
 ```sh
 wgt update --all   # all model dependencies, with exact new locks
-wgt self-update   # latest stable native wgt for this platform
+wgt self update   # latest stable native wgt for this platform
 ```
 
 Existing `wgt update` remains a self-update shorthand. Dependency upgrades finish
