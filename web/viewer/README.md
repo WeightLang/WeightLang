@@ -54,6 +54,28 @@ Serve ES modules over HTTP when embedding; the CLI's standalone HTML works offli
   Its dense-tensor previews explicitly use tile means; full weights enable exact slices.
 - The overview collapses modules; expanded mode retains all graph nodes and edges.
   Solid edges carry data, dashed edges are residual skips, dotted edges are recurrence.
+  Skip, recurrent and long forward edges run in separate side lanes instead of
+  crossing behind nodes. Each node carries a category color (input/output,
+  projection, attention, normalization, activation, pooling, merge, structure,
+  recurrent, other); the legend lists only the categories present.
+
+## Navigate the canvas
+
+- **Zoom:** toolbar buttons, `+` / `-` / `0` (fit) while the canvas has focus, or
+  Ctrl/⌘ + wheel (trackpad pinch). Clicking the percentage restores 100%. Fit shows
+  the whole graph when it stays at least 75% legible; otherwise it fits the cross
+  axis and scrolls along the flow.
+- **Pan:** plain wheel/trackpad scrolling, or drag empty canvas space with the mouse.
+- **Keyboard:** Tab to a node; arrow keys along the flow follow edges, arrow keys
+  across it move between nodes of the same rank; Enter/Space selects.
+- **Search:** matches node paths, operators, titles, std blocks, shapes and parameter
+  tensor names (`qkv`). In the overview, a module matches when any collapsed inner
+  node or tensor matches. Enter / Shift+Enter cycles matches; Escape clears.
+- **Details:** the side panel lists shape, parameters, block, operators,
+  configuration, and clickable upstream/downstream neighbours.
+- **Layout:** top-to-bottom or left-to-right.
+- **Export:** SVG (computed theme colors inlined, no stylesheet needed) or 2× PNG.
+  Search dimming and selection emphasis are not exported.
 
 ## Configure a viewer
 
@@ -61,6 +83,8 @@ Serve ES modules over HTTP when embedding; the CLI's standalone HTML works offli
 viewer.configure({
   theme: 'dark',                       // 'light' | 'dark' | 'auto'
   presentation: 'tensors',             // 'tensors' | 'compact'
+  direction: 'TB',                     // 'TB' top-to-bottom | 'LR' left-to-right
+  layout: null,                        // custom layout function; null = built-in
   tensorLimits: {rows: 6, columns: 8, planes: 3},
   nodeRenderer: null,                  // null restores built-in nodes
   tensorRenderer: null,                // null restores built-in tensor glyphs
@@ -68,6 +92,11 @@ viewer.configure({
 viewer.setLanguage('en');              // 'zh-CN' | 'en'
 viewer.setTheme('light');
 viewer.setTensorAxes('f32[2,3,4,5,6]', [0, 2, 4]); // at most 3 original axes
+viewer.setExpanded(true);              // overview ⇄ all internal nodes
+viewer.selectNode(id);                 // selects, expands if internal, scrolls into view
+viewer.setZoom(1.5); viewer.fitView();
+const svgText = viewer.exportSVG();    // standalone SVG string
+const pngBlob = await viewer.exportPNG(2);
 ```
 
 `configure()` merges options and returns the viewer. Limits are bounded to 12 rows,
@@ -82,9 +111,51 @@ storage is available. `auto` follows system changes. Language preferences likewi
 fall back gracefully when storage is disabled. Browser-native file inputs follow
 browser/OS localization. Theme changes redraw canvas colors without altering data.
 
+### Register operators, blocks and categories
+
+Titles and categories come from module-level registries, so new operators need no
+viewer changes. A title or description is a translatable string, a
+`{'zh-CN': …, en: …}` object, or (descriptions only) a `(node, language) => string`.
+Category names use lowercase letters, digits and hyphens. Built-in category
+colors come from `--cat-<name>`; a registered `color` overrides that.
+
+```js
+import {registerOperator, registerBlock, registerCategory, addTranslations} from 'weightlang-viewer';
+
+registerCategory('quant', {title: {'zh-CN': '量化', en: 'Quantization'}, color: '#6d7fa6'});
+registerOperator('fake_quant', {
+  title: {'zh-CN': '伪量化', en: 'Fake quantization'},
+  category: 'quant',
+  description: (node, language) => language === 'en' ? `Simulate ${node.args} quantization.` : `模拟 ${node.args} 量化。`,
+});
+addTranslations([['专家混合', 'Mixture of experts']]);
+registerBlock('acme/moe', {title: '专家混合', category: 'dense'});
+```
+
+Registrations are global to the module; call them before `load()` or reload the
+graph to re-render. `nodeTitle`, `nodeDescription`, `nodeCategory`,
+`categoryTitle`, `layoutGraph` and `routeEdges` are exported for reuse.
+
+### Provide a layout
+
+```js
+viewer.configure({
+  // Receives {nodes, edges, width, height, gap, direction}; returns
+  // {width, height, positions: Map(id → {x, y, width, height})}.
+  // Returning null falls back to the built-in layered layout.
+  layout: ({nodes, width, height}) => ({
+    width: nodes.length * (width + 20) + 40, height: height + 60,
+    positions: new Map(nodes.map((n, i) => [n.id, {x: 20 + i * (width + 20), y: 30, width, height}])),
+  }),
+});
+```
+
+Edges are routed by `routeEdges` for any layout.
+
 ### Replace or decorate a node
 
-The wrapper retains selection, keyboard behavior, graph edges and `data-op` attributes.
+The wrapper retains selection, keyboard behavior, graph edges and `data-op` /
+`data-category` attributes. The renderer context also includes `category`.
 The renderer controls only its content.
 
 ```js
@@ -151,15 +222,28 @@ Color tokens: `--page-bg`, `--panel-bg`, `--text`, `--muted`, `--line`,
 `--node-fill`, `--node-border`, `--module-fill`, `--io-fill`, `--io-border`,
 `--selection`, `--edge-color`, `--skip-color`, `--recurrent-color`,
 `--tensor-cell`, `--tensor-plane`, `--tensor-outline`, `--tensor-positive`,
-`--tensor-negative`, `--tensor-zero`, `--heatmap-contrast`, `--error-color`.
+`--tensor-negative`, `--tensor-zero`, `--heatmap-contrast`, `--error-color`, `--shadow`.
+Category tokens: `--cat-io`, `--cat-dense`, `--cat-attention`, `--cat-norm`,
+`--cat-activation`, `--cat-pool`, `--cat-merge`, `--cat-structure`,
+`--cat-recurrent`, `--cat-other`; per node, override `--accent`.
+Font tokens: `--font-ui`, `--font-mono`.
 Geometry tokens: `--tensor-node-width`, `--tensor-node-height`,
 `--node-width`, `--node-height` (the latter two apply to compact mode).
-The CLI also accepts `wgt graph MODEL --style custom.css --open`.
+The model entry convention is `model.wgt`, with its companion `model.css`.
+For HTML, the CLI selects an explicit `--style custom.css` first, then
+`model.css` in the artifact directory, then the source's same-name CSS in the
+current project (or `-C` directory). The source is `model.source` from `wgt.toml`,
+defaulting to `model.wgt`, and must exist for project discovery. Missing CSS uses
+the built-in theme; unreadable CSS is an error. Other export formats do not
+auto-load CSS. Artifact `source.wgt` remains unchanged; CSS is not automatically
+included in published packages.
+Use `wgt graph MODEL --open` for discovery or
+`wgt graph MODEL --style custom.css --open` for an explicit override.
 
 ## Events and verification
 
 Bubbling events: `node-select` (node), `tensor-select` (tensor),
-`theme-change` (`{theme, resolved}`). `load(graph)` validates and replaces model data.
+`theme-change` (`{theme, resolved}`), `graph-render` (`{expanded, direction, nodes}`). `load(graph)` validates and replaces model data.
 Local tests: `npm test`; browser tests in `test/*.browser.mjs` plus `test/browser.mjs`
 use `WEIGHTLANG_PLAYWRIGHT` pointing to an installed Playwright module, with Chromium.
 No browser dependency or network request is needed by the viewer itself.

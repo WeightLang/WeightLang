@@ -1,312 +1,26 @@
+/*
+ * WeightLang viewer. Every color and size is a custom property on the host
+ * element, so instance-scoped overrides (`#model { --selection: … }`) restyle
+ * both themes without replacing renderers. Load custom CSS after this file.
+ */
+
+/* ---- Theme tokens: warm paper, clay and olive ---------------------------- */
 weightlang-viewer {
-  --page-bg: #f2efe8;
-  --panel-bg: #fcfbf7;
-  --text: #302b28;
-  --muted: #776e63;
-  --line: #dfd5c6;
-  --node-fill: var(--panel-bg);
-  --node-stroke: var(--node-border);
-  --node-width: 320;
-  --node-height: 88;
-  --tensor-positive: #b75b35;
-  --tensor-negative: #6e5a91;
-  --tensor-zero: #f4efe5;
-  display: block;
-  background: var(--page-bg);
-  color: var(--text);
-  font:
-    14px/1.5 system-ui,
-    sans-serif;
-  min-height: 100vh;
-}
-weightlang-viewer * {
-  box-sizing: border-box;
-}
-weightlang-viewer [hidden] {
-  display: none !important;
-}
-weightlang-viewer .wl-header {
-  padding: 28px 32px 22px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  border-bottom: 1px solid var(--line);
-}
-weightlang-viewer .wl-eyebrow {
-  font-size: 10px;
-  letter-spacing: 0.18em;
-  color: var(--muted);
-}
-weightlang-viewer h1 {
-  font-size: 28px;
-  letter-spacing: -0.04em;
-  margin: 4px 0 0;
-}
-weightlang-viewer h2 {
-  font-size: 17px;
-  margin: 0;
-}
-weightlang-viewer .wl-summary {
-  font-size: 13px;
-  color: var(--muted);
-}
-weightlang-viewer .wl-workspace {
-  display: grid;
-  grid-template-columns: minmax(380px, 1fr) minmax(300px, 380px);
-  gap: 20px;
-  padding: 24px;
-  max-width: 1800px;
-  margin: auto;
-}
-weightlang-viewer section {
-  background: var(--panel-bg);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  min-width: 0;
-  padding: 20px;
-}
-weightlang-viewer .wl-panel-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-}
-weightlang-viewer .wl-note {
-  font-size: 12px;
-  color: var(--muted);
-}
-weightlang-viewer .wl-flow {
-  height: calc(100vh - 255px);
-  min-height: 350px;
-  overflow: auto;
-  border-top: 1px solid var(--line);
-}
-weightlang-viewer .wl-fitted > svg {
-  width: 100%;
-  height: auto;
-}
-weightlang-viewer .wl-node {
-  cursor: pointer;
-  outline: none;
-}
-weightlang-viewer .wl-node .wl-node-background {
-  fill: var(--node-fill);
-  stroke: var(--node-stroke);
-  stroke-width: 1;
-}
-weightlang-viewer .wl-node:hover .wl-node-background,
-weightlang-viewer .wl-node:focus .wl-node-background,
-weightlang-viewer .wl-selected .wl-node-background {
-  stroke-width: 2;
-  stroke: var(--selection);
-}
-weightlang-viewer [data-op="seq"],
-weightlang-viewer [data-op="residual"] {
-  --node-fill: var(--module-fill);
-  --node-stroke: var(--node-border);
-}
-weightlang-viewer [data-changed="true"] {
-  --node-stroke: var(--tensor-positive);
-}
-weightlang-viewer .wl-node-title {
-  font: 600 15px system-ui;
-  fill: var(--text);
-}
-weightlang-viewer .wl-node-op {
-  font: 12px system-ui;
-  fill: var(--muted);
-}
-weightlang-viewer .wl-node-shape {
-  font:
-    12px ui-monospace,
-    monospace;
-  fill: var(--muted);
-}
-weightlang-viewer .wl-edge {
-  fill: none;
-  stroke: var(--edge-color, #9b8060);
-  stroke-width: 1.5;
-}
-weightlang-viewer .wl-edge[data-kind="skip"] {
-  stroke-dasharray: 5 4;
-  stroke: var(--skip-color, #b75b35);
-}
-weightlang-viewer .wl-tensor-label {
-  display: block;
-  margin-top: 22px;
-}
-weightlang-viewer select,
-weightlang-viewer input,
-weightlang-viewer button {
-  font: inherit;
-  color: var(--text);
-  background: var(--panel-bg);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px 10px;
-  max-width: 100%;
-}
-weightlang-viewer button {
-  cursor: pointer;
-}
-weightlang-viewer .wl-tensor {
-  display: block;
-  width: 100%;
-  margin: 5px 0 12px;
-  font-family: ui-monospace, monospace;
-}
-weightlang-viewer .wl-statistics {
-  color: var(--muted);
-  font-size: 12px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--line);
-}
-weightlang-viewer .wl-controls,
-weightlang-viewer .wl-fixed {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 16px;
-}
-weightlang-viewer .wl-fixed input {
-  width: 80px;
-}
-weightlang-viewer .wl-presets {
-  margin-top: 12px;
-}
-weightlang-viewer .wl-description {
-  font-size: 12px;
-  color: var(--muted);
-  min-height: 36px;
-}
-weightlang-viewer .wl-plot {
-  background: var(--tensor-zero);
-  padding: 12px;
-  border-radius: 12px;
-  overflow: auto;
-}
-weightlang-viewer canvas {
-  display: block;
-}
-weightlang-viewer .wl-legend {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin: 12px 0;
-  font:
-    11px ui-monospace,
-    monospace;
-}
-weightlang-viewer .wl-gradient {
-  height: 7px;
-  flex: 1;
-  background: linear-gradient(
-    to right,
-    var(--tensor-negative),
-    var(--tensor-zero),
-    var(--tensor-positive)
-  );
-  border-radius: 8px;
-}
-weightlang-viewer .wl-readout {
-  display: block;
-  font:
-    12px/1.7 ui-monospace,
-    monospace;
-  min-height: 42px;
-}
-weightlang-viewer .wl-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  border-top: 1px solid var(--line);
-  margin-top: 16px;
-  padding-top: 16px;
-  font-size: 11px;
-  color: var(--muted);
-}
-weightlang-viewer .wl-files input {
-  display: block;
-  font-size: 11px;
-  margin-top: 4px;
-  width: 240px;
-}
-weightlang-viewer .wl-origin {
-  color: var(--muted);
-  font-size: 12px;
-}
-weightlang-viewer .wl-error {
-  color: var(--error-color);
-  padding: 0 28px;
-  white-space: pre-wrap;
-}
-@media (max-width: 900px) {
-  weightlang-viewer .wl-workspace {
-    grid-template-columns: 1fr;
-    padding: 12px;
-  }
-  weightlang-viewer .wl-header {
-    padding: 20px;
-    flex-wrap: wrap;
-  }
-  weightlang-viewer .wl-flow {
-    height: 350px;
-  }
-  weightlang-viewer section {
-    padding: 14px;
-  }
-}
-@media (prefers-reduced-motion: no-preference) {
-  weightlang-viewer .wl-node .wl-node-background {
-    transition:
-      stroke 0.15s,
-      stroke-width 0.15s;
-  }
-}
-
-/* Architecture comes first; weights remain an optional, narrower inspection pane. */
-weightlang-viewer .wl-actions, weightlang-viewer .wl-key {
-  display: flex; gap: 10px; flex-wrap: wrap;
-}
-weightlang-viewer .wl-key { color: var(--muted); font-size: 12px; margin: 12px 0; }
-weightlang-viewer .wl-flow { height: calc(100vh - 280px); min-height: 440px; }
-weightlang-viewer .wl-flow > svg { display: block; margin: 0 auto; }
-weightlang-viewer .wl-node-info { border-bottom: 1px solid var(--line); margin-bottom: 24px; padding-bottom: 18px; }
-weightlang-viewer .wl-node-info p { overflow-wrap: anywhere; margin: 9px 0; }
-weightlang-viewer .wl-node-info p:first-of-type { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
-weightlang-viewer [data-op="input"], weightlang-viewer [data-op="output"] { --node-fill: var(--io-fill); --node-stroke: var(--io-border); }
-weightlang-viewer .wl-edge[data-kind="recurrent"] { stroke: var(--recurrent-color); stroke-dasharray: 2 5; stroke-width: 2; }
-weightlang-viewer button[aria-pressed="true"] { background: var(--module-fill); border-color: var(--selection); }
-weightlang-viewer .wl-explorer { align-self: start; }
-@media (max-width: 900px) {
-  weightlang-viewer .wl-workspace { grid-template-columns: minmax(0, 1fr); }
-  weightlang-viewer .wl-flow { height: 520px; }
-  weightlang-viewer .wl-panel-heading { flex-wrap: wrap; }
-}
-weightlang-viewer .wl-node-meta { font: 11px system-ui; fill: var(--muted); }
-
-weightlang-viewer .wl-architecture { align-self: start; }
-weightlang-viewer .wl-weight-tools { margin-top: 20px; }
-weightlang-viewer .wl-header-tools { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
-weightlang-viewer .wl-header-tools label { white-space: nowrap; }
-
-/* Public theme tokens: warm paper, clay and olive; no blue accent palette. */
-weightlang-viewer {
-  --page-bg: #f2efe8;
-  --panel-bg: #fcfbf7;
-  --text: #302d27;
+  --page-bg: #f3f0e9;
+  --panel-bg: #fdfcf8;
+  --text: #2f2c26;
   --muted: #716b60;
-  --line: #ded8cd;
+  --line: #e0d9cd;
   --node-fill: var(--panel-bg);
-  --node-border: #c5bcac;
-  --module-fill: #f0ebe2;
-  --io-fill: #f0f0e5;
+  --node-border: #c8bfaf;
+  --node-stroke: var(--line);
+  --module-fill: #f1ece3;
+  --io-fill: #f2f2e7;
   --io-border: #b5b69a;
   --selection: #985235;
-  --edge-color: #a29783;
+  --edge-color: #a99d88;
   --skip-color: #ad7047;
-  --recurrent-color: #7b8055;
+  --recurrent-color: #6f7a45;
   --tensor-cell: #b67b56;
   --tensor-plane: #f3e7db;
   --tensor-outline: #d3b69d;
@@ -315,23 +29,45 @@ weightlang-viewer {
   --tensor-zero: #eee9df;
   --heatmap-contrast: #fffdf6;
   --error-color: #a33e30;
+  --shadow: 0 1px 2px rgb(60 45 25 / 0.06), 0 6px 18px rgb(60 45 25 / 0.06);
+  /* Node categories: the left accent bar, chip and legend dot. */
+  --cat-io: #8a8c58;
+  --cat-dense: #b0673f;
+  --cat-attention: #9b5677;
+  --cat-norm: #4f8478;
+  --cat-activation: #b38420;
+  --cat-pool: #7c6a9c;
+  --cat-merge: #9c7454;
+  --cat-structure: #857a6b;
+  --cat-recurrent: #5f7f3e;
+  --cat-other: #9a9182;
+  /* Geometry in SVG units (numbers, no unit). */
   --tensor-node-width: 420;
   --tensor-node-height: 184;
+  --node-width: 320;
+  --node-height: 88;
+  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  display: block;
+  min-height: 100vh;
+  background: var(--page-bg);
+  color: var(--text);
+  font: 14px/1.5 var(--font-ui);
   color-scheme: light;
   accent-color: var(--selection);
 }
 weightlang-viewer[data-theme="dark"] {
-  --page-bg: #1b1a17;
-  --panel-bg: #24231f;
+  --page-bg: #1a1916;
+  --panel-bg: #23221e;
   --text: #eee7d9;
-  --muted: #b6ad9d;
-  --line: #454035;
+  --muted: #b2a999;
+  --line: #3e3a31;
   --node-border: #615747;
-  --module-fill: #302b24;
-  --io-fill: #2c2e23;
+  --module-fill: #2e2a23;
+  --io-fill: #2a2c22;
   --io-border: #686c4c;
-  --selection: #d9aa7d;
-  --edge-color: #99886e;
+  --selection: #dcab7c;
+  --edge-color: #85775f;
   --skip-color: #ce9969;
   --recurrent-color: #a5ac79;
   --tensor-cell: #c08d64;
@@ -339,65 +75,307 @@ weightlang-viewer[data-theme="dark"] {
   --tensor-outline: #7e6148;
   --tensor-positive: #c58d60;
   --tensor-negative: #9da56c;
-  --tensor-zero: #302c24;
-  --heatmap-contrast: #1b1a17;
+  --tensor-zero: #2e2a22;
+  --heatmap-contrast: #1a1916;
   --error-color: #eca08b;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.25);
+  --cat-io: #b3b582;
+  --cat-dense: #d99266;
+  --cat-attention: #c886a5;
+  --cat-norm: #7fb5a8;
+  --cat-activation: #dcae4f;
+  --cat-pool: #a796c6;
+  --cat-merge: #c49d7c;
+  --cat-structure: #ab9f8e;
+  --cat-recurrent: #96b46f;
+  --cat-other: #a59c8d;
   color-scheme: dark;
 }
-weightlang-viewer .wl-flow { background: var(--panel-bg); }
+
+/* ---- Base ----------------------------------------------------------------- */
+weightlang-viewer * { box-sizing: border-box; }
+weightlang-viewer [hidden] { display: none !important; }
+weightlang-viewer h1 {
+  margin: 4px 0 0;
+  font-size: clamp(22px, 2.4vw, 32px);
+  letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
+}
+weightlang-viewer h2 { margin: 0; font-size: 17px; }
+weightlang-viewer :is(select, input, button) {
+  max-width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+weightlang-viewer button { cursor: pointer; }
+weightlang-viewer :is(button, select):hover { border-color: var(--node-border); background: var(--module-fill); }
+weightlang-viewer button[aria-pressed="true"] { background: var(--module-fill); border-color: var(--selection); color: var(--selection); }
+weightlang-viewer :is(button, select, input, canvas):focus-visible { outline: 2px solid var(--selection); outline-offset: 2px; }
+weightlang-viewer .wl-note,
 weightlang-viewer .wl-shape-note { font-size: 12px; color: var(--muted); margin: 10px 0; }
-weightlang-viewer .wl-tensor-plane { fill: var(--tensor-plane); stroke: var(--tensor-outline); stroke-width: .7; }
+
+/* ---- Header ----------------------------------------------------------------- */
+weightlang-viewer .wl-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 26px 32px;
+  border-bottom: 1px solid var(--line);
+}
+weightlang-viewer .wl-title { min-width: 0; }
+weightlang-viewer .wl-eyebrow { font-size: 10px; font-weight: 600; letter-spacing: 0.18em; color: var(--selection); }
+weightlang-viewer .wl-summary { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; font-variant-numeric: tabular-nums; }
+weightlang-viewer .wl-summary span {
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--module-fill);
+  border-radius: 999px;
+}
+weightlang-viewer .wl-header-tools { display: flex; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
+weightlang-viewer .wl-header-tools label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+/* ---- Workspace -------------------------------------------------------------- */
+weightlang-viewer .wl-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  gap: 32px;
+  max-width: 1800px;
+  margin: auto;
+  padding: 24px 32px;
+}
+weightlang-viewer section { min-width: 0; padding: 0; background: transparent; border: 0; }
+weightlang-viewer .wl-architecture { align-self: start; }
+weightlang-viewer .wl-panel-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+weightlang-viewer .wl-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+weightlang-viewer .wl-search-box { position: relative; display: flex; align-items: center; flex: 1 1 200px; min-width: 0; }
+weightlang-viewer .wl-search { width: 100%; padding-right: 48px; }
+weightlang-viewer .wl-search-count {
+  position: absolute;
+  right: 10px;
+  font: 11px var(--font-mono);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* Legend: edge kinds and the node categories present in the current graph. */
+weightlang-viewer .wl-key,
+weightlang-viewer .wl-categories { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 11px; color: var(--muted); }
+weightlang-viewer .wl-key { margin: 12px 0 6px; }
+weightlang-viewer :is(.wl-key, .wl-categories) span { display: inline-flex; align-items: center; gap: 6px; }
+weightlang-viewer .wl-key span::before { content: ""; width: 18px; border-top: 2px solid var(--edge-color); }
+weightlang-viewer .wl-key span:nth-child(2)::before { border-top-style: dashed; border-color: var(--skip-color); }
+weightlang-viewer .wl-key span:nth-child(3)::before { border-top-style: dotted; border-color: var(--recurrent-color); }
+weightlang-viewer .wl-categories span::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+
+/* ---- Canvas ------------------------------------------------------------------- */
+weightlang-viewer .wl-canvas { position: relative; margin-top: 14px; }
+weightlang-viewer .wl-flow {
+  position: relative;
+  height: calc(100vh - 290px);
+  min-height: 440px;
+  overflow: auto;
+  background: var(--panel-bg) radial-gradient(circle, var(--line) 0.8px, transparent 1px) 0 0 / 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--node-border) transparent;
+  overscroll-behavior: contain;
+}
+weightlang-viewer .wl-flow > svg { display: block; margin: 52px auto 16px; overflow: visible; }
+weightlang-viewer .wl-flow.wl-panning { cursor: grabbing; user-select: none; }
+weightlang-viewer .wl-zoom {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--panel-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+weightlang-viewer .wl-zoom button {
+  min-width: 32px;
+  min-height: 30px;
+  padding: 2px 8px;
+  border-color: transparent;
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+}
+weightlang-viewer .wl-zoom .wl-zoom-level { min-width: 56px; font-size: 12px; }
+weightlang-viewer .wl-zoom :is(.wl-export-svg, .wl-export-png) { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--muted); }
+weightlang-viewer .wl-zoom-separator { width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
+
+/* ---- Nodes ------------------------------------------------------------------- */
+weightlang-viewer .wl-node { cursor: pointer; outline: none; --accent: var(--cat-other); }
+weightlang-viewer [data-category="io"] { --accent: var(--cat-io); }
+weightlang-viewer [data-category="dense"] { --accent: var(--cat-dense); }
+weightlang-viewer [data-category="attention"] { --accent: var(--cat-attention); }
+weightlang-viewer [data-category="norm"] { --accent: var(--cat-norm); }
+weightlang-viewer [data-category="activation"] { --accent: var(--cat-activation); }
+weightlang-viewer [data-category="pool"] { --accent: var(--cat-pool); }
+weightlang-viewer [data-category="merge"] { --accent: var(--cat-merge); }
+weightlang-viewer [data-category="structure"] { --accent: var(--cat-structure); }
+weightlang-viewer [data-category="recurrent"] { --accent: var(--cat-recurrent); }
+weightlang-viewer [data-category="other"] { --accent: var(--cat-other); }
+weightlang-viewer [data-op="seq"],
+weightlang-viewer [data-op="residual"] { --node-fill: var(--module-fill); }
+weightlang-viewer [data-op="input"],
+weightlang-viewer [data-op="output"] { --node-fill: var(--io-fill); --node-stroke: var(--io-border); }
+weightlang-viewer [data-changed="true"] { --node-stroke: var(--tensor-positive); }
+weightlang-viewer .wl-node .wl-node-background {
+  fill: var(--node-fill);
+  stroke: var(--node-stroke);
+  stroke-width: 1;
+  filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.06));
+}
+weightlang-viewer .wl-node-accent { fill: var(--accent); }
+weightlang-viewer .wl-node:hover .wl-node-background { stroke: var(--node-border); }
+weightlang-viewer .wl-selected .wl-node-background { stroke: var(--selection); stroke-width: 1.75; }
+weightlang-viewer .wl-node:focus-visible .wl-node-background { stroke: var(--selection); stroke-width: 2; stroke-dasharray: 5 3; }
+weightlang-viewer .wl-node-title { font: 500 15px var(--font-ui); fill: var(--text); }
+weightlang-viewer .wl-selected .wl-node-title { fill: var(--selection); font-weight: 600; }
+weightlang-viewer .wl-node-chip { font: 600 10px var(--font-ui); letter-spacing: 0.06em; fill: var(--accent); }
+weightlang-viewer .wl-node-op { font: 12px var(--font-ui); fill: var(--muted); }
+weightlang-viewer .wl-node-shape { font: 12px var(--font-mono); fill: var(--muted); }
+weightlang-viewer .wl-node-meta { font: 11px var(--font-ui); fill: var(--muted); }
+weightlang-viewer .wl-transform-arrow { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+
+/* Tensor glyphs: equal fills mark element positions, not values. */
+weightlang-viewer .wl-tensor-plane { fill: var(--tensor-plane); stroke: none; }
 weightlang-viewer .wl-tensor-cell { fill: var(--tensor-cell); stroke: none; }
 weightlang-viewer .wl-tensor-cell:hover { fill: var(--selection); stroke: var(--text); stroke-width: 1; }
-weightlang-viewer .wl-tensor-dimensions { fill: var(--text); font: 12px ui-monospace, monospace; }
-weightlang-viewer .wl-transform-arrow { fill: none; stroke: var(--selection); stroke-width: 1.8; }
-weightlang-viewer section { border-radius: 12px; }
-weightlang-viewer .wl-header { align-items: flex-start; }
-weightlang-viewer .wl-header-tools { justify-content: flex-end; }
-weightlang-viewer .wl-summary { flex-basis: 100%; text-align: right; }
-weightlang-viewer .wl-node:focus-visible .wl-node-background { stroke: var(--selection); stroke-width: 2; }
-@media (max-width: 900px) {
-  weightlang-viewer .wl-header-tools { justify-content: flex-start; }
-  weightlang-viewer .wl-summary { text-align: left; }
-}
+weightlang-viewer .wl-tensor-dimensions { fill: var(--text); font: 12px var(--font-mono); }
 
-weightlang-viewer .wl-header-tools { display: grid; grid-template-columns: auto auto; gap: 12px 18px; }
-weightlang-viewer .wl-header-tools .wl-summary { grid-row: 1; grid-column: 1 / -1; }
-@media (max-width: 500px) { weightlang-viewer .wl-header-tools { grid-template-columns: 1fr; } weightlang-viewer .wl-header-tools .wl-summary { grid-column: 1; } }
+/* ---- Edges ------------------------------------------------------------------- */
+weightlang-viewer .wl-edge { fill: none; stroke: var(--edge-color); stroke-width: 1.5; stroke-linecap: round; }
+weightlang-viewer .wl-edge[data-kind="skip"] { stroke: var(--skip-color); stroke-dasharray: 6 4; }
+weightlang-viewer .wl-edge[data-kind="recurrent"] { stroke: var(--recurrent-color); stroke-dasharray: 1 5; stroke-width: 2; }
+weightlang-viewer .wl-edge-head { fill: var(--edge-color); }
+weightlang-viewer .wl-edge-head[data-kind="skip"] { fill: var(--skip-color); }
+weightlang-viewer .wl-edge-head[data-kind="recurrent"] { fill: var(--recurrent-color); }
+weightlang-viewer .wl-edge-head[data-kind="active"] { fill: var(--selection); }
+weightlang-viewer .wl-has-selection .wl-edge:not(.wl-edge-active) { opacity: 0.5; }
+weightlang-viewer .wl-edge.wl-edge-active { stroke: var(--selection); stroke-width: 2.25; }
 
-weightlang-viewer button:hover, weightlang-viewer select:hover {
-  border-color: var(--node-border);
-  background: var(--module-fill);
-}
-weightlang-viewer :is(button, select, input, canvas):focus-visible {
-  outline: 2px solid var(--selection);
-  outline-offset: 3px;
-}
-weightlang-viewer .wl-node-title { font-weight: 500; }
-weightlang-viewer .wl-tensor-plane { stroke-width: .5; }
-weightlang-viewer .wl-transform-arrow { stroke-width: 1.5; }
-weightlang-viewer .wl-key { column-gap: 18px; }
+/* Search: matching nodes stay crisp, everything else recedes. */
+weightlang-viewer .wl-searching :is(.wl-node:not(.wl-match), .wl-edge) { opacity: 0.25; }
+weightlang-viewer .wl-match .wl-node-background { stroke: var(--selection); stroke-width: 2; }
+weightlang-viewer .wl-current-match .wl-node-background { stroke-width: 3; }
 
-/* Open layout: spacing carries hierarchy instead of surrounding boxes. */
-weightlang-viewer .wl-workspace { gap: 48px; padding: 32px; }
-weightlang-viewer section { border: 0; border-radius: 0; padding: 8px 0; background: transparent; }
-weightlang-viewer .wl-header { border-bottom: 0; padding-bottom: 12px; }
-weightlang-viewer .wl-flow { background: transparent; border-top: 0; margin-top: 24px; }
-weightlang-viewer .wl-node .wl-node-background { fill: transparent; stroke: transparent; }
-weightlang-viewer .wl-node:hover .wl-node-background,
-weightlang-viewer .wl-selected .wl-node-background { fill: var(--module-fill); stroke: transparent; }
-weightlang-viewer .wl-node:focus-visible .wl-node-background { stroke: var(--selection); stroke-width: 1; }
-weightlang-viewer .wl-node-info { border: 0; padding-bottom: 8px; }
-weightlang-viewer .wl-tensor-plane { stroke: none; }
-weightlang-viewer .wl-shape-axes { margin: 24px 0; }
-weightlang-viewer .wl-shape-axes fieldset { border: 0; padding: 0; margin: 20px 0; min-width: 0; }
-weightlang-viewer .wl-shape-axes legend { margin-bottom: 12px; font-weight: 500; }
-weightlang-viewer .wl-shape-axes label { display: inline-flex; align-items: center; gap: 4px; margin: 0 16px 10px 0; font-size: 12px; }
-weightlang-viewer .wl-shape-axes input { margin: 0; padding: 0; accent-color: var(--selection); }
+/* ---- Explorer panel ------------------------------------------------------------ */
+weightlang-viewer .wl-explorer {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding-left: 24px;
+  border-left: 1px solid var(--line);
+  scrollbar-width: thin;
+}
+weightlang-viewer .wl-node-info { padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+weightlang-viewer .wl-node-info h2 { margin-top: 6px; font-size: 20px; color: var(--text); }
+weightlang-viewer .wl-node-info p { margin: 8px 0; line-height: 1.7; overflow-wrap: anywhere; }
+weightlang-viewer .wl-node-info .wl-node-path { font: 12px var(--font-mono); color: var(--muted); }
+weightlang-viewer .wl-category-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--accent, var(--muted));
+  --accent: var(--cat-other);
+}
+weightlang-viewer .wl-category-chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+weightlang-viewer .wl-category-chip[data-category="io"] { --accent: var(--cat-io); }
+weightlang-viewer .wl-category-chip[data-category="dense"] { --accent: var(--cat-dense); }
+weightlang-viewer .wl-category-chip[data-category="attention"] { --accent: var(--cat-attention); }
+weightlang-viewer .wl-category-chip[data-category="norm"] { --accent: var(--cat-norm); }
+weightlang-viewer .wl-category-chip[data-category="activation"] { --accent: var(--cat-activation); }
+weightlang-viewer .wl-category-chip[data-category="pool"] { --accent: var(--cat-pool); }
+weightlang-viewer .wl-category-chip[data-category="merge"] { --accent: var(--cat-merge); }
+weightlang-viewer .wl-category-chip[data-category="structure"] { --accent: var(--cat-structure); }
+weightlang-viewer .wl-category-chip[data-category="recurrent"] { --accent: var(--cat-recurrent); }
+weightlang-viewer .wl-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; margin: 16px 0 0; font-size: 13px; }
+weightlang-viewer .wl-facts dt { color: var(--muted); }
+weightlang-viewer .wl-facts dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+weightlang-viewer .wl-links { display: flex; flex-wrap: wrap; gap: 4px; }
+weightlang-viewer .wl-link { min-height: 26px; padding: 1px 8px; font-size: 12px; border-radius: 999px; }
+weightlang-viewer .wl-shape-axes { margin: 18px 0 0; }
+weightlang-viewer .wl-shape-axes fieldset { min-width: 0; margin: 14px 0; padding: 0; border: 0; }
+weightlang-viewer .wl-shape-axes legend { margin-bottom: 10px; font-weight: 500; }
+weightlang-viewer .wl-shape-axes label { display: inline-flex; align-items: center; gap: 4px; margin: 0 14px 8px 0; font-size: 12px; }
+weightlang-viewer .wl-shape-axes input { min-height: 0; margin: 0; padding: 0; }
 weightlang-viewer .wl-shape-axes label:has(:disabled) { color: var(--muted); }
-weightlang-viewer .wl-key { margin: 18px 0; }
-@media (max-width: 900px) { weightlang-viewer .wl-workspace { gap: 32px; padding: 20px; } }
-weightlang-viewer .wl-node { --node-fill: transparent; }
-weightlang-viewer .wl-node .wl-node-background,
-weightlang-viewer .wl-selected .wl-node-background { fill: var(--node-fill); }
-weightlang-viewer .wl-selected .wl-node-title { fill: var(--selection); font-weight: 600; }
+weightlang-viewer .wl-inspect-toggle { width: 100%; padding: 10px 14px; text-align: left; }
+
+/* ---- Weight inspector ----------------------------------------------------------- */
+weightlang-viewer .wl-weight-tools { margin-top: 22px; }
+weightlang-viewer .wl-origin { font-size: 12px; color: var(--muted); }
+weightlang-viewer .wl-tensor-label { display: block; margin-top: 18px; }
+weightlang-viewer .wl-tensor { display: block; width: 100%; margin: 5px 0 12px; font-family: var(--font-mono); }
+weightlang-viewer .wl-statistics { padding-bottom: 14px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
+weightlang-viewer .wl-controls,
+weightlang-viewer .wl-fixed { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+weightlang-viewer .wl-fixed input { width: 80px; }
+weightlang-viewer .wl-presets { margin-top: 12px; }
+weightlang-viewer .wl-description { min-height: 36px; font-size: 12px; color: var(--muted); }
+weightlang-viewer .wl-plot { padding: 12px; overflow: auto; background: var(--tensor-zero); border-radius: 12px; }
+weightlang-viewer canvas { display: block; }
+weightlang-viewer .wl-legend { display: flex; align-items: center; gap: 12px; margin: 12px 0; font: 11px var(--font-mono); }
+weightlang-viewer .wl-gradient {
+  flex: 1;
+  height: 7px;
+  background: linear-gradient(to right, var(--tensor-negative), var(--tensor-zero), var(--tensor-positive));
+  border-radius: 8px;
+}
+weightlang-viewer .wl-readout { display: block; min-height: 42px; font: 12px/1.7 var(--font-mono); overflow-wrap: anywhere; }
+weightlang-viewer .wl-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+}
+weightlang-viewer .wl-files input { display: block; width: 240px; margin-top: 4px; font-size: 11px; }
+weightlang-viewer .wl-error { padding: 0 32px; color: var(--error-color); white-space: pre-wrap; }
+
+/* ---- Motion and responsive layout ----------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  weightlang-viewer .wl-node-background,
+  weightlang-viewer .wl-edge,
+  weightlang-viewer .wl-node { transition: stroke 0.15s, stroke-width 0.15s, opacity 0.2s; }
+}
+@media (max-width: 1100px) {
+  weightlang-viewer .wl-workspace { grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; }
+}
+@media (max-width: 900px) {
+  weightlang-viewer .wl-workspace { grid-template-columns: minmax(0, 1fr); padding: 20px; }
+  weightlang-viewer .wl-header { padding: 22px 20px; flex-wrap: wrap; }
+  weightlang-viewer .wl-header-tools { justify-content: flex-start; }
+  weightlang-viewer .wl-flow { height: 520px; }
+  weightlang-viewer .wl-explorer { position: static; max-height: none; padding: 24px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 500px) {
+  weightlang-viewer .wl-header { flex-direction: column; gap: 14px; }
+  weightlang-viewer .wl-header-tools { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  weightlang-viewer .wl-actions { width: 100%; }
+  weightlang-viewer .wl-search-box { flex-basis: 100%; }
+  weightlang-viewer .wl-zoom :is(.wl-export-svg, .wl-export-png, .wl-zoom-separator) { display: none; }
+}
+/* Export reads computed styles synchronously; transitions would report stale values. */
+weightlang-viewer .wl-exporting * { transition: none !important; }

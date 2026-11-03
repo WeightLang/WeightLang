@@ -32,7 +32,7 @@ try {
     theme.textContent='weightlang-viewer [data-op="unseen_operator"]{--node-fill:rgb(12, 34, 56)}';
     document.head.append(theme);
   });
-  assert.equal(await page.locator(".wl-node rect").evaluate(e=>getComputedStyle(e).fill),"rgb(12, 34, 56)");
+  assert.equal(await page.locator(".wl-node .wl-node-background").evaluate(e=>getComputedStyle(e).fill),"rgb(12, 34, 56)");
   await page.selectOption(".wl-row","1");await page.selectOption(".wl-column","3");
   for(const [axis,value] of [[0,1],[2,2],[4,1]]){const input=page.getByLabel("Axis "+axis+" slice",{exact:true});await input.fill(String(value));await input.dispatchEvent("change");}
   assert.equal(await page.evaluate(()=>document.querySelector("weightlang-viewer").plane.values[0]),141);

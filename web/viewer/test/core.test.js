@@ -134,3 +134,48 @@ test('tensor geometry bounds dense views and preserves complete named shapes', a
   assert.equal(g('unavailable'),null);
   assert.equal(g('f32[100,100]',{rows:Infinity,columns:500}).shownCols,16);
 });
+
+test('left-to-right layout swaps axes and barycenter ordering removes crossings', async () => {
+  const {layoutGraph} = await import('../viewer.js');
+  const nodes = ['a','b','x','y'].map(id=>({id}));
+  // a→y and b→x cross when ranks keep insertion order; sweeps should untangle them.
+  const edges = [{from:'a',to:'y'},{from:'b',to:'x'}];
+  const tb = layoutGraph([...nodes], edges, 100, 50, 20);
+  assert.ok((tb.positions.get('a').x < tb.positions.get('b').x) === (tb.positions.get('y').x < tb.positions.get('x').x));
+  const lr = layoutGraph(nodes, edges, 100, 50, 20, {direction:'LR'});
+  assert.equal(lr.direction,'LR');
+  assert.equal(lr.positions.get('a').x, lr.positions.get('b').x);
+  assert.ok(lr.positions.get('y').x > lr.positions.get('a').x);
+});
+
+test('bypass edges get separate lanes and never route through nodes', async () => {
+  const {layoutGraph,routeEdges} = await import('../viewer.js');
+  const nodes = ['a','b','c','d'].map(id=>({id}));
+  const edges = [{from:'a',to:'b'},{from:'b',to:'c'},{from:'c',to:'d'},
+    {from:'a',to:'c',kind:'skip'},{from:'b',to:'d',kind:'skip'},{from:'a',to:'d'}];
+  const {positions} = layoutGraph(nodes, edges, 100, 50, 20);
+  const {routes, extent} = routeEdges(edges, positions);
+  const lanes = routes.filter(r=>r.lane!=null);
+  // Two overlapping skips plus a long forward edge that would cross b and c.
+  assert.equal(lanes.length, 3);
+  assert.equal(new Set(lanes.map(r=>r.lane)).size, 3);
+  assert.ok(extent > 100 + 24);
+  assert.ok(routes.every(r=>/^M[\d.]+,[\d.]+/.test(r.d)));
+});
+
+test('registries extend operators, blocks and categories without core changes', async () => {
+  const {registerOperator,registerBlock,registerCategory,nodeTitle,nodeDescription,nodeCategory,categoryTitle,addTranslations} = await import('../viewer.js');
+  registerCategory('quant', {title:{'zh-CN':'量化',en:'Quantization'}, color:'#123456'});
+  registerOperator('fake_quant', {title:{'zh-CN':'伪量化',en:'Fake quant'}, category:'quant',
+    description:(node,language)=>language==='en'?`${node.args} bits`:`${node.args} 位`});
+  assert.equal(nodeTitle({op:'fake_quant'},'en'),'Fake quant');
+  assert.equal(nodeDescription({op:'fake_quant',args:'8'},'zh-CN'),'8 位');
+  assert.equal(nodeCategory({op:'fake_quant'}),'quant');
+  assert.equal(categoryTitle('quant','en'),'Quantization');
+  addTranslations([['专家混合','Mixture of experts']]);
+  registerBlock('acme/moe', {title:'专家混合', category:'dense'});
+  assert.equal(nodeTitle({op:'seq',block:'acme/moe'},'en'),'Mixture of experts');
+  assert.equal(nodeCategory({op:'linear'}),'dense');
+  assert.equal(nodeCategory({op:'never_seen'}),'other');
+  assert.throws(()=>registerOperator('x',{category:'Bad Name'}),/Category/);
+});
