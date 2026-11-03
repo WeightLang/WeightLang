@@ -63,6 +63,10 @@ not mean every historical operator, trainer or CLI command has a native replacem
 Old CLI-dependent `wgt check/build/package/install/train/export/test/trace/debug`
 commands report that they are retired. Use the native script commands above.
 
+On Linux, [weightfs](docs/weightfs.md) can expose live weights as editable JSON
+files. The runtime attempts to mount it by default; an explicit model or
+checkpoint save is still required for persistence.
+
 `std/` retains WGT library sources; `language/primitive_specs.json` holds operator
 signatures. Retained library sources and artifact fixtures are migration material,
 not proof of execution support. See the [WGT 0.5 reference](docs/reference.zh-CN.md),
@@ -87,5 +91,3 @@ Packaging verifies matching versions and creates both platform assets plus
 checksums in a new directory. Publishing is a separate operation.
 
 [MIT license](LICENSE).
-
-Linux training and inference support [weightfs](docs/weightfs.md): an automatically mounted, in-memory view of live weights as editable JSON files. Persistence still requires an explicit model or checkpoint save.

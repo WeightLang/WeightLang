@@ -57,6 +57,9 @@ cargo build --locked --workspace --bins
 仍依赖旧 CLI 的 `wgt check/build/package/install/train/export/test/trace/debug`
 明确报错；执行训练请使用上述原生脚本入口。
 
+Linux 的 [weightfs](docs/weightfs.md) 可将运行中的权重展示为可编辑的 JSON 文件。
+运行时默认尝试挂载；持久化仍需显式保存模型或断点。
+
 WGT 标准库源码保留在 `std/`，算子签名保留在 `language/primitive_specs.json`。
 保留的标准库源码及制品夹具作为迁移资料，不表示原生执行器已经支持。
 参见 [WGT 0.5 参考](docs/reference.zh-CN.md)、[包依赖](docs/packages.md)、
@@ -78,5 +81,3 @@ sh scripts/package_wgt.sh --binary target/release/wgt --output dist/native-relea
 打包检查两个程序版本一致，在全新目录写入平台文件与校验和；不会自动发布。
 
 [MIT 许可证](LICENSE)。
-
-Linux 训练和推理支持 [weightfs](docs/weightfs.md)：自动挂载运行中的内存权重，按 JSON 文件浏览和编辑；显式保存后才持久化。
