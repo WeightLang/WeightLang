@@ -10,7 +10,7 @@ TextMate 还区分函数定义、参数、调用名称、标点和运算符。�
 
 | 编辑器 | 文件/方式 | 状态 |
 | --- | --- | --- |
-| VS Code、VSCodium，以及兼容 VS Code 扩展的编辑器 | `editors/vscode/`，本地 VSIX | TextMate 引擎测试通过；0.1.0 已提交 Marketplace 验证 |
+| VS Code、VSCodium，以及兼容 VS Code 扩展的编辑器 | `editors/vscode/`，本地 VSIX | TextMate 引擎测试通过；当前扩展版本 0.2.0 |
 | Sublime Text | `editors/WeightLang.tmbundle/Syntaxes/WeightLang.tmLanguage` | 格式已验证，未逐一 GUI 验收 |
 | TextMate | `editors/WeightLang.tmbundle/` | 同上 |
 | JetBrains IDE（启用 TextMate Bundles 插件） | 导入 `editors/WeightLang.tmbundle/` | 同上 |
@@ -35,16 +35,16 @@ VS Code 使用 [TextMate grammar](https://code.visualstudio.com/api/language-ext
 ```sh
 cd editors/vscode
 npx @vscode/vsce package --no-dependencies
-code --install-extension weightlang-0.1.0.vsix
+code --install-extension weightlang-0.2.0.vsix
 ```
 
 也可以在编辑器中执行 **Extensions: Install from VSIX**，选择生成的文件。
 VSCodium 用 `codium` 替代 `code`；其他兼容编辑器使用自己的安装入口。
 扩展提供 `.wgt` 自动识别、注释切换、括号和双引号配对，无可执行扩展代码。
 发布者为 `LIghtJUNction`，安装 ID 为 `LIghtJUNction.weightlang`。
-0.1.0 已上传 Marketplace，正在等待平台验证；这不等于已经可以搜索或安装。
+Marketplace 的可安装版本以发布页的验证状态为准；本地 VSIX 可直接安装。
 [Marketplace 页面](https://marketplace.visualstudio.com/items?itemName=LIghtJUNction.weightlang)
-在验证完成后可用。Open VSX 尚未发布。
+提供公开版本。Open VSX 尚未发布。
 
 ### Sublime Text / TextMate / JetBrains
 
@@ -78,7 +78,7 @@ vim.cmd('syntax enable')
 ### Zed
 
 在命令面板运行 **`zed: install dev extension`**，选择本仓库的 `editors/zed/`。
-注意：当前 manifest 仍固定在旧远端提交，本地 0.5 解析器尚未发布；需发布后更新 rev 才能通过上述安装方式获得本次更新。
+0.2.0 的 manifest 已固定到包含 WGT 0.5 解析器的远端提交。
 Zed 会从 manifest 固定的提交下载并编译 `editors/tree-sitter-wgt/` 中的解析器；
 首次需要网络及 WASI 工具链，之后高亮可离线工作。打开 `.wgt` 文件后语言应显示 **WeightLang**。
 
@@ -133,11 +133,12 @@ npm test --prefix editors/vscode
 node scripts/test_editor_support.cjs
 ```
 
-生成器从 Rust 的 BUILTINS 提取普通函数，显式维护 0.5 声明、控制流和 forward 运算。
+生成器使用 native-builtins.json 中的原生函数快照；存在 Rust BUILTINS 源码时检查两者一致。
+编辑器可独立发布，不依赖尚未合入的语言迁移；显式维护 0.5 声明、控制流和 forward 运算。
 修改生成器及 scripts/editor-templates/，不要直接修改生成的词表、TextMate、Vim、Emacs、
 Kate、GtkSourceView 或高亮查询。Tree-sitter 结构规则在 grammar.js；结构变更后提交生成的 C/JSON。
 编辑器解析器允许部分旧语法以便阅读迁移材料，不替代 weightc check。
 
 测试覆盖具体 TextMate scope、仓库源码遍历、Tree-sitter 语料和四种查询。
 新增 0.5 样例覆盖训练循环、自更新 forward、嵌套花括号、逻辑运算与字符串转义。
-本次未逐一 GUI 验收，也未发布 Marketplace、Open VSX 或 Zed 更新。
+未逐一 GUI 验收；Open VSX 与 Zed 扩展仓库未发布。

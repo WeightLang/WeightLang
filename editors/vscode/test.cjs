@@ -59,7 +59,10 @@ const onig = require('vscode-oniguruma');
       }
     }
   }
-  for (const dir of ['examples', 'std', 'packages']) walk(path.resolve(__dirname, '../..', dir));
+  for (const dir of ['examples', 'std', 'src/weightlang/std', 'packages']) {
+    const source = path.resolve(__dirname, '../..', dir);
+    if (fs.existsSync(source)) walk(source);
+  }
   console.log(`TextMate scope assertions passed; tokenized ${count} WGT files.`);
   registry.dispose();
 })().catch(error => {console.error(error); process.exit(1);});

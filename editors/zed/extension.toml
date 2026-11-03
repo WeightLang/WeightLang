@@ -1,6 +1,6 @@
 id = "weightlang"
 name = "WeightLang"
-version = "0.1.0"
+version = "0.2.0"
 schema_version = 1
 authors = ["WeightLang contributors"]
 description = "Syntax highlighting, bracket matching and outline for WeightLang models and functions."
@@ -8,5 +8,5 @@ repository = "https://github.com/WeightLang/WeightLang"
 
 [grammars.wgt]
 repository = "https://github.com/WeightLang/WeightLang"
-rev = "92ef7e77ec50d96d41a31197260ac23b82864d52"
+rev = "d0cfc1b727fda1731031ac1f6e339239acef0e06"
 path = "editors/tree-sitter-wgt"

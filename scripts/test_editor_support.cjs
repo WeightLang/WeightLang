@@ -7,11 +7,11 @@ const grammar = path.join(root, 'editors/tree-sitter-wgt');
 const run = (bin, args, cwd = root) => execFileSync(bin, args, {cwd, encoding: 'utf8'});
 run(process.execPath, ['scripts/generate_editor_support.cjs', '--check']);
 console.log(run('tree-sitter', ['test'], grammar));
-const files = ['examples/native_training', 'examples/self_modifying'].flatMap(dir =>
+const files = ['examples/native_training', 'examples/self_modifying'].filter(dir => fs.existsSync(path.join(root, dir))).flatMap(dir =>
   fs.readdirSync(path.join(root, dir)).filter(f => f.endsWith('.wgt')).map(f => path.join(root, dir, f)));
 files.push(path.join(root, 'editors/vscode/media/example.wgt'));
 run('tree-sitter', ['parse', '--quiet', ...files], grammar);
-const sample = path.join(root, 'examples/self_modifying/model.wgt');
+const sample = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/forward.wgt');
 for (const query of ['highlights', 'outline', 'indents', 'brackets']) {
   const captures = run('tree-sitter', ['query', `queries/${query}.scm`, sample], grammar);
   assert(captures.includes('capture:'), `${query}: no captures`);

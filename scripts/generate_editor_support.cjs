@@ -3,10 +3,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 process.chdir(path.resolve(__dirname, '..'));
 const read = file => fs.readFileSync(file, 'utf8');
-const runtime = read('crates/wgt-runtime/src/script.rs').match(/const BUILTINS:[\s\S]*?= &\[([\s\S]*?)\];/)[1];
+const nativeBuiltins = JSON.parse(read('scripts/editor-templates/native-builtins.json'));
+// The editor release is independent of the in-progress native language migration.
+// When native source is present, require this release snapshot to stay in sync.
+const nativePath = 'crates/wgt-runtime/src/script.rs';
+if (fs.existsSync(nativePath)) {
+  const runtime = read(nativePath).match(/const BUILTINS:[\s\S]*?= &\[([\s\S]*?)\];/)[1];
+  const actual = [...runtime.matchAll(/"(\w+)"/g)].map(m => m[1]).filter(s => !s.startsWith('__')).sort();
+  require('node:assert/strict').deepEqual(nativeBuiltins, actual, 'Update native-builtins.json from the Rust BUILTINS table');
+}
 const vocabulary = {
   keywords: 'break continue else fn for frozen if in init input layer let model output parameter return wgt while'.split(' '),
-  builtins: [...new Set([...runtime.matchAll(/"(\w+)"/g)].map(m => m[1]).filter(s => !s.startsWith('__')).concat('read write linear add mul relu tanh sigmoid identity slice positive'.split(' ')))].sort(),
+  builtins: [...new Set(nativeBuiltins.concat('read write linear add mul relu tanh sigmoid identity slice positive'.split(' ')))].sort(),
   types: ['f32'],
   constants: ['false', 'null', 'true'],
 };

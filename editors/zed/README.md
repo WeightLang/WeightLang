@@ -4,9 +4,8 @@ Syntax highlighting, bracket pairing, comment toggling and a declaration outline
 for WGT 0.5 models and functions. Colors follow your Zed theme. No Python, PyTorch,
 model execution, Rust extension code or language server is needed for highlighting.
 
-The local parser supports 0.5, but `extension.toml` still pins the previous published
-grammar commit. Installation below will not receive this update until the new grammar
-is published and `rev` is updated. No Zed release or GUI acceptance is claimed.
+Version 0.2.0 supports WGT 0.5. The manifest pins the published grammar commit.
+Zed registry publication and GUI acceptance are separate from this source release.
 
 ## Install locally
 

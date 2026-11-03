@@ -36,7 +36,7 @@ models, install the separate [WeightLang toolchain](https://github.com/WeightLan
 This extension covers the current WGT 0.5 vocabulary, including native training
 and self-updating forward functions. Highlighting is lexical: it does not
 validate language versions or shapes, train models, or provide completion,
-definition navigation or diagnostics. The local changes have not been published.
+definition navigation or diagnostics.
 
 ## 中文说明
 

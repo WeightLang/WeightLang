@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Update highlighting to WGT 0.5 functions, control flow, native training and forward builtins.
 - Handle JSON string escapes, boolean/null literals, logical operators and brace pairing.
