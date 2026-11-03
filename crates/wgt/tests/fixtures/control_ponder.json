@@ -1,0 +1,320 @@
+{
+  "layers": [
+    {
+      "name": "reasoning",
+      "op": "ponder",
+      "args": {
+        "steps": 8,
+        "until": "stop"
+      },
+      "layers": [
+        {
+          "name": "next",
+          "op": "seq",
+          "args": {},
+          "layers": [
+            {
+              "name": "step0",
+              "op": "linear",
+              "args": {
+                "out": 4,
+                "in": 4
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4
+                ],
+                "axes": [
+                  "feature"
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4
+                ],
+                "axes": [
+                  "feature"
+                ]
+              }
+            },
+            {
+              "name": "step1",
+              "op": "tanh",
+              "args": {},
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4
+                ],
+                "axes": [
+                  "feature"
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4
+                ],
+                "axes": [
+                  "feature"
+                ]
+              }
+            }
+          ],
+          "inputs": [
+            "input"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4
+            ],
+            "axes": [
+              "feature"
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4
+            ],
+            "axes": [
+              "feature"
+            ]
+          }
+        },
+        {
+          "name": "stop",
+          "op": "seq",
+          "args": {},
+          "layers": [
+            {
+              "name": "step0",
+              "op": "linear",
+              "args": {
+                "out": 1,
+                "in": 4
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4
+                ],
+                "axes": [
+                  "feature"
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  1
+                ],
+                "axes": [
+                  "feature"
+                ]
+              }
+            },
+            {
+              "name": "step1",
+              "op": "sigmoid",
+              "args": {},
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  1
+                ],
+                "axes": [
+                  "feature"
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  1
+                ],
+                "axes": [
+                  "feature"
+                ]
+              }
+            }
+          ],
+          "inputs": [
+            "next"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4
+            ],
+            "axes": [
+              "feature"
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1
+            ],
+            "axes": [
+              "feature"
+            ]
+          }
+        },
+        {
+          "name": "result",
+          "op": "identity",
+          "args": {},
+          "inputs": [
+            "next"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4
+            ],
+            "axes": [
+              "feature"
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4
+            ],
+            "axes": [
+              "feature"
+            ]
+          }
+        }
+      ],
+      "results": {
+        "states": {
+          "dtype": "f32",
+          "shape": [
+            8,
+            4
+          ]
+        },
+        "probabilities": {
+          "dtype": "f32",
+          "shape": [
+            8,
+            1
+          ]
+        },
+        "halt_weights": {
+          "dtype": "f32",
+          "shape": [
+            8,
+            1
+          ]
+        },
+        "expected_steps": {
+          "dtype": "f32",
+          "shape": []
+        },
+        "output": {
+          "dtype": "f32",
+          "shape": [
+            4
+          ],
+          "axes": [
+            "feature"
+          ]
+        }
+      },
+      "input": {
+        "dtype": "f32",
+        "shape": [
+          4
+        ],
+        "axes": [
+          "feature"
+        ]
+      },
+      "output": {
+        "dtype": "f32",
+        "shape": [
+          4
+        ],
+        "axes": [
+          "feature"
+        ]
+      }
+    }
+  ],
+  "interface": {
+    "input": {
+      "name": "x",
+      "dtype": "f32",
+      "shape": [
+        4
+      ],
+      "axes": [
+        "feature"
+      ]
+    },
+    "output": {
+      "name": "final",
+      "dtype": "f32",
+      "shape": [
+        4
+      ],
+      "axes": [
+        "feature"
+      ]
+    },
+    "batch": "optional leading batch dimension before the declared sample shape",
+    "inputs": [
+      {
+        "name": "x",
+        "dtype": "f32",
+        "shape": [
+          4
+        ],
+        "axes": [
+          "feature"
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "final",
+        "dtype": "f32",
+        "shape": [
+          4
+        ],
+        "axes": [
+          "feature"
+        ],
+        "from": "reasoning.output"
+      },
+      {
+        "name": "states",
+        "dtype": "f32",
+        "shape": [
+          8,
+          4
+        ],
+        "from": "reasoning.states"
+      },
+      {
+        "name": "halt_weights",
+        "dtype": "f32",
+        "shape": [
+          8,
+          1
+        ],
+        "from": "reasoning.halt_weights"
+      },
+      {
+        "name": "expected_steps",
+        "dtype": "f32",
+        "shape": [],
+        "from": "reasoning.expected_steps"
+      }
+    ]
+  }
+}

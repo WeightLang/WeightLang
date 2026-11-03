@@ -20,6 +20,8 @@ Releases = "https://github.com/WeightLang/WeightLang/releases"
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+formats = ["onnx>=1.17", "gguf>=0.17"]
+transformers = ["transformers==5.7.0", "tokenizers>=0.22.0,<=0.23.0", "huggingface-hub>=1.5.0,<2.0"]
 
 [project.scripts]
 weightc = "weightlang.cli:main"
@@ -32,7 +34,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-weightlang = ["std/*.wgt"]
+weightlang = ["std/*.wgt", "primitive_specs.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

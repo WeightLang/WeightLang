@@ -1,0 +1,12 @@
+wgt 0.3
+model gated_encoder
+input x: f32[16]
+output y: f32[16]
+block swiglu(dim, hidden=dim * 4):
+  layer gate: linear(in=dim, out=hidden) from input
+  layer activation: silu
+  layer value: linear(in=dim, out=hidden) from input
+  layer gated: mul(activation, value)
+  layer down: linear(in=hidden, out=dim)
+layer encoder: repeat(4, residual(swiglu(dim=16)))
+init seed=42

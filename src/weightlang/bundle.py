@@ -72,7 +72,10 @@ def build_bundle(root, output, *, entry=None, weights=(), references=(), force=F
             text = path.read_text()
             if text.startswith('wgt 0.3\nbackend torch-dynamic\n'):
                 raise WgtError('dynamic executable sources are not supported in declarative bundles')
-            if is_library_source(text):
+            from .initialization import HEADER, read_rules
+            if text.lstrip().startswith(HEADER):
+                read_rules(str(path.resolve()))
+            elif is_library_source(text):
                 parse_library(text, str(path))
             else:
                 program = parse_file(path, check_training=False)
@@ -128,6 +131,17 @@ def build_bundle(root, output, *, entry=None, weights=(), references=(), force=F
                 raise WgtError('source hash does not match artifact manifest')
             selected[source] = {'mode': mode, 'path': f'weights/{identifier}', 'files': assets}
     for source, program in programs.items():
+        if "file" in program.initializer:
+            reference = Path(program.initializer["file"])
+            dependency = root / source
+            dependency = dependency.parent / reference
+            if reference.is_absolute() or not dependency.resolve().is_relative_to(root.resolve()):
+                raise WgtError('initialization rules must stay inside the bundle source tree')
+            relative = dependency.resolve().relative_to(root.resolve()).as_posix()
+            if 'sources/' + relative not in files:
+                raise WgtError('initialization rules must be included as a .wgt source')
+        if source not in selected and "python" in program.initializer:
+            raise WgtError('Python initialization needs an explicit selected artifact in declarative bundles')
         if source not in selected and (program.imports or program.inherit or program.derivation):
             raise WgtError('construction-time weight imports need an explicit selected artifact in bundles')
     metadata = {'format': FORMAT, 'format_version': 1, 'entry': entry, 'models': models,
@@ -151,6 +165,8 @@ def build_bundle(root, output, *, entry=None, weights=(), references=(), force=F
                 staged = stage / name
                 if name.removeprefix('sources/') in models:
                     parse_file(staged, check_training=False)
+                elif staged.read_text().lstrip().startswith(HEADER):
+                    read_rules(str(staged.resolve()))
                 else:
                     parse_library(staged.read_text(), str(staged))
     if output.exists() and not force or output.is_symlink():

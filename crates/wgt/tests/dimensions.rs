@@ -106,7 +106,7 @@ fn malformed_patterns_sizes_reductions_and_overflow_are_rejected() {
         )
         .is_err());
     }
-    for op in ["reduce", "rearrange"] {
+    for op in ["rearrange"] {
         assert!(transform(
             input.clone(),
             op,

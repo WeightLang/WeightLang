@@ -45,7 +45,7 @@ fn toml_roundtrip_and_validation() {
 }
 
 #[test]
-fn initialization_defaults_and_manifest_conflicts() {
+fn sync_is_offline_idempotent_and_locked() {
     let temp = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_wgt"))
@@ -63,16 +63,34 @@ fn initialization_defaults_and_manifest_conflicts() {
     assert_eq!(ProjectConfig::parse(&config).unwrap().revisions.max_versions, 5);
     assert!(!project.join("wgt.mod").exists());
     for _ in 0..2 {
-        let result = run(&["-C", "demo", "sync", "--offline", "--locked"]);
+        let result = run(&["-C", "demo", "sync", "--no-env", "--offline", "--locked"]);
         assert!(
             result.status.success(),
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
     }
+    fs::write(
+        project.join("wgt.sum"),
+        "github.com/example/old v1.0.0 commit abc\n",
+    )
+    .unwrap();
+    assert!(
+        !run(&["-C", "demo", "sync", "--no-env", "--offline", "--locked"])
+            .status
+            .success()
+    );
+    assert!(run(&["-C", "demo", "sync", "--no-env", "--offline"])
+        .status
+        .success());
+    assert_eq!(fs::read_to_string(project.join("wgt.sum")).unwrap(), "");
+    fs::remove_file(project.join("wgt.sum")).unwrap();
+    assert!(!run(&["-C", "demo", "sync", "--no-env", "--locked"])
+        .status
+        .success());
     fs::write(project.join("wgt.mod"), "module local/other\nwgt 0.2\n").unwrap();
     assert!(manifest::manifest_path(&project).is_err());
-    assert!(!run(&["-C", "demo", "sync"]).status.success());
+    assert!(!run(&["-C", "demo", "sync", "--no-env"]).status.success());
 }
 
 #[test]
@@ -82,7 +100,7 @@ fn offline_sync_requires_locked_dependencies() {
     let result = Command::new(env!("CARGO_BIN_EXE_wgt"))
         .current_dir(temp.path())
         .env("WEIGHTLANG_CACHE", temp.path().join("cache"))
-        .args(["sync", "--offline"])
+        .args(["sync", "--no-env", "--offline"])
         .output()
         .unwrap();
     assert!(!result.status.success());

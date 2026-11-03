@@ -1,7 +1,7 @@
 # WeightLang language
 
-> 当前 `build` 只生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
-> 旧构建示例改用 `weightc legacy-build`；参见[分发包与迁移规范](bundles.md)。
+> 当前命令已拆分：`build` 生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
+> 旧构建示例使用 `weightc legacy-build`；详见[分发包、元数据与迁移规范](bundles.md)。
 
 
 One model per file, explicit initialization and tensor origins. Released 0.2
@@ -14,8 +14,12 @@ Existing 0.1 examples remain unchanged.
 
 One statement per line; comments begin with `#`. Names are identifiers.
 A model needs a version header, `model name`, `input x: f32[N]`,
-`output y: f32[M]`, at least one parameter-bearing layer and `init seed=N`.
-Layers run in source order. Widths are checked before training.
+`output y: f32[M]`, at least one parameter-bearing layer and an explicit `init` statement.
+In 0.3, `init file="init.wgt" [seed=N]` and `init python="generate.py[:function]" [seed=N]`
+provide complete custom initialization; see [initialization](initialization.md).
+Layers run in source order; wgt 0.3 can name earlier tensor outputs with `from`.
+Shapes are checked before training. See [architecture composition](dataflow.md)
+for pipelines, branches, gates, repeated blocks and shared recurrent state.
 
 | Operator | Meaning | Version |
 |---|---|---|
@@ -47,7 +51,9 @@ init seed=42
 ```
 
 This example has untrained weights. See `examples/std_mlp.wgt` for training.
-Block arguments are named positive integers and must exactly match the signature.
+Block arguments are named finite numbers and must match the signature (including defaults).
+Dimension/count arguments still require positive integers at their consuming operators;
+floats and zero allow eps, probabilities and bias flags.
 Blocks contain only indented layer statements, may call other blocks, and cannot
 be empty, recursive or named after built-in operators. Missing parameters fail
 at their source line. A call expands into a nested sequence with stable names
@@ -64,7 +70,10 @@ Cycles are errors. Remote source libraries are not supported.
 `weightc std` lists the available block signatures.
 
 `layer skip: residual(nn.mlp(in=4, hidden=8, out=4))` adds the input to
-the block output. A bare operator such as `residual(linear(...))` is rejected.
+the block output. In 0.3, a pipeline such as `residual(linear(8) -> gelu -> linear(4))`
+is also accepted for an input width of 4. Its children use stable `stepN` names.
+See [source sugar signatures](reference.zh-CN.md) for tensor arithmetic, named-axis
+operations and positional linear. A bare operator such as `residual(linear(...))` is rejected.
 
 ## Data
 
@@ -141,7 +150,9 @@ Artifacts without training are useful for structure/loader tests, not prediction
 ## Limits
 
 No embedding, i64 ports, convolution, attention, general graph wiring,
-multidimensional feature shapes, GPU training controls or learning-rate schedules.
+multidimensional feature shapes or learning-rate schedules in the released language.
+Source builds support CPU/CUDA execution and parameter placement through
+CLI/Python configuration; see [devices](devices.md).
 
 
 ## wgt 0.3: sequences and images (main, unreleased)
@@ -191,6 +202,14 @@ for exact selectors, precedence, runnable workflows and limitations. The separat
 [revision store v1](specs/revision-v1.md) deduplicates unchanged weight chunks;
 checkout produces an unchanged standard artifact for existing consumers.
 
+## Architecture composition (main, unreleased)
+
+`wgt 0.3` supports `->` pipelines, `from` tensor references, `add`/`mul`/`concat`,
+soft `mix` gates, eager `where` selection, independent `repeat`, shared `recur`,
+and stateful sequence `scan`. See [dataflow.md](dataflow.md) for syntax,
+parameter-sharing rules, examples and explicit limitations.
+
+
 ## Named dimensions and transforms (wgt 0.3, local source)
 
 Ports may name sample axes, for example `input x: f32[time=8, feature=32]`.
@@ -218,3 +237,105 @@ imports, freezing and automatic compatible HEAD weight migration still run.
 See [build/migrate without training](architecture-reuse.md#buildmigrate-without-training)
 for migration rules, provenance and standalone output behavior. Without the flag,
 `build` continues to execute declared training.
+
+
+## Audited Transformer primitives (0.3, local)
+
+`linear` accepts optional `bias=0|1` (default 1); `layernorm` accepts `eps=1e-5`,
+`bias=1`, `affine=1`; `gelu(approximate=1)` selects tanh approximation (default 0).
+`embedding` accepts optional `padding_idx` in the vocabulary; the padding row has
+zero gradient, but does not create an attention mask. `self_attention` accepts
+`dropout=0` (training only). New `rmsnorm`, `scale` and `rope_attention` operators
+and `std/hf_decoder` blocks are described with full signatures in the
+[Chinese reference](reference.zh-CN.md) and [migration record](transformers-migration.md).
+RoPE attention currently has fixed zero-based positions and no external mask or cache.
+
+`rope_attention` 的 `qk_norm=2` 在拆头前对 Q/K 完整投影向量做 RMSNorm；
+模式 1 仍按每头归一化，0 禁用。标准库 `hf_decoder.olmo2_block` 使用模式 2，
+以及注意力与 FFN 输出端 RMSNorm 后的残差，完整签名见中文参考。
+
+
+## 可选动态 Torch 模型前端（0.3，本地未发布）
+
+`backend torch-dynamic` 提供 `module/setup/fn` 的 Python 兼容可执行模型源码，
+支持动态张量、多输入／输出和显式跨调用状态；它与静态 layer/block 图分开，
+`check --shapes` 只报告运行时契约，不提供静态形状证明。构造参数沿用对应 Torch 类，
+GRU 为 PyTorch reset-after。制品使用独立格式，加载须显式信任源码；Rust、静态导出、
+revision/自动复用不支持该格式。完整语法、参数、默认值、保存与验证边界见
+[动态张量程序](tensor-programs.md)。
+
+
+具名多输入/输出、bool 条件和显式 scan 初态已加入本地 0.3 静态图。
+返回字典与固定形状检查、制品 v4 及限制见 [端口契约](dataflow.md#named-tensor-boundaries-and-explicit-scan-state-03-localunreleased)。
+符号维度、KV cache 图端口和多状态循环仍未完成。
+
+
+本地 0.3 已新增 `dim NAME min=N max=M` 和 `require LEFT OP RIGHT`，用于同一具名模型
+接受有限范围内的运行时维度。每个符号需直接绑定某个输入轴，编译器检查所有合法组合，
+运行时先验证约束。制品 v5 保留表达式，详见 [有界维度及限制](dimensions.md#bounded-symbolic-dimensions-03-localunreleased)。
+这不代表通用动态形状、零长度 cache 或 KV/MoE 图端口已完成。
+
+
+## 张量原子、标量与空端口（0.3 本地增量）
+
+当前支持标量 `f32[]/i64[]/bool[]`、非负静态维度及 `dim P min=0 max=N`；
+新增 matmul、broadcast、cat/stack/slice、transpose_axes、reduce_sum/mean/max、
+gather/scatter_add、eq/lt 和 masked_softmax。归约可以输出标量，空 sum 为零；
+全 mask 的 softmax 行输出和梯度为零。0.3 允许无参数计算模型。
+Conv1d 支持 groups/dilation/causal 左填充。
+完整签名、参数默认值、形状/dtype、空集合边界、限制和例子见 [primitives](primitives.md)。
+这些规则替代前文历史增量中“所有端口正整数、禁止标量”的限制；
+KV/MoE 的显式结果端口、具名 block 返回和多状态 scan 见下节；完整精度策略仍未完成。
+
+The local 0.3 `recur(N, body, until=stop)` extension supports bounded stochastic
+early exit with shared parameters. See [dataflow](dataflow.md#probabilistic-early-exit-local-03-unreleased)
+for batching, probability contracts and nondifferentiable stopping semantics.
+
+## 具名结果、状态、配置与参数身份（0.3 本地增量）
+
+完整签名、默认值、限制、可运行例子与 Python API 见
+[组合契约](composition.md)。本次包含：
+
+- block 末尾 `return output=x field=y`，多实参通过 input/arg1/arg2 访问；结果通过层名.字段引用。
+- `scan_state(cell()) from sequence,state0,state1,...`；返回 output 和全部同形同类型状态，支持 T=0 和跨块梯度。
+- `rope_attention(...,ports=1) from x,mask,key,value` 返回 output/key/value；
+  `sparse_moe(...,ports=1)` 返回 output/aux。ports 默认为 0。
+- `parameter identity = layer.weight`、`share other.weight = identity`，以及按身份迁移和兼容性报告。
+- `config WIDTH: int default=4 min=2 max=16`（也支持 float/bool），Python config 覆盖和 package_model 固定源码。
+- `adapter task: lora target=projection rank=2 alpha=4 freeze=1`，合并/解除合并、独立适配器和完整模型保存。
+- 独立训练断点保存优化器、参数身份、RNG 和进度；与完整模型制品严格区分。
+
+以上替代此前增量中“cache/MoE/multi-state 尚未接入”的状态描述。仍不支持任意嵌套 Python
+返回对象、一般可选输入或任意动态形状；精度四部分契约与旧算子的完整统一 IR 尚未完成。
+
+## 条件与自适应计算增量（0.3，本地未发布）
+
+`route(branch0,branch1,...) from selector,x` 支持按样本真正选择执行路径；
+`recur(N,body,until=stop,compact=1)` 压缩活动样本；
+`ponder(N,body,until=stop)` 返回可微停止分布、每步状态和期望计算量，训练留在 Python。
+`resize2d`、`pad2d`、`avgpool2d` 支持多尺度空间组合。
+完整签名、默认值、约束、限制和可运行例子见 [adaptive-compute.md](adaptive-compute.md)。
+
+## Native tensor math and frontend unification (local 0.3)
+
+The declarative graph now includes square/rsqrt/exp/log/sin/cos/softplus,
+shift(value=V), and cumsum(axis=A), plus std/tensor_math.l2norm(eps=1e-6)
+and rms(eps=1e-6). See [complete contracts and example](primitives.md).
+These operations use f32 and do not implement a general precision policy.
+The [unification plan](migrations/unified-language.zh-CN.md) retains dynamic models
+in WGT; the legacy torch-dynamic frontend is still required until migration passes
+numerical, gradient and artifact checks. Unification is not yet complete.
+
+原生适配器还支持 `dora/pissa/qlora`；完整方法语义、NF4 存储边界及训练例子见 [适配器](adapters.md)。
+
+## Custom and mixed weight domains (0.3, local)
+
+`weighttype ternary = [-1, 0, 1]` declares a finite f32 codebook.
+`weight head.weight: ternary` applies it to a parameter; optional
+`axis=0 start=0 stop=2` applies it only to a half-open slice. Disjoint slices along
+one axis can mix different codebooks and untouched floating-point values.
+Forward uses nearest-value projection (lower value on ties); backward uses an
+identity STE on floating-point master parameters. Python owns training.
+See [complete contracts and runnable example](weight-types.md), including named
+outputs, shared parameters, artifact v7, and current limitations. This is not
+packed low-bit storage or an integer compute backend.

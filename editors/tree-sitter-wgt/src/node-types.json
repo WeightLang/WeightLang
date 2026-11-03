@@ -306,6 +306,14 @@
         "required": true,
         "types": [
           {
+            "type": "adapter",
+            "named": false
+          },
+          {
+            "type": "config",
+            "named": false
+          },
+          {
             "type": "data",
             "named": false
           },
@@ -326,7 +334,19 @@
             "named": false
           },
           {
+            "type": "parameter",
+            "named": false
+          },
+          {
             "type": "require",
+            "named": false
+          },
+          {
+            "type": "return",
+            "named": false
+          },
+          {
+            "type": "share",
             "named": false
           },
           {
@@ -751,6 +771,10 @@
     "named": false
   },
   {
+    "type": "adapter",
+    "named": false
+  },
+  {
     "type": "as",
     "named": false
   },
@@ -762,6 +786,10 @@
     "type": "comment",
     "named": true,
     "extra": true
+  },
+  {
+    "type": "config",
+    "named": false
   },
   {
     "type": "const",
@@ -824,7 +852,19 @@
     "named": false
   },
   {
+    "type": "parameter",
+    "named": false
+  },
+  {
     "type": "require",
+    "named": false
+  },
+  {
+    "type": "return",
+    "named": false
+  },
+  {
+    "type": "share",
     "named": false
   },
   {

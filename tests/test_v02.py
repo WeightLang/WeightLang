@@ -64,7 +64,7 @@ def test_version_and_unknown_std():
     with pytest.raises(WgtError, match="requires 'wgt 0.2'") as exc:
         parse(source("layer x: layernorm(dim=2)").replace("wgt 0.2", "wgt 0.1"))
     assert exc.value.line == 5
-    with pytest.raises(WgtError, match="available: std/blocks, std/heads, std/nn") as exc:
+    with pytest.raises(WgtError, match="available: std/blocks, std/heads, .*std/nn") as exc:
         parse(source(prefix="use std/missing\n"))
     assert exc.value.line == 2
 

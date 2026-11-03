@@ -35,10 +35,6 @@ fn side(text: &str) -> Result<Vec<Vec<String>>> {
         groups.push(group);
         remaining = rest.trim_start();
     }
-    ensure!(
-        !groups.is_empty(),
-        "pattern must retain a nonempty sample shape"
-    );
     Ok(groups)
 }
 

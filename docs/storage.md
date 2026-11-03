@@ -50,9 +50,14 @@ A model directory contains manifest.json, weights.safetensors, and source.wgt.
 Retain the complete directory. A safetensors file alone does not retain its
 interface or provenance.
 
-Ignore /weights/, /.cache/weightlang/, and /dist/ in Git. wgt new/init writes
-these entries when creating a new .gitignore; it preserves an existing ignore
-file. Sources, experiment definitions and dependency lockfiles remain versioned.
+`wgt new/init` installs default `.gitignore` rules for `weights/` (including
+`.revisions`), `checkpoints/`, common model files (`*.safetensors`, `*.pt`,
+`*.pth`, `*.ckpt`, `*.gguf`, `*.onnx`, `pytorch_model*.bin`, `model*.bin`,
+`adapter_model.bin`), local environments, caches and build/package outputs.
+Missing rules are prepended to an existing file, preserving its contents and
+the precedence of explicit user exceptions. Sources, experiment definitions
+and dependency lockfiles remain versioned. Ignore rules do not untrack files
+already committed or remove weights from existing Git history.
 Large cache/download/build operations must use a disk-backed filesystem:
 check the actual mount, including custom paths, before starting.
 Do not place large weights or datasets in /tmp, /dev/shm, or a tmpfs cache.

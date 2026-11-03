@@ -1,0 +1,16 @@
+wgt 0.3
+model conditional_route
+input choice: i64[]
+input x: f32[feature=4]
+output y: f32[feature=4] from selected
+
+block expert():
+  # 每个专家有独立的 [4] -> [8] -> [4] 权重；同一专家跨样本共享。
+  layer hidden: linear(8) -> gelu
+  layer result: linear(4)
+
+# 每样本的 choice 为 0、1 或 2：两个专家或恒等跳层。
+# 只计算被选中的样本/分支；输出回填到原始 batch 顺序。
+# choice 由显式张量输入提供，硬路由不对整数选择传梯度；这里只初始化。
+layer selected: route(expert(), expert(), identity) from choice,x
+init seed=42

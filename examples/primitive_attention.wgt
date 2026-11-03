@@ -1,0 +1,19 @@
+wgt 0.3
+model primitive_attention
+# Q 是查询长度，K 是外部记忆长度；K=0 表示尚无记忆。
+# 每个样本单独计算，Python 可统一添加一个 batch 维。
+dim Q min=1 max=4
+dim K min=0 max=8
+input queries: f32[Q,4]
+input keys: f32[K,4]
+input values: f32[K,3]
+input keep: bool[Q,K]
+output attended: f32[Q,3] from context
+# 显式转置和收缩避免隐含广播。没有可训练参数，输入由上游投影提供。
+layer kt: transpose_axes(axis1=0,axis2=1) from keys
+layer scores: matmul from queries,kt
+layer scaled: scale(factor=0.5)
+# true 表示保留；整行屏蔽时概率与梯度为零，不产生 NaN。
+layer probabilities: masked_softmax(axis=-1) from scaled,keep
+layer context: matmul from probabilities,values
+init seed=0

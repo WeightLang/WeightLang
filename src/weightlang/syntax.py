@@ -15,7 +15,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .diagnostics import WgtError, label as diagnostic_label, suggestion
 from .expressions import Expression, evaluate, logical_lines, parse_expression
+from .primitives import SPECS as PRIMITIVES
 
 LANGUAGE_VERSION = "0.3"
 SUPPORTED_VERSIONS = ("0.1", "0.2", "0.3")
@@ -26,6 +28,9 @@ PARAM_FREE_OPS = {"relu", "tanh", "sigmoid", "gelu", "silu", "softmax", "identit
 # Ops with arguments: name -> {arg: type}.
 ARG_OPS: dict[str, dict[str, type]] = {
     "linear": {"in": int, "out": int},
+    "rmsnorm": {"dim": int},
+    "scale": {"factor": float},
+    "rope_attention": {"dim": int, "heads": int, "kv_heads": int, "head_dim": int},
     "layernorm": {"dim": int},
     "dropout": {"p": float},
 }
@@ -38,6 +43,7 @@ _V03_OPS = {
     "globalavgpool2d",
     "meanpool",
     "flatten",
+    "last",
     "rearrange",
     "reduce",
 }
@@ -51,7 +57,7 @@ ARG_OPS.update(
     }
 )
 OP_DEFAULTS = {"self_attention": {"causal": 0}, "conv2d": {"stride": 1, "padding": 0}}
-PARAM_FREE_OPS |= {"globalavgpool2d", "meanpool", "flatten"}
+PARAM_FREE_OPS |= {"globalavgpool2d", "meanpool", "flatten", "last"}
 BUILTIN_OPS = PARAM_FREE_OPS | set(ARG_OPS) | {"rearrange", "reduce"}
 PARAM_OPS = {
     "linear",
@@ -61,10 +67,46 @@ PARAM_OPS = {
     "self_attention",
     "conv2d",
 }  # ops that own trainable tensors
-STRUCTURAL_OPS = {"seq", "residual"}  # produced by block calls and residual(...)
+GRAPH_OPS = {"add", "mul", "concat", "mix", "where"}
+LOOP_OPS = {"repeat", "recur", "scan", "scan_state", "ponder"}
+STRUCTURAL_OPS = {"seq", "residual", "recur", "scan", "scan_state", "ponder", "route"}  # produced by block calls and residual(...)
 LOSSES = {"mse", "bce", "cross_entropy"}
 OPTIMIZERS = {"sgd", "adam", "adamw"}
-DTYPES = {"f32", "i64"}
+DTYPES = {"f32", "i64", "bool"}
+
+# Optional fields do not alter legacy serialized defaults when omitted.
+OP_OPTIONALS = {
+    "linear": {"bias": int, "tie_embedding": int},
+    "layernorm": {"eps": float, "bias": int, "affine": int},
+    "gelu": {"approximate": int},
+    "rmsnorm": {"eps": float, "offset": float, "cast_after": int},
+    "rope_attention": {"ports": int, "theta": float, "eps": float, "qk_norm": int,
+                       "qkv_bias": int, "out_bias": int, "window": int, "dropout": float, "clip": float,
+                       "yarn_factor": float, "yarn_original": int, "yarn_fast": float,
+                       "yarn_slow": float, "attention_factor": float, "max_len": int, "flash": int, "norm_cast_after": int, "rope_fp32": int},
+    "self_attention": {"dropout": float},
+    "embedding": {"padding_idx": int},
+}
+_V03_OPS |= {"rmsnorm", "rope_attention", "scale"}
+PARAM_OPS |= {"rmsnorm", "rope_attention"}
+
+ARG_OPS["sparse_moe"] = {"dim": int, "hidden": int, "experts": int, "top_k": int}
+OP_OPTIONALS["sparse_moe"] = {"ports": int,"normalize": int, "aux_coef": float, "activation": int}
+BUILTIN_OPS.add("sparse_moe")
+_V03_OPS.add("sparse_moe")
+PARAM_OPS.add("sparse_moe")
+
+ARG_OPS.update({op: {k: float if spec.get('types', {}).get(k) == 'float' else int
+                     for k in spec['required']} for op, spec in PRIMITIVES.items()})
+OP_DEFAULTS.update({op: spec['defaults'] for op, spec in PRIMITIVES.items()})
+BUILTIN_OPS.update(PRIMITIVES)
+_V03_OPS.update(PRIMITIVES)
+
+ARG_OPS['conv1d'] = {k: int for k in ('in','out','kernel','stride','padding','dilation','groups','bias','causal')}
+OP_DEFAULTS['conv1d'] = dict(stride=1,padding=0,dilation=1,groups=1,bias=1,causal=0)
+BUILTIN_OPS.add('conv1d')
+PARAM_OPS.add('conv1d')
+_V03_OPS.add('conv1d')
 
 # Ops that need `wgt 0.2`.
 _V02_OPS = {"gelu", "silu", "softmax", "identity", "layernorm", "dropout"}
@@ -77,26 +119,12 @@ _TOKEN_RE = re.compile(
   | (?P<number>-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?(?![A-Za-z0-9_.]))
   | (?P<ident>[A-Za-z_][A-Za-z0-9_]*)
   | (?P<word>[A-Za-z0-9_]+)
-  | (?P<punct>//|[:=\[\](),./+*%\-])
+  | (?P<punct>==|!=|<=|>=|<|>|//|[:=\[\](),./+*%\-])
     """,
     re.VERBOSE,
 )
 
 
-class WgtError(Exception):
-    """A user-facing error, optionally tied to a source line."""
-
-    def __init__(self, message: str, line: int | None = None, path: str | None = None):
-        self.message = message
-        self.line = line
-        self.path = path
-        super().__init__(str(self))
-
-    def __str__(self) -> str:
-        where = self.path or "<source>"
-        if self.line is not None:
-            return f"{where}:{self.line}: {self.message}"
-        return f"{where}: {self.message}"
 
 
 Value = int | float | str | Expression  # str = reference to a block parameter
@@ -109,6 +137,7 @@ class Port:
     shape: tuple[int, ...]
     line: int
     axes: tuple[str | None, ...] = ()
+    shape_expr: tuple = ()
 
 
 @dataclass
@@ -121,6 +150,9 @@ class Spec:
     inner: Spec | None
     line: int
     path: str | None
+    inputs: list[str] = field(default_factory=list)
+    chain: list[Spec] = field(default_factory=list)
+    input_spans: list[tuple[int, int, int]] = field(default_factory=list)
 
 
 @dataclass
@@ -136,11 +168,22 @@ class Layer:
     block: str | None = None  # e.g. "std/nn.mlp" when produced by a block call
     input_spec: dict | None = None
     output_spec: dict | None = None
+    inputs: list[str] = field(default_factory=list)
+    frames: list[dict] = field(default_factory=list)
+    input_spans: list[tuple[int, int, int]] = field(default_factory=list)
+    results: dict = field(default_factory=dict)
+    returns: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d: dict = {"name": self.name, "op": self.op, "args": dict(self.args)}
         if self.op in STRUCTURAL_OPS:
             d["layers"] = [c.to_dict() for c in self.children]
+        if self.returns:
+            d["returns"] = self.returns
+        if self.results:
+            d["results"] = self.results
+        if self.inputs:
+            d["inputs"] = list(self.inputs)
         if self.block:
             d["block"] = self.block
         if self.input_spec is not None:
@@ -162,6 +205,7 @@ class Block:
     path: str | None
     scope: Scope | None = None
     defaults: dict[str, Value] = field(default_factory=dict)
+    returns: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -236,6 +280,7 @@ class Program:
     layers: list[Layer]
     datasets: dict[str, Dataset]
     seed: int
+    initializer: dict[str, str] = field(default_factory=dict)
     imports: list[ImportStmt] = field(default_factory=list)
     train: TrainStmt | None = None
     path: str | None = None
@@ -244,6 +289,19 @@ class Program:
     freezing: list[FreezeStmt] = field(default_factory=list)
     inherit: ImportStmt | None = None
     derivation: object | None = None
+    inputs: list[Port] = field(default_factory=list)
+    outputs: list[Port] = field(default_factory=list)
+    returns: dict[str, str] = field(default_factory=dict)
+    dimensions: dict = field(default_factory=dict)
+    constraints: list = field(default_factory=list)
+
+    weight_types: dict = field(default_factory=dict)
+    weight_assignments: list = field(default_factory=list)
+    adapters: dict = field(default_factory=dict)
+    config_schema: dict = field(default_factory=dict)
+    config_values: dict = field(default_factory=dict)
+    parameter_ids: dict[str, str] = field(default_factory=dict)
+    parameter_shares: dict[str, str] = field(default_factory=dict)
 
     def find(self, dotted: str) -> Layer | None:
         return find_layer(self.layers, dotted)
@@ -260,17 +318,24 @@ def find_layer(layers: list[Layer], dotted: str) -> Layer | None:
 # ---------------------------------------------------------------- tokens
 
 
+class _Tokens(list):
+    def __init__(self):
+        super().__init__()
+        self.spans = []
+
+
 def _tokenize(text: str, line: int, path: str | None) -> list[tuple[str, str]]:
-    tokens: list[tuple[str, str]] = []
+    tokens = _Tokens()
     pos = 0
     while pos < len(text):
         m = _TOKEN_RE.match(text, pos)
         if not m:
-            raise WgtError(f"unexpected character {text[pos]!r}", line, path)
+            raise WgtError(f"unexpected character {text[pos]!r}", line, path, code="E0100", labels=[diagnostic_label(path, line, column=pos + 1, end_column=pos + 2)])
         kind = m.lastgroup
         assert kind is not None
         if kind != "ws":
             tokens.append((kind, m.group()))
+            tokens.spans.append((line, m.start() + 1, m.end() + 1))
         pos = m.end()
     return tokens
 
@@ -296,8 +361,16 @@ class _Cursor:
         self.line = line
         self.path = path
 
-    def error(self, message: str) -> WgtError:
-        return WgtError(message, self.line, self.path)
+    def error(self, message: str, index=None) -> WgtError:
+        spans = getattr(self.tokens, "spans", [])
+        index = max(0, self.i - 1) if index is None else index
+        if spans:
+            line, column, end = spans[min(index, len(spans) - 1)]
+            if index >= len(spans):
+                column, end = end, end + 1
+            return WgtError(message, line, self.path, code="E0100",
+                            labels=[diagnostic_label(self.path, line, column=column, end_column=end)])
+        return WgtError(message, self.line, self.path, code="E0100")
 
     def peek(self) -> tuple[str, str] | None:
         return self.tokens[self.i] if self.i < len(self.tokens) else None
@@ -305,7 +378,7 @@ class _Cursor:
     def next(self, what: str) -> tuple[str, str]:
         tok = self.peek()
         if tok is None:
-            raise self.error(f"expected {what}, found end of line")
+            raise self.error(f"expected {what}, found end of line", self.i)
         self.i += 1
         return tok
 
@@ -335,7 +408,7 @@ class _Cursor:
     def done(self) -> None:
         tok = self.peek()
         if tok is not None:
-            raise self.error(f"unexpected {tok[1]!r} at end of statement")
+            raise self.error(f"unexpected {tok[1]!r} at end of statement", self.i)
 
     def at_end(self) -> bool:
         return self.peek() is None
@@ -345,18 +418,26 @@ def _number(text: str) -> int | float:
     return int(text) if re.fullmatch(r"-?\d+", text) else float(text)
 
 
-def _parse_port(cur: _Cursor, constants: dict[str, int | float]) -> tuple[str, str, tuple[int, ...], tuple[str | None, ...]]:
+def _parse_port(cur: _Cursor, constants: dict[str, int | float], dimensions=None) -> tuple[str, str, tuple[int, ...], tuple[str | None, ...], tuple]:
     name = cur.ident("port name")
     cur.expect("punct", ":")
     dtype = cur.ident("dtype")
     if dtype not in DTYPES:
-        raise cur.error(f"unsupported dtype {dtype!r}; WeightLang supports only f32 and i64 (i64 requires wgt 0.3)")
+        supported = "f32, i64 and bool" if cur.version == "0.3" else "f32"
+        raise cur.error(f"unsupported dtype {dtype!r}; WeightLang supports only {supported}")
     cur.expect("punct", "[")
+
+    expressions = []
 
     def dimension() -> int:
         if cur.version != "0.3":
             return cur.integer("dimension")
-        value = evaluate(parse_expression(cur), constants, cur.error)
+        expr = parse_expression(cur)
+        if dimensions:
+            from .symbolic import encode
+            expressions.append(encode(expr, constants, dimensions, cur.error))
+            return 1  # Concrete representative is selected by exhaustive checking.
+        value = evaluate(expr, constants, cur.error)
         if not isinstance(value, int):
             raise cur.error("dimension must be an integer")
         return value
@@ -375,15 +456,14 @@ def _parse_port(cur: _Cursor, constants: dict[str, int | float]) -> tuple[str, s
         axes.append(axis)
         return dimension()
 
-    dims = [named_dimension()]
+    dims = [] if cur.version == "0.3" and cur.peek() == ("punct", "]") else [named_dimension()]
     while cur.peek() == ("punct", ","):
         cur.next(",")
         dims.append(named_dimension())
     cur.expect("punct", "]")
-    cur.done()
-    if any(dim <= 0 for dim in dims):
-        raise cur.error("dimensions must be positive")
-    return name, dtype, tuple(dims), tuple(axes) if any(axes) else ()
+    if any(dim < (0 if cur.version == "0.3" else 1) for dim in dims):
+        raise cur.error("dimensions must be nonnegative in wgt 0.3")
+    return name, dtype, tuple(dims), tuple(axes) if any(axes) else (), tuple(expressions)
 
 
 def _parse_kv(cur: _Cursor) -> dict[str, str]:
@@ -415,17 +495,72 @@ def _parse_vector(cur: _Cursor) -> list[float]:
 
 
 def _parse_spec(cur: _Cursor) -> Spec:
+    first = _parse_atom(cur)
+    chain = [first]
+    while cur.peek() == ("arrow", "->"):
+        if cur.version != "0.3":
+            raise cur.error("pipelines require 'wgt 0.3'")
+        cur.next("->")
+        chain.append(_parse_atom(cur))
+    if len(chain) == 1:
+        return first
+    if any(item.inputs for item in chain):
+        raise cur.error("merge operations need named layers, not an inline pipeline")
+    return Spec("seq", None, {}, None, first.line, first.path, chain=chain)
+
+
+def _parse_atom(cur: _Cursor) -> Spec:
     line = cur.line
     name = cur.ident("layer operation or block")
+    if cur.peek() in {("punct", "+"), ("punct", "*")}:
+        if cur.version != "0.3":
+            raise cur.error("tensor arithmetic requires 'wgt 0.3'")
+        spans = [cur.tokens.spans[cur.i - 1]]
+        operator = cur.next("tensor operator")[1]
+        other = cur.dotted("tensor name")
+        spans.append(cur.tokens.spans[cur.i - 1])
+        if cur.peek() in {("punct", "+"), ("punct", "*")}:
+            raise cur.error("tensor arithmetic takes two names; use separate named layers for chained expressions")
+        return Spec("add" if operator == "+" else "mul", None, {}, None,
+                    line, cur.path, [name, other], input_spans=spans)
     ns = None
     if cur.peek() == ("punct", "."):
         cur.next(".")
         ns, name = name, cur.ident("block name")
     args: dict[str, Value] = {}
     inner = None
+    inputs = []
+    input_spans = []
+    if ns is None and name in GRAPH_OPS | LOOP_OPS | {"route"} and cur.version != "0.3":
+        raise cur.error(f"{name} requires 'wgt 0.3'")
     if cur.peek() == ("punct", "("):
         cur.next("(")
-        if ns is None and name in {"rearrange", "reduce"}:
+        if ns is None and name in {"mean", "sum", "transpose"}:
+            if cur.version != "0.3":
+                raise cur.error("named axis shorthand requires 'wgt 0.3'")
+            if name == "transpose":
+                names = [cur.ident("axis name")]
+                while cur.peek() == ("punct", ","):
+                    cur.next(",")
+                    if cur.peek() == ("punct", ")"):
+                        break
+                    names.append(cur.ident("axis name"))
+                args["axes"] = " ".join(names)
+            else:
+                cur.expect("ident", "axis")
+                cur.expect("punct", "=")
+                args["axis"] = cur.ident("axis name")
+                if cur.peek() == ("punct", ","):
+                    cur.next(",")
+        elif ns is None and name == "linear" and cur.peek() != ("punct", ")") and cur.tokens[cur.i + 1:cur.i + 2] != [("punct", "=")]:
+            if cur.version != "0.3":
+                raise cur.error("positional linear requires 'wgt 0.3'")
+            args["out"] = parse_expression(cur)
+            if cur.peek() == ("punct", ","):
+                cur.next(",")
+            if cur.peek() != ("punct", ")"):
+                raise cur.error("linear(out) takes one positional argument; use named arguments for other options")
+        elif ns is None and name in {"rearrange", "reduce"}:
             if cur.version != "0.3":
                 raise cur.error(f"{name} requires 'wgt 0.3'")
             args["pattern"] = cur.expect("string", what="quoted axis pattern")[1:-1]
@@ -440,6 +575,41 @@ def _parse_spec(cur: _Cursor) -> Spec:
                 args[key] = cur.ident("mean or sum") if name == "reduce" and key == "op" else parse_expression(cur)
             if name == "reduce" and args.get("op") not in {"mean", "sum"}:
                 raise cur.error("reduce requires op=mean or op=sum")
+        elif ns is None and name in GRAPH_OPS:
+            while cur.peek() != ("punct", ")"):
+                inputs.append(cur.dotted("tensor name"))
+                input_spans.append(cur.tokens.spans[cur.i - 1])
+                if cur.peek() != ("punct", ","):
+                    break
+                cur.next(",")
+        elif ns is None and name == "route":
+            branches = [_parse_spec(cur)]
+            while cur.peek() == ("punct", ","):
+                cur.next(",")
+                branches.append(_parse_spec(cur))
+            cur.expect("punct", ")")
+            if len(branches) < 2:
+                raise cur.error("route needs at least two branches")
+            return Spec("route", None, {}, None, line, cur.path, chain=branches)
+        elif ns is None and name == "scan_state":
+            inner = _parse_spec(cur)
+        elif ns is None and name in LOOP_OPS:
+            key = "hidden" if name == "scan" else "steps"
+            if name == "scan":
+                cur.expect("ident", "hidden")
+                cur.expect("punct", "=")
+            args[key] = parse_expression(cur)
+            cur.expect("punct", ",")
+            inner = _parse_spec(cur)
+            while cur.peek() == ("punct", ","):
+                cur.next(",")
+                if cur.peek() == ("punct", ")"):
+                    break
+                option = cur.ident("loop option")
+                if name not in {"recur", "ponder"} or option not in ({"until", "compact"} if name == "recur" else {"until"}) or option in args:
+                    raise cur.error("invalid or duplicate loop option")
+                cur.expect("punct", "=")
+                args[option] = cur.ident("stop probability layer") if option == "until" else parse_expression(cur)
         elif name == "residual" and ns is None:
             inner = _parse_spec(cur)
         else:
@@ -455,7 +625,29 @@ def _parse_spec(cur: _Cursor) -> Spec:
         cur.expect("punct", ")")
     elif name == "residual" and ns is None:
         raise cur.error("residual needs a block: residual(<block>(...))")
-    return Spec(name, ns, args, inner, line, cur.path)
+    if ns is None and name == "linear" and "in" not in args and cur.version != "0.3":
+        raise cur.error("linear requires in and out; inferred input width requires 'wgt 0.3'")
+    if ns is None and cur.version != "0.3" and set(args) & set(OP_OPTIONALS.get(name, {})):
+        raise cur.error("extended operator options require wgt 0.3")
+    spec = Spec(name, ns, args, inner, line, cur.path, inputs, input_spans=input_spans)
+    return spec
+
+
+def _parse_layer_spec(cur):
+    spec = _parse_spec(cur)
+    if cur.peek() == ("ident", "from"):
+        if cur.version != "0.3":
+            raise cur.error("tensor references require 'wgt 0.3'")
+        if spec.inputs:
+            raise cur.error("merge operations already specify their inputs")
+        cur.next("from")
+        spec.inputs = [cur.dotted("tensor name")]
+        spec.input_spans = [cur.tokens.spans[cur.i - 1]]
+        while cur.peek() == ("punct", ","):
+            cur.next(",")
+            spec.inputs.append(cur.dotted("tensor name"))
+            spec.input_spans.append(cur.tokens.spans[cur.i - 1])
+    return spec
 
 
 # ---------------------------------------------------------------- files
@@ -464,7 +656,7 @@ def _parse_spec(cur: _Cursor) -> Spec:
 class _FileParser:
     """Parses one file into a Scope plus, for model files, the model statements."""
 
-    def __init__(self, source: str, path: str | None, loader: _Loader, *, library: bool):
+    def __init__(self, source: str, path: str | None, loader: _Loader, *, library: bool, config=None):
         self.source = source
         self.path = path
         self.loader = loader
@@ -473,14 +665,52 @@ class _FileParser:
         self.version: str | None = None
         self.model: str | None = None
         self.ports: dict[str, Port] = {}
+        self.named_ports = {"input": [], "output": []}
+        self.returns = {}
+        self.dimensions = {}
+        self.constraints = []
+        self.weight_types = {}
+        self.weight_assignments = []
+        self.adapters = {}
+        self.config_overrides = dict(config or {})
+        self.config_schema = {}
+        self.config_values = {}
+        self.parameter_ids = {}
+        self.parameter_shares = {}
         self.layer_specs: list[tuple[str, Spec]] = []
         self.datasets: dict[str, Dataset] = {}
         self.seed: int | None = None
+        self.initializer: dict[str, str] = {}
         self.imports: list[ImportStmt] = []
         self.train: TrainStmt | None = None
         self.freezing: list[FreezeStmt] = []
         self.inherit: ImportStmt | None = None
         self.uses: dict[str, str] = {}
+
+    def cursor(self, text, lineno):
+        positions = []
+        for index, raw in enumerate(self.source.splitlines()[lineno - 1:], lineno):
+            segment = _strip_comment(raw)
+            offset = 0 if index == lineno else len(segment) - len(segment.lstrip())
+            segment = segment if index == lineno else segment.strip()
+            if positions:
+                positions.append((index, offset + 1))
+            positions.extend((index, offset + col + 1) for col in range(len(segment)))
+            if len(positions) >= len(text):
+                break
+        try:
+            tokens = _tokenize(text, lineno, self.path)
+        except WgtError as exc:
+            if exc.labels:
+                index = exc.labels[0]["column"] - 1
+                if index < len(positions):
+                    line, column = positions[index]
+                    exc.line = line
+                    exc.labels = [diagnostic_label(self.path, line, column=column, end_column=column + 1)]
+            raise
+        tokens.spans = [(positions[start - 1][0], positions[start - 1][1],
+                         positions[end - 2][1] + 1) for _, start, end in tokens.spans]
+        return _Cursor(tokens, lineno, self.path)
 
     def need_v02(self, what: str, line: int) -> None:
         if self.version == "0.1":
@@ -497,7 +727,7 @@ class _FileParser:
             if not text.strip():
                 continue
             if text[0] in " \t":
-                cur = _Cursor(_tokenize(text, lineno, self.path), lineno, self.path)
+                cur = self.cursor(text, lineno)
                 cur.version = self.version
                 if open_data is not None:
                     x = _parse_vector(cur)
@@ -507,10 +737,26 @@ class _FileParser:
                     open_data.inputs.append(x)
                     open_data.targets.append(y)
                 elif open_block is not None:
-                    cur.expect("ident", "layer", what="'layer' (only layers belong in a block)")
+                    if cur.peek() == ('ident','return'):
+                        if self.version != '0.3' or open_block.returns:
+                            raise cur.error('block return requires 0.3 and must occur once')
+                        cur.next('return')
+                        while not cur.at_end():
+                            field = cur.ident('result name')
+                            cur.expect('punct','=')
+                            ref = cur.dotted('result tensor')
+                            if field in open_block.returns:
+                                raise cur.error('duplicate block result')
+                            open_block.returns[field] = ref
+                        if 'output' not in open_block.returns:
+                            raise cur.error('block return requires output=<tensor>')
+                        continue
+                    if open_block.returns:
+                        raise cur.error('block return must be the final statement')
+                    cur.expect("ident", "layer", what="'layer' or 'return'")
                     name = cur.ident("layer name")
                     cur.expect("punct", ":")
-                    spec = _parse_spec(cur)
+                    spec = _parse_layer_spec(cur)
                     cur.done()
                     if any(n == name for n, _ in open_block.body):
                         raise cur.error(f"duplicate layer name {name!r} in block {open_block.name!r}")
@@ -524,7 +770,7 @@ class _FileParser:
                 raise WgtError(f"block {open_block.name!r} has no layers", open_block.line, self.path)
             open_data = None
             open_block = None
-            cur = _Cursor(_tokenize(text, lineno, self.path), lineno, self.path)
+            cur = self.cursor(text, lineno)
             cur.version = self.version
             keyword = cur.ident("statement keyword")
             if self.version is None and keyword != "wgt":
@@ -562,6 +808,109 @@ class _FileParser:
             raise cur.error("library files require 'wgt 0.2'")
         self.version = version
 
+    def _stmt_weighttype(self, cur: _Cursor, line: int) -> None:
+        if self.version != "0.3":
+            raise cur.error("weighttype requires wgt 0.3")
+        name = cur.ident("weight type name")
+        cur.expect("punct", "=")
+        cur.expect("punct", "[")
+        values = []
+        while True:
+            values.append(evaluate(parse_expression(cur), self.scope.constants, cur.error))
+            token = cur.next("',' or ']'")
+            if token == ("punct", "]"):
+                break
+            if token != ("punct", ","):
+                raise cur.error("weighttype values must be separated by commas")
+        cur.done()
+        if name in self.weight_types:
+            raise cur.error("duplicate weighttype")
+        from .weight_types import validate_types
+        try:
+            self.weight_types.update(validate_types({name: values}))
+        except ValueError as exc:
+            raise cur.error(str(exc)) from None
+
+    def _stmt_weight(self, cur: _Cursor, line: int) -> None:
+        if self.version != "0.3":
+            raise cur.error("weight requires wgt 0.3")
+        target = cur.dotted("parameter path")
+        cur.expect("punct", ":")
+        spec = {"target": target, "type": cur.ident("weight type name")}
+        while not cur.at_end():
+            key = cur.ident("slice option")
+            if key not in {"axis", "start", "stop"} or key in spec:
+                raise cur.error("weight slice options are axis/start/stop, each once")
+            cur.expect("punct", "=")
+            spec[key] = evaluate(parse_expression(cur), self.scope.constants, cur.error)
+        self.weight_assignments.append(spec)
+
+    def _stmt_adapter(self, cur: _Cursor, line: int) -> None:
+        if self.version != "0.3":
+            raise cur.error("adapter requires wgt 0.3")
+        name = cur.ident("adapter name")
+        cur.expect("punct", ":")
+        method = cur.ident("adapter method")
+        if method not in ("lora", "dora", "pissa", "qlora"):
+            raise cur.error("unknown adapter method")
+        args = {'freeze':1}
+        seen = set()
+        while not cur.at_end():
+            key = cur.ident("adapter option")
+            cur.expect("punct", "=")
+            if key in seen:
+                raise cur.error("duplicate adapter option")
+            seen.add(key)
+            args[key] = cur.dotted("target layer") if key == 'target' else evaluate(parse_expression(cur),self.scope.constants,cur.error)
+        if name in self.adapters or set(args) != {'target','rank','alpha','freeze'}:
+            raise cur.error("adapter needs a unique name, target/rank/alpha and optional freeze=1")
+        if method != "lora":
+            args["method"] = method
+        self.adapters[name] = args
+
+    def _stmt_config(self, cur: _Cursor, line: int) -> None:
+        if self.version != "0.3" or self.ports or self.layer_specs:
+            raise cur.error("config requires wgt 0.3 and must precede ports and layers")
+        name = cur.ident("configuration name")
+        cur.expect("punct", ":")
+        kind = cur.ident("configuration type")
+        options = _parse_kv(cur)
+        if name in self.scope.constants or name in self.dimensions:
+            raise cur.error("duplicate configuration/constant/dimension")
+        from .configuration import validate
+        try:
+            default = options['default']
+            value = {'int':int,'float':float,'bool':lambda v:v == 'true'}[kind](default)
+            validate(name,kind,options,value)
+            value = validate(name,kind,options,self.config_overrides.get(name,value))
+        except (ValueError,KeyError,OverflowError) as exc:
+            raise cur.error(f"invalid config {name}: {exc}") from None
+        self.config_schema[name] = dict(type=kind,**options,line=line,end_line=cur.tokens.spans[-1][0])
+        self.config_values[name] = value
+        self.scope.constants[name] = int(value) if type(value) is bool else value
+
+    def _stmt_parameter(self, cur: _Cursor, line: int) -> None:
+        if self.version != "0.3":
+            raise cur.error("parameter requires wgt 0.3")
+        name = cur.ident("parameter identity")
+        cur.expect("punct", "=")
+        path = cur.dotted("parameter path")
+        cur.done()
+        if name in self.parameter_ids:
+            raise cur.error("duplicate parameter identity")
+        self.parameter_ids[name] = path
+
+    def _stmt_share(self, cur: _Cursor, line: int) -> None:
+        if self.version != "0.3":
+            raise cur.error("share requires wgt 0.3")
+        path = cur.dotted("parameter destination")
+        cur.expect("punct", "=")
+        name = cur.ident("parameter identity")
+        cur.done()
+        if path in self.parameter_shares:
+            raise cur.error("duplicate shared destination")
+        self.parameter_shares[path] = name
+
     def _stmt_const(self, cur: _Cursor, line: int) -> None:
         if self.version != "0.3":
             raise cur.error("const requires 'wgt 0.3'")
@@ -569,9 +918,44 @@ class _FileParser:
         cur.expect("punct", "=")
         value = parse_expression(cur)
         cur.done()
-        if name in self.scope.constants:
-            raise cur.error(f"duplicate constant {name!r}")
+        if name in self.scope.constants or name in self.dimensions:
+            raise cur.error(f"duplicate constant/dimension {name!r}")
         self.scope.constants[name] = evaluate(value, self.scope.constants, cur.error)
+
+    def _stmt_dim(self, cur: _Cursor, line: int) -> None:
+        if self.version != "0.3" or self.ports:
+            raise cur.error("dim requires wgt 0.3 and must precede all ports")
+        name = cur.ident("dimension name")
+        options = _parse_kv(cur)
+        if set(options) != {"min", "max"} or any(not re.fullmatch(r"[0-9]+", v) for v in options.values()):
+            raise cur.error("dim requires min=<nonnegative integer> max=<nonnegative integer>")
+        if name in self.scope.constants or name in self.dimensions:
+            raise cur.error(f"duplicate constant/dimension {name!r}")
+        bounds = {k: int(v) for k, v in options.items()}
+        if not 0 <= bounds["min"] <= bounds["max"] <= 2147483647:
+            raise cur.error("dimension bounds require 0 <= min <= max <= 2147483647")
+        self.dimensions[name] = bounds
+
+    def _stmt_require(self, cur: _Cursor, line: int) -> None:
+        from .symbolic import encode
+        if self.version != "0.3" or not (self.dimensions or self.scope.constants):
+            raise cur.error("require needs declared dimensions or constants in wgt 0.3")
+        left = encode(parse_expression(cur), self.scope.constants, self.dimensions, cur.error)
+        comparison = cur.expect("punct", what="integer comparison")
+        if comparison not in ("==", "!=", "<", "<=", ">", ">="):
+            raise cur.error("require expects == != < <= > >=")
+        right = encode(parse_expression(cur), self.scope.constants, self.dimensions, cur.error)
+        cur.done()
+        if self.dimensions:
+            self.constraints.append([comparison, left, right])
+        else:
+            from .symbolic import DimensionContract
+            try:
+                valid = DimensionContract.satisfies([[comparison,left,right]],{})
+            except ValueError as exc:
+                raise cur.error(str(exc)) from None
+            if not valid:
+                raise cur.error("configuration integer constraint failed")
 
     def _stmt_model(self, cur: _Cursor, line: int) -> None:
         if self.model is not None:
@@ -586,17 +970,27 @@ class _FileParser:
         self._port("output", cur, line)
 
     def _port(self, kind: str, cur: _Cursor, line: int) -> None:
-        if kind in self.ports:
+        if kind in self.ports and self.version != "0.3":
             raise cur.error(f"only one {kind} is supported")
-        name, dtype, shape, axes = _parse_port(cur, self.scope.constants)
+        name, dtype, shape, axes, shape_expr = _parse_port(cur, self.scope.constants, self.dimensions)
         if self.version != "0.3" and (dtype != "f32" or len(shape) != 1):
             raise cur.error("only 1-D f32 ports in this version; this interface requires 'wgt 0.3'")
-        self.ports[kind] = Port(name, dtype, shape, line, axes)
+        if any(p.name == name for ports in self.named_ports.values() for p in ports):
+            raise cur.error(f"duplicate port name {name!r}; input and output must have different names")
+        if kind == "output" and cur.peek() == ("ident", "from"):
+            if self.version != "0.3":
+                raise cur.error("output references require 'wgt 0.3'")
+            cur.next("from")
+            self.returns[name] = cur.dotted("output tensor reference")
+        cur.done()
+        port = Port(name, dtype, shape, line, axes, shape_expr)
+        self.named_ports[kind].append(port)
+        self.ports.setdefault(kind, port)
 
     def _stmt_layer(self, cur: _Cursor, line: int) -> None:
         name = cur.ident("layer name")
         cur.expect("punct", ":")
-        spec = _parse_spec(cur)
+        spec = _parse_layer_spec(cur)
         cur.done()
         if any(n == name for n, _ in self.layer_specs):
             raise cur.error(f"duplicate layer name {name!r}")
@@ -650,7 +1044,7 @@ class _FileParser:
         cur.expect("punct", ")")
         cur.expect("punct", ":")
         cur.done()
-        if name in BUILTIN_OPS or name == "residual":
+        if name in BUILTIN_OPS | GRAPH_OPS | LOOP_OPS | STRUCTURAL_OPS:
             raise cur.error(f"block name {name!r} shadows a built-in op")
         if name in self.scope.blocks:
             raise cur.error(f"duplicate block {name!r}")
@@ -704,9 +1098,21 @@ class _FileParser:
         if self.seed is not None:
             raise cur.error("duplicate init statement")
         kv = _parse_kv(cur)
-        if set(kv) != {"seed"} or not kv["seed"].isdigit():
-            raise cur.error("init requires exactly seed=<non-negative int>")
-        self.seed = int(kv["seed"])
+        if set(kv) - {"seed", "file", "python"} or not kv:
+            raise cur.error("init accepts seed=, file= or python=")
+        sources = set(kv) & {"file", "python"}
+        if len(sources) > 1 or any(not kv[key] for key in sources):
+            raise cur.error("init requires one non-empty file= or python= source")
+        if sources and self.version != "0.3":
+            raise cur.error("custom initialization requires 'wgt 0.3'")
+        seed = kv.get("seed", "0")
+        if not seed.isdigit() or int(seed) >= 2**64:
+            raise cur.error("init seed must be an integer in [0, 2**64)")
+        self.seed = int(seed)
+        self.initializer = {key: kv[key] for key in sources}
+        if "file" in sources:
+            from .initialization import read_rules
+            read_rules(self.initializer["file"], self.path)
 
     def _stmt_import(self, cur: _Cursor, line: int) -> None:
         if cur.tokens[cur.i:cur.i + 2] == [("ident", "std"), ("punct", "/")]:
@@ -866,14 +1272,93 @@ def _value(v: Value, env: dict[str, int | float], spec: Spec) -> int | float:
     return evaluate(v, env, lambda message: WgtError(message, spec.line, spec.path))
 
 
-def _resolve(name: str, spec: Spec, scope: Scope, env: dict[str, int | float], stack: tuple[str, ...]) -> Layer:
+def _resolve(name: str, spec: Spec, scope: Scope, env: dict[str, int | float], stack: tuple[str, ...], budget: list[int] | None = None) -> Layer:
+    if budget is None:
+        budget = [0]
+    budget[0] += 1
+    if budget[0] > 10000 or len(stack) > 64:
+        raise WgtError("architecture expansion exceeds 10000 nodes or 64 nested blocks", spec.line, spec.path)
+    try:
+        layer = _resolve_body(name, spec, scope, env, stack, budget)
+    except WgtError as exc:
+        if (spec.ns is not None or spec.op in scope.blocks) and (exc.path, exc.line) != (spec.path, spec.line):
+            if not exc.labels and exc.line:
+                exc.labels.append(diagnostic_label(exc.path, exc.line, exc.message))
+            exc.labels.append(diagnostic_label(spec.path, spec.line, f"while expanding `{name}: {spec.op}`"))
+        raise
+    layer.inputs = list(spec.inputs)
+    layer.input_spans = list(spec.input_spans)
+    if layer.block:
+        frame = diagnostic_label(spec.path, spec.line, f"while expanding `{name}: {layer.block}`")
+        def annotate(children):
+            for child in children:
+                child.frames.append(frame)
+                annotate(child.children)
+        annotate(layer.children)
+    return layer
+
+
+def _resolve_body(name: str, spec: Spec, scope: Scope, env: dict[str, int | float], stack: tuple[str, ...], budget: list[int]) -> Layer:
     env = {**scope.constants, **env}
+    if spec.op == "route" and spec.ns is None:
+        children = [_resolve(f"branch{i}", child, scope, env, stack, budget) for i, child in enumerate(spec.chain)]
+        return Layer(name, "route", {}, spec.line, spec.path, children)
+    if spec.chain:
+        children = [_resolve(f"step{i}", child, scope, env, stack, budget) for i, child in enumerate(spec.chain)]
+        return Layer(name, "seq", {}, spec.line, spec.path, children)
+    if spec.ns is None and spec.op in GRAPH_OPS:
+        expected = 3 if spec.op in ("mix", "where") else 2
+        if len(spec.inputs) < expected or (spec.op in ("mix", "where") and len(spec.inputs) != 3):
+            raise WgtError(f"{spec.op} needs {'exactly' if expected == 3 else 'at least'} {expected} tensor names", spec.line, spec.path)
+        return Layer(name, spec.op, {}, spec.line, spec.path)
+    if spec.ns is None and spec.op == 'scan_state':
+        if spec.inner is None:
+            raise WgtError('scan_state needs a block call',spec.line,spec.path)
+        child = _resolve('cell',spec.inner,scope,env,stack,budget)
+        if child.op != 'seq' or not child.returns:
+            raise WgtError('scan_state needs a block with an explicit return',spec.line,spec.path)
+        return Layer(name,'scan_state',{},spec.line,spec.path,child.children,returns=child.returns)
+    if spec.ns is None and spec.op in LOOP_OPS:
+        key = "hidden" if spec.op == "scan" else "steps"
+        value = _value(spec.args.get(key, 0), env, spec)
+        if type(value) is not int or (value < 1 or (key == "steps" and value > 1024)) or spec.inner is None:
+            raise WgtError(f"{spec.op} {key} must be a positive integer (steps <= 1024) and needs a body", spec.line, spec.path)
+        if spec.op == "repeat":
+            children = [_resolve(f"step{i}", spec.inner, scope, env, stack, budget) for i in range(value)]
+            for index, child in enumerate(children):
+                if child.inputs:
+                    # Each repetition has its own input scope, including a bare merge body.
+                    original_name = child.name
+                    child.name = "value"
+                    children[index] = Layer(original_name, "seq", {}, spec.line, spec.path, [child])
+            return Layer(name, "seq", {}, spec.line, spec.path, children)
+        child = _resolve("cell", spec.inner, scope, env, stack, budget)
+        if spec.op == "scan" and child.op != "seq":
+            raise WgtError("scan needs a block call", spec.line, spec.path)
+        # The cell's children live directly under the loop, keeping weight paths short.
+        children = child.children if child.op == "seq" else [child]
+        options = {key: value, **({"until": spec.args["until"]} if "until" in spec.args else {})}
+        if spec.op == "ponder" and "until" not in options:
+            raise WgtError("ponder requires until=probability_layer", spec.line, spec.path)
+        if "compact" in spec.args:
+            compact = _value(spec.args["compact"], env, spec)
+            if type(compact) is not int or compact not in (0, 1) or "until" not in options:
+                raise WgtError("compact must be 0 or 1 and requires until", spec.line, spec.path)
+            options["compact"] = compact
+        if child.returns:
+            raise WgtError("recur/ponder/scan body must return a single tensor; use scan_state for records", spec.line, spec.path)
+        return Layer(name, spec.op, options, spec.line, spec.path, children)
     if spec.op == "residual" and spec.ns is None:
         assert spec.inner is not None
-        inner = _resolve(name, spec.inner, scope, env, stack)
+        inner = _resolve(name, spec.inner, scope, env, stack, budget)
         if inner.op != "seq":
-            raise WgtError("residual(...) takes a block call, e.g. residual(nn.mlp(...))", spec.line, spec.path)
+            raise WgtError("residual(...) takes a block call or pipeline, e.g. residual(linear(out=8) -> relu)", spec.line, spec.path)
         return Layer(name, "residual", {}, spec.line, spec.path, inner.children, inner.block)
+
+    if spec.ns is None and spec.op in {"mean", "sum", "transpose"}:
+        if not spec.args:
+            raise WgtError(f"{spec.op} requires named axes", spec.line, spec.path)
+        return Layer(name, spec.op, dict(spec.args), spec.line, spec.path)
 
     if spec.ns is None and spec.op in {"rearrange", "reduce"}:
         if "pattern" not in spec.args:
@@ -887,26 +1372,7 @@ def _resolve(name: str, spec: Spec, scope: Scope, env: dict[str, int | float], s
         return Layer(name, spec.op, args, spec.line, spec.path)
     if spec.ns is None and spec.op in BUILTIN_OPS:
         args = {**OP_DEFAULTS.get(spec.op, {}), **{k: _value(v, env, spec) for k, v in spec.args.items()}}
-        signature = ARG_OPS.get(spec.op, {})
-        if spec.op == "linear" and "in" not in args:
-            signature = {"out": int}
-        if set(args) != set(signature):
-            if not signature:
-                raise WgtError(f"{spec.op} takes no arguments", spec.line, spec.path)
-            want = ", ".join(f"{k}=<{t.__name__}>" for k, t in signature.items())
-            raise WgtError(f"{spec.op} requires exactly ({want})", spec.line, spec.path)
-        for k, t in signature.items():
-            if t is int:
-                minimum = 0 if k in ("padding", "causal") else 1
-                if not isinstance(args[k], int) or args[k] < minimum:
-                    raise WgtError(f"{spec.op} {k} must be a positive integer", spec.line, spec.path)
-            else:
-                args[k] = float(args[k])
-        if spec.op == "self_attention":
-            if args["dim"] % args["heads"] or args["causal"] not in (0, 1):
-                raise WgtError("self_attention needs dim divisible by heads and causal=0 or 1", spec.line, spec.path)
-        if spec.op == "dropout" and not 0 <= args["p"] < 1:
-            raise WgtError("dropout p must be in [0, 1)", spec.line, spec.path)
+        args = _checked_operator_args(spec.op, args, spec.line, spec.path)
         return Layer(name, spec.op, args, spec.line, spec.path)
 
     # Block call.
@@ -917,6 +1383,8 @@ def _resolve(name: str, spec: Spec, scope: Scope, env: dict[str, int | float], s
                 f"unknown layer operation or block {spec.op!r}; built-in ops: {', '.join(sorted(BUILTIN_OPS))}",
                 spec.line,
                 spec.path,
+                code="E0201", labels=[diagnostic_label(spec.path, spec.line, "unknown operation", needle=spec.op)],
+                help=suggestion(spec.op, BUILTIN_OPS | GRAPH_OPS | LOOP_OPS | set(target.blocks)),
             )
     else:
         if spec.ns not in scope.uses:
@@ -939,18 +1407,85 @@ def _resolve(name: str, spec: Spec, scope: Scope, env: dict[str, int | float], s
         raise WgtError(
             f"block {block.name} takes ({', '.join(block.params)}), got ({', '.join(args)})", spec.line, spec.path
         )
-    int_args: dict[str, int] = {}
+    block_args: dict[str, int | float] = {}
     for k in block.params:
         v = args[k] if k in args else evaluate(
-            block.defaults[k], {**target.constants, **int_args},
+            block.defaults[k], {**target.constants, **block_args},
             lambda message: WgtError(message, block.line, block.path),
         )
-        if not isinstance(v, int) or v <= 0:
-            raise WgtError(f"block parameter {k} must be a positive integer", spec.line, spec.path)
-        int_args[k] = v
+        if type(v) not in (int, float) or not math.isfinite(v):
+            raise WgtError(f"block parameter {k} must be a finite number", spec.line, spec.path)
+        block_args[k] = v
     assert block.scope is not None
-    children = [_resolve(lname, lspec, block.scope, int_args, stack + (label,)) for lname, lspec in block.body]
-    return Layer(name, "seq", {}, spec.line, spec.path, children, label)
+    children = [_resolve(lname, lspec, block.scope, block_args, stack + (label,), budget) for lname, lspec in block.body]
+    return Layer(name, "seq", {}, spec.line, spec.path, children, label, returns=dict(block.returns))
+
+
+def _checked_operator_args(op, args, line, path):
+    """One validation path for parsed sources and serialized architecture records."""
+    if op in PRIMITIVES:
+        from .primitives import arguments
+        try:
+            return arguments(op, args)
+        except ValueError as exc:
+            raise WgtError(str(exc), line, path) from None
+    args = dict(args)
+    signature = dict(ARG_OPS.get(op, {}))
+    if op == "linear" and "in" not in args:
+        signature = {"out": int}
+    signature.update({k: t for k, t in OP_OPTIONALS.get(op, {}).items() if k in args})
+    if set(args) != set(signature):
+        if not signature:
+            raise WgtError(f"{op} takes no arguments", line, path)
+        want = ", ".join(f"{k}=<{t.__name__}>" for k, t in signature.items())
+        raise WgtError(f"{op} requires exactly ({want})", line, path)
+    for k, t in signature.items():
+        if t is int:
+            minimum = 0 if k in ("ports", "padding", "causal", "bias", "approximate", "qk_norm", "qkv_bias", "out_bias", "window", "affine", "padding_idx", "tie_embedding", "normalize", "activation", "flash", "cast_after", "norm_cast_after", "rope_fp32") else 1
+            if type(args[k]) is not int or args[k] < minimum:
+                raise WgtError(f"{op} {k} must be a positive integer", line, path)
+        else:
+            if type(args[k]) not in (int, float) or not math.isfinite(args[k]):
+                raise WgtError(f"{op} {k} must be a finite number", line, path)
+            args[k] = float(args[k])
+    if "qk_norm" in args and args["qk_norm"] not in (0, 1, 2):
+        raise WgtError("rope_attention qk_norm must be 0, 1 or 2", line, path)
+    for key in ("ports", "bias", "approximate", "qkv_bias", "out_bias", "affine", "normalize", "flash", "cast_after", "norm_cast_after", "rope_fp32"):
+        if key in args and args[key] not in (0, 1):
+            raise WgtError(f"{op} {key} must be 0 or 1", line, path)
+    for key in ("eps", "theta"):
+        if key in args and (not math.isfinite(args[key]) or args[key] <= 0):
+            raise WgtError(f"{op} {key} must be finite and positive", line, path)
+    for key in ("offset", "factor", "clip"):
+        if key in args and not math.isfinite(args[key]):
+            raise WgtError(f"{op} {key} must be finite", line, path)
+    if "clip" in args and args["clip"] < 0:
+        raise WgtError("attention clip must be nonnegative", line, path)
+    if op == "conv1d":
+        if args['in'] % args['groups'] or args['out'] % args['groups']:
+            raise WgtError("conv1d channels must be divisible by groups", line, path)
+        if args['causal'] not in (0,1) or (args['causal'] and args['padding']):
+            raise WgtError("conv1d causal must be 0/1 and requires padding=0", line, path)
+    if op == "sparse_moe":
+        if args["top_k"] > args["experts"] or args.get("aux_coef", 0) < 0 or args.get("activation", 0) not in (0, 1, 2):
+            raise WgtError("invalid sparse_moe top_k, aux_coef or activation", line, path)
+    for key in ("yarn_factor", "yarn_fast", "yarn_slow", "attention_factor"):
+        if key in args and args[key] <= 0:
+            raise WgtError(f"{key} must be positive", line, path)
+    if op == "embedding" and args.get("padding_idx", 0) >= args["vocab"]:
+        raise WgtError("embedding padding_idx outside vocabulary", line, path)
+    if "dropout" in args and not 0 <= args["dropout"] < 1:
+        raise WgtError("attention dropout must be in [0,1)", line, path)
+    if op == "rope_attention" and args.get("yarn_factor", 1) != 1 and args.get("theta", 10000) <= 1:
+        raise WgtError("YaRN requires theta > 1", line, path)
+    if op == "rope_attention" and (args["heads"] % args["kv_heads"] or args["head_dim"] % 2):
+        raise WgtError("rope_attention requires heads divisible by kv_heads and even head_dim", line, path)
+    if op == "self_attention":
+        if args["dim"] % args["heads"] or args["causal"] not in (0, 1):
+            raise WgtError("self_attention needs dim divisible by heads and causal=0 or 1", line, path)
+    if op == "dropout" and not 0 <= args["p"] < 1:
+        raise WgtError("dropout p must be in [0, 1)", line, path)
+    return args
 
 
 def output_width(layers: list[Layer], width: int) -> int:
@@ -965,7 +1500,7 @@ def output_width(layers: list[Layer], width: int) -> int:
                     layer.path,
                 )
             width = int(layer.args["out"])
-        elif layer.op == "layernorm":
+        elif layer.op in ("layernorm", "rmsnorm"):
             if layer.args["dim"] != width:
                 raise WgtError(
                     f"shape mismatch: layer {layer.name!r} normalises dim={layer.args['dim']} but receives {width}",
@@ -993,15 +1528,30 @@ def _last_leaf(layers: list[Layer]) -> Layer:
 # ---------------------------------------------------------------- entry points
 
 
-def parse(source: str, path: str | None = None, *, check_training: bool = True) -> Program:
+def parse(source: str, path: str | None = None, *, check_training: bool = True, config=None) -> Program:
+    try:
+        return _parse(source, path, check_training=check_training, config=config)
+    except WgtError as exc:
+        if exc.path == path:
+            exc.source = source
+        raise
+
+
+def _parse(source: str, path: str | None = None, *, check_training: bool = True, config=None) -> Program:
     """Parse and statically check a model file."""
 
     from .derivation import is_derived, parse as parse_derived
 
     if is_derived(source):
+        if config:
+            raise WgtError("derived sources do not declare configuration")
         return parse_derived(source, path, check_training=check_training)
-    fp = _FileParser(source, path, _Loader(), library=False)
+    if source.startswith("wgt tensors "):
+        raise WgtError("tensor inventory is not executable: a forward graph and supported operators are required", path=path)
+    fp = _FileParser(source, path, _Loader(), library=False, config=config)
     fp.run()
+    if set(fp.config_overrides)-set(fp.config_schema):
+        raise WgtError("unknown configuration keys: " + ", ".join(sorted(set(fp.config_overrides)-set(fp.config_schema))),path=path)
     if fp.model is None:
         raise WgtError("missing 'model <name>' statement", None, path)
     for kw in ("input", "output"):
@@ -1013,17 +1563,19 @@ def parse(source: str, path: str | None = None, *, check_training: bool = True) 
         raise WgtError("missing 'init seed=<int>'; every parameter must have an explicit initialization", None, path)
 
     layers = []
+    budget = [0]
     for name, spec in fp.layer_specs:
         if fp.version == "0.1" and (spec.op in _V02_OPS or spec.op == "residual" or spec.ns is not None):
             raise WgtError(f"{spec.op!r} requires 'wgt 0.2'", spec.line, path)
-        resolved = _resolve(name, spec, fp.scope, {}, ())
+        resolved = _resolve(name, spec, fp.scope, {}, (), budget)
 
         def needs_v03(layer):
-            return (layer.op in _V03_OPS or (layer.op == "linear" and "in" not in layer.args)
-                    or any(needs_v03(c) for c in layer.children))
+            return bool(layer.inputs) or layer.op in _V03_OPS | GRAPH_OPS | LOOP_OPS or any(needs_v03(c) for c in layer.children)
 
         if fp.version != "0.3" and needs_v03(resolved):
             raise WgtError(f"{spec.op!r} requires 'wgt 0.3'", spec.line, path)
+        if fp.version == "0.3":
+            resolved.inputs = ["input" if ref == fp.ports["input"].name and ref not in {layer.name for layer in layers} else ref for ref in resolved.inputs]
         layers.append(resolved)
 
     for ds in fp.datasets.values():
@@ -1050,12 +1602,25 @@ def parse(source: str, path: str | None = None, *, check_training: bool = True) 
         layers=layers,
         datasets=fp.datasets,
         seed=fp.seed,
+        initializer=fp.initializer,
         imports=fp.imports,
         train=fp.train,
         path=path,
         uses=fp.uses,
         freezing=fp.freezing,
         inherit=fp.inherit,
+        inputs=fp.named_ports["input"],
+        outputs=fp.named_ports["output"],
+        returns=fp.returns,
+        dimensions=fp.dimensions,
+        constraints=fp.constraints,
+        weight_types=fp.weight_types,
+        weight_assignments=fp.weight_assignments,
+        adapters=fp.adapters,
+        config_schema=fp.config_schema,
+        config_values=fp.config_values,
+        parameter_ids=fp.parameter_ids,
+        parameter_shares=fp.parameter_shares,
     )
     check(program, check_training=check_training)
     return program
@@ -1080,16 +1645,26 @@ def check(program: Program, *, check_training: bool = True) -> None:
     path = program.path
     if program.input.name == program.output.name:
         raise WgtError("input and output must have different names", program.output.line, path)
-    if not any(layer.has_params for layer in program.layers):
+    if program.version != "0.3" and not any(layer.has_params for layer in program.layers):
         raise WgtError("model has no parameters (add at least one linear layer)", program.layers[0].line, path)
-    if program.version == "0.3":
+    if program.dimensions:
+        from .symbolic import check_symbolic
+        check_symbolic(program)
+    elif program.version == "0.3" and (program.weight_types or program.weight_assignments or program.adapters or program.parameter_ids or program.parameter_shares or any(not p.shape or 0 in p.shape for p in program.inputs + program.outputs) or len(program.inputs) > 1 or len(program.outputs) > 1 or program.returns):
+        from .ports import check_ports
+        check_ports(program)
+    elif program.version == "0.3":
         dtype, shape = output_contract(program.layers, program.input.dtype, program.input.shape, axes=program.input.axes)
         if dtype != program.output.dtype or shape != program.output.shape:
             raise WgtError(
                 f"shape/dtype mismatch: network produces {dtype}{list(shape)}, output declares "
                 f"{program.output.dtype}{list(program.output.shape)}",
                 program.output.line,
-                path,
+                path, code="E0301",
+                labels=[diagnostic_label(path, program.output.line, "declared output"),
+                        diagnostic_label(program.layers[-1].path, program.layers[-1].line,
+                                         f"produces {dtype}{list(shape)}")],
+                help="match the output declaration to the final layer, or adjust the final layer",
             )
     else:
         width = output_width(program.layers, program.input.shape[0])
@@ -1099,7 +1674,7 @@ def check(program: Program, *, check_training: bool = True) -> None:
                 program.output.line,
                 path,
             )
-    if program.output.axes:
+    if program.output.axes and not (program.dimensions or len(program.inputs) > 1 or len(program.outputs) > 1 or program.returns):
         inferred = program.layers[-1].output_spec.get("axes", [None] * len(program.output.shape))
         if any(a and b and a != b for a, b in zip(inferred, program.output.axes)):
             raise WgtError(f"output axis mismatch: inferred {inferred}, declared {list(program.output.axes)}", program.output.line, path)
@@ -1148,14 +1723,23 @@ def check(program: Program, *, check_training: bool = True) -> None:
         if not layer.has_params:
             raise WgtError(f"import target {imp.target!r} has no parameters", imp.line, path)
 
-    if program.freezing:
+    if program.weight_types or program.weight_assignments or program.freezing or program.adapters or program.parameter_ids or program.parameter_shares:
         # Resolve against the same parameter names used by the runtime, including
         # packed attention projections. Do not silently accept an empty selector.
         from .artifact import build_module
         import torch
 
-        with torch.random.fork_rng(devices=[]):
+        with torch.device("meta"):
             module = build_module([layer.to_dict() for layer in program.layers])
+            from .parameter_identity import bind_parameters
+            try:
+                bind_parameters(module,program.parameter_ids,program.parameter_shares)
+                from .adapters import attach_adapters
+                attach_adapters(module,program.adapters)
+                from .weight_types import attach_weight_types
+                attach_weight_types(module, program.weight_types, program.weight_assignments)
+            except ValueError as exc:
+                raise WgtError(str(exc),path=program.path) from None
         apply_freezing(program, module, require_trainable=check_training)
 
     if not check_training:
@@ -1219,13 +1803,13 @@ def _check_targets(program: Program, ds: Dataset, train: TrainStmt) -> None:
         )
 
 
-def parse_file(path: str | Path, *, check_training: bool = True) -> Program:
+def parse_file(path: str | Path, *, check_training: bool = True, config=None) -> Program:
     p = Path(path)
     try:
         text = p.read_text(encoding="utf-8")
     except OSError as exc:
         raise WgtError(f"cannot read source: {exc.strerror}", None, str(p)) from None
-    return parse(text, str(p), check_training=check_training)
+    return parse(text, str(p), check_training=check_training, config=config)
 
 
 def is_library_source(text: str) -> bool:
@@ -1233,21 +1817,116 @@ def is_library_source(text: str) -> bool:
     return not any(_strip_comment(line).split()[:1] == ["model"] for line in text.splitlines())
 
 
-def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...], axes=()) -> tuple[str, tuple[int, ...]]:
+def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...], bindings=None, axes=(), binding_axes=None) -> tuple[str, tuple[int, ...]]:
     """Static per-sample contracts: batch is always an optional leading runtime dimension."""
+    values = {"input": (dtype, shape), **(bindings or {})}
     axes = list(axes or [None] * len(shape))
     if len(axes) != len(shape) or any(a is not None and (not isinstance(a, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", a)) for a in axes) or len([a for a in axes if a]) != len(set(a for a in axes if a)):
         raise WgtError("invalid or duplicate axis names")
+    axis_values = {"input": axes, **{k: [None] * len(v[1]) for k, v in (bindings or {}).items()}}
+    axis_values.update(binding_axes or {})
+    origins = {}
+    previous = None
     for layer in layers:
+        if layer.name in values:
+            raise WgtError(f"duplicate or reserved tensor name {layer.name!r}", layer.line, layer.path)
+        if not isinstance(layer.inputs, list) or not all(isinstance(ref, str) for ref in layer.inputs):
+            raise WgtError("tensor inputs must be a list of names", layer.line, layer.path)
+        if layer.op not in GRAPH_OPS and layer.op not in PRIMITIVES and not (layer.op in {"route", "scan_state"} or (layer.op == "seq" and layer.returns)) and not (layer.op == "rope_attention" and layer.args.get("ports")) and not (layer.op == "scan" and len(layer.inputs) == 2) and len(layer.inputs) > 1:
+            raise WgtError("unary layers take one tensor input", layer.line, layer.path)
+        if layer.op in STRUCTURAL_OPS and not layer.children:
+            raise WgtError("structural layer needs a nonempty body", layer.line, layer.path)
+        def reference_label(index, ref, message):
+            if index < len(layer.input_spans):
+                line, column, end = layer.input_spans[index]
+                return diagnostic_label(layer.path, line, message, column=column, end_column=end)
+            return diagnostic_label(layer.path, layer.line, message, needle=ref)
+
+        operands = []
+        for index, ref in enumerate(layer.inputs):
+            if ref not in values:
+                raise WgtError(f"unknown or forward tensor reference {ref!r}", layer.line, layer.path,
+                    code="E0201", labels=[reference_label(index, ref, "not defined in this scope")],
+                    help=suggestion(ref, values) or "declare this tensor before using it; `input` is the block input")
+            operands.append(values[ref])
+        if operands:
+            dtype, shape = operands[0]
+            axes = list(axis_values[layer.inputs[0]])
         before_axes = list(axes)
         layer.input_spec = {"dtype": dtype, "shape": list(shape)}
         args, op = layer.args, layer.op
+        if op in BUILTIN_OPS and op not in {"rearrange", "reduce"}:
+            args = layer.args = _checked_operator_args(op, args, layer.line, layer.path)
 
         def require(ok, message):
             if not ok:
-                raise WgtError(f"{layer.name}: {message}", layer.line, layer.path)
+                labels = [diagnostic_label(layer.path, layer.line, message, needle=layer.op)]
+                refs = layer.inputs or ([previous] if previous else ["input"])
+                notes = []
+                for index, ref in enumerate(refs):
+                    contract = values.get(ref)
+                    if contract:
+                        kind, dims = contract
+                        desc = f"{ref}: {kind}[{','.join(map(str, dims))}]"
+                        if layer.inputs:
+                            labels.append(reference_label(index, ref, desc))
+                        if ref in origins:
+                            origin = origins[ref]
+                            labels.append(diagnostic_label(origin.path, origin.line, desc, needle=origin.name))
+                        else:
+                            notes.append(desc)
+                labels.extend(layer.frames)
+                raise WgtError(f"{layer.name}: {message}", layer.line, layer.path, code="E0301",
+                               labels=labels, notes=notes,
+                               help="make the producer dimensions match this operation; no implicit broadcasting is performed")
 
-        if op in {"rearrange", "reduce"}:
+        # Empty tensors and scalar samples have defined behavior only for audited ops.
+        scalar_ops = {"identity", "relu", "tanh", "sigmoid", "gelu", "silu", "scale", "dropout", "add", "mul", "mix", "where", "seq", "residual", "recur", "ponder", "route", "scan_state", "rearrange", "reduce"}
+        require(bool(shape) or op in scalar_ops or op in PRIMITIVES, f"{op} requires a non-scalar sample")
+        if 0 in shape:
+            empty_ops = scalar_ops - {"rearrange", "reduce"} | {"linear", "embedding", "scan", "concat"}
+            require(op in empty_ops or op in PRIMITIVES, f"{op} does not support empty sample dimensions")
+        if op == "concat":
+            require(all(bool(s) for _, s in operands), "concat requires non-scalar inputs")
+
+        # Resolve source-only axis sugar after its actual input axes are known.
+        # Artifacts contain only the existing explicit transform operators.
+        if op in {"mean", "sum", "transpose"}:
+            require(all(a is not None for a in axes), "named axis shorthand requires all input axes to be named")
+            if op == "transpose":
+                target = args["axes"].split()
+                require(len(target) == len(axes) and set(target) == set(axes),
+                        "transpose must list each input axis exactly once")
+                resolved = {"pattern": " ".join(axes) + " -> " + " ".join(target), "sizes": {}}
+                op = "rearrange"
+            else:
+                require(args["axis"] in axes, f"unknown reduction axis {args['axis']!r}")
+                target = [a for a in axes if a != args["axis"]]
+                resolved = {"pattern": " ".join(axes) + " -> " + " ".join(target), "sizes": {}, "reduction": op}
+                op = "reduce"
+            layer.op, layer.args = op, resolved
+            args = resolved
+
+        layer.results = {}
+        if op == 'rope_attention' and args.get('ports'):
+            require(len(operands) == 4, "attention ports require x,mask,old_key,old_value")
+            require(dtype == 'f32' and len(shape) == 2 and shape[0] > 0 and shape[1] == args['dim'], "attention ports require nonempty f32[T,dim]")
+            old_dtype,old_shape = operands[2]
+            require(old_dtype == 'f32' and len(old_shape) == 3 and old_shape[1:] == (args['kv_heads'],args['head_dim']), "cache must be f32[P,kv_heads,head_dim]")
+            require(operands[3] == operands[2], "key/value cache shapes and dtypes must match")
+            total = old_shape[0] + shape[0]
+            require(operands[1] == ('bool',(total,)), "attention mask must be bool[P+T]")
+            require(total <= args.get('max_len',32768), "cache and tokens exceed max_len")
+            for field in ('key','value'):
+                layer.results[field] = {'dtype':'f32','shape':[total,*old_shape[1:]]}
+        if op in PRIMITIVES:
+            from .primitives import contract
+            try:
+                dtype, shape = contract(op, args, operands or [(dtype, shape)])
+            except ValueError as exc:
+                require(False, str(exc))
+            axes = [None] * len(shape)
+        elif op in {"rearrange", "reduce"}:
             from .axes import plan
             require(dtype == "f32" or op == "rearrange", "reduce expects f32 tensors")
             require(op != "reduce" or args.get("reduction") in {"mean", "sum"}, "reduce requires mean or sum")
@@ -1257,9 +1936,93 @@ def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...], axe
                 require(False, str(exc))
             require(all(a is None or b is None or a == b for a, b in zip(axes, transform["input_axes"])),
                     f"axis pattern does not match input axes {axes}")
-            require(bool(transform["output_shape"]), "scalar output is unsupported; retain at least one sample axis")
             shape = tuple(transform["output_shape"])
             axes = transform["output_axes"]
+        elif op in GRAPH_OPS:
+            for ref in layer.inputs[1:]:
+                other = axis_values[ref]
+                require(len(axes) == len(other) and all(a is None or b is None or a == b for a, b in zip(axes, other)),
+                        f"axis mismatch between {layer.inputs[0]} {axes} and {ref} {other}")
+                axes = [a or b for a, b in zip(axes, other)]
+                require(len([a for a in axes if a]) == len(set(a for a in axes if a)), "duplicate inferred axis names")
+            expected = 3 if op in ("mix", "where") else 2
+            require(len(operands) >= expected and (expected == 2 or len(operands) == 3), "invalid merge input count")
+            if op == "where":
+                require(operands[0][0] in {"f32", "bool"} and all(t == "f32" for t, _ in operands[1:]), "where expects bool/f32 condition and f32 values")
+                dtype = "f32"
+            else:
+                require(all(t == "f32" for t, _ in operands), "merge expects f32 tensors")
+            if op == "concat":
+                require(all(s[:-1] == shape[:-1] for _, s in operands), "concat requires matching dimensions except the last")
+                shape = (*shape[:-1], sum(s[-1] for _, s in operands))
+            else:
+                require(all(s == shape for _, s in operands), f"{op} requires identical shapes (no implicit broadcasting)")
+        elif op == 'scan_state' or (op == 'seq' and layer.returns):
+            actual = operands or [(dtype,shape)]
+            is_scan = op == 'scan_state'
+            require(not is_scan or len(shape) >= 1, 'scan_state requires a sequence sample axis')
+            item_shape = shape[1:] if is_scan else shape
+            bindings = {f'state{i}' if is_scan else f'arg{i+1}':v for i,v in enumerate(actual[1:])}
+            if is_scan:
+                require(set(layer.returns) == {'output',*bindings}, 'scan_state return must contain output and exactly state0..stateN')
+            output_contract(layer.children,dtype,item_shape,bindings)
+            local = {'input':(dtype,item_shape),**bindings}
+            for child in layer.children:
+                local[child.name] = (child.output_spec['dtype'],tuple(child.output_spec['shape']))
+                local.update({f'{child.name}.{field}':(spec['dtype'],tuple(spec['shape'])) for field,spec in child.results.items()})
+            for field,ref in layer.returns.items():
+                require(ref in local, f'unknown block result {ref!r}')
+                result_dtype,result_shape = local[ref]
+                if is_scan and field != 'output':
+                    require((result_dtype,result_shape) == bindings[field], f'{field} must preserve shape and dtype')
+                if is_scan and field == 'output':
+                    result_shape = (shape[0],*result_shape)
+                layer.results[field] = {'dtype':result_dtype,'shape':list(result_shape)}
+            dtype,shape = layer.results['output']['dtype'],tuple(layer.results['output']['shape'])
+            axes = [None]*len(shape)
+        elif op == "scan":
+            require(dtype == "f32" and len(shape) == 2 and shape[-1] > 0, "scan expects f32[sequence, features]")
+            hidden = args.get("hidden")
+            require(type(hidden) is int and hidden > 0, "scan hidden must be a positive integer")
+            if len(operands) == 2:
+                require(operands[1] == (dtype, (hidden,)), "scan initial state must be f32[hidden]")
+            result = output_contract(layer.children, dtype, (shape[-1],), {"state": (dtype, (hidden,))})
+            require(result == (dtype, (hidden,)), "scan cell must output f32[hidden]")
+            shape = (shape[0], hidden)
+        elif op == "route":
+            require(len(operands) == 2 and operands[0][0] in {"i64", "bool"} and operands[0][1] == (),
+                    "route requires a scalar i64/bool selector and an f32 state")
+            require(len(layer.children) >= 2 and (dtype != "bool" or len(layer.children) == 2), "bool route requires exactly two branches")
+            dtype, shape = operands[1]
+            require(dtype == "f32", "route state must be f32")
+            axes = axis_values[layer.inputs[1]]
+            for branch in layer.children:
+                require(not branch.inputs and not branch.returns, "route branches must be single-input single-output computations")
+                result = output_contract([branch], dtype, shape, axes=axes)
+                require(result == (dtype, shape) and not branch.results, "route branches must preserve state shape and dtype")
+                result_axes = branch.output_spec.get("axes", [None] * len(shape))
+                require(all(a is None or b is None or a == b for a,b in zip(axes,result_axes)), "route branches must preserve axes")
+        elif op in {"recur", "ponder"}:
+            require(type(args.get("steps")) is int and 1 <= args["steps"] <= 1024, "recur steps must be in [1, 1024]")
+            require("compact" not in args or (op == "recur" and type(args["compact"]) is int and args["compact"] in (0,1) and "until" in args), "invalid compact option")
+            require(op != "ponder" or "until" in args, "ponder requires until")
+            result = output_contract(layer.children, dtype, shape, axes=axes)
+            require(result == (dtype, shape), "recur body must preserve complete shape and dtype")
+            if "until" in args:
+                require(isinstance(args["until"], str), "recur until must name a direct body layer")
+                gate = next((c for c in layer.children if c.name == args["until"]), None)
+                require(gate is not None, "recur until must name a direct body layer")
+                require(dtype == "f32" and gate.output_spec["dtype"] == "f32" and gate.output_spec["shape"] == [1],
+                        "recur until probability must be f32[1] and body must be f32")
+            result_axes = layer.children[-1].output_spec.get("axes", [None] * len(shape))
+            require(all(a is None or b is None or a == b for a, b in zip(axes, result_axes)), "recur body must preserve axis names")
+            if op == "ponder":
+                layer.results = {
+                    "states": {"dtype":"f32", "shape":[args["steps"], *shape]},
+                    "probabilities": {"dtype":"f32", "shape":[args["steps"], 1]},
+                    "halt_weights": {"dtype":"f32", "shape":[args["steps"], 1]},
+                    "expected_steps": {"dtype":"f32", "shape":[]},
+                }
         elif op in STRUCTURAL_OPS:
             new_dtype, new_shape = output_contract(layer.children, dtype, shape, axes=axes)
             if op == "residual":
@@ -1272,22 +2035,38 @@ def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...], axe
             dtype, shape = "f32", (*shape, int(args["dim"]))
         else:
             require(op in BUILTIN_OPS, f"unknown operation {op!r}")
-            require(dtype == "f32", f"{op} expects f32; convert tokens with embedding first")
+            require(dtype == "f32" or op == "identity", f"{op} expects f32; convert tokens with embedding first")
             if op == "linear":
+                # Resolve once during source checking; saved weights always carry an explicit width.
+                require(shape[-1] > 0, "linear feature width must be positive")
                 args.setdefault("in", shape[-1])
-                require(shape[-1] == args["in"], f"linear expects last dimension {args['in']}, got {shape[-1]}")
+                require(shape[-1] == args["in"], f"linear expects {axes[-1] or 'last dimension'}={args['in']}, got {shape[-1]}")
+                if args.get("tie_embedding", 0):
+                    embeddings = [v for v in origins.values() if v.op == "embedding"]
+                    index = args["tie_embedding"] - 1
+                    require(index < len(embeddings), "tie_embedding must name an earlier embedding by 1-based scope index")
+                    target = embeddings[index]
+                    require(args["in"] == target.args["dim"] and args["out"] == target.args["vocab"] and args.get("bias", 1) == 0,
+                            "tied projection must match embedding dimensions and have bias=0")
                 shape = (*shape[:-1], int(args["out"]))
-            elif op == "layernorm":
+            elif op in ("layernorm", "rmsnorm"):
                 require(shape[-1] == args["dim"], "layernorm dimension mismatch")
-            elif op in ("self_attention", "position_embedding"):
+            elif op in ("self_attention", "rope_attention", "position_embedding", "sparse_moe"):
                 require(len(shape) == 2 and shape[-1] == args["dim"], f"{op} expects f32[sequence, dim]")
                 if op == "position_embedding":
                     require(shape[0] <= args["max_len"], "sequence exceeds max_len")
-            elif op == "meanpool":
-                require(len(shape) == 2, "meanpool expects f32[sequence, dim]")
+            elif op in ("meanpool", "last"):
+                require(len(shape) == 2, f"{op} expects f32[sequence, dim]")
                 shape = (shape[-1],)
             elif op == "flatten":
                 shape = (math.prod(shape),)
+            elif op == "conv1d":
+                require(len(shape) == 2 and shape[0] == args['in'], "conv1d expects f32[channels,length] with matching in")
+                effective = args['dilation'] * (args['kernel']-1)
+                padding = effective if args['causal'] else 2*args['padding']
+                length = (shape[1]+padding-effective-1)//args['stride']+1
+                require(length > 0, "conv1d kernel produces an empty length")
+                shape = (args['out'],length)
             elif op in ("conv2d", "maxpool2d", "globalavgpool2d"):
                 require(len(shape) == 3, f"{op} expects f32[channels, height, width]")
                 channels, height, width = shape
@@ -1304,10 +2083,10 @@ def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...], axe
                     )
                     require(height > 0 and width > 0, "kernel produces an empty spatial dimension")
                     shape = (int(args.get("out", channels)), height, width)
-        if op == "residual":
+        if op in {"residual", "recur", "ponder"}:
             # A body can supply names for an unnamed input. Check that boundary
             # again with those names: otherwise a square transpose can silently
-            # swap meanings on residual addition.
+            # swap meanings on residual addition or on the next recurrence.
             result_axes = layer.children[-1].output_spec.get("axes", [None] * len(shape))
             refined_axes = [a or b for a, b in zip(before_axes, result_axes)]
             if refined_axes != before_axes:
@@ -1315,11 +2094,13 @@ def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...], axe
 
         # Preserve semantic names when an operation preserves axis identity. New
         # feature axes remain unnamed until an explicit pattern supplies a name.
-        if op in STRUCTURAL_OPS:
-            axes = list(layer.children[-1].output_spec.get("axes", [None] * len(shape)))
+        if op in STRUCTURAL_OPS and op != "route" and not layer.returns:
+            axes = list(layer.children[-1].output_spec.get("axes", [None] * len(layer.children[-1].output_spec["shape"])))
+            if op == "scan":
+                axes = [before_axes[0], *axes]
         elif op == "embedding":
             axes = [*before_axes, None]
-        elif op == "meanpool":
+        elif op in {"meanpool", "last"}:
             axes = before_axes[-1:]
         elif op == "globalavgpool2d":
             axes = before_axes[:1]
@@ -1332,6 +2113,17 @@ def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...], axe
         layer.output_spec = {"dtype": dtype, "shape": list(shape)}
         if any(axes):
             layer.output_spec["axes"] = list(axes)
+        if op == 'sparse_moe' and args.get('ports'):
+            layer.results['aux'] = {'dtype':'f32','shape':[]}
+        if layer.results:
+            layer.results['output'] = dict(layer.output_spec)
+            for field,spec in layer.results.items():
+                values[f'{layer.name}.{field}'] = (spec['dtype'],tuple(spec['shape']))
+                axis_values[f'{layer.name}.{field}'] = list(spec.get('axes',[None]*len(spec['shape'])))
+        axis_values[layer.name] = list(axes)
+        values[layer.name] = (dtype, shape)
+        origins[layer.name] = layer
+        previous = layer.name
     return dtype, shape
 
 

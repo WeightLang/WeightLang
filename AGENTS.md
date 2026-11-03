@@ -14,3 +14,10 @@
 
 - For model authoring or language implementation, use `/home/lightjunction/.codex/skills/wgt-development/SKILL.md` when available. Keep its grammar and runnable examples aligned with the latest implemented language only; validate against the current parser/runtime, excluding historical syntax and unimplemented proposals.
 - New or substantially changed WGT examples need meaningful comments explaining axis meanings, shape transitions, gate/reduction intent, independent versus shared loop weights and initialization/training state. Explain intent rather than narrating obvious lines.
+
+# Architectural boundary
+
+- Python is the application entry point. WGT defines model parameters, shape contracts and tensor computation; Python owns data preparation, loss, optimization, training loops, inference orchestration and sampling.
+- `weightlang.load` must build source models in memory without artifact output, training-data access or training callbacks. Explicit imports/derivations and freezing remain part of construction. CLI training is an explicit convenience, not an implicit model-loading side effect.
+- Runtime data crosses the model boundary as explicit tensor inputs. Standard libraries reuse computation; adding masks, conditions or caches may require language/runtime input contracts. Do not claim multi-input or cache support without implementation and behavioral tests.
+- Compose existing Python modules in Python first. Do not add arbitrary Python execution to WGT forward as a shortcut. Keep architecture, model artifacts and optimizer-bearing training checkpoints distinct.

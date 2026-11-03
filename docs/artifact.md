@@ -165,3 +165,13 @@ package publishers. [Selective training and examples](weight-iterations.md).
 Weight serialization uses the existing safetensors Rust extension while preserving
 WeightLang's canonical file bytes and hashes. Python handles metadata and orchestration.
 See [local benchmarks and compatibility checks](native-performance.md).
+
+## Custom weight domains (v7)
+
+Artifacts with finite weight types use format_version 7. The named interface adds
+`weight_types` (name -> nonempty list of distinct finite f32 values) and
+`weight_assignments` (target/type with optional axis/start/stop). Parameter identity
+maps are present, even when empty. Tensor payloads remain f32 master parameters;
+loading reconstructs nearest-codebook forward projection and identity STE.
+Slice bounds, overlaps, aliases and unsupported adapter targets are validated.
+Earlier artifact versions reject these fields. See [weight domains](weight-types.md).

@@ -60,7 +60,7 @@ impl Artifact {
             .with_context(|| format!("invalid artifact manifest {}", manifest_path.display()))?;
         ensure!(
             m["format"] == "weightlang.artifact"
-                && matches!(m["format_version"].as_u64(), Some(1..=3)),
+                && matches!(m["format_version"].as_u64(), Some(1..=7)),
             "unsupported artifact format"
         );
         ensure!(identifier(string(&m, "model")?), "invalid model name");
@@ -73,10 +73,23 @@ impl Artifact {
                 "{kind} sha256 mismatch"
             );
         }
+        if m["format_version"] == 5 || (m["format_version"].as_u64().unwrap() >= 6 && m["interface"].get("dimensions").is_some()) {
+            crate::symbolic::validate(&m["layers"], &m["interface"])?;
+        } else {
+            ensure!(m["interface"].get("dimensions").is_none() && m["interface"].get("constraints").is_none(), "symbolic metadata requires v5");
+            for key in ["inputs", "outputs"] {
+                if let Some(ports) = m["interface"][key].as_array() {
+                    ensure!(ports.iter().all(|p| p.get("shape_expr").is_none()), "symbolic metadata requires v5");
+                }
+            }
+        }
         let mut shapes = BTreeMap::new();
         let input = crate::contracts::TensorType::parse(&m["interface"]["input"])?;
         let output = crate::contracts::TensorType::parse(&m["interface"]["output"])?;
-        if m["format_version"] != 3 {
+        if m["format_version"].as_u64().unwrap() < 4 {
+            ensure!(!input.shape.is_empty() && !output.shape.is_empty() && input.shape.iter().chain(output.shape.iter()).all(|n| *n > 0), "scalar/empty ports require v4 or later");
+        }
+        if m["format_version"].as_u64().unwrap() < 3 {
             ensure!(
                 input.dtype == "f32"
                     && output.dtype == "f32"
@@ -86,9 +99,17 @@ impl Artifact {
             );
         }
         let mut contracts = crate::contracts::Contracts::new();
-        let inferred =
-            crate::contracts::infer(&m["layers"], "", input, &mut shapes, &mut contracts)?;
-        ensure!(inferred.compatible(&output), "output shape/dtype/axis mismatch");
+        if m["format_version"].as_u64().unwrap() >= 4 {
+            crate::contracts::infer_named(&m["layers"], &m["interface"], &mut shapes, &mut contracts)?;
+        } else {
+            let inferred = crate::contracts::infer(&m["layers"], "", input, &mut shapes, &mut contracts)?;
+            ensure!(inferred.compatible(&output), "output shape/dtype/axis mismatch");
+        }
+        if m["format_version"].as_u64().unwrap() >= 6 {
+            crate::parameter_identity::adapters(&m["interface"], &m["layers"], &mut shapes)?;
+        } else {
+            ensure!(m["interface"].get("adapters").is_none(), "adapters require v6");
+        }
         let tensors = m["weights"]["tensors"]
             .as_object()
             .context("missing tensor metadata")?;
@@ -114,6 +135,17 @@ impl Artifact {
                 == shapes.len(),
             "safetensors tensor table mismatch"
         );
+        let aliases = if m["format_version"].as_u64().unwrap() >= 6 {
+            crate::parameter_identity::validate(&m["interface"], &shapes)?
+        } else {
+            ensure!(m["interface"].get("parameter_ids").is_none() && m["interface"].get("parameter_shares").is_none(), "parameter identities require v6");
+            Vec::new()
+        };
+        if m["format_version"] == 7 {
+            crate::weight_types::validate(&m["interface"], &shapes, &aliases)?;
+        } else {
+            ensure!(m["interface"].get("weight_types").is_none() && m["interface"].get("weight_assignments").is_none(), "weight types require v7");
+        }
         let mut ranges = Vec::new();
         for (name, shape) in &shapes {
             let t = header.get(name).context("missing tensor")?;
@@ -152,6 +184,23 @@ impl Artifact {
             end = next;
         }
         ensure!(end == size - 8 - length, "trailing safetensors data");
+        for (destination,owner) in aliases {
+            let d = header[&destination]["data_offsets"][0].as_u64().context("invalid shared offset")?;
+            let o = header[&owner]["data_offsets"][0].as_u64().context("invalid owner offset")?;
+            let end = header[&owner]["data_offsets"][1].as_u64().context("invalid owner end")?;
+            let mut checked = 0;
+            let mut left = [0u8;8192];
+            let mut right = [0u8;8192];
+            while checked < end-o {
+                let size = (end-o-checked).min(8192) as usize;
+                file.seek(SeekFrom::Start(8+length+d+checked))?;
+                file.read_exact(&mut left[..size])?;
+                file.seek(SeekFrom::Start(8+length+o+checked))?;
+                file.read_exact(&mut right[..size])?;
+                ensure!(left[..size] == right[..size], "conflicting shared weights");
+                checked += size as u64;
+            }
+        }
         file.seek(SeekFrom::Start(8 + length))?;
         Ok(Self {
             root: root.to_owned(),

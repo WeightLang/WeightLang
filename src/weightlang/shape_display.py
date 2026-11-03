@@ -1,5 +1,7 @@
 """Human-readable sample shapes; the optional batch axis stays outside the DSL."""
 
+from .symbolic import display
+
 
 def format_shape(spec):
     axes = spec.get("axes", [None] * len(spec["shape"]))
@@ -9,10 +11,16 @@ def format_shape(spec):
 
 def shape_rows(program):
     """Include expanded block paths so an error can be located in a nested model."""
-    yield f"input {program.input.name}: " + format_shape({
-        "dtype": program.input.dtype, "shape": program.input.shape,
-        "axes": program.input.axes or [None] * len(program.input.shape),
-    })
+    if program.dimensions:
+        yield "bounded dimensions: " + ", ".join(f"{name}={b['min']}..{b['max']}" for name, b in program.dimensions.items())
+        for op, left, right in program.constraints:
+            yield f"require {display(left)} {op} {display(right)}"
+        yield "layer shapes use the first legal dimension assignment; port expressions define the runtime contract"
+    for port in program.inputs or [program.input]:
+        yield f"input {port.name}: " + format_shape({
+            "dtype": port.dtype, "shape": tuple(display(e) for e in port.shape_expr) if port.shape_expr else port.shape,
+            "axes": port.axes or [None] * len(port.shape),
+        })
 
     def visit(layers, prefix=""):
         for layer in layers:
@@ -22,3 +30,9 @@ def shape_rows(program):
             yield from visit(layer.children, name + ".")
 
     yield from visit(program.layers)
+    for port in program.outputs or [program.output]:
+        ref = program.returns.get(port.name, program.layers[-1].name)
+        yield f"output {port.name} from {ref}: " + format_shape({
+            "dtype": port.dtype, "shape": tuple(display(e) for e in port.shape_expr) if port.shape_expr else port.shape,
+            "axes": port.axes or [None] * len(port.shape),
+        })

@@ -52,6 +52,33 @@ def _cmd_check(args: argparse.Namespace) -> int:
         source = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise WgtError(f"cannot read source: {exc}", path=str(path)) from None
+    from .initialization import HEADER as INIT_HEADER, read_rules
+    if source.lstrip().startswith(INIT_HEADER):
+        rules, _ = read_rules(str(path.resolve()))
+        print(f"ok: initialization program, {len(rules)} tensor selectors; algorithms not executed; coverage/shapes checked at construction")
+        return 0
+    from .tensor_program import HEADER, parse_tensor_program
+    if source.startswith(HEADER):
+        program = parse_tensor_program(source, str(path))
+        import ast
+        names = [n.name for n in program.tree.body if isinstance(n, ast.ClassDef)]
+        print(f"ok: torch-dynamic modules {', '.join(names)}; trusted executable source; not initialized")
+        if args.shapes:
+            print("dynamic contracts: shapes/dtypes checked by model guards and Torch at execution; no static shape proof")
+        return 0
+    from .decompile import parse_inventory, parse_architecture
+
+    if source.startswith("wgt architecture "):
+        parse_architecture(source)
+        print("ok: architecture description; NOT executable; no weight values")
+        return 0
+    if source.startswith("wgt tensors "):
+        try:
+            inventory = parse_inventory(source)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise WgtError(f"invalid tensor inventory: {exc}") from None
+        print(f"ok: tensor inventory, {len(inventory['tensors'])} tensors; NOT executable; payloads not verified")
+        return 0
     if is_library_source(source) and any(line.startswith("data ") for line in source.splitlines()):
         from .syntax import _FileParser, _Loader
         parser = _FileParser(source, str(path), _Loader(), library=False)
@@ -66,8 +93,16 @@ def _cmd_check(args: argparse.Namespace) -> int:
         print(f"ok: library {path}, blocks: {', '.join(scope.blocks)}")
         return 0
     program = parse_file(path)
-    params = sum(p.numel() for p in build_module([layer.to_dict() for layer in program.layers]).parameters())
-    weights = "trained" if program.train else "random-init only (untrained)"
+    import torch
+    from .debugger import lint
+    from .diagnostics import render
+
+    with torch.device("meta"):
+        params = sum(p.numel() for p in build_module([layer.to_dict() for layer in program.layers]).parameters())
+    weights = "training declared (not executed)" if program.train else (
+        "custom initialization declared (not executed; untrained)" if program.initializer
+        else "random-init only (untrained)"
+    )
     if program.imports:
         weights += f", {len(program.imports)} imported layer(s)"
     print(f"ok: model {program.model}, {len(program.layers)} layers, {params} parameters, weights: {weights}")
@@ -75,6 +110,11 @@ def _cmd_check(args: argparse.Namespace) -> int:
         from .shape_display import shape_rows
         for row in shape_rows(program):
             print(row)
+    for diagnostic in lint(program.layers):
+        if args.error_format == "json":
+            print(json.dumps(diagnostic), file=sys.stderr)
+        else:
+            print(render(diagnostic), file=sys.stderr)
     return 0
 
 
@@ -83,6 +123,14 @@ def _cmd_build(args: argparse.Namespace) -> int:
         raise WgtError("export never trains; use train --trainer for explicit training")
     if args.command == "legacy-build":
         print("deprecated: legacy-build may train; migrate to build / export / train", file=sys.stderr)
+    from .tensor_program import HEADER, build_tensor_program
+    if Path(args.source).read_text().startswith(HEADER):
+        if not args.no_train or args.store or args.force or args.place or args.device_map:
+            raise WgtError("torch-dynamic build requires --no-train --no-store; force/placement maps unsupported")
+        artifact = build_tensor_program(args.source, args.out, model=args.tensor_model,
+                                        kwargs=json.loads(args.tensor_args), device=args.device)
+        print(f"built {artifact.path}; initialized, not trained")
+        return 0
     from .compiler import compile_file  # imports torch training code lazily
     from .reuse_cli import build_with_reuse
     from .trainers import load_trainers
@@ -102,15 +150,13 @@ def _cmd_build(args: argparse.Namespace) -> int:
         from .repository import WeightRepository
 
         if args.force or args.out != "weights":
-            raise WgtError(
-                "--force and custom -o require --no-store; versioned builds use checkout for standalone output"
-            )
+            raise WgtError("--force and custom -o require --no-store; versioned builds use checkout for standalone output")
         from .retention import project_limit
 
         repository = WeightRepository(args.store, max_versions=project_limit())
         expected = repository.prepare(args.parent)
         with tempfile.TemporaryDirectory(prefix=".build-", dir=repository.root) as tmp:
-            result = build_with_reuse(compile_file, args, tmp, repository=repository, expected=expected, trainers=trainers, no_train=args.no_train)
+            result = build_with_reuse(compile_file, args, tmp, repository=repository, expected=expected, device=args.device, placements=_placements(args), trainers=trainers, no_train=args.no_train)
             report = repository.commit(result.path, message=args.message, parent=args.parent, expected=expected)
         report["retention"] = repository.prune()
         report["reuse"] = result.manifest["reuse"]
@@ -118,7 +164,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
             report["training_skipped"] = True
         print(json.dumps(report, indent=2))
         return 0
-    result = build_with_reuse(compile_file, args, args.out, force=args.force, trainers=trainers, no_train=args.no_train)
+    result = build_with_reuse(compile_file, args, args.out, force=args.force, device=args.device, placements=_placements(args), trainers=trainers, no_train=args.no_train)
     m = result.manifest
     print(f"built {result.path}")
     if args.no_train:
@@ -153,7 +199,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
 def _cmd_run(args: argparse.Namespace) -> int:
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", UntrainedWeightsWarning)
-        artifact = load_artifact(args.artifact)
+        artifact = load_artifact(args.artifact, device=args.device, placements=_placements(args))
     for w in caught:
         print(f"warning: {w.message}", file=sys.stderr)
     try:
@@ -205,7 +251,7 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
-    artifact = load_artifact(args.artifact, warn_untrained=False)
+    artifact = load_artifact(args.artifact, warn_untrained=False, trusted_tensor_source=args.trust_tensor_source)
     print(f"ok: {artifact.path} (weights sha256 {artifact.manifest['weights']['sha256']})")
     if artifact.untrained_tensors:
         print("note: contains untrained tensors: " + ", ".join(artifact.untrained_tensors))
@@ -284,7 +330,9 @@ def _cmd_diff(args: argparse.Namespace) -> int:
 def _cmd_evaluate(args: argparse.Namespace) -> int:
     from .weights import evaluate_artifact
 
-    report = evaluate_artifact(args.artifact, args.data, args.loss, compare=args.compare)
+    report = evaluate_artifact(
+        args.artifact, args.data, args.loss, compare=args.compare, device=args.device, placements=_placements(args)
+    )
     print(json.dumps(report, indent=2, allow_nan=False))
     return 0
 
@@ -303,11 +351,12 @@ def _cmd_patch(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_ablate(args: argparse.Namespace) -> int:
-    from .ablation import run_ablation
+def _cmd_experiment(args: argparse.Namespace) -> int:
+    from .experiments import run_experiment
 
-    print(json.dumps(run_ablation(args.artifact, args.suite), indent=2, allow_nan=False))
-    return 0
+    report = run_experiment(args.artifact, args.baseline, args.suite)
+    print(json.dumps(report, indent=2, allow_nan=False))
+    return 0 if report["passed"] else 1
 
 
 def _cmd_revision(args: argparse.Namespace) -> int:
@@ -353,6 +402,72 @@ def _cmd_revision(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ablate(args: argparse.Namespace) -> int:
+    from .ablation import run_ablation
+
+    print(json.dumps(run_ablation(args.artifact, args.suite), indent=2, allow_nan=False))
+    return 0
+
+
+def _cmd_decompile(args: argparse.Namespace) -> int:
+    from .decompile import decompile
+
+    try:
+        init_args = json.loads(args.init_args) if args.init_args is not None else None
+        shape = tuple(int(n.strip()) for n in args.input_shape.split(",")) if args.input_shape else None
+    except (ValueError, TypeError) as exc:
+        raise WgtError(f"invalid Python conversion options: {exc}") from None
+    if init_args is not None and not isinstance(init_args, dict):
+        raise WgtError("--init-args must be a JSON object")
+    print(json.dumps(decompile(args.source, args.output, references=args.references,
+                              class_name=args.class_name, init_args=init_args,
+                              input_shape=shape, input_dtype=args.input_dtype), indent=2))
+    return 0
+
+
+def _cmd_transformers(args: argparse.Namespace) -> int:
+    from .transformers_import import inventory, write_architecture
+
+    try:
+        if args.inventory:
+            result = inventory()
+            destination = Path(args.output)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with destination.open("x", encoding="utf-8") as stream:
+                json.dump(result, stream, ensure_ascii=False, indent=2)
+                stream.write("\n")
+            print(json.dumps({"output": str(destination), "files": result["source_files"],
+                              "transformers_version": result["transformers_version"]}))
+        else:
+            if not args.family or not args.config or args.sequence is None:
+                raise WgtError("transformers requires --family, --config and --sequence, or --inventory")
+            print(json.dumps(write_architecture(args.family, args.config, args.sequence, args.output), indent=2))
+    except (OSError, ValueError, TypeError) as exc:
+        raise WgtError(f"Transformers conversion failed: {exc}") from None
+    return 0
+
+
+def _cmd_metadata(args: argparse.Namespace) -> int:
+    from .weight_metadata import read_metadata, write_metadata
+
+    if args.set:
+        if not args.output:
+            raise WgtError("--set requires -o NEW.safetensors")
+        updates = {}
+        for item in args.set:
+            key, separator, value = item.partition("=")
+            if not separator or not key or key in updates:
+                raise WgtError("--set requires unique nonempty KEY=VALUE entries")
+            updates[key] = value
+        result = write_metadata(args.source, args.output, updates)
+    else:
+        if args.output:
+            raise WgtError("-o requires at least one --set KEY=VALUE")
+        result = read_metadata(args.source)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _cmd_export_python(args: argparse.Namespace) -> int:
     from .python_export import export_python
 
@@ -369,6 +484,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="weightc", description="WeightLang compiler (prototype)")
     parser.add_argument("--version", action="version", version=f"weightc {__version__}")
+    parser.add_argument("--error-format", choices=["human", "json"], default="human")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("export-python", help="export standalone PyTorch source and optional artifact weights")
@@ -376,20 +492,66 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--output", required=True, help="new .py file; never overwrite")
     p.set_defaults(func=_cmd_export_python)
 
+    p = sub.add_parser("decompile", help="reverse import safetensors, PyTorch, GGUF, ONNX, NumPy or Python to .wgt")
+    p.add_argument("source", help="local file/directory or hf://owner/model[@revision]")
+    p.add_argument("-o", "--output", required=True, help="new .wgt file; never overwrite")
+    p.add_argument("--references", action="store_true", help="include checkpoint locations/imports; default: structure only")
+    p.add_argument("--class-name", help="Python nn.Module class to convert")
+    p.add_argument("--init-args", help='constructor keyword arguments as JSON, e.g. {"width": 64}')
+    p.add_argument("--input-shape", help="single-sample dimensions without batch, e.g. 3,32,32")
+    p.add_argument("--input-dtype", choices=("f32", "i64"), default="f32")
+    p.set_defaults(func=_cmd_decompile)
+
+    p = sub.add_parser("transformers", help="audited Transformers base architectures or full source inventory")
+    p.add_argument("--family", choices=("gpt2", "llama", "mistral", "qwen2", "qwen3", "gemma", "olmo", "olmo2", "olmo3", "starcoder2"))
+    p.add_argument("--config", help="local model config JSON; no weights downloaded")
+    p.add_argument("--sequence", type=int, help="fixed unpadded token sequence length")
+    p.add_argument("--inventory", action="store_true", help="scan all installed modeling_*.py sources; no execution")
+    p.add_argument("-o", "--output", required=True, help="new WGT or inventory JSON; never overwrite")
+    p.set_defaults(func=_cmd_transformers)
+
+    p = sub.add_parser("metadata", help="read checkpoint metadata or write metadata to a NEW safetensors file")
+    p.add_argument("source")
+    p.add_argument("--set", action="append", metavar="KEY=VALUE", help="string metadata entry; repeat for more keys")
+    p.add_argument("-o", "--output", help="NEW .safetensors file; original remains unchanged")
+    p.set_defaults(func=_cmd_metadata)
+
     p = sub.add_parser("ablate", help="compare independent inference-time ablations with a fixed baseline")
     p.add_argument("artifact")
     p.add_argument("--suite", required=True, help="weightlang.ablation v1 JSON file")
     p.set_defaults(func=_cmd_ablate)
+
+    from .diagnostics import explain
+    p = sub.add_parser("explain", help="explain a diagnostic code, e.g. E0301")
+    p.add_argument("code")
+    p.set_defaults(func=explain)
 
     p = sub.add_parser("check", help="parse and type-check a .wgt file without building")
     p.add_argument("source")
     p.add_argument("--shapes", action="store_true", help="show each layer input/output shape and named axes")
     p.set_defaults(func=_cmd_check)
 
+    from .debugger import command as debug_command
+    for mode in ("trace", "debug"):
+        p = sub.add_parser(mode, help="inspect execution without saving weights" if mode == "trace" else "run bounded training diagnostics in memory")
+        p.add_argument("source")
+        p.add_argument("--weights", help="verified artifact directory; replaces source initialization/imports")
+        p.add_argument("--watch", help="layer path; includes descendants")
+        p.add_argument("--time", help="zero-based loop/time indices, e.g. 0,3,7")
+        p.add_argument("--json", action="store_true", help="structured trace/debug report")
+        p.add_argument("--max-parameters", type=int, default=10_000_000)
+        if mode == "trace":
+            p.add_argument("--sample", help="JSON tensor or {inputs: ...}; defaults to first dataset row, otherwise zeros")
+        else:
+            p.add_argument("--steps", type=int, default=10, help="optimizer updates, not epochs (1..1000)")
+        p.set_defaults(func=debug_command)
+
     for operation in ("export", "train", "legacy-build"):
         descriptions = {"train": "continue training a weight revision", "export": "explicitly initialize/migrate weights without training", "legacy-build": "deprecated old build behavior (may execute training)"}
         p = sub.add_parser(operation, help=descriptions[operation])
         p.add_argument("--no-train", action="store_true", help="build/migrate weights without loading training data or running training")
+        p.add_argument("--tensor-model", help="torch-dynamic module name")
+        p.add_argument("--tensor-args", default="{}", help="torch-dynamic constructor keyword JSON")
         p.add_argument("source", nargs="?" if operation == "train" else None)
         p.add_argument("-o", "--out", default="weights", help="output root; writes <root>/<model>/ (default: weights)")
         p.add_argument("--force", action="store_true", help="replace an existing WeightLang model directory")
@@ -437,6 +599,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("run", help="run inference with an artifact")
     p.add_argument("artifact")
     p.add_argument("--input", required=True, help='JSON vector or batch, e.g. "[[0, 1], [1, 1]]"')
+    _device_options(p)
     p.set_defaults(func=_cmd_run)
 
     p = sub.add_parser("inspect", help="show an artifact's interface and weight provenance")
@@ -445,6 +608,7 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=_cmd_inspect)
 
     p = sub.add_parser("verify", help="check artifact hashes, tensor shapes and loadability")
+    p.add_argument("--trust-tensor-source", action="store_true", help="allow executing a trusted dynamic artifact and its host adapters")
     p.add_argument("artifact")
     p.set_defaults(func=_cmd_verify)
 
@@ -464,6 +628,12 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("audit", help="check standard weight admission requirements")
     p.add_argument("artifact")
     p.set_defaults(func=_cmd_audit)
+
+    p = sub.add_parser("experiment", help="evaluate target and regression cases against explicit thresholds")
+    p.add_argument("artifact")
+    p.add_argument("--baseline", required=True)
+    p.add_argument("--suite", required=True)
+    p.set_defaults(func=_cmd_experiment)
 
     p = sub.add_parser("patch-template", help="emit a hash-bound weight patch template (no edits)")
     p.add_argument("artifact")
@@ -492,6 +662,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--data", required=True, help="JSON file with inputs and targets")
     p.add_argument("--loss", required=True, choices=["mse", "bce", "cross_entropy"])
     p.add_argument("--compare", help="optional baseline artifact, evaluated on the same data")
+    _device_options(p)
     p.set_defaults(func=_cmd_evaluate)
 
     p = sub.add_parser("revision", help="version control for model weights")
@@ -541,13 +712,15 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("-o", "--output", required=True, help="NEW artifact directory")
         command.set_defaults(func=_cmd_revision)
 
+    for command_parser in sub.choices.values():
+        command_parser.add_argument("--error-format", choices=["human", "json"], default=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     try:
         return args.func(args)
     except WgtError as exc:
         if hasattr(exc, "reuse_report"):
             print(json.dumps({"reuse": exc.reuse_report}, indent=2), file=sys.stderr)
-        print(f"error: {exc}", file=sys.stderr)
+        print(json.dumps(exc.as_dict(), ensure_ascii=False) if args.error_format == "json" else exc.render(), file=sys.stderr)
         return 1
 
 

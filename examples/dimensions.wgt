@@ -8,8 +8,11 @@ input x: f32[time=STEPS, feature=FEATURES]
 output y: f32[feature=FEATURES]
 
 # 每个时间步共用一套线性权重：[4,8] -> [4,8]；in 从最后一维推导。
-# 这里学习新的特征表示，后面的重排只改变排列，不增加权重。
-layer project: linear(out=FEATURES)
+# gate 和 value 是两个独立层，各自拥有权重。sigmoid 门决定各位置保留多少值。
+layer gate: linear(out=FEATURES) -> sigmoid from input
+layer value: linear(out=FEATURES) from input
+# 两支完整形状相同，逐元素相乘，不会把一个标量门自动广播到全部特征。
+layer gated: mul(gate, value)
 
 # [time=4,feature=8] -> [feature=8,time=4] -> [time=4,feature=8]。
 # 显式调换轴再还原，数值不会被训练或聚合；轴名必须与已知输入名称相符。

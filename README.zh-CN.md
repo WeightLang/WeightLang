@@ -53,7 +53,76 @@ WeightLang 主要面向 AI 编程模型，因此语法小而严格，以行为�
                               └─ source.wgt           构建时的原始源码
 ```
 
+## Python 管程序，WGT 定义模型
+
+这是项目的主要开发方式：Python 负责数据、loss、优化器、训练循环、推理和采样；
+WGT 负责参数、形状、连接关系和模型内部的张量计算。Python 是应用入口。
+
+当前源码提供直接加载接口（尚未发布）：
+
+```python
+import torch
+import weightlang
+
+model = weightlang.load("examples/python_first/model.wgt")
+model.train()
+x = torch.randn(8, 4)  # 数据由 Python 提供；首维是 batch。
+logits = model(x)      # 普通 nn.Module，支持 autograd 和 PyTorch 优化器。
+```
+
+`load(source, *, device="cpu", placements=None)` 返回 eval 模式的 `nn.Module`。
+加载 `.wgt` 在内存中构建模型，不生成中间制品，不读取训练数据或执行训练回调；
+仍遵守显式权重导入、派生和冻结声明。普通架构只得到初始化参数。
+加载完整模型目录则校验并恢复保存的权重：`weightlang.load("weights/my_model")`。
+训练前调用 `train()`；推理使用 `eval()` 和 `torch.inference_mode()`。
+
+**前向需要 Python 的数据，就通过张量输入传入。** 当前接口为单个张量输入，
+不含 batch 的样本形状由 WGT 声明。mask、条件向量、位置和 KV cache 等多个独立
+输入需要模型接口与运行时扩展，当前不能直接传入额外关键字参数；这不是只补标准库
+就能解决的问题。标准库复用张量计算，Python 负责外部数据与控制流程。
+现有 Python 自定义层可在外层 `nn.Module` 中组合；不承诺 WGT 任意调用 Python，
+也不承诺完整制品保存器能保存任意 Python 组合结构。
+
+WGT 的 `train` 和数据/训练回调保留为显式 CLI 编译任务的便捷功能，
+不会由 `weightlang.load()` 隐式执行。架构 `.wgt`、包含实际权重的完整模型目录、
+包含优化器等状态的训练断点是三种不同对象。
+
+调试中间值也由 Python 完成，无需在 WGT 中添加 `print`：
+
+```python
+from weightlang import forward_hooks
+
+def show(module, inputs, output):
+    print(output.detach().flatten()[:6].cpu().tolist())
+
+with forward_hooks(model, {"hidden": show, "head": show}):
+    logits = model(x)
+```
+
+层路径可用 `model.named_modules()` 查看。退出上下文自动移除这些 hook，异常时也会清理；
+回调返回 None 只观察，其他返回值会替换输出，沿用 PyTorch 语义。
+保存完整模型前先退出 hook 上下文。见 [调试示例](examples/python_first/debug.py)。
+
+见 [Python 接口与保存边界](docs/python.md)及
+[可运行的训练、保存、重载示例](examples/python_first/train.py)。
+
 ## 安装
+
+安装当前检出的源码版 `wgt`（需要 Rust/Cargo）：
+
+```sh
+WEIGHTLANG_SOURCE="$PWD" sh install.sh
+# Windows PowerShell，在源码目录执行：
+# $env:WEIGHTLANG_SOURCE = $PWD.Path; & ./install.ps1
+```
+
+脚本编译 `wgt` 并内置对应的编译器源码。随后执行 `wgt new demo`、
+`cd demo`、`wgt sync`，准备 Python/PyTorch 环境。编译缓存保留在 `target/`，
+请预留磁盘空间。不设置 `WEIGHTLANG_SOURCE` 时，脚本仍按下文安装已发布的
+`weightc` wheel。`WEIGHTLANG_HOME` 指定安装根目录，`WEIGHTLANG_BIN_DIR`
+指定原生命令目录。发布包下载暂存于 `WEIGHTLANG_CACHE`（默认用户磁盘缓存），
+退出时清理本次下载文件。
+
 
 **Linux / macOS**
 
@@ -266,6 +335,9 @@ weightc publish path/to/pkg --version v0.1.0 -o dist   # 构建文件并打印 t
 - [工程层级与目录规范](docs/project-layout.md)：工程、构件库、构件、模型、层、模型制品和权重包。
 - [完整工程示例](examples/complete_project/README.md)：拆分源码、数据、训练、推理与行为测试。
 
+- [反向转换为 .wgt](docs/decompile.md)：支持 safetensors、PyTorch、GGUF、ONNX、NumPy 权重索引和元数据读写，以及Python nn.Module/Sequential 静态架构转换、可执行的 WeightLang 模型还原。外部权重索引不等于恢复可运行模型。
+- [Transformers 迁移验收](docs/transformers-migration.md)：8 个基础模型适配器、可复用 WGT 标准库和逐文件缺口；全库尚未迁移完成。
+
 以下详细文档目前为英文：
 
 | 文档 | 内容 |
@@ -330,9 +402,7 @@ cargo install --path crates/wgt --locked
 wgt new demo
 wgt -C demo check
 wgt -C demo build
-wgt -C demo train --fresh
 wgt -C demo test
-(cd demo && weightc revision checkout HEAD -o weights/demo)
 wgt -C demo graph weights/demo --open
 ```
 
@@ -385,6 +455,78 @@ y = 2x + 1 的参数，再比较和评估结果。详见 [补丁指南](docs/wei
 可屏蔽层输出、跳过层或清零指定权重；每个变体从同一基线独立运行，报告损失、准确率及变化量，保留配置和数据哈希，不改原模型。
 目前是推理时消融，不包含重新训练。配置见[消融实验](docs/ablation.md)。
 
+
+## 源码版：设备放置与项目同步
+
+`weightc legacy-build/run/evaluate` 和 `wgt export/run/test` 支持 `--device cpu|cuda|cuda:N`。
+默认 CPU；`--place 层名或参数名=设备` 可重复指定，支持混合放置：
+
+```sh
+weightc legacy-build --no-store examples/xor.wgt --device cuda:0 --place hidden.weight=cpu
+weightc run weights/xor_mlp --device cpu --input '[[0,1]]'
+```
+
+层的执行设备和参数的驻留设备可以不同，计算时自动复制输入和所需参数，
+梯度回到参数的驻留设备。CUDA 需要支持 CUDA 的 PyTorch；并非自动显存管理。
+详见 [设备与参数放置](docs/devices.md)。
+
+`wgt new/init` 现在创建 `wgt.toml`，记录项目、模型入口、输出目录、设备配置和依赖。
+`wgt sync` 一键校验缓存、获取缺失依赖并同步 `wgt.sum` 锁文件；支持 `--offline` 和
+`--locked`。旧版 `wgt.mod` 仍受支持，但不能与 `wgt.toml` 并存。
+锁文件记录依赖版本、提交号和文件哈希；`sync` 不训练、不自动升级模型依赖；同时会自动准备 Python/PyTorch 运行环境。
+配置示例见 [wgt 文档](docs/wgt.md#toml-configuration-and-one-command-sync)。
+
+
+## 源码版：自动准备运行环境
+
+```sh
+wgt new demo
+cd demo
+wgt sync       # 自动准备 uv、独立 Python、匹配的 PyTorch 和模型依赖
+wgt doctor     # 验证导入、设备上的前向计算与反向传播
+wgt export
+```
+
+在 `wgt.toml` 的 `[environment]` 中设置 `python = "3.12"` 和
+`backend = "auto"`（也可指定 `cpu`、`cuda`、`cu128` 或 `mps`）。
+环境保存在项目 `.cache/weightlang/runtime/`，不修改系统 Python 或已有 `.venv`。
+运行环境锁在 `wgt.lock`，模型依赖锁在 `wgt.sum`；两者都应提交。
+支持 `--locked`、`--offline`、`--upgrade-env` 和仅同步模型依赖的 `--no-env`。
+显卡驱动不自动安装。平台范围、隔离和恢复行为见 [环境管理](docs/environment.md)。
+
+
+## 用简洁语法描述分支、门控和循环（main，未发布）
+
+```wgt
+wgt 0.3
+use std/transformer as t
+model language_model
+input tokens: i64[16]
+output logits: f32[16,128]
+layer embed: t.tokens(vocab=128, dim=32, max_len=16)
+layer decoder: repeat(4, t.gated_decoder(dim=32, heads=4))
+layer head: layernorm(dim=32) -> linear(in=32, out=128)
+init seed=42
+```
+
+`->` 串联层，`from` 指定分支来源，`mul`/`mix` 表达可训练门控。
+`repeat` 堆叠独立参数，`recur` 共享参数迭代，`scan` 沿序列传递隐藏状态。
+标准库提供 SwiGLU 和 GRU；这些示例只初始化架构，不代表已经训练。
+`where` 是两路都执行后的条件选择，不是节省计算的惰性分支。
+
+见[完整语法与限制](docs/dataflow.md)、[GRU 示例](examples/gru.wgt)和
+[自定义循环单元](examples/recurrent.wgt)。
+
+## 架构调试（main，未发布）
+
+`weightc check` 提供带错误码、源码标记、张量来源和修改提示的诊断；
+`weightc trace` 查看逐层数值和循环时间步；`weightc debug --steps 10`
+检查短训练的损失、梯度和门控饱和情况，不保存权重。Rust `wgt` 支持同名命令。
+加 `--weights weights/my_model` 可直接诊断已保存的权重，核验哈希和结构，
+报告逐参数梯度状态及更新幅度；原模型文件保持不变。
+见[调试指南](docs/debugging.md)、[循环示例](examples/debug_memory.wgt)和
+[权重调试示例](examples/debug_weights.wgt)。
+
 ## Git 包注册表
 
 源码版 `wgt` 支持从 [WeightLang/registry](https://github.com/WeightLang/registry) 添加已审核的模型包：
@@ -407,6 +549,10 @@ wgt add weightlang/gates
 Metadata lives in `[package]` in `wgt.toml`. See [bundle and migration specification](docs/bundles.md).
 Older build examples below/above use the explicit compatibility command `weightc legacy-build`;
 standalone initialization is `wgt export`. These changes are not yet released.
+
+## 编辑器支持
+
+已提供 VS Code 兼容编辑器、Sublime Text、TextMate、JetBrains、Vim/Neovim、Emacs、Kate/KWrite 和 GtkSourceView 的语法高亮配置。见[安装方法与验证状态](docs/editors.md)。扩展尚未上架；目前提供词法高亮，不含 LSP。
 
 ### 一键升级
 

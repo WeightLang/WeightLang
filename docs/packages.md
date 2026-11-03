@@ -1,7 +1,7 @@
 # Packages
 
-> 当前 `build` 只生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
-> 旧构建示例改用 `weightc legacy-build`；参见[分发包与迁移规范](bundles.md)。
+> 当前命令已拆分：`build` 生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
+> 旧构建示例使用 `weightc legacy-build`；详见[分发包、元数据与迁移规范](bundles.md)。
 
 
 The native Rust **wgt** CLI now offers Cargo-like project and package commands.

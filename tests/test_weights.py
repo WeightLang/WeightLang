@@ -131,7 +131,7 @@ def test_cli_and_tamper(model, tmp_path, capsys):
     assert main(["evaluate", str(model), "--data", str(data), "--loss", "cross_entropy"]) == 0
     assert json.loads(capsys.readouterr().out)["data"]["rows"] == 2
     assert main(["weights", str(model), "--limit", "-1"]) == 1
-    assert "error:" in capsys.readouterr().err
+    assert "error[E0001]:" in capsys.readouterr().err
     manifest = json.loads((model / "manifest.json").read_text())
     file = model / manifest["weights"]["file"]
     file.write_bytes(file.read_bytes() + b"tampered")

@@ -304,6 +304,26 @@
               {
                 "type": "STRING",
                 "value": "train"
+              },
+              {
+                "type": "STRING",
+                "value": "config"
+              },
+              {
+                "type": "STRING",
+                "value": "parameter"
+              },
+              {
+                "type": "STRING",
+                "value": "share"
+              },
+              {
+                "type": "STRING",
+                "value": "adapter"
+              },
+              {
+                "type": "STRING",
+                "value": "return"
               }
             ]
           }

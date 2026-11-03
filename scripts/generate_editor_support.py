@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def vocabulary():
     tree = ast.parse((ROOT / 'src/weightlang/syntax.py').read_text())
-    groups = {'keywords': {'as', 'from'}, 'builtins': {'mean', 'sum', 'transpose', 'residual'}, 'types': set()}
-    names = {'PARAM_FREE_OPS', 'ARG_OPS', 'GRAPH_OPS', 'LOOP_OPS', 'LOSSES', 'OPTIMIZERS', 'BUILTIN_OPS'}
+    groups = {'keywords': {'as', 'from', 'return'}, 'builtins': {'mean', 'sum', 'transpose', 'residual'}, 'types': set()}
+    names = {'PARAM_FREE_OPS', 'ARG_OPS', 'GRAPH_OPS', 'LOOP_OPS', 'STRUCTURAL_OPS', 'LOSSES', 'OPTIMIZERS', 'BUILTIN_OPS'}
     # Collect literal additions as well as initial definitions, without executing the parser.
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith('_stmt_'):
@@ -39,6 +39,7 @@ def vocabulary():
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
             if node.func.value.id in names and node.func.attr == 'update' and node.args and isinstance(node.args[0], ast.Dict):
                 groups['builtins'].update(k.value for k in node.args[0].keys if isinstance(k, ast.Constant))
+    groups["builtins"].update(json.loads((ROOT / "src/weightlang/primitive_specs.json").read_text()))
     return {key: sorted(value) for key, value in groups.items()}
 
 
@@ -55,7 +56,7 @@ def outputs():
         {'name': 'support.function.wgt', 'match': r'(?<![\w.])(?:' + alt['builtins'] + r')\b'},
         {'name': 'constant.numeric.wgt', 'match': number},
         {'name': 'entity.name.function.wgt', 'match': r'\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?(?=\s*\()'},
-        {'name': 'keyword.operator.wgt', 'match': r'->|//|[=+*/%\-]'},
+        {'name': 'keyword.operator.wgt', 'match': r'->|==|!=|<=|>=|//|[<>=+*/%\-]'},
         {'name': 'punctuation.wgt', 'match': r'[\[\](),.:]'},
     ]
     grammar = {'name': 'WeightLang', 'scopeName': 'source.wgt', 'fileTypes': ['wgt'], 'patterns': patterns}

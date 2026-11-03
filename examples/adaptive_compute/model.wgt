@@ -1,0 +1,20 @@
+wgt 0.3
+model adaptive_compute
+input x: f32[feature=4]
+output final: f32[feature=4] from reasoning.output
+output states: f32[8,4] from reasoning.states
+output halt_weights: f32[8,1] from reasoning.halt_weights
+output expected_steps: f32[] from reasoning.expected_steps
+
+block think():
+  # 四维隐状态，八轮共用同一组更新权重；新状态仍为 [4]。
+  layer next: linear(4) -> tanh from input
+  # 每个样本一个停止概率；训练时保留梯度，不做随机判断。
+  layer stop: linear(1) -> sigmoid from next
+  layer result: identity from next
+
+# 完整执行八轮并返回训练所需结果，不在 WGT 内定义损失或优化器。
+# halt_weights 是各轮首次停止的概率；最后一轮吸收全部剩余概率。
+# 模型仅初始化；Python 示例用合成目标演示如何训练门，不证明任务质量。
+layer reasoning: ponder(8, think(), until=stop)
+init seed=42

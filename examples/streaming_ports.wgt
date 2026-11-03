@@ -1,0 +1,18 @@
+wgt 0.3
+model streaming_ports
+# 每个样本输入三帧、每帧两个特征；batch 轴由 Python 在最前面提供。
+# old 由调用方持有，可接上一个分块的 new；它不是参数或模型内部持久状态。
+input samples: f32[time=3,features=2]
+input old: f32[hidden=4]
+output states: f32[time=3,hidden=4] from memory
+output new: f32[hidden=4] from final
+block cell():
+  # 拼接当前帧与旧状态：2 + 4 -> 6，再映射回四维状态。
+  # scan 在所有时间步共享这一组权重，梯度能跨显式传入的状态继续传播。
+  layer joined: concat(input, state)
+  layer next: linear(in=6, out=4) -> tanh
+layer memory: scan(hidden=4, cell()) from samples, old
+# 所有状态用于逐帧任务；最后一个状态供下一分块继续使用。
+layer final: last from memory
+# 这里只初始化结构；没有训练数据，未训练。
+init seed=7

@@ -7,7 +7,7 @@
 (punctuation) @punctuation.delimiter
 ["(" ")" "[" "]"] @punctuation.bracket
 ["model" "block" "layer" "input" "output" "const" "dim"] @keyword
-["wgt" "require" "use" "import" "inherit" "freeze" "unfreeze" "data" "init" "train"] @keyword
+["wgt" "require" "use" "import" "inherit" "freeze" "unfreeze" "data" "init" "train" "config" "parameter" "share" "adapter" "return"] @keyword
 (clause) @keyword
 (call function: (qualified_name) @function)
 (parameter name: (identifier) @variable.parameter)
@@ -16,4 +16,4 @@
 (constant_declaration name: (identifier) @constant)
 (dimension_declaration name: (identifier) @type)
 ((identifier) @type.builtin (#any-of? @type.builtin "bool" "f32" "i64"))
-((qualified_name . (identifier) @function.builtin .) (#any-of? @function.builtin "adam" "adamw" "add" "bce" "concat" "conv2d" "cross_entropy" "dropout" "embedding" "flatten" "gelu" "globalavgpool2d" "identity" "last" "layernorm" "linear" "maxpool2d" "mean" "meanpool" "mix" "mse" "mul" "position_embedding" "rearrange" "recur" "reduce" "relu" "repeat" "residual" "rmsnorm" "rope_attention" "scale" "scan" "self_attention" "sgd" "sigmoid" "silu" "softmax" "sparse_moe" "sum" "tanh" "transpose" "where"))
+((qualified_name . (identifier) @function.builtin .) (#any-of? @function.builtin "adam" "adamw" "add" "avgpool2d" "bce" "broadcast" "cat" "concat" "conv1d" "conv2d" "cos" "cross_entropy" "cumsum" "dropout" "embedding" "eq" "exp" "flatten" "gather" "gelu" "globalavgpool2d" "identity" "last" "layernorm" "linear" "log" "lt" "masked_softmax" "matmul" "maxpool2d" "mean" "meanpool" "mix" "mse" "mul" "pad2d" "ponder" "position_embedding" "rearrange" "recur" "reduce" "reduce_max" "reduce_mean" "reduce_sum" "relu" "repeat" "residual" "resize2d" "rmsnorm" "rope_attention" "route" "rsqrt" "scale" "scan" "scan_state" "scatter_add" "self_attention" "seq" "sgd" "shift" "sigmoid" "silu" "sin" "slice" "softmax" "softplus" "sparse_moe" "square" "stack" "sum" "tanh" "transpose" "transpose_axes" "where"))

@@ -1,0 +1,14 @@
+wgt 0.3
+use std/hf_decoder
+model starcoder2_base
+# Audited against Transformers 5.7.0: Starcoder2Model base hidden states only.
+# 单输入 token 序列，不含 batch；只含结构，无权重值或训练声明。
+# 位置从 0 开始，无 padding、外部 mask、KV cache 或语言模型输出头。
+input tokens: i64[time=8]
+output hidden: f32[time=8,feature=16]
+layer tokens: embedding(vocab=32, dim=16)
+layer embedding_dropout: dropout(p=0.0)
+layer b0: hf_decoder.starcoder2_block(dim=16, heads=4, kv_heads=2, head_dim=4, hidden=32, eps=1e-05, theta=10000.0, bias=1, window=0, attn_dropout=0.0, resid_dropout=0.0)
+layer b1: hf_decoder.starcoder2_block(dim=16, heads=4, kv_heads=2, head_dim=4, hidden=32, eps=1e-05, theta=10000.0, bias=1, window=0, attn_dropout=0.0, resid_dropout=0.0)
+layer norm: layernorm(dim=16, eps=1e-05)
+init seed=0

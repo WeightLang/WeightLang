@@ -4,6 +4,7 @@
 #   curl -fsSL https://github.com/WeightLang/WeightLang/releases/latest/download/install.sh | sh
 #
 # Environment variables:
+#   WEIGHTLANG_SOURCE    local checkout to build/install wgt (requires Cargo; skips wheel)
 #   WEIGHTLANG_VERSION   release tag to install, e.g. v0.1.0 (default: latest)
 #   WEIGHTLANG_TORCH     "cpu" (default on Linux) installs CPU-only PyTorch, which is much
 #                        smaller; "default" uses PyPI's torch (CUDA build on Linux)
@@ -27,6 +28,25 @@ CPU_INDEX="https://download.pytorch.org/whl/cpu"
 
 say() { printf 'weightlang-install: %s\n' "$*"; }
 die() { printf 'weightlang-install: error: %s\n' "$*" >&2; exit 1; }
+
+# Source mode installs the native CLI, including its matching compiler sources.
+# Keep Cargo build intermediates on the checkout filesystem, not in /tmp.
+if [ -n "${WEIGHTLANG_SOURCE:-}" ]; then
+    SOURCE="$(cd "$WEIGHTLANG_SOURCE" && pwd)" || die "invalid WEIGHTLANG_SOURCE"
+    [ -f "$SOURCE/crates/wgt/Cargo.toml" ] && [ -f "$SOURCE/pyproject.toml" ] || die "WEIGHTLANG_SOURCE must be a WeightLang checkout"
+    command -v cargo >/dev/null 2>&1 || die "source installation requires Cargo"
+    say "building wgt from $SOURCE"
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$SOURCE/target}" cargo install --path "$SOURCE/crates/wgt" --locked --force --root "$HOME_DIR"
+    "$HOME_DIR/bin/wgt" --version || die "installed wgt failed verification"
+    mkdir -p "$BIN_DIR"
+    if [ "$BIN_DIR" != "$HOME_DIR/bin" ]; then
+        ln -sf "$HOME_DIR/bin/wgt" "$BIN_DIR/wgt"
+    fi
+    say "installed wgt at $BIN_DIR/wgt"
+    case ":$PATH:" in *":$BIN_DIR:"*) ;; *) say "add $BIN_DIR to PATH" ;; esac
+    say "next: wgt new demo; cd demo; wgt sync"
+    exit 0
+fi
 
 if [ -z "$TORCH" ]; then
     case "$(uname -s)" in
@@ -60,8 +80,13 @@ else
     die "need sha256sum or shasum"
 fi
 
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT INT TERM
+# Release downloads use disk-backed cache; only this invocation's scratch is removed.
+CACHE_DIR="${WEIGHTLANG_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/weightlang}"
+mkdir -p "$CACHE_DIR"
+TMP="$(mktemp -d "$CACHE_DIR/install.XXXXXX")"
+trap 'rm -rf "$TMP"' 0
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 say "fetching release metadata ($VERSION)"
 fetch "$BASE/SHA256SUMS" "$TMP/SHA256SUMS" || die "cannot download $BASE/SHA256SUMS"
@@ -82,8 +107,7 @@ if [ "${WEIGHTLANG_NO_UV:-}" != 1 ] && command -v uv >/dev/null 2>&1; then
     else
         uv tool install --force --python '>=3.10' "$TMP/$WHEEL"
     fi
-    WEIGHTC="$(command -v weightc || true)"
-    [ -n "$WEIGHTC" ] || WEIGHTC="$(uv tool dir --bin)/weightc"
+    WEIGHTC="$(uv tool dir --bin)/weightc"
 else
     PY=""
     for cand in python3 python; do

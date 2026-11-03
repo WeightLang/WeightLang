@@ -4,6 +4,27 @@
 优先读仓库 `docs/decompile.md`、`docs/python.md`、`docs/debugging.md`，避免沿用过期能力。
 示例路径是独立任务的占位路径，先检查存在性；不覆盖现有文件。
 
+## 项目接入与验收
+
+所有相对路径以待迁移项目为根。先确认该项目的模型定义、训练入口、推理入口、
+保存/加载路径和依赖管理，再决定 WGT 文件布局；不要用编译器仓库的示例目录充当目标项目。
+
+- 在原项目中建立受当前工具支持的 WGT 配置和架构入口，更新依赖声明与实际调用方。
+  核对当前 `wgt` 项目配置格式再写配置，不能为了外观补一个未接入的 `wgt.toml`。
+- 将可表达的完整网络连接、门控和共享关系写入 WGT。宿主只保留确有需要的逻辑，
+  逐项记录尚未迁入 WGT 的核心计算及原因。几百个单层 `.wgt` 加一份照旧运行的
+  Python forward，并不自动构成完整架构迁移。
+- WGT 源码应被实际构建/训练/推理流程读取；不能每次从旧 Python 定义重新生成并覆盖，
+  使用户修改 `.wgt` 后对原项目毫无作用。用一个有意义的源码变更或入口检查验证接入。
+- 原实现可以留作基线或显式兼容入口；正常使用路径要切到迁移后的架构。
+  更新 README、训练与推理命令、保存加载步骤，说明需要的编译器版本或本地依赖。
+- 对可重训的开发项目，验证前向、梯度、最小优化步骤及保存重载；只迁架构时使用
+  相同初始化参数进行对比，不把缺失旧检查点当成阻塞，也不把随机初始化说成训练权重。
+
+完成标准是“原项目已接入且约定范围的行为可运行”，不是“另一个仓库新增了示例”。
+语言能力不足时，实施任务范围内可验证的扩展并报告剩余缺口；只完成组件转换时明确标为
+部分迁移。用户明确要求示例或单模型导出时，才按那个更窄的范围交付。
+
 ## 1. 原生 WeightLang 模型
 
 ```sh
@@ -26,9 +47,11 @@ weightc check models/migrated.wgt --shapes
 weightc build models/migrated.wgt --no-store --no-train -o weights/scaffold
 ```
 
-当前静态 Python 转换只支持一个字面量 nn.Sequential：带 bias 的 Linear 和
-默认参数的 ReLU/Tanh/Sigmoid/GELU/SiLU/Identity。它只读 AST，不执行输入代码，
-不恢复权重或初始化随机状态。自定义类、forward、嵌套序列与非默认选项不能靠此命令自动迁移。
+当前静态转换支持 nn.Module 的 __init__/单输入 forward、同文件嵌套类、Sequential、
+ModuleList 与固定 range。可选 --class-name、--init-args JSON、--input-shape（不含 batch）
+和 --input-dtype。支持 MLP、基本 CNN、残差/门控/末维拼接等，完整签名与限制见仓库
+ docs/decompile.md。只读 AST，不执行输入代码，不恢复权重或初始化随机状态；
+动态控制流、重复调用同一参数层和不等价选项会明确拒绝。用真实前向和梯度验证转换。
 
 对其他模型，读真实 forward 后手工编写 WGT。重点核对：
 
@@ -110,3 +133,12 @@ weightc debug models/migrated.wgt --weights weights/migrated --steps 3 --json
 目前仅 CPU；debug 仅内置 backprop，使用新优化器与固定小批次，只在内存更新。
 用 --watch 层路径及 --time 循环索引定位最早出现偏差的输出；逐参数报告说明梯度和更新幅度，
 但不能代替原模型对比。诊断运行不会保存修复后的模型，保存需走明确的新制品路径。
+
+
+## 5. Transformers 安装包模型
+
+使用仓库 docs/transformers-migration.md 的固定 5.7.0 清单和适配器。
+`weightc transformers --inventory -o NEW.json` 对全部 modeling 源文件做静态尝试；失败必须保留。
+`--family NAME --config LOCAL.json --sequence N -o NEW.wgt` 只生成受支持基础模型的隐藏状态接口。
+目前 8 个家族通过小配置前向、全部参数梯度、制品重载和 Python 导出；
+完整源文件、任务头、缓存、padding mask 等仍未完成迁移，不能按适配器数量宣称全库完成。

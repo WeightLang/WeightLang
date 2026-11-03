@@ -22,7 +22,8 @@ def _architecture(module):
             raise WgtError("cannot save Python forward hooks")
         config = {key: value for key, value in vars(child).items()
                   if not key.startswith("_") and key not in ("training", "forward")}
-        result.append((name, type(child), child.extra_repr(), config, getattr(forward, "__func__", forward)))
+        boundary = {key: copy.deepcopy(getattr(child, key)) for key in ("_port_interface", "_port_routes", "_weight_rules") if hasattr(child, key)}
+        result.append((name, type(child), child.extra_repr(), config, boundary, getattr(forward, "__func__", forward)))
     return result
 
 
@@ -36,6 +37,9 @@ def save_artifact(
     were trained by the caller; it is not independent quality verification.
     The source architecture, frozen parameters and baseline must remain intact.
     """
+    from .tensor_program import TensorArtifact
+    if isinstance(artifact, TensorArtifact):
+        return artifact.save(path, training=training)
     output = Path(path)
     if output.exists() or output.is_symlink():
         raise WgtError("output already exists; choose a new artifact directory")
@@ -59,6 +63,9 @@ def save_artifact(
         raise WgtError("model tensor names changed")
     parameters = dict(artifact.module.named_parameters())
     frozen = {name for name, p in baseline.module.named_parameters() if not p.requires_grad}
+    for spec in getattr(baseline.module, '_wgt_adapters', {}).values():
+        if spec.get('method') == 'qlora':
+            frozen.add(spec['target'] + '.weight')
     changed = []
     for name, value in state.items():
         if value.dtype != before[name].dtype or value.shape != before[name].shape:
@@ -91,7 +98,7 @@ def save_artifact(
     manifest.setdefault("python_history", []).append(record)
     if changed:
         manifest["training"] = None if training is None else {**training, "backend": "python", "provenance": "caller-reported"}
-    manifest["format_version"] = 3
+    manifest["format_version"] = max(3, manifest["format_version"])
     manifest["rebuild"] = "Source describes the base model; Python weight updates require the external training code and data."
     output.parent.mkdir(parents=True, exist_ok=True)
     output.mkdir()  # Exclusive reservation: never replace a retained model.

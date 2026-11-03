@@ -1,3 +1,5 @@
+mod project_ignore;
+
 use anyhow::{ensure, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use fs2::FileExt;
@@ -10,6 +12,7 @@ use std::{
 };
 use weightlang_wgt::{
     artifact::Artifact,
+    environment,
     graph::Graph,
     manifest::{self, Manifest},
     package_index, registry, toolchain, upgrade,
@@ -20,7 +23,7 @@ use weightlang_wgt::{
     name = "wgt",
     version,
     about = "WeightLang package manager and architecture renderer",
-    after_help = "Extensions: wgt <name> runs wgt-<name> from PATH. Build/run/test/check require weightc; package management and graph rendering are native Rust."
+    after_help = "Extensions: wgt <name> runs wgt-<name> from PATH. Run wgt sync to prepare Python/PyTorch for build/run/test/check; package management and graph rendering are native Rust."
 )]
 struct Cli {
     #[arg(short = 'C', long = "directory", global = true, default_value = ".")]
@@ -45,6 +48,57 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
 }
+#[derive(clap::Args, Default)]
+struct DeviceOptions {
+    /// Default execution device (cpu, cuda, cuda:N)
+    #[arg(long)]
+    device: Option<String>,
+    /// Override a layer or parameter device (TARGET=DEVICE), repeatable
+    #[arg(long = "place")]
+    placements: Vec<String>,
+    /// JSON mapping exact layer/parameter names to devices
+    #[arg(long)]
+    device_map: Option<PathBuf>,
+}
+impl DeviceOptions {
+    fn with_config(mut self, config: Option<&manifest::ProjectConfig>, project: &Path) -> Self {
+        if let Some(config) = config {
+            self.device = self.device.or_else(|| config.runtime.device.clone());
+            // An explicit map replaces project placements; explicit --place overrides individual entries.
+            if self.device_map.is_none() {
+                let overrides: Vec<_> = self
+                    .placements
+                    .iter()
+                    .filter_map(|s| s.split_once('=').map(|p| p.0.to_owned()))
+                    .collect();
+                let mut inherited: Vec<_> = config
+                    .runtime
+                    .placements
+                    .iter()
+                    .filter(|(name, _)| !overrides.contains(name))
+                    .map(|(name, device)| format!("{name}={device}"))
+                    .collect();
+                inherited.extend(self.placements);
+                self.placements = inherited;
+            }
+        }
+        self.device = self.device.or_else(|| environment::active_device(project));
+        self
+    }
+    fn args(&self) -> Vec<OsString> {
+        let mut args = Vec::new();
+        if let Some(device) = &self.device {
+            args.extend(["--device".into(), device.into()]);
+        }
+        if let Some(path) = &self.device_map {
+            args.extend(["--device-map".into(), path.as_os_str().into()]);
+        }
+        for placement in &self.placements {
+            args.extend(["--place".into(), placement.into()]);
+        }
+        args
+    }
+}
 #[derive(Subcommand)]
 enum SelfCommand {
     /// Download, verify and select the latest stable native wgt
@@ -64,7 +118,6 @@ enum Cmd {
         #[arg(long)]
         path: Option<PathBuf>,
     },
-
     /// Create a new project directory
     New {
         path: PathBuf,
@@ -104,18 +157,68 @@ enum Cmd {
     /// Download and verify a wgt version without selecting it
     Download { version: String },
     /// Fetch and verify every pinned dependency
-    #[command(alias = "sync")]
     Fetch,
+    /// Prepare Python/PyTorch and synchronize model dependencies
+    Sync {
+        /// Synchronize only model dependencies; do not prepare Python
+        #[arg(long, conflicts_with = "upgrade_env")]
+        no_env: bool,
+        /// Re-resolve Python packages instead of reusing the environment lock
+        #[arg(long, conflicts_with = "locked")]
+        upgrade_env: bool,
+    },
     /// Print direct dependency tree
     Tree,
     /// Print project metadata as JSON
     Metadata,
+    /// Explain a compiler diagnostic code
+    Explain { code: String },
     /// Check all sources using weightc, without training
     Check {
         source: Option<PathBuf>,
-        /// Display inferred input/output shapes for each layer
+        /// Show inferred layer shapes and named axes
         #[arg(long)]
         shapes: bool,
+        #[arg(long, value_parser = ["human", "json"], default_value = "human")]
+        error_format: String,
+    },
+    /// Trace one sample with source locations, tensor statistics and loop indices
+    Trace {
+        source: PathBuf,
+        /// Load exact saved weights instead of source initialization/imports
+        #[arg(long)]
+        weights: Option<PathBuf>,
+        #[arg(long)]
+        sample: Option<PathBuf>,
+        #[arg(long)]
+        watch: Option<String>,
+        #[arg(long)]
+        time: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, default_value_t = 10_000_000)]
+        max_parameters: u64,
+        #[arg(long, value_parser = ["human", "json"], default_value = "human")]
+        error_format: String,
+    },
+    /// Run a bounded number of training updates in memory without saving weights
+    Debug {
+        source: PathBuf,
+        /// Load exact saved weights instead of source initialization/imports
+        #[arg(long)]
+        weights: Option<PathBuf>,
+        #[arg(long, default_value_t = 10)]
+        steps: u32,
+        #[arg(long)]
+        watch: Option<String>,
+        #[arg(long)]
+        time: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, default_value_t = 10_000_000)]
+        max_parameters: u64,
+        #[arg(long, value_parser = ["human", "json"], default_value = "human")]
+        error_format: String,
     },
     /// Build a source ZIP bundle; never initialize weights or train
     Build {
@@ -150,35 +253,54 @@ enum Cmd {
         #[arg(short, long)]
         output: PathBuf,
     },
-    /// Explicitly initialize weights without training
+    /// Explicitly initialize or migrate weights, without training
     Export {
         source: Option<PathBuf>,
         /// Output root; writes <root>/<model>/
-        #[arg(short, long, default_value = "weights")]
-        output: PathBuf,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
         /// Replace an existing WeightLang model directory
         #[arg(long)]
         force: bool,
         /// Load a trusted Python trainer: NAME=FILE.py:FUNCTION (repeatable)
         #[arg(long = "trainer")]
         trainers: Vec<String>,
+        #[command(flatten)]
+        devices: DeviceOptions,
     },
-    /// Build in the disposable disk cache and run one model
+    /// Run the current weight revision without training
     Run {
-        #[arg(long, default_value = "main.wgt")]
-        source: PathBuf,
+        #[arg(long)]
+        source: Option<PathBuf>,
         #[arg(long)]
         input: String,
+        #[command(flatten)]
+        devices: DeviceOptions,
     },
-    /// Build and run JSON behavior tests from tests/*.json
-    Test,
+    /// Test the current weight revision using tests/*.json
+    Test {
+        #[command(flatten)]
+        devices: DeviceOptions,
+    },
     /// Verify a local artifact or all locked dependencies
     Verify { artifact: Option<PathBuf> },
     /// Render verified model architecture without Python
     Graph {
         artifact: PathBuf,
-        #[arg(long, value_enum, default_value = "html")]
-        format: Format,
+        #[arg(long, value_enum)]
+        format: Option<Format>,
+        /// Export JSON to stdout (or -o), instead of human-readable HTML
+        #[arg(long, conflicts_with_all = ["toon", "format"])]
+        json: bool,
+        /// Export TOON to stdout (or -o)
+        #[arg(long, conflicts_with_all = ["json", "format"])]
+        toon: bool,
+        /// Compare tensor values with a compatible baseline artifact
+        #[arg(long)]
+        compare: Option<PathBuf>,
+        /// Override HTML appearance with a local CSS stylesheet
+        #[arg(long)]
+        style: Option<PathBuf>,
         #[arg(short, long)]
         output: Option<PathBuf>,
         /// Open the generated HTML in the system's default browser
@@ -278,6 +400,9 @@ fn main() -> ExitCode {
     match execute(cli) {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
+            if let Some(failure) = e.downcast_ref::<CompilerFailure>() {
+                return ExitCode::from(failure.0);
+            }
             eprintln!("error: {e:#}");
             ExitCode::FAILURE
         }
@@ -327,16 +452,41 @@ fn execute(cli: Cli) -> Result<u8> {
         Cmd::Graph {
             artifact,
             format,
+            json,
+            toon,
+            compare,
+            style,
             output,
             open,
             stdout,
         } => {
+            let format = if json {
+                Format::Json
+            } else if toon {
+                Format::Toon
+            } else {
+                format.unwrap_or(Format::Html)
+            };
+            let stdout = stdout || ((json || toon) && output.is_none());
             ensure!(
                 !open || matches!(format, Format::Html),
                 "--open requires --format html"
             );
-            let graph = Graph::read(&base.join(artifact))?;
-            let text = graph.render(format.name())?;
+            ensure!(
+                style.is_none() || matches!(format, Format::Html),
+                "--style requires HTML"
+            );
+            let comparison = compare.map(|p| base.join(p));
+            let graph = Graph::read_compared(&base.join(artifact), comparison.as_deref())?;
+            let text = if let Some(style) = style {
+                let path = base.join(style);
+                graph.html_with_style(
+                    &fs::read_to_string(&path)
+                        .with_context(|| format!("read CSS {}", path.display()))?,
+                )?
+            } else {
+                graph.render(format.name())?
+            };
             if stdout {
                 print!("{text}");
             } else {
@@ -389,11 +539,15 @@ fn execute(cli: Cli) -> Result<u8> {
         }
         Cmd::Cache => println!("{}", registry::cache_root()?.display()),
         Cmd::Doctor => {
-            println!("wgt {}: native Rust; Python is not required for package management or graph rendering",env!("CARGO_PKG_VERSION"));
+            println!(
+                "wgt {}: native Rust; Python is not required for package management or graph rendering",
+                env!("CARGO_PKG_VERSION")
+            );
             for (tool, reason) in [
                 ("git", "remote tags / publishing"),
                 ("gh", "publishing only"),
-                ("weightc", "build/run/test/check only"),
+                ("uv", "managed runtime preparation; bootstrapped if missing"),
+                ("weightc", "optional external compiler override"),
             ] {
                 println!(
                     "{tool}: {} ({reason})",
@@ -403,6 +557,9 @@ fn execute(cli: Cli) -> Result<u8> {
                 );
             }
             println!("cache: {}", registry::cache_root()?.display());
+            if let Ok(project) = manifest::project(&base) {
+                environment::doctor(&project)?;
+            }
         }
         Cmd::External(args) => {
             let name = args[0].to_str().context("extension name must be UTF-8")?;
@@ -481,6 +638,7 @@ fn execute(cli: Cli) -> Result<u8> {
             guard.lock_exclusive()?;
             let manifest_path = manifest::manifest_path(&project)?;
             let manifest = Manifest::read(&manifest_path)?;
+            let config = manifest::ProjectConfig::read(&project)?;
             let update = matches!(command, Cmd::Update { .. });
             match command {
                 Cmd::Add { module, version }
@@ -578,6 +736,50 @@ fn execute(cli: Cli) -> Result<u8> {
                     )?;
                     println!("removed {module}; source imports are unchanged");
                 }
+                Cmd::Sync {
+                    no_env,
+                    upgrade_env,
+                } => {
+                    ensure!(
+                        !cli.locked || project.join("wgt.sum").is_file(),
+                        "--locked requires wgt.sum; run wgt sync first"
+                    );
+                    let known = manifest::read_lock(&project.join("wgt.sum"))?;
+                    let active: manifest::Lock = known
+                        .iter()
+                        .filter(|((m, v, _), _)| manifest.dependencies.get(m) == Some(v))
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    ensure!(
+                        !cli.locked || known == active,
+                        "--locked forbids removing stale dependencies"
+                    );
+                    let lock =
+                        registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
+                    if !cli.locked {
+                        let active: manifest::Lock = lock
+                            .into_iter()
+                            .filter(|((m, v, _), _)| manifest.dependencies.get(m) == Some(v))
+                            .collect();
+                        manifest::atomic_write(
+                            &project.join("wgt.sum"),
+                            manifest::lock_text(&active).as_bytes(),
+                        )?;
+                    }
+                    println!(
+                        "synchronized {} dependencies (wgt.sum)",
+                        manifest.dependencies.len()
+                    );
+                    if !no_env {
+                        environment::sync(
+                            &project,
+                            config.as_ref(),
+                            cli.offline,
+                            cli.locked,
+                            upgrade_env,
+                        )?;
+                    }
+                }
                 Cmd::Fetch => {
                     let known = manifest::read_lock(&project.join("wgt.sum"))?;
                     if cli.offline {
@@ -609,7 +811,7 @@ fn execute(cli: Cli) -> Result<u8> {
                     println!(
                         "{}",
                         serde_json::to_string_pretty(
-                            &json!({"format":"weightlang.project","format_version":1,"project":project,"manifest":manifest,"cache":cache,"dependency_scope":"direct exact versions"})
+                            &json!({"format":"weightlang.project","format_version":1,"project":project,"manifest":manifest,"config":config,"cache":cache,"dependency_scope":"direct exact versions"})
                         )?
                     );
                 }
@@ -621,15 +823,97 @@ fn execute(cli: Cli) -> Result<u8> {
                     )?;
                     println!("verified {} dependency artifacts", entries.len());
                 }
-                Cmd::Check { source, shapes } => {
+                Cmd::Check {
+                    source,
+                    error_format,
+                    shapes,
+                } => {
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
+                    let source =
+                        source.or_else(|| config.as_ref().and_then(|c| c.model.source.clone()));
                     for p in sources(&project, source)? {
-                        let mut args = vec!["check".into(), p.into_os_string()];
+                        let mut args: Vec<OsString> = vec![
+                            "check".into(),
+                            p.into_os_string(),
+                            "--error-format".into(),
+                            error_format.clone().into(),
+                        ];
                         if shapes {
                             args.push("--shapes".into());
                         }
                         compiler(&project, &args)?;
                     }
+                }
+                Cmd::Trace {
+                    source,
+                    weights,
+                    sample,
+                    watch,
+                    time,
+                    json,
+                    max_parameters,
+                    error_format,
+                } => {
+                    registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
+                    let mut args: Vec<OsString> = vec![
+                        "trace".into(),
+                        source.into_os_string(),
+                        "--max-parameters".into(),
+                        max_parameters.to_string().into(),
+                        "--error-format".into(),
+                        error_format.into(),
+                    ];
+                    if let Some(path) = sample {
+                        args.extend(["--sample".into(), path.into_os_string()]);
+                    }
+                    if let Some(path) = weights {
+                        args.extend(["--weights".into(), path.into_os_string()]);
+                    }
+                    if let Some(value) = watch {
+                        args.extend(["--watch".into(), value.into()]);
+                    }
+                    if let Some(value) = time {
+                        args.extend(["--time".into(), value.into()]);
+                    }
+                    if json {
+                        args.push("--json".into());
+                    }
+                    compiler(&project, &args)?;
+                }
+                Cmd::Debug {
+                    source,
+                    weights,
+                    steps,
+                    watch,
+                    time,
+                    json,
+                    max_parameters,
+                    error_format,
+                } => {
+                    registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
+                    let mut args: Vec<OsString> = vec![
+                        "debug".into(),
+                        source.into_os_string(),
+                        "--steps".into(),
+                        steps.to_string().into(),
+                        "--max-parameters".into(),
+                        max_parameters.to_string().into(),
+                        "--error-format".into(),
+                        error_format.into(),
+                    ];
+                    if let Some(path) = weights {
+                        args.extend(["--weights".into(), path.into_os_string()]);
+                    }
+                    if let Some(value) = watch {
+                        args.extend(["--watch".into(), value.into()]);
+                    }
+                    if let Some(value) = time {
+                        args.extend(["--time".into(), value.into()]);
+                    }
+                    if json {
+                        args.push("--json".into());
+                    }
+                    compiler(&project, &args)?;
                 }
                 Cmd::Build { entry, output, force } => {
                     let mut args: Vec<OsString> = vec!["build".into(), ".".into(), "-o".into(), output.into_os_string()];
@@ -654,9 +938,16 @@ fn execute(cli: Cli) -> Result<u8> {
                     source,
                     output,
                     force,
+                    devices,
                     trainers,
                 } => {
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
+                    let source =
+                        source.or_else(|| config.as_ref().and_then(|c| c.model.source.clone()));
+                    let output = output
+                        .or_else(|| config.as_ref().and_then(|c| c.model.output.clone()))
+                        .unwrap_or_else(|| "weights".into());
+                    let devices = devices.with_config(config.as_ref(), &project);
                     for p in sources(&project, source)? {
                         if model_name(&p)?.is_some() {
                             build_with_trainers(
@@ -664,18 +955,28 @@ fn execute(cli: Cli) -> Result<u8> {
                                 &p,
                                 &project.join(&output),
                                 force,
+                                &devices,
                                 &trainers,
                             )?;
                         }
                     }
                 }
-                Cmd::Run { source, input } => {
+                Cmd::Run {
+                    source,
+                    input,
+                    devices,
+                } => {
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
+                    let source = source
+                        .or_else(|| config.as_ref().and_then(|c| c.model.source.clone()))
+                        .unwrap_or_else(|| "main.wgt".into());
+                    let devices = devices.with_config(config.as_ref(), &project);
                     let artifact = build(
                         &project,
                         &project.join(source),
                         &project.join(".cache/weightlang/run"),
                         true,
+                        &devices,
                     )?;
                     compiler(
                         &project,
@@ -684,12 +985,15 @@ fn execute(cli: Cli) -> Result<u8> {
                             artifact.path().join("model").into_os_string(),
                             "--input".into(),
                             input.into(),
-                        ],
+                        ]
+                        .into_iter()
+                        .chain(devices.args())
+                        .collect::<Vec<_>>(),
                     )?;
                 }
-                Cmd::Test => {
+                Cmd::Test { devices } => {
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
-                    test_project(&project)?;
+                    test_project(&project, &devices.with_config(config.as_ref(), &project))?;
                 }
                 Cmd::ReleaseAssets {
                     version,
@@ -730,37 +1034,45 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
         !module.chars().any(char::is_whitespace) && !module.contains('#') && !module.is_empty(),
         "invalid module name"
     );
-    for file in ["wgt.mod", "wgt.toml", "wgt.sum", "main.wgt", "tests/main.json", toolchain::PIN] {
+    for file in [
+        "wgt.mod",
+        "wgt.toml",
+        "wgt.sum",
+        "wgt.lock",
+        ".wgt-version",
+        "main.wgt",
+        "tests/main.json",
+    ] {
         ensure!(!path.join(file).exists(), "refusing to overwrite {file}");
     }
     fs::create_dir_all(path.join("tests"))?;
+    fs::write(
+        path.join("wgt.toml"),
+        format!(
+            "[project]\nmodule = {}\nedition = \"0.2\"\n\n[model]\nsource = \"main.wgt\"\noutput = \"weights\"\n\n[revisions]\nmax_versions = 5\n\n[environment]\npython = \"3.12\"\nbackend = \"auto\"\n\n[dependencies]\n",
+            serde_json::to_string(&module)?
+        ),
+    )?;
+    fs::write(path.join("wgt.sum"), "")?;
     fs::write(
         path.join(toolchain::PIN),
         format!("{}\n", toolchain::CURRENT),
     )?;
     fs::write(
-        path.join("wgt.toml"),
+        path.join("main.wgt"),
         format!(
-            "[project]\nmodule = {}\nedition = \"0.2\"\n\n[model]\nsource = \"main.wgt\"\noutput = \"weights\"\n\n[revisions]\nmax_versions = 5\n\n[dependencies]\n",
-            serde_json::to_string(&module)?
+            "wgt 0.2\n# Learn a tiny identity map on four explicit training rows.\nmodel {name}\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ndata identity:\n  [0, 0] -> [0, 0]\n  [0, 1] -> [0, 1]\n  [1, 0] -> [1, 0]\n  [1, 1] -> [1, 1]\ninit seed=42\ntrain data=identity loss=mse optimizer=adam lr=0.05 epochs=400\n"
         ),
     )?;
-    fs::write(path.join("wgt.sum"), "")?;
-    fs::write(path.join("main.wgt"),format!("wgt 0.2\n# Learn a tiny identity map on four explicit training rows.\nmodel {name}\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ndata identity:\n  [0, 0] -> [0, 0]\n  [0, 1] -> [0, 1]\n  [1, 0] -> [1, 0]\n  [1, 1] -> [1, 1]\ninit seed=42\ntrain data=identity loss=mse optimizer=adam lr=0.05 epochs=400\n"))?;
     fs::write(
         path.join("tests/main.json"),
         serde_json::to_vec_pretty(
             &json!({"source":"main.wgt","input":[[0,1],[1,0]],"expected":[[0,1],[1,0]],"atol":0.001}),
         )?,
     )?;
-    if !path.join(".gitignore").exists() {
-        fs::write(
-            path.join(".gitignore"),
-            "/weights/\n/.cache/weightlang/\n/dist/\n",
-        )?;
-    }
+    project_ignore::initialize(path)?;
     println!(
-        "created {} (wgt check; wgt build; wgt train --fresh; wgt test)",
+        "created {} (wgt sync; wgt check; wgt build; wgt train --fresh; wgt test)",
         path.display()
     );
     Ok(())
@@ -792,18 +1104,39 @@ fn model_name(path: &Path) -> Result<Option<String>> {
     }
     Ok(None)
 }
-fn compiler_path() -> Result<PathBuf> {
-    if let Some(p) = std::env::var_os("WEIGHTC") {
-        return Ok(p.into());
+fn compiler_command(project: &Path) -> Result<Command> {
+    if let Some(path) = std::env::var_os("WEIGHTC") {
+        return Ok(Command::new(path));
     }
-    find_executable("weightc").context("weightc is needed for build/run/test/check; install it separately or set WEIGHTC. Native package/graph commands do not need Python.")
+    if let Some(command) = environment::compiler_command(project)? {
+        return Ok(command);
+    }
+    let path = find_executable("weightc").context("weightc is unavailable; run wgt sync to prepare Python/PyTorch, or set WEIGHTC to an external compiler")?;
+    Ok(Command::new(path))
 }
+#[derive(Debug)]
+struct CompilerFailure(u8);
+impl std::fmt::Display for CompilerFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "compiler exited with status {}", self.0)
+    }
+}
+impl std::error::Error for CompilerFailure {}
+
 fn compiler(project: &Path, args: &[OsString]) -> Result<()> {
-    let status = Command::new(compiler_path()?)
+    let status = compiler_command(project)?
         .current_dir(project)
         .args(args)
         .status()?;
-    ensure!(status.success(), "weightc failed: {status}");
+    if !status.success() {
+        return Err(CompilerFailure(
+            status
+                .code()
+                .and_then(|n| u8::try_from(n).ok())
+                .unwrap_or(1),
+        )
+        .into());
+    }
     Ok(())
 }
 fn build(
@@ -811,6 +1144,7 @@ fn build(
     source: &Path,
     output: &Path,
     _force: bool,
+    _devices: &DeviceOptions,
 ) -> Result<tempfile::TempDir> {
     fs::create_dir_all(output)?;
     let scratch = tempfile::tempdir_in(output)?;
@@ -831,6 +1165,7 @@ fn build_with_trainers(
     source: &Path,
     output: &Path,
     force: bool,
+    devices: &DeviceOptions,
     trainers: &[String],
 ) -> Result<PathBuf> {
     let name = model_name(source)?.context("cannot build a library; select a model source")?;
@@ -844,6 +1179,7 @@ fn build_with_trainers(
     if force {
         args.push("--force".into());
     }
+    args.extend(devices.args());
     for trainer in trainers {
         args.extend(["--trainer".into(), trainer.into()]);
     }
@@ -852,7 +1188,7 @@ fn build_with_trainers(
     Artifact::read(&path)?;
     Ok(path)
 }
-fn test_project(project: &Path) -> Result<()> {
+fn test_project(project: &Path, devices: &DeviceOptions) -> Result<()> {
     let directory = project.join("tests");
     ensure!(
         directory.is_dir(),
@@ -879,15 +1215,17 @@ fn test_project(project: &Path) -> Result<()> {
                         &project.join(source),
                         &project.join(".cache/weightlang/test"),
                         true,
+                        devices,
                     )?,
                 );
             }
             let artifact = built[source].path().join("model");
             let a = Artifact::read(&artifact)?;
-            let output = Command::new(compiler_path()?)
+            let output = compiler_command(project)?
                 .current_dir(project)
                 .arg("run")
                 .arg(&artifact)
+                .args(devices.args())
                 .arg("--input")
                 .arg(serde_json::to_string(
                     fixture.get("input").context("missing input")?,
@@ -979,7 +1317,9 @@ fn executable(path: &Path) -> bool {
     }
 }
 fn list_commands() {
-    println!("Built-in: version toolchain self download sync new init add remove update fetch tree metadata check build run test verify graph package install train export release-assets publish register cache doctor");
+    println!(
+        "Built-in: version toolchain self download new init add remove update fetch sync tree metadata check build run test verify graph package publish register cache doctor"
+    );
     let mut names = std::collections::BTreeSet::new();
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {

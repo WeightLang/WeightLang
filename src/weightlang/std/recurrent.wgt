@@ -1,0 +1,15 @@
+wgt 0.3
+
+# A GRU cell with reset applied before the candidate hidden projection.
+# scan supplies input (current features) and state (previous hidden state).
+block gru_cell(features, hidden):
+  layer joined: concat(input, state)
+  layer reset: linear(in=features + hidden, out=hidden) -> sigmoid
+  layer update: linear(in=features + hidden, out=hidden) -> sigmoid from joined
+  layer reset_state: mul(reset, state)
+  layer candidate_input: concat(input, reset_state)
+  layer candidate: linear(in=features + hidden, out=hidden) -> tanh
+  layer next: mix(update, state, candidate)
+
+block gru(features, hidden):
+  layer sequence: scan(hidden=hidden, gru_cell(features=features, hidden=hidden))

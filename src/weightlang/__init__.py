@@ -9,10 +9,11 @@ from .interop import save_artifact  # noqa: E402
 from .trainers import Trainer, TrainingContext  # noqa: E402
 
 from .python_export import export_python  # noqa: E402
-
-from .loading import load
+from .loading import load  # noqa: E402
+from .hooks import forward_hooks  # noqa: E402
 
 __all__ = [
+    "forward_hooks",
     "load",
     "export_python",
     "Artifact",
@@ -30,3 +31,18 @@ __all__ = [
     "parse",
     "parse_file",
 ]
+
+from .sequence import run_sequence, SequenceOutput  # noqa: E402
+__all__ += ["run_sequence", "SequenceOutput"]
+
+from .parameter_identity import parameter_inventory, migrate_parameters  # noqa: E402
+__all__ += ["parameter_inventory", "migrate_parameters"]
+
+from .checkpoint import save_checkpoint, restore_checkpoint, checkpoint_report  # noqa: E402
+__all__ += ['save_checkpoint', 'restore_checkpoint', 'checkpoint_report']
+
+from .configuration import model_config, package_model  # noqa: E402
+__all__ += ['model_config', 'package_model']
+
+from .adapters import merge_adapter, unmerge_adapter, save_adapter, load_adapter  # noqa: E402
+__all__ += ['merge_adapter', 'unmerge_adapter', 'save_adapter', 'load_adapter']

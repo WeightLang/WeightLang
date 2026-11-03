@@ -9,7 +9,7 @@ from .compiler import _prepare_program
 from .syntax import parse_file
 
 
-def load(source: str | Path, *, device="cpu", placements=None, entry=None, external_weights=None) -> nn.Module:
+def load(source: str | Path, *, device="cpu", placements=None, entry=None, external_weights=None, config=None) -> nn.Module:
     """Load WGT source or a complete artifact directory as an eval-mode module.
 
     Source loading does not write an artifact or execute data loaders/trainers.
@@ -18,6 +18,9 @@ def load(source: str | Path, *, device="cpu", placements=None, entry=None, exter
     and preserves saved weights and freezing. Call train() before training.
     """
     path = Path(source)
+    if config is not None and path.is_dir():
+        from .syntax import WgtError
+        raise WgtError("configuration applies to source; artifacts and installed packages are fixed")
     from .bundle import METADATA, load_installed
     if path.is_dir() and (path / METADATA).is_file():
         return load_installed(path, entry=entry, device=device, placements=placements, external_weights=external_weights)
@@ -26,7 +29,7 @@ def load(source: str | Path, *, device="cpu", placements=None, entry=None, exter
         raise WgtError("entry/external_weights only apply to installed bundles")
     if path.is_dir():
         return load_artifact(path, device=device, placements=placements).module
-    program = parse_file(path, check_training=False)
+    program = parse_file(path, check_training=False, config=config)
     module = _prepare_program(program, device=device, placements=placements, no_train=True)[0]
     module.eval()
     return module

@@ -1,0 +1,351 @@
+{
+  "layers": [
+    {
+      "name": "selected",
+      "op": "route",
+      "args": {},
+      "layers": [
+        {
+          "name": "branch0",
+          "op": "seq",
+          "args": {},
+          "layers": [
+            {
+              "name": "hidden",
+              "op": "seq",
+              "args": {},
+              "layers": [
+                {
+                  "name": "step0",
+                  "op": "linear",
+                  "args": {
+                    "out": 8,
+                    "in": 4
+                  },
+                  "input": {
+                    "dtype": "f32",
+                    "shape": [
+                      4
+                    ],
+                    "axes": [
+                      "feature"
+                    ]
+                  },
+                  "output": {
+                    "dtype": "f32",
+                    "shape": [
+                      8
+                    ],
+                    "axes": [
+                      "feature"
+                    ]
+                  }
+                },
+                {
+                  "name": "step1",
+                  "op": "gelu",
+                  "args": {},
+                  "input": {
+                    "dtype": "f32",
+                    "shape": [
+                      8
+                    ],
+                    "axes": [
+                      "feature"
+                    ]
+                  },
+                  "output": {
+                    "dtype": "f32",
+                    "shape": [
+                      8
+                    ],
+                    "axes": [
+                      "feature"
+                    ]
+                  }
+                }
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4
+                ],
+                "axes": [
+                  "feature"
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  8
+                ],
+                "axes": [
+                  "feature"
+                ]
+              }
+            },
+            {
+              "name": "result",
+              "op": "linear",
+              "args": {
+                "out": 4,
+                "in": 8
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  8
+                ],
+                "axes": [
+                  "feature"
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4
+                ],
+                "axes": [
+                  "feature"
+                ]
+              }
+            }
+          ],
+          "block": "expert",
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4
+            ],
+            "axes": [
+              "feature"
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4
+            ],
+            "axes": [
+              "feature"
+            ]
+          }
+        },
+        {
+          "name": "branch1",
+          "op": "seq",
+          "args": {},
+          "layers": [
+            {
+              "name": "hidden",
+              "op": "seq",
+              "args": {},
+              "layers": [
+                {
+                  "name": "step0",
+                  "op": "linear",
+                  "args": {
+                    "out": 8,
+                    "in": 4
+                  },
+                  "input": {
+                    "dtype": "f32",
+                    "shape": [
+                      4
+                    ],
+                    "axes": [
+                      "feature"
+                    ]
+                  },
+                  "output": {
+                    "dtype": "f32",
+                    "shape": [
+                      8
+                    ],
+                    "axes": [
+                      "feature"
+                    ]
+                  }
+                },
+                {
+                  "name": "step1",
+                  "op": "gelu",
+                  "args": {},
+                  "input": {
+                    "dtype": "f32",
+                    "shape": [
+                      8
+                    ],
+                    "axes": [
+                      "feature"
+                    ]
+                  },
+                  "output": {
+                    "dtype": "f32",
+                    "shape": [
+                      8
+                    ],
+                    "axes": [
+                      "feature"
+                    ]
+                  }
+                }
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4
+                ],
+                "axes": [
+                  "feature"
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  8
+                ],
+                "axes": [
+                  "feature"
+                ]
+              }
+            },
+            {
+              "name": "result",
+              "op": "linear",
+              "args": {
+                "out": 4,
+                "in": 8
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  8
+                ],
+                "axes": [
+                  "feature"
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4
+                ],
+                "axes": [
+                  "feature"
+                ]
+              }
+            }
+          ],
+          "block": "expert",
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4
+            ],
+            "axes": [
+              "feature"
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4
+            ],
+            "axes": [
+              "feature"
+            ]
+          }
+        },
+        {
+          "name": "branch2",
+          "op": "identity",
+          "args": {},
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4
+            ],
+            "axes": [
+              "feature"
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4
+            ],
+            "axes": [
+              "feature"
+            ]
+          }
+        }
+      ],
+      "inputs": [
+        "input",
+        "x"
+      ],
+      "input": {
+        "dtype": "i64",
+        "shape": []
+      },
+      "output": {
+        "dtype": "f32",
+        "shape": [
+          4
+        ],
+        "axes": [
+          "feature"
+        ]
+      }
+    }
+  ],
+  "interface": {
+    "input": {
+      "name": "choice",
+      "dtype": "i64",
+      "shape": []
+    },
+    "output": {
+      "name": "y",
+      "dtype": "f32",
+      "shape": [
+        4
+      ],
+      "axes": [
+        "feature"
+      ]
+    },
+    "batch": "optional leading batch dimension before the declared sample shape",
+    "inputs": [
+      {
+        "name": "choice",
+        "dtype": "i64",
+        "shape": []
+      },
+      {
+        "name": "x",
+        "dtype": "f32",
+        "shape": [
+          4
+        ],
+        "axes": [
+          "feature"
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "y",
+        "dtype": "f32",
+        "shape": [
+          4
+        ],
+        "axes": [
+          "feature"
+        ],
+        "from": "selected"
+      }
+    ]
+  }
+}

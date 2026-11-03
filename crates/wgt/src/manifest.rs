@@ -32,6 +32,8 @@ pub struct ProjectConfig {
     #[serde(default)]
     pub runtime: RuntimeConfig,
     #[serde(default)]
+    pub environment: Option<crate::environment::EnvironmentConfig>,
+    #[serde(default)]
     pub dependencies: BTreeMap<String, String>,
 }
 #[derive(Debug, Deserialize, Serialize)]
@@ -78,6 +80,9 @@ impl ProjectConfig {
             ["0.1", "0.2", "0.3"].contains(&config.project.edition.as_str()),
             "unsupported edition"
         );
+        if let Some(environment) = &config.environment {
+            environment.validate()?;
+        }
         for (module, v) in &config.dependencies {
             module_parts(module)?;
             version(v)?;

@@ -1,0 +1,8 @@
+wgt 0.3
+model structured_init
+# 单样本四维特征，运行时可以带 batch 轴。
+input x: f32[4]
+output y: f32[4]
+# 保持四维形状；初始映射采用确定性正交基，不代表训练完成。
+layer projection: linear(4)
+init file="init.wgt"

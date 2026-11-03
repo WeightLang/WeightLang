@@ -1,7 +1,7 @@
 # wgt: native project and package tooling
 
-> 当前 `build` 只生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
-> 旧构建示例改用 `weightc legacy-build`；参见[分发包与迁移规范](bundles.md)。
+> 当前命令已拆分：`build` 生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
+> 旧构建示例使用 `weightc legacy-build`；详见[分发包、元数据与迁移规范](bundles.md)。
 
 
 `weightc` is the compiler. **`wgt` is a separate Rust executable**, inspired by
@@ -18,14 +18,14 @@ wgt --list
 wgt doctor
 ```
 
-The installed executable does not embed, import, or invoke Python for dependency
+The installed executable does not embed, import, or invoke Python for package
 management, artifact verification or graph rendering. HTTPS uses Rust's reqwest
 and rustls. Remote tag resolution uses `git`; uploading releases uses `gh`.
 
-`build`, `package`, `install`, `train`, `export`, `run`, `check` and `test` invoke the existing **weightc** compiler.
-That compiler currently depends on Python/PyTorch. Install it separately, or set
-`WEIGHTC=/absolute/path/to/weightc`. A missing compiler produces a clear error;
-`wgt` never silently installs a Python environment.
+`wgt sync` prepares a project-scoped Python/PyTorch environment using uv and the
+compiler bundled in the native binary. `build`, `run`, `check` and `test` then use
+that environment. `WEIGHTC=/absolute/path/to/weightc` is an explicit external
+compiler override. See [managed environments](environment.md).
 
 ## Project workflow
 
@@ -34,26 +34,29 @@ behavior tests, see [complete_project](../examples/complete_project/README.md)
 and the [project layout convention](project-layout.md).
 
 ```sh
-wgt new demo                   # creates demo/wgt.mod, main.wgt and tests/main.json
+wgt new demo                   # creates demo/wgt.toml, wgt.sum, main.wgt and tests/main.json
 cd demo
+wgt sync                       # prepare Python/PyTorch and lock dependencies
 wgt check                      # parse/type-check every root .wgt, including libraries
-wgt build                     # package sources into dist/model.wgtpkg
-wgt train --fresh             # first training run; later use wgt train to continue HEAD
-wgt run --input '[[0,1]]'       # infer with current weight HEAD
+wgt export                      # compile model files into weights/; executes training directives
+wgt run --input '[[0,1]]'       # builds main.wgt, then infers
 wgt test                       # runs tests/*.json behavior assertions
-weightc revision checkout HEAD -o weights/demo
 wgt graph weights/demo --open
 ```
 
 `wgt init` initializes an existing directory. Neither creation command overwrites
-existing project files. The starter trains a small linear identity map on four explicit rows; its
+existing project files; an existing `.gitignore` receives missing defaults while
+retaining its original contents and explicit exceptions. Defaults exclude model
+weights, checkpoints, caches and build outputs (see [storage](storage.md)).
+The starter trains a small linear identity map on four explicit rows; its
 behavior test checks two of those rows within an absolute tolerance of 0.001.
 This is a toolchain example, not a held-out generalization benchmark.
 
-`-C DIR` selects a directory; project commands search upward for `wgt.mod`.
+`-C DIR` selects a directory; project commands search upward for `wgt.toml` or legacy `wgt.mod`.
 Source paths for weights/check/run are relative to the discovered project root.
 Use `wgt export model.wgt` or `wgt run --source model.wgt --input '[1,2]'`
-to select a source. Source bundling never trains. Run/test read the current weight revision and reject a mismatching source.
+to select a source. Building always calls the compiler; there is no incremental
+training cache yet.
 
 ## Dependencies
 
@@ -134,8 +137,8 @@ From a committed, clean package directory whose module path matches its Git
 location:
 
 ```sh
-wgt export -o weights
-wgt release-assets --version v0.1.0 --artifacts weights -o dist
+wgt export
+wgt package --version v0.1.0 --artifacts build -o dist
 wgt publish --index dist/wgt.index.json --license MIT --dry-run
 # Push the exact commit and annotated package tag shown in the index, then:
 wgt publish --index dist/wgt.index.json --license MIT
@@ -160,7 +163,6 @@ Ignore weights/ and dist/ in the package's Git configuration.
 One command renders HTML and opens the default browser:
 
 ```sh
-weightc revision checkout HEAD -o weights/demo
 wgt graph weights/demo --open
 ```
 
@@ -188,6 +190,37 @@ wgt graph weights/demo --format dot --stdout
 Input is an artifact directory or its manifest.json. All artifact hashes and
 tensor layouts are verified before rendering. Rendering does not execute
 models, train them, or need Python, Graphviz or a CDN.
+
+The HTML viewer opens with a module-level architecture overview. Use
+`展开内部层` to inspect every underlying node and `返回模型总览` to collapse them.
+Select a node for its purpose, input/output shapes (without the batch axis),
+and parameter count; overview counts include the module's internal layers.
+Solid connections show data flow, dashed connections show residual skips,
+and dotted connections show recurrent feedback. `查看参数值` opens the existing
+tensor inspector, including slicing and baseline comparisons. These are
+parameter values, not execution activations or attention probabilities.
+
+Use the header's `Language / 语言` selector to switch between Chinese and English.
+The initial language follows the browser (Chinese for `zh-*`, English otherwise);
+the viewer remembers an explicit selection in browser local storage when available.
+Switching preserves the selected node, overview/detail mode, tensor, axes, slice
+indices and comparison mode. Model paths, tensor names and operator arguments
+remain unchanged. Native file-picker text follows the browser/OS language.
+
+The default `Tensor view` draws vectors as cells, matrices as grids, and
+higher-rank tensors as stacked matrices. At most three axes are displayed,
+defaulting to the first three; the node inspector lets users hide one axis and
+show another. Hidden axes are fixed at index 0, never flattened or averaged.
+These glyphs describe tensor shapes,
+not activations: they do not execute the model or invent values. An ellipsis
+marks omitted elements; the full dimensions remain visible. `Compact view`
+restores text-only nodes. The weight inspector still shows recorded parameters.
+
+The theme selector supports light, dark and system appearance, remembers the
+choice when browser storage is available, and updates heatmap colors as well.
+The reusable [frontend library](../web/viewer/README.md) exposes `configure()`,
+`nodeRenderer`, `tensorRenderer`, CSS tokens, and bounded shape-preview limits.
+The CLI embeds these same frontend sources; `--style` accepts a local CSS theme.
 
 - **HTML:** standalone diagram plus expandable tensor/provenance and JSON views.
 - **SVG:** a directly viewable, self-contained vector diagram.
@@ -243,21 +276,90 @@ Attention parameter counts include its QKV and output projections.
 
 See [storage conventions](storage.md). wgt export [-o ROOT] [--force] writes weights/<model>/ by default and refuses an existing model unless --force is supplied. run and test rebuild only disposable copies under .cache/weightlang/. Package defaults also use weights/.
 
-## Native tool versions
+## TOML configuration and one-command sync
 
-`wgt update` selects the latest stable native release;
+New `wgt new/init` projects use `wgt.toml` and an empty `wgt.sum`. Legacy
+`wgt.mod` projects remain supported. Do not keep both manifest formats in one
+project: all clients reject that ambiguity. Python `weightc` also reads TOML
+for dependency resolution (Python 3.10 uses the conditional `tomli` dependency).
+
+```toml
+[project]
+module = "local/demo"
+edition = "0.3"
+description = "My model project"
+
+[model]
+source = "models/main.wgt"
+output = "weights"
+description = "Training entry point"
+
+[revisions]
+max_versions = 5  # versioned weightc legacy-builds; 0 keeps all snapshots
+
+[runtime]
+device = "cuda:0"
+
+[runtime.placements]
+"body" = "cuda:0"
+"body.fc1.weight" = "cpu"
+"head" = "cpu"
+
+[dependencies]
+"github.com/WeightLang/WeightLang/packages/gates" = "v0.2.0"
+```
+
+The model name and architecture remain in the `.wgt` source. TOML records the
+entry point, output root, description and execution defaults. Source/output
+paths are relative to the project root. With no configured source, build retains
+legacy root-source discovery; run defaults to `main.wgt`.
+
+```sh
+wgt sync                  # prepare runtime, sync wgt.sum and wgt.lock
+wgt sync --offline        # require cached runtime and model dependencies; no network
+wgt sync --locked         # require existing lock; prohibit changes
+wgt export                 # use configured source/output/devices
+wgt run --input '[[0,1]]'
+wgt export --device cpu --place body=cpu --place head=cpu
+```
+
+CLI source/output/device values override TOML defaults. Individual `--place`
+entries override matching project entries; other project placements remain.
+An explicit `--device-map` replaces the project placement map, with CLI
+`--place` overrides on top. `--device cpu` alone does not erase specific GPU
+placement rules; use `--device-map` with an empty JSON object to clear them.
+`wgt test` applies runtime defaults to each fixture's source.
+
+`wgt.sum` **is the dependency lock file**, shared by Rust and Python clients.
+It records exact versions, resolved Git commits, index hashes, and artifact
+manifest/source/weight hashes. Commit it with the manifest. Python runtime packages have a separate `wgt.lock`; see [managed environments](environment.md). `sync` retains known hashes, removes stale dependency entries
+unless locked, and reuses verified caches without contacting the registry.
+Use `fetch` for an explicit remote recheck, `add/update` for explicit dependency
+changes. `sync` also prepares Python/PyTorch unless `--no-env` is supplied. It
+does not train models or choose newer model-package versions. Model dependencies
+remain direct and exact-version only. `--upgrade-env` explicitly updates Python
+package resolution.
+
+See [devices](devices.md) for parameter residence, execution devices, gradient
+transfers, and their performance limitations.
+
+## Project toolchain version
+
+Use `.wgt-version` to pin the native CLI independently of the language edition.
+`wgt version VERSION` writes it; `wgt sync` installs a missing pinned executable.
+See [toolchain versions](toolchains.md) for offline use and local imports.
+
+Native tool versions: `wgt update` selects the latest stable release;
 `wgt update --version X.Y.Z` switches to an exact version;
-`wgt download X.Y.Z` downloads without switching.
-See [toolchain versions](toolchains.md) for pins, offline use and local imports.
+`wgt download X.Y.Z` downloads without switching. See [toolchains](toolchains.md).
 
-## Default revision retention
+## Source diagnostics and bounded debugging
 
-New projects use `wgt.toml`, including `[revisions] max_versions = 5`.
-Versioned `weightc legacy-build` and `revision commit/save` retain five recoverable
-weight snapshots per branch by default; set 0 to retain all. Legacy projects
-and omitted settings use the same default. The Rust `wgt export` standalone
-output is not subject to revision cleanup. See
-[retention details](weight-version-control.md#default-retention).
+`wgt check SOURCE --error-format json` forwards structured compiler errors.
+`wgt trace SOURCE [--weights ARTIFACT] [--sample FILE] [--watch PATH] [--time 0,3,7] [--json]`
+inspects one input. `wgt debug SOURCE [--weights ARTIFACT] --steps 10` performs CPU training diagnostics
+without writing model artifacts. `wgt explain E0301` explains a diagnostic code.
+See [debugging.md](debugging.md) for flags, report contracts and limitations.
 
 ## One-command upgrades
 

@@ -58,7 +58,84 @@ runs end to end, but has not passed the language-capability acceptance gate.
                               └─ source.wgt           the exact source
 ```
 
+## Python owns the application; WGT defines the model
+
+This is the primary development workflow. Python owns data, losses, optimizers,
+training loops, inference and sampling. WGT defines parameters, shapes, connections
+and tensor computation inside the model. Python is the application entry point.
+
+The current source provides direct loading (not yet released):
+
+```python
+import torch
+import weightlang
+
+model = weightlang.load("examples/python_first/model.wgt")
+model.train()
+x = torch.randn(8, 4)  # Python supplies data; the leading dimension is batch.
+logits = model(x)      # Ordinary nn.Module with autograd and PyTorch optimizers.
+```
+
+`load(source, *, device="cpu", placements=None)` returns an eval-mode `nn.Module`.
+WGT source is constructed in memory without intermediate artifacts, training-data
+access or trainer callbacks. Explicit weight imports, derivations and freezing
+still apply. A plain architecture initializes parameters; it is not trained.
+A complete artifact directory restores verified saved weights:
+`weightlang.load("weights/my_model")`. Call `train()` for training; use `eval()`
+and `torch.inference_mode()` for inference.
+
+**Python-dependent forward data belongs in tensor inputs.** The current model
+interface accepts one tensor with a declared sample shape and a leading batch
+dimension. Separate masks, conditions, positions or KV caches require interface
+and runtime support; extra forward keyword arguments are not currently supported.
+Standard-library additions alone cannot provide that interface. Libraries reuse
+tensor computations; Python owns external data and application control.
+Compose existing Python layers in an outer `nn.Module` when necessary. Arbitrary
+Python callbacks inside WGT and artifact serialization of arbitrary Python
+compositions are not promised.
+
+WGT `train` and data/trainer callbacks remain optional conveniences for explicit
+CLI compilation tasks; `weightlang.load()` never executes them. Architecture
+source, a complete model artifact with actual weights, and a training checkpoint
+with optimizer state are distinct objects.
+
+Intermediate-value debugging also belongs in Python; WGT needs no `print` statement:
+
+```python
+from weightlang import forward_hooks
+
+def show(module, inputs, output):
+    print(output.detach().flatten()[:6].cpu().tolist())
+
+with forward_hooks(model, {"hidden": show, "head": show}):
+    logits = model(x)
+```
+
+Discover paths with `model.named_modules()`. Context exit removes these hooks,
+including on exceptions. Returning None observes; any other return replaces the
+output, following PyTorch semantics. Leave the context before saving an artifact.
+See the [debug example](examples/python_first/debug.py).
+
+See [Python APIs and persistence](docs/python.md) and the
+[runnable training/save/reload example](examples/python_first/train.py).
+
 ## Install
+
+To install the current checkout's native `wgt` (requires Rust/Cargo):
+
+```sh
+WEIGHTLANG_SOURCE="$PWD" sh install.sh
+# Windows PowerShell, from the checkout:
+# $env:WEIGHTLANG_SOURCE = $PWD.Path; & ./install.ps1
+```
+
+This builds `wgt` with the matching compiler bundled. Then run `wgt new demo`,
+`cd demo`, and `wgt sync` to prepare Python/PyTorch. Build files stay in `target/`;
+allow sufficient disk space. Without `WEIGHTLANG_SOURCE`, the scripts install
+only the released `weightc` wheel as below. `WEIGHTLANG_HOME` selects the install
+root and `WEIGHTLANG_BIN_DIR` selects the native launcher directory. Release
+scratch uses `WEIGHTLANG_CACHE` (default: the user disk cache), and is cleaned on exit.
+
 
 **Linux / macOS**
 
@@ -261,6 +338,9 @@ Design, lock-file format and known gaps: [docs/packages.md](docs/packages.md).
 - [Project hierarchy and layout](docs/project-layout.md) — terminology and directory conventions (Chinese).
 - [Complete project](examples/complete_project/README.md) — local libraries, training data, artifacts and behavior tests.
 
+- [Reverse import to .wgt](docs/decompile.md): safetensors, PyTorch, GGUF, ONNX and NumPy inventories; checkpoint metadata; static Python nn.Module/Sequential architecture conversion; executable WeightLang checkpoint reconstruction.
+- [Transformers migration coverage](docs/transformers-migration.md): audited base-model adapters, reusable WGT blocks and source-by-source gaps.
+
 | | |
 |---|---|
 | [docs/language.md](docs/language.md) | Syntax, checks, weight sources and origins |
@@ -325,9 +405,7 @@ cargo install --path crates/wgt --locked
 wgt new demo
 wgt -C demo check
 wgt -C demo build
-wgt -C demo train --fresh
 wgt -C demo test
-(cd demo && weightc revision checkout HEAD -o weights/demo)
 wgt -C demo graph weights/demo --open
 ```
 
@@ -383,6 +461,58 @@ zero layer outputs, bypass modules or zero tensors, then compare independent
 variants on fixed data without changing model files or retraining.
 See [ablation experiments](docs/ablation.md) for configuration and report semantics.
 
+
+## Source builds: devices and project sync
+
+`weightc legacy-build/run/evaluate` and `wgt export/run/test` accept `--device cpu|cuda|cuda:N`
+and repeatable `--place layer.or.parameter=device` overrides. Parameters may reside
+on a different device from their layer's computation, with differentiable transfers.
+See [execution devices](docs/devices.md) for semantics and limitations.
+
+New projects use `wgt.toml` for model entry points, output directories, device
+placement and exact dependencies. `wgt sync` verifies caches, fetches missing
+packages and synchronizes the shared `wgt.sum` lock; it supports `--offline` and
+`--locked`. Legacy `wgt.mod` remains supported. See [project configuration](docs/wgt.md#toml-configuration-and-one-command-sync).
+
+
+## Source builds: managed runtime
+
+`wgt sync` can bootstrap uv, download a project-scoped CPython, and install a
+hash-locked PyTorch environment. New projects default to `[environment]`
+`python = "3.12"`, `backend = "auto"`; CPU, CUDA and MPS can be selected explicitly.
+`wgt.lock` records per-platform/backend Python package locks, while `wgt.sum`
+continues to lock model packages. `wgt doctor` runs a real forward/backward check.
+System Python and existing `.venv` directories are untouched. GPU drivers are
+not installed automatically. See [managed environments](docs/environment.md).
+
+
+## Architecture composition (main, unreleased)
+
+`wgt 0.3` now includes `->` pipelines, named `from` branches, `add`/`mul`/`concat`,
+soft `mix` gates, eager `where` selection, independent `repeat`, shared `recur`,
+and sequence-state `scan`. Python execution/training and Rust inspection/graphs
+share these contracts. Standard blocks include SwiGLU, gated decoders and a
+reset-before-projection GRU cell.
+
+See the [composition guide](docs/dataflow.md),
+[compact Transformer](examples/gated_transformer.wgt), and [GRU](examples/gru.wgt).
+These examples initialize architectures, not pretrained models.
+
+## Architecture debugging (main, unreleased)
+
+`weightc check` now reports coded, source-labelled diagnostics with producer and
+expansion context. `trace` inspects layer statistics and recurrent time steps;
+`debug --steps 10` checks losses, gradients and gate saturation in memory.
+The Rust `wgt` driver supports the same commands. See [debugging](docs/debugging.md).
+
+### Debug saved weights (main, unreleased)
+
+`weightc trace model.wgt --weights weights/my_model` inspects the saved model.
+`weightc debug model.wgt --weights weights/my_model --steps 3` reports gradients
+and parameter updates in memory, with verified artifact identity and no writes.
+The native `wgt` driver supports the same options. See the
+[debugging guide](docs/debugging.md) and [example](examples/debug_weights.wgt).
+
 ## Git package registry
 
 The source-built native client supports the reviewed [WeightLang registry](https://github.com/WeightLang/registry):
@@ -406,6 +536,10 @@ to upload assets and submit a registration PR for maintainer review. See the
 Metadata lives in `[package]` in `wgt.toml`. See [bundle and migration specification](docs/bundles.md).
 Older build examples below/above use the explicit compatibility command `weightc legacy-build`;
 standalone initialization is `wgt export`. These changes are not yet released.
+
+## Editor support
+
+Offline syntax highlighting is available for VS Code-compatible editors, Sublime Text, TextMate, JetBrains, Vim/Neovim, Emacs, Kate/KWrite and GtkSourceView. See [installation and support status](docs/editors.md). Extensions are not yet published; this is lexical highlighting, not an LSP.
 
 ### One-command updates
 

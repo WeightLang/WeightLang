@@ -1,0 +1,23 @@
+wgt 0.3
+model custom_weight_types
+
+# 类型描述前向实际使用的值；浮点主权重仍由 Python 优化器更新。
+# 这些是初始化的结构，不是已训练模型，也没有低位压缩存储。
+weighttype ternary = [-1, 0, 1]
+weighttype asymmetric = [-2, -0.25, 0.5, 3]
+weighttype binary = [-1, 1]
+
+input x: f32[4]
+output y: f32[2]
+layer hidden: linear(in=4,out=6)
+layer activation: relu
+layer head: linear(in=6,out=2)
+
+# Linear 的 weight 轴为 [输出通道, 输入通道]；沿输出轴分段。
+# 前两行三值化，中间两行使用非对称码本，最后两行保持浮点精度。
+# 各段不重叠；偏置未声明，保持浮点。隐藏层输出形状是 [6]。
+weight hidden.weight: ternary axis=0 start=0 stop=2
+weight hidden.weight: asymmetric axis=0 start=2 stop=4
+# 输出层整块二值化，把六个隐藏特征映射到两个输出值。
+weight head.weight: binary
+init seed=7

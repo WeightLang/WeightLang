@@ -1,5 +1,8 @@
 # WeightLang bootstrap：第一个本地实验
 
+当前后续路线是 [Qwen3.5-4B 预训练权重迭代](qwen/README.md)。以下小模型实验
+保留作历史与协议回归，不再作为新 bootstrap 的训练基座。
+
 这是用 `.wgt` 定义并从零训练的 **142,344 参数小模型**，用于验证训练、保留评测、
 模型保存和 Open Responses 文本接口的完整流程。它目前会套用训练模板，不能当作
 懂 WeightLang 的编程助手。整个 bootstrap 目标还没有完成。

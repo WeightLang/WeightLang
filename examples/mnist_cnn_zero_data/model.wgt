@@ -1,0 +1,22 @@
+wgt 0.3
+model mnist_cnn_zero_data
+# 单张图片的轴为 [灰度通道, 高, 宽]；Python 只做 uint8 / 255。
+input pixels: f32[1,28,28]
+output logits: f32[10]
+# 8 个 5×5 局部方向卷积核（4 个方向 × 2 个尺度），所有空间位置共享权重。
+# 参数可正常训练，但本实验只用解析公式初始化，从不更新。
+layer conv1: conv2d(in=1, out=8, kernel=5, padding=2)
+layer activation1: relu
+layer pool1: maxpool2d(kernel=2, stride=2)
+# [8,14,14] -> [8,14,14]；第二层在方向通道内聚合邻域并融合另一个尺度。
+layer conv2: conv2d(in=8, out=8, kernel=3, padding=1)
+layer activation2: relu
+layer pool2: maxpool2d(kernel=2, stride=2)
+# [8,7,7] -> [392]，保留空间布局供全连接层组合局部特征。
+layer flattened: flatten
+# 10 种区域/方向特征 × 4 个小位移；每行独立存储，不是整字图片或整字匹配核。
+layer features: linear(in=392, out=40)
+layer activation3: relu
+# 数字类别的人工局部笔画关系编码为普通全连接权重；无额外规则后处理。
+layer classifier: linear(in=40, out=10)
+init file="init.wgt" seed=42

@@ -129,16 +129,24 @@ def _array(values, shape, label, *, integer=False, bound=None):
     return torch.tensor(values, dtype=torch.int64 if integer else torch.float32)
 
 
-def evaluate_artifact(path: str | Path, data_path: str | Path, loss: str, *, compare: str | Path | None = None) -> dict:
+def evaluate_artifact(
+    path: str | Path,
+    data_path: str | Path,
+    loss: str,
+    *,
+    compare: str | Path | None = None,
+    device="cpu",
+    placements=None,
+) -> dict:
     """Evaluate exactly the same file on candidate and optional baseline; never train."""
     try:
         raw = Path(data_path).read_bytes()
     except OSError as exc:
         raise WgtError(f"cannot read evaluation data: {exc}") from None
-    candidate = load_artifact(path, warn_untrained=False)
+    candidate = load_artifact(path, warn_untrained=False, device=device, placements=placements)
     report = _evaluate_loaded(candidate, data_path, loss, raw=raw)
     if compare is not None:
-        baseline = load_artifact(compare, warn_untrained=False)
+        baseline = load_artifact(compare, warn_untrained=False, device=device, placements=placements)
         _compatible(baseline, candidate)
         report["baseline"] = _evaluate_loaded(baseline, data_path, loss, raw=raw)["candidate"]
         report["delta"] = {
@@ -178,7 +186,7 @@ def _evaluate_loaded(candidate: Artifact, data_path, loss: str, *, raw: bytes | 
 
     def metrics(artifact):
         _tensors(artifact)
-        prediction = artifact.predict(x)
+        prediction = artifact.predict(x).cpu()
         if list(prediction.shape) != [len(x), *outshape] or not torch.isfinite(prediction).all():
             raise WgtError("model produced invalid evaluation outputs")
         if loss == "cross_entropy":

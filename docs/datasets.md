@@ -1,7 +1,7 @@
 # 独立数据与 Python 入口（wgt 0.3，当前源码实现）
 
-> 当前 `build` 只生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
-> 旧构建示例改用 `weightc legacy-build`；参见[分发包与迁移规范](bundles.md)。
+> 当前命令已拆分：`build` 生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
+> 旧构建示例使用 `weightc legacy-build`；详见[分发包、元数据与迁移规范](bundles.md)。
 
 
 完整可运行示例见 [external_data](../examples/external_data/model.wgt) 和

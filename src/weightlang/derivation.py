@@ -219,6 +219,7 @@ def parse(source, path=None, *, check_training=True):
         layers=expanded,
         datasets=fp.datasets,
         seed=fp.seed if fp.seed is not None else manifest["init"]["seed"],
+        initializer=fp.initializer,
         train=fp.train,
         path=path,
         uses=fp.uses,

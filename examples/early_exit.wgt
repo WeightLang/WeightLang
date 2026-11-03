@@ -1,0 +1,18 @@
+wgt 0.3
+model early_exit
+input x: f32[feature=8]
+output y: f32[feature=8]
+
+block think(width):
+  # feature 是隐状态维；更新保持 [8]，同一套参数在各轮共享。
+  layer next: linear(width) -> tanh from input
+  # [8] -> [1]：每个样本一个停止概率，取本轮更新后的状态预测。
+  layer stop: linear(1) -> sigmoid from next
+  # block 最后一层是新状态，而不是停止概率。
+  layer result: identity from next
+
+# 最多 16 轮；每轮更新后按 stop 采样，已停止样本保留其最后结果。
+# 批内全部停止才结束循环；部分停止时仍计算整批，不做稀疏压缩。
+# 随机退出不传梯度给 stop；这里只初始化，停止门没有训练。
+layer reasoning: recur(16, think(width=8), until=stop)
+init seed=42

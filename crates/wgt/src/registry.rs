@@ -16,10 +16,15 @@ pub fn cache_root() -> Result<PathBuf> {
     if let Some(p) = std::env::var_os("WEIGHTLANG_CACHE") {
         return Ok(p.into());
     }
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-        .context("set WEIGHTLANG_CACHE")?;
+    let base = (if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA")
+    } else {
+        None
+    })
+    .or_else(|| std::env::var_os("XDG_CACHE_HOME"))
+    .map(PathBuf::from)
+    .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+    .context("set WEIGHTLANG_CACHE")?;
     Ok(base.join("weightlang"))
 }
 pub fn module_dir(cache: &Path, m: &str, v: &str) -> PathBuf {

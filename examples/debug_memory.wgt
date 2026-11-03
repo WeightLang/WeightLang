@@ -1,0 +1,17 @@
+wgt 0.3
+use std/recurrent as r
+model debug_memory
+input x: f32[4,1]
+output probability: f32[1]
+layer memory: r.gru(features=1, hidden=8)
+layer head: last -> linear(in=8, out=1) -> sigmoid
+init seed=42
+# Remember the first bit after processing the entire sequence.
+data train:
+  [0,0,0,0] -> [0]
+  [0,1,0,1] -> [0]
+  [0,1,1,1] -> [0]
+  [1,0,0,0] -> [1]
+  [1,0,1,0] -> [1]
+  [1,1,1,1] -> [1]
+train data=train loss=bce optimizer=adam lr=0.01 epochs=100 batch=6

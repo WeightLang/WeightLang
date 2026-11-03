@@ -1,0 +1,306 @@
+{
+  "layers": [
+    {
+      "name": "memory",
+      "op": "scan_state",
+      "args": {},
+      "layers": [
+        {
+          "name": "projected",
+          "op": "linear",
+          "args": {
+            "in": 2,
+            "out": 3
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              3
+            ]
+          }
+        },
+        {
+          "name": "new_cell",
+          "op": "add",
+          "args": {},
+          "inputs": [
+            "projected",
+            "state1"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              3
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              3
+            ]
+          }
+        },
+        {
+          "name": "paired",
+          "op": "seq",
+          "args": {},
+          "layers": [
+            {
+              "name": "total",
+              "op": "add",
+              "args": {},
+              "inputs": [
+                "input",
+                "arg1"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  3
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  3
+                ]
+              }
+            },
+            {
+              "name": "product",
+              "op": "mul",
+              "args": {},
+              "inputs": [
+                "input",
+                "arg1"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  3
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  3
+                ]
+              }
+            }
+          ],
+          "returns": {
+            "output": "total",
+            "product": "product"
+          },
+          "results": {
+            "output": {
+              "dtype": "f32",
+              "shape": [
+                3
+              ]
+            },
+            "product": {
+              "dtype": "f32",
+              "shape": [
+                3
+              ]
+            }
+          },
+          "inputs": [
+            "new_cell",
+            "state0"
+          ],
+          "block": "pair",
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              3
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              3
+            ]
+          }
+        },
+        {
+          "name": "new_hidden",
+          "op": "tanh",
+          "args": {},
+          "inputs": [
+            "paired.output"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              3
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              3
+            ]
+          }
+        }
+      ],
+      "returns": {
+        "output": "new_hidden",
+        "state0": "new_hidden",
+        "state1": "new_cell"
+      },
+      "results": {
+        "output": {
+          "dtype": "f32",
+          "shape": [
+            0,
+            3
+          ]
+        },
+        "state0": {
+          "dtype": "f32",
+          "shape": [
+            3
+          ]
+        },
+        "state1": {
+          "dtype": "f32",
+          "shape": [
+            3
+          ]
+        }
+      },
+      "inputs": [
+        "input",
+        "hidden",
+        "cell"
+      ],
+      "input": {
+        "dtype": "f32",
+        "shape": [
+          0,
+          2
+        ]
+      },
+      "output": {
+        "dtype": "f32",
+        "shape": [
+          0,
+          3
+        ]
+      }
+    }
+  ],
+  "interface": {
+    "input": {
+      "name": "x",
+      "dtype": "f32",
+      "shape": [
+        0,
+        2
+      ],
+      "shape_expr": [
+        "T",
+        2
+      ]
+    },
+    "output": {
+      "name": "y",
+      "dtype": "f32",
+      "shape": [
+        0,
+        3
+      ],
+      "shape_expr": [
+        "T",
+        3
+      ]
+    },
+    "batch": "optional leading batch dimension before the declared sample shape",
+    "inputs": [
+      {
+        "name": "x",
+        "dtype": "f32",
+        "shape": [
+          0,
+          2
+        ],
+        "shape_expr": [
+          "T",
+          2
+        ]
+      },
+      {
+        "name": "hidden",
+        "dtype": "f32",
+        "shape": [
+          3
+        ],
+        "shape_expr": [
+          3
+        ]
+      },
+      {
+        "name": "cell",
+        "dtype": "f32",
+        "shape": [
+          3
+        ],
+        "shape_expr": [
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "y",
+        "dtype": "f32",
+        "shape": [
+          0,
+          3
+        ],
+        "shape_expr": [
+          "T",
+          3
+        ],
+        "from": "memory.output"
+      },
+      {
+        "name": "h",
+        "dtype": "f32",
+        "shape": [
+          3
+        ],
+        "shape_expr": [
+          3
+        ],
+        "from": "memory.state0"
+      },
+      {
+        "name": "c",
+        "dtype": "f32",
+        "shape": [
+          3
+        ],
+        "shape_expr": [
+          3
+        ],
+        "from": "memory.state1"
+      }
+    ],
+    "dimensions": {
+      "T": {
+        "min": 0,
+        "max": 6
+      }
+    },
+    "constraints": []
+  }
+}

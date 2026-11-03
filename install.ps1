@@ -3,6 +3,9 @@
 #   irm https://github.com/WeightLang/WeightLang/releases/latest/download/install.ps1 | iex
 #
 # Environment variables:
+#   WEIGHTLANG_SOURCE    local checkout to build/install wgt (requires Cargo; skips wheel)
+#   WEIGHTLANG_BIN_DIR   native wgt launcher directory (default: install root\bin)
+#   WEIGHTLANG_BASE_URL  release download mirror, including SHA256SUMS
 #   WEIGHTLANG_VERSION   release tag to install, e.g. v0.1.0 (default: latest)
 #   WEIGHTLANG_HOME      install root when uv is not available (default: %LOCALAPPDATA%\weightlang)
 #   WEIGHTLANG_NO_UV=1   do not use uv even if it is installed
@@ -21,15 +24,52 @@ function Die($msg) { throw "weightlang-install: error: $msg" }
 $Repo = 'WeightLang/WeightLang'
 $Version = if ($env:WEIGHTLANG_VERSION) { $env:WEIGHTLANG_VERSION } else { 'latest' }
 $HomeDir = if ($env:WEIGHTLANG_HOME) { $env:WEIGHTLANG_HOME } else { Join-Path $env:LOCALAPPDATA 'weightlang' }
-$Base = if ($Version -eq 'latest') {
+function Add-UserPath($Directory) {
+    $UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (-not (($UserPath -split ';') -contains $Directory)) {
+        [Environment]::SetEnvironmentVariable('Path', ($(if ($UserPath) { "$UserPath;" } else { '' }) + $Directory), 'User')
+        Say "added $Directory to your user PATH (open a new terminal)"
+    }
+}
+
+if ($env:WEIGHTLANG_SOURCE) {
+    $Source = (Resolve-Path -LiteralPath $env:WEIGHTLANG_SOURCE).Path
+    $Manifest = Join-Path $Source 'crates\wgt\Cargo.toml'
+    if (-not (Test-Path $Manifest) -or -not (Test-Path (Join-Path $Source 'pyproject.toml'))) {
+        Die 'WEIGHTLANG_SOURCE must be a WeightLang checkout'
+    }
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { Die 'source installation requires Cargo' }
+    $TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $Source 'target' }
+    Say "building wgt from $Source"
+    & cargo install --path (Split-Path $Manifest) --locked --force --root $HomeDir --target-dir $TargetDir
+    if ($LASTEXITCODE -ne 0) { Die 'cargo install failed' }
+    $Native = Join-Path $HomeDir 'bin\wgt.exe'
+    & $Native --version
+    if ($LASTEXITCODE -ne 0) { Die 'installed wgt failed verification' }
+    $BinDir = if ($env:WEIGHTLANG_BIN_DIR) { $env:WEIGHTLANG_BIN_DIR } else { Join-Path $HomeDir 'bin' }
+    New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+    $Destination = Join-Path $BinDir 'wgt.exe'
+    if ([IO.Path]::GetFullPath($Native) -ne [IO.Path]::GetFullPath($Destination)) {
+        Copy-Item -LiteralPath $Native -Destination $Destination -Force
+    }
+    Add-UserPath $BinDir
+    Say "installed wgt at $Destination"
+    Say 'next: wgt new demo; cd demo; wgt sync'
+    return
+}
+
+$Base = if ($env:WEIGHTLANG_BASE_URL) {
+    $env:WEIGHTLANG_BASE_URL.TrimEnd('/')
+} elseif ($Version -eq 'latest') {
     "https://github.com/$Repo/releases/latest/download"
 } else {
     "https://github.com/$Repo/releases/download/$Version"
 }
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-$Tmp = Join-Path ([IO.Path]::GetTempPath()) ("weightlang-" + [Guid]::NewGuid())
-New-Item -ItemType Directory -Path $Tmp | Out-Null
+$CacheDir = if ($env:WEIGHTLANG_CACHE) { $env:WEIGHTLANG_CACHE } else { Join-Path $env:LOCALAPPDATA 'weightlang\cache' }
+$Tmp = Join-Path $CacheDir ("install-" + [Guid]::NewGuid())
+New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 
 try {
     Say "fetching release metadata ($Version)"
@@ -56,8 +96,11 @@ try {
         Say 'installing with uv tool'
         & uv tool install --force --python '>=3.10' $WheelPath
         if ($LASTEXITCODE -ne 0) { Die 'uv tool install failed' }
-        $BinDir = (& uv tool dir --bin).Trim()
+        $BinDir = & uv tool dir --bin
+        if ($LASTEXITCODE -ne 0) { Die 'uv tool dir failed' }
+        $BinDir = $BinDir.Trim()
         & uv tool update-shell | Out-Null
+        if ($LASTEXITCODE -ne 0) { Die 'uv tool update-shell failed' }
     } else {
         $Py = $null
         foreach ($cand in @(@('py', '-3'), @('python'))) {
@@ -77,6 +120,7 @@ try {
         if ($LASTEXITCODE -ne 0) { Die 'python -m venv failed' }
         $VPy = Join-Path $Venv 'Scripts\python.exe'
         & $VPy -m pip install -q --upgrade pip
+        if ($LASTEXITCODE -ne 0) { Die 'pip upgrade failed' }
         & $VPy -m pip install -q $WheelPath
         if ($LASTEXITCODE -ne 0) { Die 'pip install failed' }
         $BinDir = Join-Path $Venv 'Scripts'

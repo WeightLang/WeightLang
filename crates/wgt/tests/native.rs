@@ -204,8 +204,11 @@ fn graph_residual_edges_shapes_counts_and_formats() {
     assert_eq!(value["format"], "weightlang.graph");
     assert!(g.render("toon").unwrap().contains("nodes[5]{"));
     assert!(g.render("mermaid").unwrap().contains("-. skip .->"));
-    assert!(g.render("html").unwrap().contains("<details>"));
-    assert!(!g.render("html").unwrap().contains("<script"));
+    let html = g.render("html").unwrap();
+    assert!(!html.contains("<details>"));
+    assert!(!html.contains("Agent-readable"));
+    assert!(html.contains("<weightlang-viewer>"));
+    assert!(html.contains("<script type=\"module\">"));
 }
 #[test]
 fn graph_rejects_corruption_and_bad_safetensors() {

@@ -1,0 +1,332 @@
+wgt 0.3
+backend torch-dynamic
+host weightlang.tensor_program
+extern
+
+# Text-only Qwen3.5. Adapted from Transformers 5.7.0 Qwen3.5, Apache-2.0.
+# Copyright 2025 The Qwen Team and The HuggingFace Inc. team.
+# https://www.apache.org/licenses/LICENSE-2.0
+# 以下归一化、分块 delta rule 与部分 RoPE 保留上游计算语义。
+# batch/time/head/key/value 为显式轴；递推状态为 [batch,head,key,value]。
+# 每个 chunk 传递衰减记忆；不同层参数独立，同层跨 token 共享。
+
+module Qwen3_5RMSNormGated(Module):
+    setup(self, hidden_size, eps=1e-6, **kwargs):
+        super().__init__()
+        self.weight = parameter(torch.ones(hidden_size))
+        self.variance_epsilon = eps
+
+    fn forward(self, hidden_states, gate=None):
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(torch.float32)
+        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        # Norm before gate
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        hidden_states = self.weight * hidden_states.to(input_dtype)
+        hidden_states = hidden_states * F.silu(gate.to(torch.float32))
+
+        return hidden_states.to(input_dtype)
+
+fn l2norm(x: torch.FloatTensor, dim: int = -1, eps: float = 1e-6):
+    """This function is intended to align with the l2norm implementation in the FLA library."""
+    inv_norm = torch.rsqrt((x * x).sum(dim=dim, keepdim=True) + eps)
+    return x * inv_norm
+
+fn torch_chunk_gated_delta_rule(
+    query,
+    key,
+    value,
+    g,
+    beta,
+    chunk_size=64,
+    initial_state=None,
+    output_final_state=False,
+    use_qk_l2norm_in_kernel=False,
+):
+    initial_dtype = query.dtype
+    if use_qk_l2norm_in_kernel:
+        query = l2norm(query, dim=-1, eps=1e-6)
+        key = l2norm(key, dim=-1, eps=1e-6)
+    query, key, value, beta, g = [
+        x.transpose(1, 2).contiguous().to(torch.float32) for x in (query, key, value, beta, g)
+    ]
+
+    batch_size, num_heads, sequence_length, k_head_dim = key.shape
+    v_head_dim = value.shape[-1]
+    pad_size = (chunk_size - sequence_length % chunk_size) % chunk_size
+    query = F.pad(query, (0, 0, 0, pad_size))
+    key = F.pad(key, (0, 0, 0, pad_size))
+    value = F.pad(value, (0, 0, 0, pad_size))
+    beta = F.pad(beta, (0, pad_size))
+    g = F.pad(g, (0, pad_size))
+    total_sequence_length = sequence_length + pad_size
+    scale = 1 / (query.shape[-1] ** 0.5)
+    query = query * scale
+
+    v_beta = value * beta.unsqueeze(-1)
+    k_beta = key * beta.unsqueeze(-1)
+    # reshape to chunks
+    query, key, value, k_beta, v_beta = [
+        x.reshape(x.shape[0], x.shape[1], -1, chunk_size, x.shape[-1]) for x in (query, key, value, k_beta, v_beta)
+    ]
+    g = g.reshape(g.shape[0], g.shape[1], -1, chunk_size)
+    mask = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=query.device), diagonal=0)
+
+    # chunk decay
+    g = g.cumsum(dim=-1)
+    decay_mask = ((g.unsqueeze(-1) - g.unsqueeze(-2)).tril().exp().float()).tril()
+    attn = -((k_beta @ key.transpose(-1, -2)) * decay_mask).masked_fill(mask, 0)
+    for i in range(1, chunk_size):
+        row = attn[..., i, :i].clone()
+        sub = attn[..., :i, :i].clone()
+        attn[..., i, :i] = row + (row.unsqueeze(-1) * sub).sum(-2)
+    attn = attn + torch.eye(chunk_size, dtype=attn.dtype, device=attn.device)
+    value = attn @ v_beta
+    k_cumdecay = attn @ (k_beta * g.exp().unsqueeze(-1))
+    last_recurrent_state = (
+        torch.zeros(batch_size, num_heads, k_head_dim, v_head_dim, dtype=value.dtype, device=value.device)
+        if initial_state is None
+        else initial_state.to(value)
+    )
+    core_attn_out = torch.zeros_like(value)
+    mask = torch.triu(torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=query.device), diagonal=1)
+
+    # for each chunk
+    for i in range(0, total_sequence_length // chunk_size):
+        q_i, k_i, v_i = query[:, :, i], key[:, :, i], value[:, :, i]
+        attn = q_i @ k_i.transpose(-1, -2) * decay_mask[:, :, i]
+        v_prime = (k_cumdecay[:, :, i]) @ last_recurrent_state
+        v_new = v_i - v_prime
+        attn_inter = (q_i * g[:, :, i, :, None].exp()) @ last_recurrent_state
+        core_attn_out[:, :, i] = attn_inter + attn @ v_new
+        last_recurrent_state = (
+            last_recurrent_state * g[:, :, i, -1, None, None].exp()
+            + (k_i * (g[:, :, i, -1, None] - g[:, :, i]).exp()[..., None]).transpose(-1, -2) @ v_new
+        )
+
+    if not output_final_state:
+        last_recurrent_state = None
+    core_attn_out = core_attn_out.reshape(core_attn_out.shape[0], core_attn_out.shape[1], -1, core_attn_out.shape[-1])
+    core_attn_out = core_attn_out[:, :, :sequence_length]
+    core_attn_out = core_attn_out.transpose(1, 2).contiguous().to(initial_dtype)
+    return core_attn_out, last_recurrent_state
+
+fn rotate_half(x):
+    """Rotates half the hidden dims of the input."""
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
+
+fn apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
+    """Applies Rotary Position Embedding to the query and key tensors.
+
+    Removes the interleaving of cos and sin from GLM
+
+    Args:
+        q (`torch.Tensor`): The query tensor.
+        k (`torch.Tensor`): The key tensor.
+        cos (`torch.Tensor`): The cosine part of the rotary embedding.
+        sin (`torch.Tensor`): The sine part of the rotary embedding.
+        unsqueeze_dim (`int`, *optional*, defaults to 1):
+            The 'unsqueeze_dim' argument specifies the dimension along which to unsqueeze cos[position_ids] and
+            sin[position_ids] so that they can be properly broadcasted to the dimensions of q and k. For example, note
+            that cos[position_ids] and sin[position_ids] have the shape [batch_size, seq_len, head_dim]. Then, if q and
+            k have the shape [batch_size, heads, seq_len, head_dim], then setting unsqueeze_dim=1 makes
+            cos[position_ids] and sin[position_ids] broadcastable to the shapes of q and k. Similarly, if q and k have
+            the shape [batch_size, seq_len, heads, head_dim], then set unsqueeze_dim=2.
+    Returns:
+        `tuple(torch.Tensor)` comprising of the query and key tensors rotated using the Rotary Position Embedding.
+    """
+    cos = cos.unsqueeze(unsqueeze_dim)
+    sin = sin.unsqueeze(unsqueeze_dim)
+
+    # Keep half or full tensor for later concatenation
+    rotary_dim = cos.shape[-1]
+    q_rot, q_pass = q[..., :rotary_dim], q[..., rotary_dim:]
+    k_rot, k_pass = k[..., :rotary_dim], k[..., rotary_dim:]
+
+    # Apply rotary embeddings on the first half or full tensor
+    q_embed = (q_rot * cos) + (rotate_half(q_rot) * sin)
+    k_embed = (k_rot * cos) + (rotate_half(k_rot) * sin)
+
+    # Concatenate back to full shape
+    q_embed = torch.cat([q_embed, q_pass], dim=-1)
+    k_embed = torch.cat([k_embed, k_pass], dim=-1)
+    return q_embed, k_embed
+
+module Qwen3_5RMSNorm(Module):
+    setup(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = parameter(torch.zeros(dim))
+
+    fn _norm(self, x):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    fn forward(self, x):
+        output = self._norm(x.float())
+        # Llama does x.to(float16) * w whilst Qwen3_5 is (x * w).to(float16)
+        # See https://github.com/huggingface/transformers/pull/29402
+        output = output * (1.0 + self.weight.float())
+        return output.type_as(x)
+
+    fn extra_repr(self):
+        return f"{tuple(self.weight.shape)}, eps={self.eps}"
+
+module DeltaNet(Module):
+    setup(self, c):
+        super().__init__()
+        self.kh, self.vh = c['linear_num_key_heads'], c['linear_num_value_heads']
+        self.kd, self.vd = c['linear_key_head_dim'], c['linear_value_head_dim']
+        self.ks = c['linear_conv_kernel_dim']
+        d, k, v = c['hidden_size'], self.kh * self.kd, self.vh * self.vd
+        self.in_proj_qkv = linear(d, 2*k+v, bias=False)
+        self.in_proj_z = linear(d, v, bias=False)
+        self.in_proj_b = linear(d, self.vh, bias=False)
+        self.in_proj_a = linear(d, self.vh, bias=False)
+        self.conv1d = conv1d(2*k+v, 2*k+v, self.ks, groups=2*k+v, padding=self.ks-1, bias=False)
+        self.A_log = parameter(torch.zeros(self.vh))
+        self.dt_bias = parameter(torch.ones(self.vh))
+        self.norm = Qwen3_5RMSNormGated(self.vd, c['rms_norm_eps'])
+        self.out_proj = linear(v, d, bias=False)
+
+    fn forward(self, x):
+        # 因果 depthwise 卷积只读取当前及之前 token；不接受 padding/cache。
+        b,t,_ = x.shape
+        qkv = F.silu(self.conv1d(self.in_proj_qkv(x).transpose(1,2))[:,:,:t]).transpose(1,2)
+        q,k,v = qkv.split([self.kh*self.kd,self.kh*self.kd,self.vh*self.vd],dim=-1)
+        q = q.reshape(b,t,self.kh,self.kd).repeat_interleave(self.vh//self.kh,dim=2)
+        k = k.reshape(b,t,self.kh,self.kd).repeat_interleave(self.vh//self.kh,dim=2)
+        v = v.reshape(b,t,self.vh,self.vd)
+        # beta 控制新信息写入；负 g 的指数控制旧记忆衰减，累计计算保持 f32。
+        beta = self.in_proj_b(x).sigmoid()
+        g = -self.A_log.float().exp() * F.softplus(self.in_proj_a(x).float()+self.dt_bias)
+        y,_ = torch_chunk_gated_delta_rule(q,k,v,g,beta,use_qk_l2norm_in_kernel=True)
+        z = self.in_proj_z(x).reshape(b,t,self.vh,self.vd)
+        return self.out_proj(self.norm(y,z).reshape(b,t,-1))
+
+module Attention(Module):
+    setup(self,c):
+        super().__init__()
+        d = c['hidden_size']
+        self.h,self.kv,self.hd = c['num_attention_heads'],c['num_key_value_heads'],c['head_dim']
+        self.rd = int(self.hd*c['rope_parameters']['partial_rotary_factor'])
+        self.theta = c['rope_parameters']['rope_theta']
+        self.q_proj = linear(d,2*self.h*self.hd,bias=False)
+        self.k_proj = linear(d,self.kv*self.hd,bias=False)
+        self.v_proj = linear(d,self.kv*self.hd,bias=False)
+        self.o_proj = linear(self.h*self.hd,d,bias=False)
+        self.q_norm = Qwen3_5RMSNorm(self.hd,c['rms_norm_eps'])
+        self.k_norm = Qwen3_5RMSNorm(self.hd,c['rms_norm_eps'])
+
+    fn forward(self,x):
+        b,t,_ = x.shape
+        q,gate = self.q_proj(x).reshape(b,t,self.h,2*self.hd).chunk(2,dim=-1)
+        q = self.q_norm(q).transpose(1,2)
+        k = self.k_norm(self.k_proj(x).reshape(b,t,self.kv,self.hd)).transpose(1,2)
+        v = self.v_proj(x).reshape(b,t,self.kv,self.hd).transpose(1,2)
+        # 纯文本三条位置轴相同，MRoPE 化为零起点部分 RoPE；只旋转 rd 个通道。
+        inv = 1.0/(self.theta**(torch.arange(0,self.rd,2,device=x.device).float()/self.rd))
+        freq = torch.arange(t,device=x.device).float()[:,None]*inv[None,:]
+        freq = torch.cat([freq,freq],dim=-1)[None,:,:]
+        q,k = apply_rotary_pos_emb(q,k,freq.cos().to(x.dtype),freq.sin().to(x.dtype))
+        k = k.repeat_interleave(self.h//self.kv,dim=1)
+        v = v.repeat_interleave(self.h//self.kv,dim=1)
+        y = F.scaled_dot_product_attention(q,k,v,is_causal=True).transpose(1,2).reshape(b,t,-1)
+        return self.o_proj(y*gate.reshape(b,t,-1).sigmoid())
+
+module MLP(Module):
+    setup(self,c):
+        super().__init__()
+        d,h = c['hidden_size'],c['intermediate_size']
+        self.gate_proj = linear(d,h,bias=False)
+        self.up_proj = linear(d,h,bias=False)
+        self.down_proj = linear(h,d,bias=False)
+    fn forward(self,x):
+        return self.down_proj(F.silu(self.gate_proj(x))*self.up_proj(x))
+
+module Decoder(Module):
+    setup(self,c,kind):
+        super().__init__()
+        self.kind = kind
+        if kind == 'linear_attention':
+            self.linear_attn = DeltaNet(c)
+        elif kind == 'full_attention':
+            self.self_attn = Attention(c)
+        else:
+            raise ValueError('unknown layer type')
+        self.input_layernorm = Qwen3_5RMSNorm(c['hidden_size'],c['rms_norm_eps'])
+        self.post_attention_layernorm = Qwen3_5RMSNorm(c['hidden_size'],c['rms_norm_eps'])
+        self.mlp = MLP(c)
+    fn forward(self,x):
+        y = self.input_layernorm(x)
+        x = x + (self.linear_attn(y) if self.kind == 'linear_attention' else self.self_attn(y))
+        return x+self.mlp(self.post_attention_layernorm(x))
+
+module Surgery(Module):
+    setup(self,width,rank=32):
+        super().__init__()
+        # 首轮结构改造：新增非线性残差分支，零输出初始化严格保留基座行为。
+        # 只迭代此分支；不把这一轮称为全参数训练或已经改善泛化。
+        self.down = linear(width,rank,bias=False)
+        self.up = linear(rank,width,bias=False)
+        torch.nn.init.zeros_(self.up.weight)
+    fn forward(self,x):
+        return x+self.up(F.silu(self.down(x)))
+
+module QwenText(Module):
+    setup(self,c,rank=32):
+        super().__init__()
+        if c['hidden_act'] != 'silu' or c.get('attention_bias',False) or c['rope_parameters']['rope_type'] != 'default':
+            raise ValueError('unsupported Qwen configuration')
+        self.embed_tokens = embedding(c['vocab_size'],c['hidden_size'])
+        self.layers = torch.nn.ModuleList([Decoder(c,k) for k in c['layer_types']])
+        self.norm = Qwen3_5RMSNorm(c['hidden_size'],c['rms_norm_eps'])
+        self.surgery = Surgery(c['hidden_size'],rank)
+    fn hidden(self,ids):
+        x = self.embed_tokens(ids)
+        for layer in self.layers:
+            x = layer(x)
+        return self.norm(x)
+    fn forward(self,ids):
+        # 共享词嵌入作为 LM head；[B,T,D] -> [B,T,V]，输出未归一化 logits。
+        return F.linear(self.surgery(self.hidden(ids)),self.embed_tokens.weight)
+
+module Refinement(Module):
+    setup(self,width,rank=64,steps=2):
+        super().__init__()
+        if rank < 1 or steps < 1:
+            raise ValueError('rank and refinement steps must be positive')
+        self.steps = steps
+        self.gate = linear(width,rank,bias=False)
+        self.value = linear(width,rank,bias=False)
+        self.up = linear(rank,width,bias=False)
+        torch.nn.init.zeros_(self.up.weight)
+    fn forward(self,x):
+        # [batch,time,width] 在内部缩至 rank。RMS 标准化仅作用于新分支，
+        # sigmoid 控制通道写入；up 零初始化时每次迭代严格是恒等映射。
+        # 同一层的 steps 次修正共享 gate/value/up；不同解码层完全独立。
+        dtype = x.dtype
+        x = x.float()
+        for _ in range(self.steps):
+            normalized = x * torch.rsqrt(x.square().mean(-1,keepdim=True)+1e-6)
+            update = self.up(self.gate(normalized).sigmoid()*F.silu(self.value(normalized)))
+            x = x + update/self.steps
+        return x.to(dtype)
+
+module EditedTail(Module):
+    setup(self,c,start=30,rank=64,steps=2,parent_rank=32):
+        super().__init__()
+        if not 0 <= start < len(c['layer_types']):
+            raise ValueError('tail start outside decoder')
+        self.layers = torch.nn.ModuleList([Decoder(c,k) for k in c['layer_types'][start:]])
+        self.edits = torch.nn.ModuleList([Refinement(c['hidden_size'],rank,steps) for _ in self.layers])
+        self.norm = Qwen3_5RMSNorm(c['hidden_size'],c['rms_norm_eps'])
+        self.surgery = Surgery(c['hidden_size'],parent_rank)
+    fn forward(self,x,edited=True):
+        # x 是前 start 层冻结后的完整序列，不是答案 token 的局部切片。
+        # 修正在每个尾部 Decoder 之前，梯度穿过原 DeltaNet/GQA/MLP，
+        # 因而不能像首轮那样只缓存 final norm 输出。宿主只负责参数加载/冻结。
+        for layer,edit in zip(self.layers,self.edits):
+            x = layer(edit(x) if edited else x)
+        return self.surgery(self.norm(x).float()).to(x.dtype)

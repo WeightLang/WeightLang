@@ -1,0 +1,24 @@
+wgt init 1
+# 在 WGT 内定义算法；不调用内置 dct 初始化器，也不调用 Python 脚本。
+algorithm cosine_basis(rows, cols):
+    # 先构造 [较小维度, 较大维度] 的正交行，再按目标方向转置。
+    let width = max(rows, cols)
+    let count = min(rows, cols)
+    let positions = arange(width) + 0.5
+    let basis = zeros([count, width])
+    for frequency in range(count):
+        # 常量行与其他频率行的归一化不同，保证每行单位范数。
+        if frequency == 0:
+            let scale = sqrt(1 / width)
+        else:
+            let scale = sqrt(2 / width)
+        basis[frequency, :] = scale * cos(pi * frequency * positions / width)
+    if rows > cols:
+        return transpose(basis, 0, 1)
+    return basis
+
+# 独立参数分别生成；共享参数只生成一次。此例只是结构化初值，尚未训练。
+tensor "*":
+    if rank == 2:
+        return cosine_basis(dim(0), dim(1))
+    return zeros(shape)

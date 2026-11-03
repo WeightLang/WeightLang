@@ -1,0 +1,273 @@
+{
+  "layers": [
+    {
+      "name": "shallow",
+      "op": "seq",
+      "args": {},
+      "layers": [
+        {
+          "name": "step0",
+          "op": "conv2d",
+          "args": {
+            "stride": 1,
+            "padding": 1,
+            "in": 3,
+            "out": 4,
+            "kernel": 3
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              3,
+              8,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              8,
+              8
+            ]
+          }
+        },
+        {
+          "name": "step1",
+          "op": "relu",
+          "args": {},
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              8,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              8,
+              8
+            ]
+          }
+        }
+      ],
+      "input": {
+        "dtype": "f32",
+        "shape": [
+          3,
+          8,
+          8
+        ]
+      },
+      "output": {
+        "dtype": "f32",
+        "shape": [
+          4,
+          8,
+          8
+        ]
+      }
+    },
+    {
+      "name": "down",
+      "op": "avgpool2d",
+      "args": {
+        "padding": 0,
+        "count_include_pad": 1,
+        "kernel": 2,
+        "stride": 2
+      },
+      "input": {
+        "dtype": "f32",
+        "shape": [
+          4,
+          8,
+          8
+        ]
+      },
+      "output": {
+        "dtype": "f32",
+        "shape": [
+          4,
+          4,
+          4
+        ]
+      }
+    },
+    {
+      "name": "deep",
+      "op": "seq",
+      "args": {},
+      "layers": [
+        {
+          "name": "step0",
+          "op": "conv2d",
+          "args": {
+            "stride": 1,
+            "padding": 1,
+            "in": 4,
+            "out": 4,
+            "kernel": 3
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              4,
+              4
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              4,
+              4
+            ]
+          }
+        },
+        {
+          "name": "step1",
+          "op": "relu",
+          "args": {},
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              4,
+              4
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              4,
+              4
+            ]
+          }
+        }
+      ],
+      "input": {
+        "dtype": "f32",
+        "shape": [
+          4,
+          4,
+          4
+        ]
+      },
+      "output": {
+        "dtype": "f32",
+        "shape": [
+          4,
+          4,
+          4
+        ]
+      }
+    },
+    {
+      "name": "up",
+      "op": "resize2d",
+      "args": {
+        "mode": 1,
+        "align_corners": 0,
+        "height": 8,
+        "width": 8
+      },
+      "input": {
+        "dtype": "f32",
+        "shape": [
+          4,
+          4,
+          4
+        ]
+      },
+      "output": {
+        "dtype": "f32",
+        "shape": [
+          4,
+          8,
+          8
+        ]
+      }
+    },
+    {
+      "name": "fused",
+      "op": "cat",
+      "args": {
+        "axis": 0
+      },
+      "inputs": [
+        "shallow",
+        "up"
+      ],
+      "input": {
+        "dtype": "f32",
+        "shape": [
+          4,
+          8,
+          8
+        ]
+      },
+      "output": {
+        "dtype": "f32",
+        "shape": [
+          8,
+          8,
+          8
+        ]
+      }
+    },
+    {
+      "name": "head",
+      "op": "conv2d",
+      "args": {
+        "stride": 1,
+        "padding": 0,
+        "in": 8,
+        "out": 2,
+        "kernel": 1
+      },
+      "input": {
+        "dtype": "f32",
+        "shape": [
+          8,
+          8,
+          8
+        ]
+      },
+      "output": {
+        "dtype": "f32",
+        "shape": [
+          2,
+          8,
+          8
+        ]
+      }
+    }
+  ],
+  "interface": {
+    "input": {
+      "name": "image",
+      "dtype": "f32",
+      "shape": [
+        3,
+        8,
+        8
+      ]
+    },
+    "output": {
+      "name": "y",
+      "dtype": "f32",
+      "shape": [
+        2,
+        8,
+        8
+      ]
+    },
+    "batch": "optional leading batch dimension before the declared sample shape"
+  }
+}

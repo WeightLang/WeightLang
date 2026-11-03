@@ -1,0 +1,25 @@
+wgt 0.3
+model multi_state
+# T 是序列轴；允许空块，hidden/cell 是跨块显式状态。
+# 所有时间步共享 cell 的线性参数。此模型只初始化，未训练。
+dim T min=0 max=6
+input x: f32[T,2]
+input hidden: f32[3]
+input cell: f32[3]
+output y: f32[T,3] from memory.output
+output h: f32[3] from memory.state0
+output c: f32[3] from memory.state1
+# 返回和与乘积；step 使用乘积作为门，主结果仍可独立引用。
+block pair():
+  layer total: add(input,arg1)
+  layer product: mul(input,arg1)
+  return output=total product=product
+# 单步 input 为 f32[2]，两个状态都是 f32[3]。
+block step():
+  layer projected: linear(in=2,out=3)
+  layer new_cell: add(projected,state1)
+  layer paired: pair() from new_cell,state0
+  layer new_hidden: tanh from paired.output
+  return output=new_hidden state0=new_hidden state1=new_cell
+layer memory: scan_state(step()) from x,hidden,cell
+init seed=7

@@ -19,7 +19,7 @@ def outputs():
 (punctuation) @punctuation.delimiter
 ["(" ")" "[" "]"] @punctuation.bracket
 ["model" "block" "layer" "input" "output" "const" "dim"] @keyword
-["wgt" "require" "use" "import" "inherit" "freeze" "unfreeze" "data" "init" "train"] @keyword
+["wgt" "require" "use" "import" "inherit" "freeze" "unfreeze" "data" "init" "train" "config" "parameter" "share" "adapter" "return"] @keyword
 (clause) @keyword
 (call function: (qualified_name) @function)
 (parameter name: (identifier) @variable.parameter)

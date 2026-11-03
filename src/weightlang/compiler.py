@@ -34,6 +34,7 @@ from .artifact import (
     structure_signature,
     write_safetensors,
 )
+from .devices import apply_placement, cuda_devices, execution_rng, placement_plan
 from .packages import is_module_import, resolve_module_import
 from .syntax import Program, WgtError, apply_freezing, parse_file
 
@@ -107,6 +108,26 @@ def _apply_imports(
                 imp.line,
                 program.path,
             )
+        # A plain pretrained linear initializes a newly declared adapter. Adapted
+        # sources instead restore their complete residual/adapter state below.
+        adapter_spec = next((spec for spec in program.adapters.values() if spec['target'] == imp.target), None)
+        source_module = src.module.get_submodule(imp.source_layer)
+        if adapter_spec is not None and type(source_module) is nn.Linear:
+            from .adapters import attach_adapters
+            parent, _, leaf = imp.target.rpartition('.')
+            base_layer = nn.Linear(source_module.in_features, source_module.out_features, bias=source_module.bias is not None)
+            base_layer.load_state_dict(source_module.state_dict())
+            module.get_submodule(parent)._modules[leaf] = base_layer
+            name = next(name for name, spec in program.adapters.items() if spec is adapter_spec)
+            attach_adapters(module, {name: adapter_spec})
+            module._wgt_adapters = dict(program.adapters)
+        for spec in program.adapters.values():
+            if not _under(spec['target'], imp.target):
+                continue
+            source_target = imp.source_layer + spec['target'][len(imp.target):]
+            source_spec = next((v for v in src.manifest.get('interface', {}).get('adapters', {}).values() if v['target'] == source_target), None)
+            if source_spec is not None and any(spec.get(k, 'lora') != source_spec.get(k, 'lora') for k in ('method', 'rank', 'alpha')):
+                raise WgtError('imported adapter method/rank/alpha mismatch', imp.line, program.path)
         src_state = src.module.state_dict()
         dst_state = module.state_dict()
         src_tensors = src.manifest["weights"]["tensors"]
@@ -115,11 +136,23 @@ def _apply_imports(
                 if not _under(name, imp.target):
                     continue
                 src_name = imp.source_layer + name[len(imp.target) :]
+                if src_name not in src_state and adapter_spec is not None and type(source_module) is nn.Linear:
+                    continue
+                if src_name not in src_state:
+                    raise WgtError("adapter imports from a plain model must target each adapted linear directly", imp.line, program.path)
+                if adapter_spec is not None and type(source_module) is nn.Linear:
+                    # Constructor has already decomposed/quantized this base.
+                    meta = src_tensors[src_name]
+                    upstream[name] = meta.get("upstream_origin", meta["origin"])
+                    continue
                 tensor.copy_(src_state[src_name])
                 meta = src_tensors[src_name]
                 upstream[name] = (
                     meta.get("upstream_origin", "imported") if meta["origin"] == "imported" else meta["origin"]
                 )
+        # Quantized canonical state is a decoded copy, so commit it explicitly.
+        if not (adapter_spec is not None and type(source_module) is nn.Linear):
+            module.load_state_dict(dst_state, strict=True)
         if imp.freeze:
             for param in module.get_submodule(imp.target).parameters():
                 param.requires_grad_(False)
@@ -158,6 +191,7 @@ def _evaluate(module: nn.Module, x: torch.Tensor, y: torch.Tensor, loss: str) ->
     module.eval()
     with torch.no_grad():
         pred = module(x)
+        y = y.to(pred.device)
         result = {"loss": float(_loss_fn(loss)(pred, _targets(y, loss)))}
         if loss == "bce":
             result["accuracy"] = float(((pred >= 0.5).float() == y).float().mean())
@@ -270,13 +304,30 @@ def _library_records(program: Program) -> dict[str, Any]:
     return records
 
 
-def _prepare_program(program, *, device="cpu", placements=None, trainers=None, reuse_source=None,
-                     reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False):
+def _prepare_program(
+    program: Program, *, device="cpu", placements=None, trainers=None,
+    reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False,
+    reuse_revision=None, no_train=False,
+):
+    """Shared in-memory construction for Python loading and artifact compilation."""
+    if program.initializer and any(spec.get('method') in ('dora', 'pissa', 'qlora') for spec in program.adapters.values()):
+        raise WgtError("dora/pissa/qlora require seed initialization or explicit pretrained linear imports; custom init is unsupported")
     base = Path(program.path).parent
     layers = _layer_dicts(program)
+    from .ports import interface, build_named_module
+    named_interface = interface(program)
+    def construct():
+        return build_named_module(layers, named_interface) if named_interface else build_module(layers)
+
+    with torch.device("meta"):
+        module = construct()
+        plan = placement_plan(module, device, placements)
+    if not program.initializer:
+        del module
+    devices = cuda_devices(plan)
 
     # Initialisation uses a private RNG stream so builds do not disturb caller state.
-    with torch.random.fork_rng(devices=[]):
+    with execution_rng(plan, program.seed):
         if program.inherit:
             inherited = load_artifact((base / program.inherit.source).resolve(), warn_untrained=False)
             if inherited.manifest["weights"]["sha256"] != program.inherit.sha256:
@@ -292,8 +343,15 @@ def _prepare_program(program, *, device="cpu", placements=None, trainers=None, r
                     program.path,
                 )
             del inherited
-        torch.manual_seed(program.seed)
-        module = build_module(layers)
+        torch.random.default_generator.manual_seed(program.seed)
+        for index in devices:
+            torch.cuda.default_generators[index].manual_seed(program.seed)
+        if program.initializer:
+            from .initialization import initialize, materialize
+            module = materialize(module)
+            module._wgt_initialization = initialize(program, module)
+        else:
+            module = construct()
         reuse_report, reused_upstream = None, {}
         if reuse_policy is not None or reuse_source is not None or reuse_mapping or reuse_strict or reuse_revision is not None:
             from .reuse import apply as apply_reuse
@@ -314,15 +372,16 @@ def _prepare_program(program, *, device="cpu", placements=None, trainers=None, r
         import_records, upstream = _apply_imports(program, module, layers, base)
         upstream = {**reused_upstream, **upstream}
         apply_freezing(program, module, require_trainable=not no_train)
-        from .devices import apply_placement, placement_plan
-        plan = placement_plan(module, device, placements)
         apply_placement(module, plan)
         training = _train(program, module, trainers) if program.train is not None and not no_train else None
 
     return module, layers, plan, import_records, upstream, reused_upstream, reuse_report, derivation_record, training
 
 
-def compile_program(program: Program, out_dir: str | Path, *, force: bool = False, device="cpu", placements=None, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False) -> BuildResult:
+def compile_program(
+    program: Program, out_dir: str | Path, *, force: bool = False, device="cpu", placements=None, trainers=None,
+    reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False, initial_state=None
+) -> BuildResult:
     """Build ``program`` and write its artifact to ``out_dir/<model>``."""
 
     if program.path is None:
@@ -337,32 +396,59 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
         raise WgtError(f"refusing to overwrite {dest}: not a regular WeightLang artifact directory")
     if dest.exists() and not force:
         raise WgtError(f"refusing to overwrite {dest}: choose another output or pass --force")
+    if initial_state is not None and (program.initializer or not no_train or program.imports or program.inherit or program.derivation or reuse_source is not None or reuse_policy is not None or reuse_mapping or reuse_strict or reuse_revision is not None):
+        raise WgtError("initial_state requires no_train=True and no custom init/import/inherit/derivation/reuse")
     source_path = Path(program.path)
-    module, layers, plan, import_records, upstream, reused_upstream, reuse_report, derivation_record, training = _prepare_program(
-        program, device=device, placements=placements, trainers=trainers, reuse_source=reuse_source,
-        reuse_policy=reuse_policy, reuse_mapping=reuse_mapping, reuse_strict=reuse_strict,
-        reuse_revision=reuse_revision, no_train=no_train)
+    (module, layers, plan, import_records, upstream, reused_upstream,
+     reuse_report, derivation_record, training) = _prepare_program(
+        program, device=device, placements=placements, trainers=trainers,
+        reuse_source=reuse_source, reuse_policy=reuse_policy, reuse_mapping=reuse_mapping,
+        reuse_strict=reuse_strict, reuse_revision=reuse_revision, no_train=no_train,
+    )
 
-    imported = [r["layer"] for r in import_records]
+    if initial_state is not None:
+        expected = module.state_dict()
+        if set(initial_state) != set(expected):
+            raise WgtError("initial_state must contain exactly the architecture tensor names")
+        aliases = {}
+        for name, value in initial_state.items():
+            if not isinstance(value, torch.Tensor) or value.shape != expected[name].shape or value.dtype != torch.float32 or not torch.isfinite(value).all():
+                raise WgtError(f"invalid initial_state tensor {name}: require matching shape and finite float32")
+        for name, parameter in module.named_parameters(remove_duplicate=False):
+            previous = aliases.setdefault(id(parameter), name)
+            if not torch.equal(initial_state[name], initial_state[previous]):
+                raise WgtError(f"conflicting tied initial_state tensors: {previous}, {name}")
+        module.load_state_dict(initial_state, strict=True)
     trainable = {name for name, param in module.named_parameters() if param.requires_grad}
+    from .modern import tensor_views
+
+    views = tensor_views(module)
     tensors_meta: dict[str, dict[str, Any]] = {}
     for name, value in module.state_dict().items():
-        is_imported = name in reused_upstream or any(_under(name, p) for p in imported)
+        is_imported = name in upstream
         trained = training is not None and name in trainable
         if is_imported:
             origin = ORIGIN_IMPORTED_TRAINED if trained else ORIGIN_IMPORTED
         else:
             origin = ORIGIN_TRAINED if trained else ORIGIN_RANDOM
+        if initial_state is not None or (program.initializer and not is_imported and not trained):
+            origin = "edited"
         meta: dict[str, Any] = {"shape": list(value.shape), "dtype": "f32", "origin": origin}
         if is_imported:
             meta["upstream_origin"] = upstream[name]
+        if name in views:
+            meta["views"] = views[name]
         tensors_meta[name] = meta
 
     out_root.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=f".{program.model}-", dir=out_root))
     try:
         write_safetensors(tmp / WEIGHTS_FILE, module.state_dict(), {"format": ARTIFACT_FORMAT, "model": program.model})
-        shutil.copyfile(source_path, tmp / SOURCE_FILE)
+        if program.config_schema:
+            from .configuration import frozen_source
+            (tmp / SOURCE_FILE).write_text(frozen_source(source_path.read_text(),program.config_schema,program.config_values))
+        else:
+            shutil.copyfile(source_path, tmp / SOURCE_FILE)
         manifest: dict[str, Any] = {
             "format": ARTIFACT_FORMAT,
             "format_version": 3
@@ -371,7 +457,7 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
             "language_version": program.version,
             "model": program.model,
             "compiler": {"name": "weightc", "version": __version__},
-            "built_with": {"torch": torch.__version__, "python": platform.python_version()},
+            "built_with": {"torch": torch.__version__, "python": platform.python_version(), "execution": plan},
             "source": {"file": SOURCE_FILE, "sha256": sha256_file(tmp / SOURCE_FILE)},
             "interface": {
                 "input": {"name": program.input.name, "dtype": program.input.dtype, "shape": list(program.input.shape)},
@@ -394,10 +480,25 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
             "training": training,
             "weights": {"file": WEIGHTS_FILE, "sha256": sha256_file(tmp / WEIGHTS_FILE), "tensors": tensors_meta},
         }
+        if program.config_schema:
+            manifest["configuration"] = {"schema":program.config_schema,"values":program.config_values}
+        if program.initializer:
+            manifest["init"] = {"seed": program.seed, **module._wgt_initialization}
+        from .ports import interface
+        named_interface = interface(program)
+        if named_interface:
+            manifest["format_version"] = 7 if program.weight_types or program.weight_assignments else 6 if program.adapters or program.parameter_ids or program.parameter_shares else 5 if program.dimensions else 4
+            manifest["interface"].update(named_interface)
+            if program.dimensions:
+                for key in ("input", "output"):
+                    manifest["interface"][key] = {k: v for k, v in named_interface[key + "s"][0].items() if k != "from"}
         # Axis names describe samples, never the optional runtime batch dimension.
         for direction, port in (("input", program.input), ("output", program.output)):
             if port.axes:
                 manifest["interface"][direction]["axes"] = list(port.axes)
+        if initial_state is not None:
+            manifest["initial_state"] = {"provenance": "caller-supplied", "training_verified": False}
+            manifest["rebuild"] = "Source describes architecture; caller-supplied initial_state is retained only in this artifact."
         if no_train:
             manifest["build"] = {"no_train": True, "training_declared": program.train is not None}
         if reuse_report is not None:
@@ -429,5 +530,19 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
     return BuildResult(dest, manifest, module)
 
 
-def compile_file(source: str | Path, out_dir: str | Path = "weights", *, force: bool = False, device="cpu", placements=None, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False) -> BuildResult:
-    return compile_program(parse_file(source, check_training=not no_train), out_dir, no_train=no_train, force=force, device=device, placements=placements, trainers=trainers, reuse_source=reuse_source, reuse_policy=reuse_policy, reuse_mapping=reuse_mapping, reuse_strict=reuse_strict, reuse_revision=reuse_revision)
+def compile_file(
+    source: str | Path, out_dir: str | Path = "weights", *, force: bool = False, device="cpu", placements=None, trainers=None,
+    reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False, tensor_model=None, tensor_args=None, config=None
+) -> BuildResult:
+    from .tensor_program import HEADER, build_tensor_program
+    try:
+        tensor_source = Path(source).read_text().startswith(HEADER)
+    except (OSError, UnicodeError):
+        tensor_source = False
+    if tensor_source:
+        if config is not None:
+            raise WgtError("dynamic programs use tensor_args, not static config")
+        if not no_train or force or placements or reuse_source or reuse_policy or reuse_mapping or reuse_revision:
+            raise WgtError("tensor programs require no_train=True; force/reuse/placement unsupported")
+        return build_tensor_program(source, out_dir, model=tensor_model, kwargs=tensor_args, device=device)
+    return compile_program(parse_file(source, check_training=not no_train, config=config), out_dir, no_train=no_train, force=force, device=device, placements=placements, trainers=trainers, reuse_source=reuse_source, reuse_policy=reuse_policy, reuse_mapping=reuse_mapping, reuse_strict=reuse_strict, reuse_revision=reuse_revision)

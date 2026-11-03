@@ -1,3 +1,19 @@
+# WeightLang defaults
+weights/
+checkpoints/
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.gguf
+*.onnx
+pytorch_model*.bin
+model*.bin
+adapter_model.bin
+.cache/weightlang/
+/build/
+/dist/
+
 build/
 /.venv/
 __pycache__/
