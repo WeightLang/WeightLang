@@ -1,0 +1,4 @@
+wgt 0.2
+# Structural reuse only: each call gets its own parameters.
+block affine(in, out):
+  layer linear: linear(in=in, out=out)

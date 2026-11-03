@@ -1,0 +1,14 @@
+wgt 0.2
+use "../lib/sensors.wgt" as sensors
+
+model sensor_calibration
+input sensors: f32[2]
+output calibrated: f32[1]
+
+layer calibration: sensors.calibrate(channels=2)
+
+data train: file="../data/train.csv" sha256=a76d5d422d84c24b3bdb03f4e962556f3c5663db90f97cd2c46f0849a3e5cabd skip=1 license="MIT" source="synthetic: y=2*a-b+0.5"
+data validation: file="../data/validation.csv" sha256=58936a9d5f7a094961a0bc13b014ac3e41c13fc2f0927e2a60f9c38176b73caf skip=1 license="MIT" source="synthetic: y=2*a-b+0.5"
+
+init seed=42
+train data=train loss=mse optimizer=adam lr=0.05 epochs=600 validate=validation

@@ -1,0 +1,5 @@
+wgt 0.2
+use "./projections.wgt" as projections
+
+block calibrate(channels):
+  layer readout: projections.affine(in=channels, out=1)

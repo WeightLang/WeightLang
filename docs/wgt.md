@@ -25,6 +25,10 @@ That compiler currently depends on Python/PyTorch. Install it separately, or set
 
 ## Project workflow
 
+For a project with separate model entries, local block libraries, datasets and
+behavior tests, see [complete_project](../examples/complete_project/README.md)
+and the [project layout convention](project-layout.md).
+
 ```sh
 wgt new demo                   # creates demo/wgt.mod, main.wgt and tests/main.json
 cd demo

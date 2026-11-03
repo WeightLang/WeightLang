@@ -254,6 +254,9 @@ weightc publish path/to/pkg --version v0.1.0 -o dist   # 构建文件并打印 t
 
 ## 文档
 
+- [工程层级与目录规范](docs/project-layout.md)：工程、构件库、构件、模型、层、模型制品和权重包。
+- [完整工程示例](examples/complete_project/README.md)：拆分源码、数据、训练、推理与行为测试。
+
 以下详细文档目前为英文：
 
 | 文档 | 内容 |

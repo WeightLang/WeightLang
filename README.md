@@ -250,6 +250,9 @@ Design, lock-file format and known gaps: [docs/packages.md](docs/packages.md).
 
 ## Documentation
 
+- [Project hierarchy and layout](docs/project-layout.md) — terminology and directory conventions (Chinese).
+- [Complete project](examples/complete_project/README.md) — local libraries, training data, artifacts and behavior tests.
+
 | | |
 |---|---|
 | [docs/language.md](docs/language.md) | Syntax, checks, weight sources and origins |

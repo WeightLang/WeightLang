@@ -15,6 +15,10 @@ The first published package is `github.com/WeightLang/WeightLang/packages/gates`
 
 ## Package identity and versions
 
+Terminology: a **weight package** distributes model artifacts; a source **library**
+contains reusable `block` declarations. The historical `module` field identifies
+the package path, not a source file. See [project hierarchy](project-layout.md).
+
 A package is a directory with a `wgt.mod` inside a GitHub repository:
 
 ```

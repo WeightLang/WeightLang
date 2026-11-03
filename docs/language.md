@@ -25,6 +25,9 @@ Layers run in source order. Widths are checked before training.
 
 ## Blocks and libraries
 
+For project/library/block/model terminology and directory conventions, see
+[project layout](project-layout.md) and the [complete project](../examples/complete_project/README.md).
+
 ```wgt
 wgt 0.2
 use std/nn
