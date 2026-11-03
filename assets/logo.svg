@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">WeightLang logo</title>
+  <rect width="512" height="512" rx="112" fill="#111827"/>
+  <path d="M94 149l54 214 63-132 45 132 45-132 63 132 54-214" fill="none" stroke="#a7f3d0" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="94" cy="149" r="13" fill="#fff"/><circle cx="256" cy="363" r="13" fill="#fff"/><circle cx="418" cy="149" r="13" fill="#fff"/>
+</svg>
