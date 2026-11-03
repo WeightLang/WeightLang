@@ -105,6 +105,15 @@ not published in this release; build from source or import a trusted local binar
 on those systems. Native package management works independently of Python; this
 release uses external weightc for model compilation.
 
+Older installations that require a module and `--version` for `wgt update`
+predate toolchain management. Bootstrap once from the release executable or:
+
+```sh
+cargo install --git https://github.com/WeightLang/WeightLang --tag wgt-v0.1.1 --locked --force weightlang-wgt
+```
+
+Then use `wgt self-update` for subsequent toolchain updates.
+
 Local imports work before releases exist. Linux switching is tested locally;
 Windows/macOS naming is tested, but native execution needs those systems.
 
