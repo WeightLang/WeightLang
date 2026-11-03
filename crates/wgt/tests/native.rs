@@ -367,3 +367,53 @@ fn native_package_pins_committed_sources_and_refuses_partial_or_untrained() {
     fs::write(pkg.join("main.wgt"), "dirty").unwrap();
     assert!(registry::package(&pkg, &arts, VERSION, &t.path().join("dist3"), true).is_err());
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn graph_temp_reuse_stdout_and_default_browser() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = tempfile::tempdir().unwrap();
+    artifact(&t.path().join("artifact"), true);
+    let bin = env!("CARGO_BIN_EXE_wgt");
+    let opener = t.path().join("xdg-open");
+    fs::write(&opener, "#!/bin/sh\nprintf '%s' \"$1\" > \"$OPEN_LOG\"\n").unwrap();
+    fs::set_permissions(&opener, fs::Permissions::from_mode(0o755)).unwrap();
+    let log = t.path().join("opened-path");
+    let run = |args: &[&str]| {
+        Command::new(bin)
+            .args(args)
+            .current_dir(t.path())
+            .env("TMPDIR", t.path())
+            .env("PATH", t.path())
+            .env("OPEN_LOG", &log)
+            .output()
+            .unwrap()
+    };
+    assert!(run(&["graph", "artifact", "--open"]).status.success());
+    let output = t.path().join("weightlang/model.html");
+    assert_eq!(fs::read_to_string(&log).unwrap(), output.to_str().unwrap());
+    fs::write(&output, "old diagram").unwrap();
+    assert!(run(&["graph", "artifact", "--open"]).status.success());
+    assert!(fs::read_to_string(&output)
+        .unwrap()
+        .starts_with("<!doctype html>"));
+    assert_eq!(fs::read_dir(output.parent().unwrap()).unwrap().count(), 1);
+    let json = run(&["graph", "artifact", "--format", "json", "--stdout"]);
+    assert!(json.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&json.stdout).unwrap()["format"],
+        "weightlang.graph"
+    );
+    assert!(!t.path().join("weightlang/model.json").exists());
+    assert!(!run(&["graph", "artifact", "--open", "--stdout"])
+        .status
+        .success());
+    assert!(!run(&["graph", "artifact", "--open", "--format", "json"])
+        .status
+        .success());
+    fs::write(&opener, "#!/bin/sh\nexit 3\n").unwrap();
+    let result = run(&["graph", "artifact", "--open"]);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("diagram saved at"));
+    assert!(output.is_file());
+}

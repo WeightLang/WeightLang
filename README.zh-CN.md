@@ -309,7 +309,7 @@ wgt new demo
 wgt -C demo check
 wgt -C demo build
 wgt -C demo test
-wgt -C demo graph build/demo --format html -o architecture.html
+wgt -C demo graph build/demo --open
 ```
 
 包管理、制品校验和架构渲染用 Rust 实现，不依赖 Python。

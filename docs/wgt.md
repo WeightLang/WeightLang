@@ -32,7 +32,7 @@ wgt check                      # parse/type-check every root .wgt, including lib
 wgt build                      # compile model files into build/; executes training directives
 wgt run --input '[[0,1]]'       # builds main.wgt, then infers
 wgt test                       # runs tests/*.json behavior assertions
-wgt graph build/demo --format html -o architecture.html
+wgt graph build/demo --open
 ```
 
 `wgt init` initializes an existing directory. Neither creation command overwrites
@@ -126,14 +126,31 @@ Ignore build/ and dist/ in the package's Git configuration.
 
 ## Native architecture rendering
 
+One command renders HTML and opens the default browser:
+
+```sh
+wgt graph build/demo --open
+```
+
+Without `-o`, output goes to `<system temporary directory>/weightlang/model.<format>`
+(on Linux, normally `/tmp/weightlang/model.html`). The same file is atomically
+replaced on each invocation. Temporary filenames do not accumulate per model or
+run. The command prints the resulting path. `--open` is supported for HTML and uses
+the platform's default opener; if no graphical session is available, the command
+reports failure and retains the generated file.
+
+Use `--stdout` for pipes or agents, e.g.
+`wgt graph build/demo --format json --stdout`. It conflicts with `-o` and `--open`.
+
+
 ```sh
 wgt graph build/demo --format html -o model.html
 wgt graph build/demo --format svg -o model.svg
 wgt graph build/demo --format md -o model.md
 wgt graph build/demo --format json -o model.json
 wgt graph build/demo --format toon -o model.toon
-wgt graph build/demo --format mermaid
-wgt graph build/demo --format dot
+wgt graph build/demo --format mermaid --stdout
+wgt graph build/demo --format dot --stdout
 ```
 
 Input is an artifact directory or its manifest.json. All artifact hashes and
@@ -152,7 +169,7 @@ Dotted paths and parent fields retain block nesting. Residuals have explicit
 add nodes and skip edges. Widths omit the optional batch dimension. Shapes in
 the tensor table use `2x8` notation. Scalar parameters are counted exactly once
 at leaf tensors; block boundary nodes own zero. Origins are displayed, not
-inferred from parameter values. Output files must not already exist.
+inferred from parameter values. Explicit `-o` output files must not already exist; default temporary outputs are replaced.
 
 A rendered example from [examples/residual.wgt](../examples/residual.wgt):
 

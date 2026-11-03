@@ -303,7 +303,7 @@ wgt new demo
 wgt -C demo check
 wgt -C demo build
 wgt -C demo test
-wgt -C demo graph build/demo --format html -o architecture.html
+wgt -C demo graph build/demo --open
 ```
 
 Package management and architecture rendering run natively without Python.

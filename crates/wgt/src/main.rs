@@ -99,6 +99,12 @@ enum Cmd {
         format: Format,
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Open the generated HTML in the system's default browser
+        #[arg(long, conflicts_with = "stdout")]
+        open: bool,
+        /// Write the document to stdout instead of a temporary file
+        #[arg(long, conflicts_with = "output")]
+        stdout: bool,
     },
     /// Package prebuilt artifacts; no compiler or Python required
     Package {
@@ -178,24 +184,50 @@ fn execute(cli: Cli) -> Result<u8> {
             artifact,
             format,
             output,
+            open,
+            stdout,
         } => {
+            ensure!(
+                !open || matches!(format, Format::Html),
+                "--open requires --format html"
+            );
             let graph = Graph::read(&base.join(artifact))?;
             let text = graph.render(format.name())?;
-            if let Some(output) = output {
-                let output = base.join(output);
-                // Never overwrite an artifact or another user file accidentally.
-                use std::io::Write;
-                let mut file = fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&output)
-                    .with_context(|| {
-                        format!("create {} (output must not exist)", output.display())
-                    })?;
-                file.write_all(text.as_bytes())?;
-                eprintln!("rendered {}", output.display());
-            } else {
+            if stdout {
                 print!("{text}");
+            } else {
+                let output = if let Some(output) = output {
+                    let output = base.join(output);
+                    use std::io::Write;
+                    let mut file = fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&output)
+                        .with_context(|| {
+                            format!(
+                                "create {} (explicit output must not exist)",
+                                output.display()
+                            )
+                        })?;
+                    file.write_all(text.as_bytes())?;
+                    output
+                } else {
+                    let directory = std::env::temp_dir().join("weightlang");
+                    if let Ok(meta) = fs::symlink_metadata(&directory) {
+                        ensure!(
+                            !meta.file_type().is_symlink(),
+                            "temporary output directory must not be a symlink"
+                        );
+                    }
+                    fs::create_dir_all(&directory)?;
+                    let output = directory.join(format!("model.{}", format.name()));
+                    manifest::atomic_write(&output, text.as_bytes())?;
+                    output
+                };
+                println!("{}", output.display());
+                if open {
+                    open_browser(&output)?;
+                }
             }
         }
         Cmd::Verify {
@@ -651,4 +683,26 @@ fn list_commands() {
     for name in names {
         println!("Extension: {name}");
     }
+}
+
+fn open_browser(path: &Path) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(target_os = "windows")]
+    let opener = "explorer";
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let opener = "xdg-open";
+    let path = fs::canonicalize(path)?;
+    let status = Command::new(opener).arg(&path).status().with_context(|| {
+        format!(
+            "could not start {opener}; diagram saved at {}",
+            path.display()
+        )
+    })?;
+    ensure!(
+        status.success(),
+        "default browser opener failed ({status}); diagram saved at {}",
+        path.display()
+    );
+    Ok(())
 }
