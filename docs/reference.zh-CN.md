@@ -94,7 +94,10 @@ fn main() {
 函数参数必须与 input 名称一致，input/output 仍使用相同的 `f32[N]` 端口语法。
 参数显式声明为 `parameter w: f32[O,I] = [...]` 或 `frozen w: f32[O,I] = [...]`；
 初值是行优先扁平有限 f32 数组，元素数必须与正整数形状匹配。
-`frozen` 仅禁止本次调用内 write；不意味着该参数的数学梯度为零。
+自更新模型还可声明标量 `parameter p: prob = 0.7` 或 `frozen p: prob = 1`。
+可训练 prob 的初值须严格在 (0,1)，内部保存 logit 并通过 sigmoid 读取；冻结 prob 可使用闭区间 [0,1] 的精确端点。prob 不支持 forward 的 `write`，也不能直接作为 linear 权重或偏置。
+目前没有布尔参数类型；普通 `f32` 参数不会自动限制在 `[0,1]` 或 `{0,1}`。
+`frozen` 禁止本次调用内 write 及优化器更新；不意味着该参数的数学梯度为零。
 
 `fn forward` 复用普通函数的 let、赋值、return、if、while、break、continue 语法，
 操作数为定长 f32 张量。暂不支持 forward 中的 for、辅助函数调用、数据 IO 或优化器调用。
@@ -107,16 +110,31 @@ fn main() {
 | `linear(x,w[,b])` | w=[O,I]、x=[I]、结果=[O]，可选 b=[O] |
 | `add(a,b)` / `mul(a,b)` / `a+b` / `a*b` | 等长逐元素运算，无广播 |
 | `relu(x)` / `tanh(x)` / `sigmoid(x)` | 等长逐元素运算 |
+| `softmax(x)` | f32[N] 沿唯一向量轴归一化，返回 f32[N]；稳定指数实现，支持一阶梯度 |
+| `gate(p,x)` | 返回 p*x；x 为 f32[N]，p 为 f32[1] 或 f32[N]，每项须在 [0,1]；标量门广播；推理时 p 全为 0 跳过 x 表达式 |
+| `route(p,a,b)` | 返回 p*a+(1-p)*b；a/b 同为 f32[N]，p 为 f32[1] 或 f32[N] 且在 [0,1]；推理时 p 全为 1 只求值 a，全为 0 只求值 b，否则计算两边 |
 | `slice(x,start,length)` | start 非负整数、length 正整数，范围不得越界 |
 | `positive(x)` | 仅作为条件；x 必须 f32[1]，严格大于零选真分支 |
 | `let y = x;` | 复制张量值并保留梯度，不创建参数别名 |
 
 局部张量的长度由表达式推导，重复赋值不能改变长度；输入不可覆盖。
-同一模型内 forward 与 layer 不混用。模型通过 `Name("none")` 构造，
+同一模型内 forward 与 layer 不混用。模型通过 `Name(optimizer)` 构造，optimizer 必填
+`"none"`、`"sgd"` 或 `"adam"`；后两者允许 `fit` / `reinforce` 优化整个已执行 forward 的非冻结初始参数。
 普通 `predict(handle,input)` 执行并提交成功写入；失败回滚，步数计入外层操作预算。
 无需 `register`、标签、`jump` 或 `branch` 源码指令，这些仅存在于内部 IR。
 
 完整可执行示例：[self_modifying/model.wgt](../examples/self_modifying/model.wgt)。
+可微路由训练示例：[soft_routing.wgt](../examples/native_training/soft_routing.wgt)，
+完整训练、状态与保存约束见[可微程序](differentiable-programs.md)。上述三种算子的张量梯度仅用于 forward，
+全部参数必填，无温度等隐式选项。`p=1` 表示完整通过或完全采用 a 的输出。
+推理短路作用于直接写在 gate/route 内的表达式（支持嵌套），不延迟此前已执行的 let；
+比较使用精确 0/1，无 0.999 等近似阈值。混合向量门不会按元素拆分专家执行。
+forward 中也可写 `mix p { then { a } else { b } }`，等价于 `route(p,a,b)`；
+分支内各为一个张量表达式，可选尾随分号。`mix` 和 `then` 是保留名称。
+fit/reinforce 和显式 VJP 记录梯度时仍计算两边，包括 frozen 门，以保留完整数学梯度。
+短路示例：[lazy_routing.wgt](../examples/native_training/lazy_routing.wgt)。
+路由选择梯度为 a-b，门梯度为 x；标量门梯度在特征轴求和。
+普通 if 保持硬分支；源文件文本、宿主函数、I/O 和离散控制决策不因此可微。
 事务、原生一阶自动微分、显式状态及预算细节见[自更新运行时](self-modifying-runtime.md)。
 
 ## 实现与验证依据
@@ -137,3 +155,17 @@ Linux 训练、推理 CLI 及独立编译程序支持 [weightfs v1](weightfs.md)
 内存权重视图。它是运行时能力，不增加语法或内置函数；检查和编译阶段不挂载。
 环境变量 `WGT_WEIGHTFS=auto|on|off` 默认 auto。文件编辑校验形状和有限 f32，遵守冻结/共享
 存储约束，在执行之间提交；冲突报错。持久化仍使用显式 save/save_model，详见协议文档。
+
+## 概率与分支语法的完整契约
+
+`parameter p: prob = 0.7`、`frozen p: prob = 1`、`mix p { then { a } else { b } }`、
+`sample p { then { a } else { b } }` 及 `fn loss(prediction,target)` 的参数、表示、梯度、
+执行边界和可运行例子统一见[可微程序语法](differentiable-programs.md#概率混合自定义损失与采样语法)。
+forward/loss 新增 `square(x)`（等长平方）、`mean(x)`（唯一向量轴平均为 f32[1]）、
+等长逐元素 `a-b` 和 `-a`；全部无默认参数或广播。自定义损失通过 `fit(...,"loss")` 调用，
+其表达式与模型共同求导；普通 sample 块不建立梯度图，forward/loss 中明确拒绝。
+
+`onehot[N] index` 是普通函数中的独热表达式，如 `onehot[4] 2` 得到 `[0,0,1,0]`。
+N 为 1..1000000 整数字面量，index 是运行时 [0,N) 整数；优先级同一元负号，复杂索引用括号。
+原生等价调用 `one_hot(index,classes)` 支持运行时类别数。无默认值，不对索引求导，forward/loss 不支持。
+完整边界、预算与示例见[独热编码](differentiable-programs.md#独热编码)。

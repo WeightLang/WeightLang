@@ -21,3 +21,4 @@
 (dimension_declaration name: (identifier) @type)
 ((identifier) @type.builtin (#any-of? @type.builtin @@types_QUOTED@@))
 ((qualified_name . (identifier) @function.builtin .) (#any-of? @function.builtin @@builtins_QUOTED@@))
+((identifier) @keyword (#any-of? @keyword "mix" "then" "sample" "onehot"))

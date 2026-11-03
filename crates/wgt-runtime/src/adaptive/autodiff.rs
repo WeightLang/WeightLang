@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 #[derive(Clone, Copy)]
 enum Edge {
     Leaf,
+    Mean { x: usize },
+    Blend { p: usize, a: usize, b: Option<usize> },
     Linear {
         x: usize,
         w: usize,
@@ -96,6 +98,7 @@ impl Tape {
 
     pub(super) fn record(&mut self, op: Op, value: &[f32]) -> Result<()> {
         let (out, edge) = match op {
+            Op::Mean(r,x) => (r,Edge::Mean{x:self.reg(x)?}),
             Op::Read(r, p) => {
                 self.registers[r] = Some(self.parameters[p]);
                 return Ok(());
@@ -123,6 +126,7 @@ impl Tape {
                     kind,
                 },
             ),
+            Op::Blend(r, p, a, b) => (r, Edge::Blend { p: self.reg(p)?, a: self.reg(a)?, b: b.map(|b| self.reg(b)).transpose()? }),
             Op::Slice(r, x, start) => (
                 r,
                 Edge::Slice {
@@ -296,6 +300,10 @@ impl ForwardPass {
             }
             match node.edge {
                 Edge::Leaf => {}
+                Edge::Mean { x } => {
+                    let g=node.gradient[0]/before[x].value.len() as f32;
+                    for v in &mut before[x].gradient { *v+=g; }
+                }
                 Edge::Linear { x, w, b } => {
                     let width = before[x].value.len();
                     for (row, &g) in node.gradient.iter().enumerate() {
@@ -328,11 +336,19 @@ impl ForwardPass {
                     }
                 }
                 Edge::Unary { x, kind } => {
+                    if kind == 3 {
+                        let dot: f32 = node.gradient.iter().zip(&node.value).map(|(g,y)| g*y).sum();
+                        for (i, &g) in node.gradient.iter().enumerate() {
+                            before[x].gradient[i] += node.value[i] * (g-dot);
+                        }
+                        continue;
+                    }
                     for (i, &g) in node.gradient.iter().enumerate() {
                         let y = node.value[i];
                         let derivative = match kind {
                             0 => 1. - y * y,
                             1 => y * (1. - y),
+                            4 => -1.,
                             _ => {
                                 if before[x].value[i] > 0. {
                                     1.
@@ -342,6 +358,17 @@ impl ForwardPass {
                             }
                         };
                         before[x].gradient[i] += g * derivative;
+                    }
+                }
+                Edge::Blend { p, a, b } => {
+                    for (i, &g) in node.gradient.iter().enumerate() {
+                        if g == 0. { continue; }
+                        let j = if before[p].value.len()==1 { 0 } else { i };
+                        let probability = before[p].value[j];
+                        let other = b.map_or(0., |b| before[b].value[i]);
+                        before[p].gradient[j] += g * (before[a].value[i] - other);
+                        before[a].gradient[i] += g * probability;
+                        if let Some(b) = b { before[b].gradient[i] += g * (1.-probability); }
                     }
                 }
                 Edge::Slice { x, start } => {

@@ -2,6 +2,7 @@
 pub mod codegen;
 pub mod compiled;
 mod dataset;
+mod one_hot;
 pub(crate) mod parse;
 use crate::training::{mlp, random, Objective, Optimizer, Trainer};
 use anyhow::{bail, ensure, Context, Result};
@@ -13,6 +14,7 @@ pub fn parse(source: &str) -> Result<Program> {
         ensure!(!name.starts_with("__") && !name.is_empty() && name.bytes().enumerate().all(|(i,c)| c.is_ascii_alphabetic() || c==b'_' || (i>0 && c.is_ascii_digit())), "invalid model name");
         ensure!(!program.contains_key(name) && !BUILTINS.contains(&name), "model name conflicts with function: {name}");
         let (builtin, plan) = if program.remove("forward").is_some() {
+            program.remove("loss");
             ("__adaptive", serde_json::to_string(&crate::adaptive::parse(source)?)?)
         } else {
             ("__graph", serde_json::to_string(&crate::source::graph(&unit.declarations)?.1)?)
@@ -35,6 +37,7 @@ use std::{
 };
 
 const BUILTINS: &[&str] = &[
+    "one_hot",
     "__graph",
     "__adaptive",
     "dependency",
@@ -346,6 +349,11 @@ impl Runtime {
     fn eval(&mut self, expr: &Expr, env: &mut Env) -> Result<Value> {
         self.tick()?;
         match expr {
+            Expr::Mix(..) => bail!("mix is only available in tensor forward/loss functions"),
+            Expr::Sample(p,a,b) => {
+                let p=self.eval(p,env)?;
+                if self.draw_probability(p)? { self.eval(a,env) } else { self.eval(b,env) }
+            }
             Expr::Number(n) => number(*n),
             Expr::Text(s) => Ok(Value::Text(s.clone())),
             Expr::Bool(b) => Ok(Value::Bool(*b)),
@@ -389,6 +397,12 @@ impl Runtime {
             }
         }
     }
+    pub fn draw_probability(&mut self, probability: Value) -> Result<bool> {
+        let p=probability.number()?;
+        ensure!(p.is_finite() && (0. ..=1.).contains(&p),"sample probability must be in [0,1]");
+        Ok(if p==0. {false} else if p==1. {true} else {random(&mut self.rng)<p})
+    }
+
     pub fn call(&mut self, name: &str, args: Vec<Value>) -> Result<Value> {
         self.tick()?;
         if let Some(function) = self.compiled.get(name).cloned() {
@@ -437,7 +451,7 @@ impl Runtime {
             "dependency" | "len" | "sum" | "sqrt" | "log" | "exp" | "seed" | "jsonl" | "close"
             | "restore" => 1,
             "__graph" | "__adaptive" | "model" | "save_model" | "range" | "append" | "column" | "assert" | "metric"
-            | "predict" | "sample" | "batch" | "save" => 2,
+            | "predict" | "sample" | "batch" | "save" | "one_hot" => 2,
             "hf_dataset" => 3,
             "mlp" => 4,
             "fit" | "reinforce" | "benchmark" => 5,
@@ -450,6 +464,7 @@ impl Runtime {
             a.len()
         );
         match name {
+            "one_hot" => one_hot::encode(&a[0], &a[1], &mut self.remaining),
             "dependency" => Ok(Value::Text(
                 self.dependencies
                     .get(a[0].text()?)
@@ -537,16 +552,34 @@ impl Runtime {
                 let index = self.models.len(); self.models.push(crate::weightfs::Mounted::auto(trainer)?); Ok(Value::Model(index))
             }
             "__adaptive" => {
-                ensure!(a[1].text()? == "none", "forward model constructor requires optimizer none; use explicit parameter updates");
                 ensure!(self.adaptive.len() < 64, "model handle limit exceeded");
                 let program = serde_json::from_str(a[0].text()?)?;
-                let session = crate::adaptive::AdaptiveSession::prepare(program, 64*1024*1024)?;
+                let mut session = crate::adaptive::AdaptiveSession::prepare(program, 64*1024*1024)?;
+                match a[1].text()? {
+                    "none" => {},
+                    "sgd" => session.set_optimizer(Optimizer::Sgd),
+                    "adam" => session.set_optimizer(Optimizer::Adam),
+                    _ => bail!("forward optimizer must be none, sgd or adam"),
+                }
                 let index = self.adaptive.len(); self.adaptive.push(crate::weightfs::Mounted::auto(session)?); Ok(Value::Adaptive(index))
             }
             "model" => {
                 ensure!(self.models.len() < 64, "model handle limit exceeded");
                 let path = self.root.join(a[0].text()?);
-                let model = serde_json::from_reader(File::open(&path)?)?;
+                let value: serde_json::Value = serde_json::from_reader(File::open(&path)?)?;
+                if value.get("instructions").is_some() {
+                    ensure!(self.adaptive.len() < 64, "model handle limit exceeded");
+                    let mut session = crate::adaptive::AdaptiveSession::prepare(serde_json::from_value(value)?,64*1024*1024)?;
+                    match a[1].text()? {
+                        "none" => {},
+                        "sgd" => session.set_optimizer(Optimizer::Sgd),
+                        "adam" => session.set_optimizer(Optimizer::Adam),
+                        _ => bail!("forward optimizer must be none, sgd or adam"),
+                    }
+                    let index=self.adaptive.len(); self.adaptive.push(crate::weightfs::Mounted::auto(session)?);
+                    return Ok(Value::Adaptive(index));
+                }
+                let model = serde_json::from_value(value)?;
                 let optimizer = match a[1].text()? {
                     "sgd" => Optimizer::Sgd,
                     "adam" => Optimizer::Adam,
@@ -563,19 +596,38 @@ impl Runtime {
                 Ok(Value::Model(index))
             }
             "save_model" => {
+                if let Value::Adaptive(index) = a[0] {
+                    crate::training::write_new(&self.root.join(a[1].text()?), &serde_json::to_vec(self.adaptive[index].lock()?.program())?)?;
+                    return Ok(Value::Null);
+                }
                 self.models[a[0].model()?].lock()?.export(&self.root.join(a[1].text()?))?;
                 Ok(Value::Null)
             }
             "predict" => {
                 if let Value::Adaptive(index) = a[0] {
-                    let result = self.adaptive[index].lock()?.run(&a[1].vector()?, self.remaining)?.to_vec();
-                    self.remaining = self.remaining.checked_sub(self.adaptive[index].lock()?.steps()).context("operation budget exceeded")?;
-                    return Ok(vector(result));
+                    let mut session=self.adaptive[index].lock()?;
+                    let result=session.run(&a[1].vector()?,self.remaining).map(<[f32]>::to_vec);
+                    self.remaining=self.remaining.saturating_sub(session.steps());
+                    return Ok(vector(result?));
                 }
                 let model = a[0].model()?;
                 Ok(vector(self.models[model].lock()?.predict(&a[1].vector()?)?))
             }
             "fit" => {
+                if let Value::Adaptive(index) = a[0] {
+                    let x=a[1].matrix()?;
+                    let rate=a[3].float()?;
+                    let loss=match a[4].text()? {
+                        "loss" => self.adaptive[index].lock()?.train_custom(&x,&a[2].matrix()?,rate,&mut self.remaining,64*1024*1024)?,
+                        "mse" => self.adaptive[index].lock()?.train_step(&x,Objective::Mse(&a[2].matrix()?),rate,&mut self.remaining,64*1024*1024)?,
+                        "cross_entropy" => {
+                            let actions=a[2].list()?.iter().map(Value::integer).collect::<Result<Vec<_>>>()?;
+                            self.adaptive[index].lock()?.train_step(&x,Objective::Policy{actions:&actions,advantages:&vec![1.;x.len()]},rate,&mut self.remaining,64*1024*1024)?
+                        }
+                        _ => bail!("forward loss must be mse, cross_entropy or loss"),
+                    };
+                    return number(loss as f64);
+                }
                 let model = a[0].model()?;
                 let x = a[1].matrix()?;
                 let rate = a[3].float()?;
@@ -601,7 +653,6 @@ impl Runtime {
                 number(loss as f64)
             }
             "reinforce" => {
-                let model = a[0].model()?;
                 let x = a[1].matrix()?;
                 let actions = a[2]
                     .list()?
@@ -609,6 +660,10 @@ impl Runtime {
                     .map(Value::integer)
                     .collect::<Result<Vec<_>>>()?;
                 let advantages = a[3].vector()?;
+                if let Value::Adaptive(index)=a[0] {
+                    return number(self.adaptive[index].lock()?.train_step(&x,Objective::Policy{actions:&actions,advantages:&advantages},a[4].float()?,&mut self.remaining,64*1024*1024)? as f64);
+                }
+                let model = a[0].model()?;
                 number(self.models[model].lock()?.step(
                     &x,
                     Objective::Policy {
@@ -619,7 +674,12 @@ impl Runtime {
                 )? as f64)
             }
             "sample" => {
-                let logits = self.models[a[0].model()?].lock()?.predict(&a[1].vector()?)?;
+                let logits = if let Value::Adaptive(index)=a[0] {
+                    let mut session=self.adaptive[index].lock()?;
+                    let result=session.evaluate(&a[1].vector()?,self.remaining);
+                    self.remaining=self.remaining.saturating_sub(session.steps());
+                    result?
+                } else { self.models[a[0].model()?].lock()?.predict(&a[1].vector()?)? };
                 let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 let probabilities: Vec<f64> =
                     logits.iter().map(|n| ((*n - max) as f64).exp()).collect();
@@ -699,10 +759,22 @@ impl Runtime {
             }
             "save" => {
                 let path = self.root.join(a[1].text()?);
+                if let Value::Adaptive(index)=a[0] {
+                    self.adaptive[index].lock()?.save_checkpoint(&path)?;
+                    return Ok(Value::Null);
+                }
                 self.models[a[0].model()?].lock()?.save(&path)?;
                 Ok(Value::Null)
             }
             "restore" => {
+                let path=self.root.join(a[0].text()?);
+                let value:serde_json::Value=serde_json::from_reader(File::open(&path)?)?;
+                if value.get("format").and_then(|v| v.as_str())==Some("weightlang.forward-training.v1") {
+                    ensure!(self.adaptive.len()<64,"model handle limit exceeded");
+                    let session=crate::adaptive::AdaptiveSession::restore_checkpoint(value,64*1024*1024)?;
+                    let index=self.adaptive.len(); self.adaptive.push(crate::weightfs::Mounted::auto(session)?);
+                    return Ok(Value::Adaptive(index));
+                }
                 ensure!(self.models.len() < 64, "model handle limit exceeded");
                 let trainer = Trainer::restore(&self.root.join(a[0].text()?), 256 * 1024 * 1024)?;
                 let index = self.models.len();

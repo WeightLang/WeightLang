@@ -425,7 +425,7 @@ impl Trainer {
     }
 }
 
-fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
     let parent = path
         .parent()

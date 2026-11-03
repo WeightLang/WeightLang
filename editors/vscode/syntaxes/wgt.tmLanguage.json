@@ -33,15 +33,15 @@
     },
     {
       "name": "support.function.wgt",
-      "match": "(?<![\\w.])(?:add|append|assert|batch|benchmark|close|column|dependency|exp|fit|gae|hf_dataset|identity|jsonl|len|linear|log|metric|mlp|model|mul|positive|predict|random|range|read|reinforce|relu|restore|sample|save|save_model|seed|sigmoid|slice|sqrt|sum|tanh|write)(?=\\s*\\()"
+      "match": "(?<![\\w.])(?:add|append|assert|batch|benchmark|close|column|dependency|exp|fit|gae|gate|hf_dataset|identity|jsonl|len|linear|log|mean|metric|mlp|model|mul|one_hot|positive|predict|random|range|read|reinforce|relu|restore|route|sample|save|save_model|seed|sigmoid|slice|softmax|sqrt|square|sum|tanh|write)(?=\\s*\\()"
     },
     {
       "name": "keyword.control.wgt",
-      "match": "\\b(?:break|continue|else|fn|for|frozen|if|in|init|input|layer|let|model|output|parameter|return|wgt|while)\\b"
+      "match": "\\b(?:break|continue|else|fn|for|frozen|if|in|init|input|layer|let|mix|model|onehot|output|parameter|return|sample|then|wgt|while)\\b"
     },
     {
       "name": "storage.type.wgt",
-      "match": "\\b(?:f32)\\b"
+      "match": "\\b(?:f32|prob)\\b"
     },
     {
       "name": "constant.language.wgt",

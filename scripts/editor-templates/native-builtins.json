@@ -16,6 +16,7 @@
   "metric",
   "mlp",
   "model",
+  "one_hot",
   "predict",
   "random",
   "range",

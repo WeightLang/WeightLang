@@ -12,9 +12,9 @@
 (defvar wgt-font-lock-keywords
   (list
     (cons (regexp-opt '("false" "null" "true") 'symbols) 'font-lock-constant-face)
-    (cons (regexp-opt '("break" "continue" "else" "fn" "for" "frozen" "if" "in" "init" "input" "layer" "let" "model" "output" "parameter" "return" "wgt" "while") 'symbols) 'font-lock-keyword-face)
-    (cons (regexp-opt '("add" "append" "assert" "batch" "benchmark" "close" "column" "dependency" "exp" "fit" "gae" "hf_dataset" "identity" "jsonl" "len" "linear" "log" "metric" "mlp" "model" "mul" "positive" "predict" "random" "range" "read" "reinforce" "relu" "restore" "sample" "save" "save_model" "seed" "sigmoid" "slice" "sqrt" "sum" "tanh" "write") 'symbols) 'font-lock-builtin-face)
-    (cons (regexp-opt '("f32") 'symbols) 'font-lock-type-face)
+    (cons (regexp-opt '("break" "continue" "else" "fn" "for" "frozen" "if" "in" "init" "input" "layer" "let" "mix" "model" "onehot" "output" "parameter" "return" "sample" "then" "wgt" "while") 'symbols) 'font-lock-keyword-face)
+    (cons (regexp-opt '("add" "append" "assert" "batch" "benchmark" "close" "column" "dependency" "exp" "fit" "gae" "gate" "hf_dataset" "identity" "jsonl" "len" "linear" "log" "mean" "metric" "mlp" "model" "mul" "one_hot" "positive" "predict" "random" "range" "read" "reinforce" "relu" "restore" "route" "sample" "save" "save_model" "seed" "sigmoid" "slice" "softmax" "sqrt" "square" "sum" "tanh" "write") 'symbols) 'font-lock-builtin-face)
+    (cons (regexp-opt '("f32" "prob") 'symbols) 'font-lock-type-face)
     (cons "\\_<[0-9]+\\(?:\\.[0-9]*\\)?\\(?:[eE][-+]?[0-9]+\\)?\\_>" 'font-lock-constant-face)))
 ;;;###autoload
 (define-derived-mode wgt-mode prog-mode "WGT"

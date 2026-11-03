@@ -7,7 +7,8 @@
 
 模型先声明 `model`、`input/output ...: f32[N]` 及显式初值的 `parameter/frozen`，
 然后用 `fn forward(x)` 表达张量计算、`write`、`if positive(...)` 和 `while`。
-同文件 main 调用 `模型名("none")` 与 `predict`。输入不含 batch；当前仅 CPU。
+同文件 main 调用 `模型名("none"|"sgd"|"adam")` 与 `predict`；这里的竖线表示三选一字符串。
+sgd/adam 可由 `fit`/`reinforce` 训练整个 forward，见[可微程序](differentiable-programs.md)。输入不含 batch；当前仅 CPU。
 可执行且带轴、状态、梯度说明的完整示例：[model.wgt](../examples/self_modifying/model.wgt)。
 
 ```sh
@@ -35,10 +36,12 @@ wgt-native adaptive examples/self_modifying/model.wgt 4096 100 --check
   不包含源码/JSON 解析、程序元数据、容器元数据或进程 RSS。
 - 每条实际执行指令计一步，包含标签、跳转、return。步数不是时间：矩阵乘法仍计一步，
   其规模受已检查的形状和内存预算约束。
-- 当前没有共享别名、文件权重、量化、并行执行、GPU 或内置优化器状态。
+- 当前没有共享别名、文件权重、量化、并行执行或 GPU。显式选择 sgd/adam 后会保留优化器状态。
 
 上述事务提交规则对应 `run` 推理调用。下述可微 `forward` 始终返回显式状态，不提交写入；
 开发者通过下一次调用的参数绑定选择延续哪些状态，基础模型不会被训练评估覆盖。
+Rust `evaluate(input,max_steps)` 与 run 使用相同的无 tape 短路执行，但始终回滚写入并返回输出副本；
+用于脚本 sample。run/evaluate 在 gate/route 的精确端点跳过无关内联表达式，详见[可微程序](differentiable-programs.md)。
 
 ## 原生自动微分
 
@@ -55,5 +58,12 @@ JSON 传输命令 `forward` 接收 input、parameters（默认空映射）、tap
 `release` 释放 tape，`parameters` 读取当前参数。每会话最多 64 个活动 tape。
 API 详情以 `crates/wgt-runtime/src/adaptive/transport.rs` 为准。
 高层普通函数暂不暴露 VJP/外部优化器接口；`predict` 用于提交推理状态。
+高层 `fit`/`reinforce` 已接通此 VJP；训练不提交 forward 中的 write，最终状态梯度为零。
+`gate`/`route` 对门与各输入求导；`softmax` 使用完整向量 Jacobian 的 VJP，不是逐项 sigmoid 导数。
+记录 tape 时禁用推理端点短路，保留另一分支对门梯度的贡献；frozen 也不改变此数学契约。
 
 验证包括写后使用、循环多次写入、分支路径、数值差分、冻结参数、预算、回滚与解释/AOT 一致性。
+
+prob 的原生参数存储为 logit（frozen 为概率）；读取表达式自动转换，write 禁止改写 prob。
+mix 保留 route 的推理短路与完整 VJP。fn loss 是无模型参数的张量子程序，
+其输入梯度回传到模型输出；fit(...,"loss") 才执行训练。详见[语法契约](differentiable-programs.md#概率混合自定义损失与采样语法)。

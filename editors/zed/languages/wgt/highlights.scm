@@ -19,5 +19,6 @@
 (block_declaration name: (identifier) @function)
 (constant_declaration name: (identifier) @constant)
 (dimension_declaration name: (identifier) @type)
-((identifier) @type.builtin (#any-of? @type.builtin "f32"))
-((qualified_name . (identifier) @function.builtin .) (#any-of? @function.builtin "add" "append" "assert" "batch" "benchmark" "close" "column" "dependency" "exp" "fit" "gae" "hf_dataset" "identity" "jsonl" "len" "linear" "log" "metric" "mlp" "model" "mul" "positive" "predict" "random" "range" "read" "reinforce" "relu" "restore" "sample" "save" "save_model" "seed" "sigmoid" "slice" "sqrt" "sum" "tanh" "write"))
+((identifier) @type.builtin (#any-of? @type.builtin "f32" "prob"))
+((qualified_name . (identifier) @function.builtin .) (#any-of? @function.builtin "add" "append" "assert" "batch" "benchmark" "close" "column" "dependency" "exp" "fit" "gae" "gate" "hf_dataset" "identity" "jsonl" "len" "linear" "log" "mean" "metric" "mlp" "model" "mul" "one_hot" "positive" "predict" "random" "range" "read" "reinforce" "relu" "restore" "route" "sample" "save" "save_model" "seed" "sigmoid" "slice" "softmax" "sqrt" "square" "sum" "tanh" "write"))
+((identifier) @keyword (#any-of? @keyword "mix" "then" "sample" "onehot"))

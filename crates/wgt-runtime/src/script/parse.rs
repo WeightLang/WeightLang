@@ -13,10 +13,13 @@ pub enum Expr {
     Index(Box<Expr>, Box<Expr>),
     Unary(String, Box<Expr>),
     Binary(String, Box<Expr>, Box<Expr>),
+    Sample(Box<Expr>, Box<Expr>, Box<Expr>),
+    Mix(Box<Expr>, Box<Expr>, Box<Expr>),
 }
 impl Expr {
     fn height(&self) -> usize {
         1 + match self {
+            Self::Sample(p,a,b) | Self::Mix(p,a,b) => p.height().max(a.height()).max(b.height()),
             Self::Binary(_, a, b) | Self::Index(a, b) => a.height().max(b.height()),
             Self::Unary(_, a) => a.height(),
             Self::List(v) | Self::Call(_, v) => v.iter().map(Self::height).max().unwrap_or(0),
@@ -193,6 +196,19 @@ struct Parser {
     depth: usize,
 }
 impl Parser {
+    fn sample_block(&self) -> bool {
+        if !self.is("(") { return true; }
+        let mut depth=0;
+        for (i,t) in self.tokens[self.pos..].iter().enumerate() {
+            if t.quoted {continue;}
+            match t.text.as_str() {
+                "("=>depth+=1,
+                ")"=>{depth-=1; if depth==0 {return self.tokens.get(self.pos+i+1).is_some_and(|t| !t.quoted && t.text=="{");}},
+                _=>{},
+            }
+        }
+        false
+    }
     fn line(&self) -> usize {
         self.tokens
             .get(self.pos)
@@ -239,7 +255,7 @@ impl Parser {
         ensure!(
             ![
                 "fn", "let", "if", "else", "while", "for", "in", "return", "break", "continue",
-                "true", "false", "null"
+                "true", "false", "null", "mix", "then", "onehot"
             ]
             .contains(&t.text.as_str()),
             "reserved name: {}",
@@ -333,6 +349,33 @@ impl Parser {
             Expr::Text(t.text)
         } else {
             match t.text.as_str() {
+                "onehot" => {
+                    self.expect("[")?;
+                    let size = self.next()?;
+                    ensure!(!size.quoted, "onehot classes must be an integer literal");
+                    let classes: usize = size.text.parse().context("onehot classes must be an integer literal")?;
+                    ensure!((1..=1_000_000).contains(&classes), "onehot classes must be 1..1000000");
+                    self.expect("]")?;
+                    Expr::Call("one_hot".into(), vec![self.expr(7)?, Expr::Number(classes as f64)])
+                }
+                "mix" | "sample" if t.text=="mix" || self.sample_block() => {
+                    let sampling=t.text=="sample";
+                    let probability = self.expr(0)?;
+                    self.expect("{")?;
+                    self.expect("then")?;
+                    self.expect("{")?;
+                    let yes = self.expr(0)?;
+                    self.take(";");
+                    self.expect("}")?;
+                    self.expect("else")?;
+                    self.expect("{")?;
+                    let no = self.expr(0)?;
+                    self.take(";");
+                    self.expect("}")?;
+                    self.expect("}")?;
+                    if sampling { Expr::Sample(Box::new(probability),Box::new(yes),Box::new(no)) }
+                    else { Expr::Mix(Box::new(probability),Box::new(yes),Box::new(no)) }
+                }
                 "true" => Expr::Bool(true),
                 "false" => Expr::Bool(false),
                 "null" => Expr::Null,

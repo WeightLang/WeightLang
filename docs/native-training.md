@@ -76,19 +76,19 @@ fn main() {
 | `seed(integer)` | 设置脚本局部采样 RNG；整数范围 0..1000000000 |
 | `random()` | 确定性 SplitMix64 流，返回 [0,1)；不影响模型初始化 RNG |
 | `mlp(widths,activation,seed,optimizer)` | 新建 CPU f32 顺序网络；widths 是包括输入输出的 2..64 个整数，每个 1..16384，最多 4000000 参数；隐藏层 activation 为 relu/tanh/sigmoid/identity，输出层始终 linear；optimizer 为 sgd/adam |
-| `model(path,optimizer)` | 加载原生 IR v1 JSON，使用新优化器；不是普通 .wgt 模型解析器，也不接受传统 manifest 制品 |
+| `model(path,optimizer)` | 加载原生顺序 IR 或 forward Program IR v1 JSON，使用新优化器；forward 另可选 none；不是普通 .wgt 模型解析器，也不接受传统 manifest 制品 |
 | `predict(model,input)` | 输入单个 f32 向量，返回输出列表；不改变权重/优化器、不训练 |
 | `fit(model,inputs,targets,lr,loss)` | 一个批次一次更新，返回更新前损失；lr 正有限；loss 为 mse/cross_entropy |
 | `reinforce(model,observations,actions,advantages,lr)` | 一批观测的策略梯度更新，返回更新前的 mean(-advantage*log pi(action)) |
-| `sample(model,observation)` | 将模型输出视为 logits，稳定 softmax 后由脚本 RNG 抽取动作索引 |
+| `sample(model,observation)` | 将模型输出视为 logits，稳定 softmax 后由脚本 RNG 抽取动作索引；forward 模型使用无 tape 的端点短路推理，不提交 write |
 | `gae(rewards,values,next_values,terminated,truncated,gamma,lambda)` | 同长度一维列表；后两种标记是 bool，gamma/lambda 在 [0,1]；返回优势列表 |
 | `hf_dataset(dataset,config,split)` | Rust 原生 Hugging Face 分页数据流；全部参数必填，首次 batch 联网；HF_TOKEN 可选，详见 [数据集契约](datasets.md#原生数据集加载器wgt-05当前源码) |
 | `jsonl(path)` | 打开 UTF-8 JSON Lines 数据流；每行一个 JSON 值，不允许空行 |
 | `batch(reader,count)` | count 在 1..65536；返回最多 count 行；尾批保留，到 EOF 返回 []；单行 <=1MiB、单批 <=16MiB |
 | `close(reader)` | 关闭流，重复关闭无操作；关闭后 batch 报错 |
-| `save(model,path)` | 保存原生训练断点：结构、权重、冻结/共享关系、优化器类别、步数和矩状态 |
+| `save(model,path)` | 保存顺序或 forward 训练断点：结构、权重、冻结关系、优化器类别、步数和矩状态；顺序模型另保留共享关系 |
 | `restore(path)` | 读取断点，返回模型及恢复后的优化器 |
-| `save_model(model,path)` | 导出原生推理 IR v1 JSON；不包含优化器，可直接供 wgt-native 推理使用 |
+| `save_model(model,path)` | 导出原生推理 IR v1 JSON；不包含优化器；forward 使用 Program 格式，供 model() 或 wgt-native adaptive 加载 |
 | `benchmark(model,input,warmup,repeats,name)` | CPU 单向量前向计时；warmup 0..10000，repeats 1..100000；返回并登记 us 单位 mean/p50/p95、次数与范围 |
 
 脚本整数参数目前限制为 0..1000000000；列表索引仍需满足实际长度。
@@ -98,13 +98,16 @@ fn main() {
 
 ## 梯度与参数更新
 
-当前原生计算支持单向量顺序 linear/relu/tanh/sigmoid/identity；训练输入是向量的列表，逐样本
+声明式顺序模型支持单向量 linear/relu/tanh/sigmoid/identity；`fn forward` 模型还支持
+可微 gate/route/softmax、显式写回与实际执行的循环/分支计算，详见[可微程序](differentiable-programs.md)。
+两类模型均可用 fit/reinforce、SGD/Adam；训练输入是向量的列表，逐样本
 建立 tape 并累加梯度。MSE 在样本及输出维度平均；交叉熵 targets 是每样本一个类别整数，
 输入模型应输出未经 softmax 的 logits。REINFORCE 的 advantages 是显式常量，不对优势求导。
 
 SGD 无 momentum/weight decay；Adam 固定 beta1=0.9、beta2=0.999、eps=1e-8，无 weight decay。
 同一模型句柄保留优化器矩和步数，学习率在每次更新显式指定。当前不支持独立优化器对象、
-混合精度、梯度累积接口、裁剪、任意自定义损失反传或 GPU 训练。
+混合精度、梯度累积接口、裁剪、任意自定义损失反传或 GPU 训练。forward 模型支持受限的
+`fn loss(prediction,target)` 一阶反传，约束与示例见[可微程序](differentiable-programs.md)。
 
 原生 IR 的 resident/view/add 梯度汇总到存储所有者，共享参数只更新一次；冻结依赖沿用 Session
 规则，冻结参数不更新。可训练的 file 存储拒绝，冻结 file 可读取。全部批次与候选更新检查通过后
@@ -309,3 +312,11 @@ weightc --offline --locked compile demo.wgt -o demo
 可像文件一样读取和修改参数 JSON；单文件提交与训练/预测互斥，旧版本编辑返回冲突。
 手工编辑保留优化器历史，不自动保存。`WGT_WEIGHTFS=on|auto|off` 控制挂载要求（默认 auto）；
 纯检查与编译不挂载。完整文件协议、环境要求、错误及预算见 [weightfs v1](weightfs.md)。
+
+## 采样与独热目标
+
+普通函数可用 `sample p { then { a } else { b } }` 只执行抽中的表达式，seed 控制随机流。
+`onehot[4] action` 将动作索引转成四类数值列表；复杂索引用括号。等价原生函数为
+`one_hot(index,classes)`，类别数 1..1000000，索引为 [0,classes) 整数，分配前扣除 classes 操作预算。
+两者不使离散动作可微；onehot 目标可用于 MSE/自定义损失，cross_entropy/reinforce 仍接收类别索引。
+详见[语法与边界](differentiable-programs.md)，可运行例子 [sample_branch.wgt](../examples/native_training/sample_branch.wgt)。

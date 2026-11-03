@@ -9,8 +9,9 @@ pub use source::parse;
 mod autodiff;
 pub use autodiff::ForwardPass;
 pub mod transport;
+mod training;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Program {
     pub version: u32,
@@ -18,16 +19,18 @@ pub struct Program {
     pub registers: Vec<Register>,
     pub parameters: Vec<Parameter>,
     pub instructions: Vec<Instruction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loss: Option<Box<Program>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Register {
     pub name: String,
     pub len: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Parameter {
     pub name: String,
@@ -35,9 +38,12 @@ pub struct Parameter {
     pub data: Vec<f32>,
     #[serde(default)]
     pub frozen: bool,
+    /// Trainable probabilities store logits; frozen probabilities store exact values.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub probability: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Instruction {
     Read {
@@ -76,6 +82,13 @@ pub enum Instruction {
         out: String,
         input: String,
     },
+    Softmax { out: String, input: String },
+    Neg { out: String, input: String },
+    Mean { out: String, input: String },
+    Gate { out: String, probability: String, input: String },
+    Route { out: String, probability: String, yes: String, no: String },
+    /// Skip an unevaluated expression only when no differentiation tape is requested.
+    InferenceSkip { probability: String, when_one: bool, target: String },
     Slice {
         out: String,
         input: String,
@@ -104,6 +117,9 @@ enum Op {
     Linear(usize, usize, usize, Option<usize>),
     Binary(usize, usize, usize, bool),
     Unary(usize, usize, u8),
+    Mean(usize, usize),
+    Blend(usize, usize, usize, Option<usize>),
+    InferenceSkip(usize, bool, usize),
     Slice(usize, usize, usize),
     Label,
     Branch(usize, usize, usize),
@@ -125,6 +141,7 @@ pub struct AdaptiveSession {
     managed_bytes: usize,
     revision: u64,
     steps: u64,
+    optimizer: Option<training::State>,
 }
 
 fn names<'a>(items: impl Iterator<Item = &'a str>) -> Result<HashMap<String, usize>> {
@@ -142,6 +159,9 @@ impl AdaptiveSession {
     pub fn prepare(program: Program, budget_bytes: usize) -> Result<Self> {
         ensure!(program.version == 1, "unsupported adaptive IR version");
         ensure!(!program.instructions.is_empty(), "empty adaptive program");
+        if let Some(loss) = &program.loss {
+            ensure!(loss.loss.is_none() && loss.parameters.is_empty(), "loss must be a parameter-free tensor program");
+        }
         let regs = names(program.registers.iter().map(|r| r.name.as_str()))?;
         let params = names(program.parameters.iter().map(|p| p.name.as_str()))?;
         let input = *regs.get(&program.input).context("unknown input register")?;
@@ -179,6 +199,10 @@ impl AdaptiveSession {
         let len = |r: usize| program.registers[r].len;
         let mut floats = 0usize;
         for p in &program.parameters {
+            if p.probability {
+                ensure!(p.shape == [1], "prob parameter must be scalar");
+                ensure!(!p.frozen || p.data.iter().all(|v| (0. ..=1.).contains(v)), "frozen prob must be in [0,1]");
+            }
             let size = crate::elements(&p.shape)?;
             ensure!(
                 size == p.data.len() && p.data.iter().all(|v| v.is_finite()),
@@ -225,6 +249,7 @@ impl AdaptiveSession {
                             !program.parameters[p].frozen,
                             "cannot write frozen parameter: {parameter}"
                         );
+                        ensure!(!program.parameters[p].probability, "write to prob is unsupported; use optimizer updates");
                         ensure!(
                             len(r) == program.parameters[p].data.len(),
                             "write length mismatch"
@@ -262,15 +287,37 @@ impl AdaptiveSession {
                     }
                     Instruction::Tanh { out, input }
                     | Instruction::Sigmoid { out, input }
+                    | Instruction::Softmax { out, input }
+                    | Instruction::Neg { out, input }
                     | Instruction::Relu { out, input } => {
                         let (r, x) = (dest(out)?, reg(input)?);
                         ensure!(len(r) == len(x), "unary length mismatch");
                         let kind = match instruction {
                             Instruction::Tanh { .. } => 0,
                             Instruction::Sigmoid { .. } => 1,
+                            Instruction::Softmax { .. } => 3,
+                            Instruction::Neg { .. } => 4,
                             _ => 2,
                         };
                         Op::Unary(r, x, kind)
+                    }
+                    Instruction::Mean { out, input } => {
+                        let (r,x)=(dest(out)?,reg(input)?);
+                        ensure!(len(r)==1,"mean output must be f32[1]");
+                        Op::Mean(r,x)
+                    }
+                    Instruction::Gate { out, probability, input } => {
+                        let (r, p, x) = (dest(out)?, reg(probability)?, reg(input)?);
+                        ensure!(len(r) == len(x) && (len(p) == 1 || len(p) == len(r)), "gate shape mismatch");
+                        Op::Blend(r, p, x, None)
+                    }
+                    Instruction::Route { out, probability, yes, no } => {
+                        let (r, p, a, b) = (dest(out)?, reg(probability)?, reg(yes)?, reg(no)?);
+                        ensure!(len(r) == len(a) && len(r) == len(b) && (len(p) == 1 || len(p) == len(r)), "route shape mismatch");
+                        Op::Blend(r, p, a, Some(b))
+                    }
+                    Instruction::InferenceSkip { probability, when_one, target } => {
+                        Op::InferenceSkip(reg(probability)?, *when_one, label(target)?)
                     }
                     Instruction::Slice { out, input, start } => {
                         let (r, x) = (dest(out)?, reg(input)?);
@@ -331,6 +378,7 @@ impl AdaptiveSession {
             managed_bytes,
             revision: 0,
             steps: 0,
+            optimizer: None,
         })
     }
 
@@ -407,7 +455,17 @@ impl AdaptiveSession {
         }
     }
 
+    /// Read-only inference: execute lazily without recording a gradient tape or
+    /// committing forward writes. Used for action sampling, not differentiation.
+    pub fn evaluate(&mut self, input: &[f32], max_steps: u64) -> Result<Vec<f32>> {
+        self.begin(input, max_steps)?;
+        let result = self.execute(max_steps, None).map(|(r, _)| self.registers[r].clone());
+        self.restore();
+        result
+    }
+
     fn begin(&mut self, input: &[f32], max_steps: u64) -> Result<()> {
+        self.steps = 0;
         ensure!(
             input.len() == self.input_len() && input.iter().all(|v| v.is_finite()),
             "invalid adaptive input"
@@ -419,7 +477,6 @@ impl AdaptiveSession {
         for (p, b) in self.program.parameters.iter().zip(&mut self.backup) {
             b.copy_from_slice(&p.data);
         }
-        self.steps = 0;
         Ok(())
     }
 
@@ -489,14 +546,56 @@ impl AdaptiveSession {
                 }
                 Op::Unary(r, x, kind) => {
                     self.ready(x)?;
+                    let max = if kind == 3 { self.registers[x].iter().copied().fold(f32::NEG_INFINITY, f32::max) } else { 0. };
+                    let total: f64 = if kind == 3 { self.registers[x].iter().map(|v| (f64::from(*v) - f64::from(max)).exp()).sum() } else { 1. };
                     for (i, v) in self.registers[x].iter().enumerate() {
                         self.scratch[i] = match kind {
                             0 => v.tanh(),
                             1 => 1. / (1. + (-v).exp()),
+                            3 => ((f64::from(*v) - f64::from(max)).exp() / total) as f32,
+                            4 => -v,
                             _ => v.max(0.),
                         };
                     }
                     output = Some(r);
+                }
+                Op::Mean(r,x) => {
+                    self.ready(x)?;
+                    self.scratch[0]=(self.registers[x].iter().map(|v| f64::from(*v)).sum::<f64>() / self.registers[x].len() as f64) as f32;
+                    output=Some(r);
+                }
+                Op::Blend(r, p, a, b) => {
+                    self.ready(p)?;
+                    ensure!(self.registers[p].iter().all(|v| (0. ..=1.).contains(v)), "gate/route probability must be in [0,1]");
+                    let all_zero = tape.is_none() && self.registers[p].iter().all(|v| *v == 0.);
+                    let all_one = tape.is_none() && self.registers[p].iter().all(|v| *v == 1.);
+                    if all_zero || all_one {
+                        let selected = if all_one { Some(a) } else { b };
+                        let n = self.registers[r].len();
+                        if let Some(selected) = selected {
+                            self.ready(selected)?;
+                            self.scratch[..n].copy_from_slice(&self.registers[selected]);
+                        } else {
+                            self.scratch[..n].fill(0.);
+                        }
+                    } else {
+                        self.ready(a)?;
+                        if let Some(b) = b { self.ready(b)?; }
+                        for i in 0..self.registers[r].len() {
+                            let p = self.registers[p][if self.registers[p].len() == 1 { 0 } else { i }];
+                            self.scratch[i] = p * self.registers[a][i] + (1. - p) * b.map_or(0., |b| self.registers[b][i]);
+                        }
+                    }
+                    output = Some(r);
+                }
+                Op::InferenceSkip(p, when_one, target) => {
+                    self.ready(p)?;
+                    ensure!(self.registers[p].iter().all(|v| (0. ..=1.).contains(v)), "gate/route probability must be in [0,1]");
+                    let endpoint = if when_one { 1. } else { 0. };
+                    if tape.is_none() && self.registers[p].iter().all(|v| *v == endpoint) {
+                        pc = target;
+                        continue;
+                    }
                 }
                 Op::Slice(r, x, start) => {
                     self.ready(x)?;

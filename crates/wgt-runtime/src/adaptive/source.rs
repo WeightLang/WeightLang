@@ -8,7 +8,7 @@ pub fn parse(source: &str) -> Result<Program> {
     let unit = crate::source::split(source)?;
     let functions = crate::script::parse::parse_functions(&unit.functions)?;
     let forward = functions.get("forward").context("stateful model requires fn forward(input)")?;
-    let mut program = Program { version:1, input:String::new(), registers:Vec::new(), parameters:Vec::new(), instructions:Vec::new() };
+    let mut program = Program { version:1, input:String::new(), registers:Vec::new(), parameters:Vec::new(), instructions:Vec::new(), loss:None };
     let (mut model, mut output) = (false, None);
     for (line, text) in unit.declarations.lines().enumerate() {
         let text = text.split('#').next().unwrap_or("").trim();
@@ -26,8 +26,20 @@ pub fn parse(source: &str) -> Result<Program> {
             "parameter" | "frozen" => {
                 let (name, body) = body.split_once(':').context("parameter requires name: f32[shape] = values")?;
                 let (shape, values) = body.split_once('=').context("parameter requires explicit values")?;
-                let shape = shape.trim().strip_prefix("f32").context("parameter type must be f32")?;
-                program.parameters.push(Parameter { name:name.trim().into(), shape:serde_json::from_str(shape)?, data:serde_json::from_str(values.trim())?, frozen:kw == "frozen" });
+                let probability=shape.trim()=="prob";
+                let (shape,data)=if probability {
+                    let p:f64=values.trim().parse().context("prob initializer must be a scalar probability")?;
+                    ensure!(p.is_finite() && (0. ..=1.).contains(&p),"prob initializer must be in [0,1]");
+                    let value=if kw=="frozen" {p} else {
+                        ensure!(p>0. && p<1.,"trainable prob initializer must be strictly between 0 and 1; use frozen for exact endpoints");
+                        p.ln()-(-p).ln_1p()
+                    };
+                    (vec![1],vec![value as f32])
+                } else {
+                    let shape = shape.trim().strip_prefix("f32").context("parameter type must be f32 or prob")?;
+                    (serde_json::from_str(shape)?,serde_json::from_str(values.trim())?)
+                };
+                program.parameters.push(Parameter { name:name.trim().into(), shape, data, frozen:kw == "frozen", probability });
             },
             _ => bail!("line {}: unsupported declaration in forward model: {kw}", line+1)
         }
@@ -38,6 +50,20 @@ pub fn parse(source: &str) -> Result<Program> {
     let mut lower = Lower { program, sizes, next:0, loops:Vec::new(), output:output.unwrap() };
     lower.block(&forward.body)?;
     ensure!(lower.program.instructions.iter().any(|i| matches!(i,I::Return{..})), "forward requires a return");
+    if let Some(loss)=functions.get("loss") {
+        ensure!(loss.args.len()==2,"loss requires prediction and target arguments");
+        let n=lower.output;
+        let input="__loss_input".to_string();
+        let program=Program{version:1,input:input.clone(),registers:vec![Register{name:input.clone(),len:n*2}],parameters:vec![],instructions:vec![],loss:None};
+        let mut loss_lower=Lower{program,sizes:HashMap::from([(input.clone(),n*2)]),next:0,loops:vec![],output:1};
+        for (i,name) in loss.args.iter().enumerate() {
+            loss_lower.register(name,n)?;
+            loss_lower.program.instructions.push(I::Slice{out:name.clone(),input:input.clone(),start:i*n});
+        }
+        loss_lower.block(&loss.body).context("fn loss")?;
+        ensure!(loss_lower.program.instructions.iter().any(|i| matches!(i,I::Return{..})),"loss requires a scalar return");
+        lower.program.loss=Some(Box::new(loss_lower.program));
+    }
     Ok(lower.program)
 }
 struct Lower {
@@ -65,7 +91,31 @@ impl Lower {
         let out = self.fresh(); self.assign(&out,expr)?; Ok(out)
     }
     fn assign(&mut self, out:&str, expr:&Expr) -> Result<()> {
+        if let Expr::Mix(p,a,b)=expr {
+            return self.assign(out,&Expr::Call("route".into(),vec![(**p).clone(),(**a).clone(),(**b).clone()]));
+        }
+        // Public reads expose probabilities; optimizer/checkpoint storage remains logits.
+        let read_parameter=match expr {
+            Expr::Name(n) if !self.sizes.contains_key(n) => Some(expr),
+            Expr::Call(op,args) if op=="read" && args.len()==1 => Some(&args[0]),
+            _=>None,
+        };
+        if let Some(e)=read_parameter {
+            let p=self.parameter(e)?;
+            if p.probability && !p.frozen {
+                let name=p.name.clone(); let raw=self.fresh();
+                self.register(&raw,1)?; self.register(out,1)?;
+                self.program.instructions.push(I::Read{out:raw.clone(),parameter:name});
+                self.program.instructions.push(I::Sigmoid{out:out.into(),input:raw});
+                return Ok(());
+            }
+        }
         let (instruction,len) = match expr {
+            Expr::Sample(..) => bail!("sample blocks are discrete host expressions; use mix for differentiable forward/loss"),
+            Expr::Unary(op,x) if op=="-" => {
+                let x=self.value(x)?; let len=self.size(&x)?;
+                (I::Neg{out:out.into(),input:x},len)
+            },
             Expr::Name(name) if self.sizes.contains_key(name) => {
                 (I::Slice { out:out.into(), input:name.clone(), start:0 }, self.size(name)?)
             },
@@ -73,18 +123,23 @@ impl Lower {
                 let p = self.parameter(expr)?;
                 (I::Read { out:out.into(), parameter:p.name.clone() },p.shape.iter().product())
             },
-            Expr::Binary(op,a,b) if op=="+" || op=="*" => {
+            Expr::Binary(op,a,b) if op=="+" || op=="*" || op=="-" => {
                 let a = self.value(a)?; let b = self.value(b)?; let len=self.size(&a)?;
                 ensure!(len==self.size(&b)?, "tensor arithmetic shape mismatch");
-                (if op=="+" {I::Add{out:out.into(),left:a,right:b}} else {I::Mul{out:out.into(),left:a,right:b}},len)
+                let b=if op=="-" {
+                    let neg=self.fresh(); self.register(&neg,len)?;
+                    self.program.instructions.push(I::Neg{out:neg.clone(),input:b}); neg
+                } else { b };
+                (if op=="*" {I::Mul{out:out.into(),left:a,right:b}} else {I::Add{out:out.into(),left:a,right:b}},len)
             },
             Expr::Call(op,args) => match (op.as_str(),args.as_slice()) {
                 ("read",[p]) => {let p=self.parameter(p)?; (I::Read{out:out.into(),parameter:p.name.clone()},p.shape.iter().product())},
                 ("linear",[x,w]) | ("linear",[x,w,_]) => {
                     let x=self.value(x)?; let w=self.parameter(w)?;
+                    ensure!(!w.probability,"linear weight cannot be prob");
                     ensure!(w.shape.len()==2 && w.shape[1]==self.size(&x)?, "linear weight/input shape mismatch");
                     let (weight,len)=(w.name.clone(),w.shape[0]);
-                    let bias=if args.len()==3 {Some(self.parameter(&args[2])?.name.clone())}else{None};
+                    let bias=if args.len()==3 {let b=self.parameter(&args[2])?; ensure!(!b.probability,"linear bias cannot be prob");Some(b.name.clone())}else{None};
                     (I::Linear{out:out.into(),input:x,weight,bias},len)
                 },
                 ("add",[a,b]) | ("mul",[a,b]) => {
@@ -92,9 +147,31 @@ impl Lower {
                     ensure!(len==self.size(&b)?, "tensor arithmetic shape mismatch");
                     (if op=="add" {I::Add{out:out.into(),left:a,right:b}}else{I::Mul{out:out.into(),left:a,right:b}},len)
                 },
-                ("relu",[x]) | ("tanh",[x]) | ("sigmoid",[x]) => {
+                ("mean",[x]) | ("square",[x]) => {
                     let x=self.value(x)?; let len=self.size(&x)?;
-                    (match op.as_str() {"relu"=>I::Relu{out:out.into(),input:x},"tanh"=>I::Tanh{out:out.into(),input:x},_=>I::Sigmoid{out:out.into(),input:x}},len)
+                    if op=="mean" {(I::Mean{out:out.into(),input:x},1)}
+                    else {(I::Mul{out:out.into(),left:x.clone(),right:x},len)}
+                },
+                ("gate",[p,x]) | ("route",[p,x,_]) => {
+                    let p=self.value(p)?;
+                    let after_a=self.fresh();
+                    self.program.instructions.push(I::InferenceSkip{probability:p.clone(),when_one:false,target:after_a.clone()});
+                    let x=self.value(x)?; let len=self.size(&x)?;
+                    self.program.instructions.push(I::Label{name:after_a});
+                    ensure!(self.size(&p)?==1 || self.size(&p)?==len, "gate/route probability shape mismatch");
+                    let instruction=if op=="gate" { I::Gate{out:out.into(),probability:p,input:x} } else {
+                        let after_b=self.fresh();
+                        self.program.instructions.push(I::InferenceSkip{probability:p.clone(),when_one:true,target:after_b.clone()});
+                        let b=self.value(&args[2])?;
+                        self.program.instructions.push(I::Label{name:after_b});
+                        ensure!(self.size(&b)?==len,"route branch shape mismatch");
+                        I::Route{out:out.into(),probability:p,yes:x,no:b}
+                    };
+                    (instruction,len)
+                },
+                ("relu",[x]) | ("tanh",[x]) | ("sigmoid",[x]) | ("softmax",[x]) => {
+                    let x=self.value(x)?; let len=self.size(&x)?;
+                    (match op.as_str() {"relu"=>I::Relu{out:out.into(),input:x},"tanh"=>I::Tanh{out:out.into(),input:x},"softmax"=>I::Softmax{out:out.into(),input:x},_=>I::Sigmoid{out:out.into(),input:x}},len)
                 },
                 ("slice",[x,Expr::Number(start),Expr::Number(len)]) => {
                     ensure!(*start>=0. && start.fract()==0. && *len>0. && len.fract()==0., "slice needs nonnegative start and positive length");
