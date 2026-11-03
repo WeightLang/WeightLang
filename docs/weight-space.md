@@ -18,11 +18,11 @@ These commands are **on main, not in the published weightc 0.2.0 wheel**.
 Install this checkout with `pip install -e .`.
 
 ```sh
-weightc build examples/xor.wgt -o build
-weightc weights build/xor_mlp --limit 0 > xor.weights.json
-weightc weights build/xor_mlp --layer hidden --limit 16
-weightc diff build/baseline build/candidate
-weightc evaluate build/candidate --data evaluation.json --loss bce --compare build/baseline
+weightc build examples/xor.wgt -o weights
+weightc weights weights/xor_mlp --limit 0 > xor.weights.json
+weightc weights weights/xor_mlp --layer hidden --limit 16
+weightc diff weights/baseline weights/candidate
+weightc evaluate weights/candidate --data evaluation.json --loss bce --compare weights/baseline
 ```
 
 All three commands verify artifact hashes before reading weights. They output
@@ -68,12 +68,12 @@ The patch-template and patch commands complete the read → edit → compare →
 evaluate loop. Neither command trains the model or contacts an LLM.
 
 ~~~sh
-weightc patch-template build/baseline --author "Your name" > patch.json
+weightc patch-template weights/baseline --author "Your name" > patch.json
 # Fill reason and edits in patch.json, retaining the two baseline hashes.
-weightc patch build/baseline --patch patch.json -o build/candidate
-weightc diff build/baseline build/candidate
-weightc evaluate build/candidate --data evaluation.json --loss mse --compare build/baseline
-wgt graph build/candidate --open
+weightc patch weights/baseline --patch patch.json -o weights/candidate
+weightc diff weights/baseline weights/candidate
+weightc evaluate weights/candidate --data evaluation.json --loss mse --compare weights/baseline
+wgt graph weights/candidate --open
 ~~~
 
 The template has format "weightlang.patch", format_version 1,

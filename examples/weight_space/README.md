@@ -4,7 +4,7 @@ Install the source checkout, then from the repository root:
 
 ~~~sh
 python examples/weight_space/demo.py
-wgt graph build/weight-space/candidate --open
+wgt graph weights/weight-space/candidate --open
 ~~~
 
 Use -o /another/new/directory to run again. Existing output directories are

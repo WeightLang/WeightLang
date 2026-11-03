@@ -241,7 +241,9 @@ def build_package(pkg_dir: Path, version: str, commit: str, out_dir: Path, *, al
     out_dir.mkdir(parents=True, exist_ok=True)
 
     artifacts: dict[str, Any] = {}
-    with tempfile.TemporaryDirectory() as tmp:
+    staging = pkg_dir / ".cache" / "weightlang" / "publish"
+    staging.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="stage-", dir=staging) as tmp:
         for src in sources:
             res = compile_file(src, Path(tmp))
             art = load_artifact(res.path, warn_untrained=False)

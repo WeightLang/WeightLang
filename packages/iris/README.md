@@ -25,8 +25,8 @@ botanical measurements, distribution shifts or other species.
 Build and audit:
 
 ```sh
-weightc build packages/iris/iris.wgt -o build
-weightc audit build/iris
+weightc build packages/iris/iris.wgt -o weights
+weightc audit weights/iris
 ```
 
 All four mechanical admission checks pass. Reproduce on the recorded PyTorch

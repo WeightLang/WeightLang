@@ -3,8 +3,8 @@
 Run `weightc get examples/standard_reuse` once, then build either source offline:
 
 ```sh
-weightc build examples/standard_reuse/iris.wgt -o build
-weightc build examples/standard_reuse/xnor.wgt -o build
+weightc build examples/standard_reuse/iris.wgt -o weights
+weightc build examples/standard_reuse/xnor.wgt -o weights
 ```
 
 wgt.sum pins gates v0.2.0 and iris v0.1.0. The Iris example imports both nested

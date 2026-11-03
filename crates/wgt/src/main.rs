@@ -80,8 +80,16 @@ enum Cmd {
     /// Check all sources using weightc, without training
     Check { source: Option<PathBuf> },
     /// Build model sources using weightc (training directives execute)
-    Build { source: Option<PathBuf> },
-    /// Build and run one model
+    Build {
+        source: Option<PathBuf>,
+        /// Output root; writes <root>/<model>/
+        #[arg(short, long, default_value = "weights")]
+        output: PathBuf,
+        /// Replace an existing WeightLang model directory
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build in the disposable disk cache and run one model
     Run {
         #[arg(long, default_value = "main.wgt")]
         source: PathBuf,
@@ -110,7 +118,7 @@ enum Cmd {
     Package {
         #[arg(long)]
         version: String,
-        #[arg(long, default_value = "build")]
+        #[arg(long, default_value = "weights")]
         artifacts: PathBuf,
         #[arg(short, long, default_value = "dist")]
         output: PathBuf,
@@ -300,7 +308,6 @@ fn execute(cli: Cli) -> Result<u8> {
                 .open(cache.join(".wgt-lock"))?;
             guard.lock_exclusive()?;
             let manifest = Manifest::read(&project.join("wgt.mod"))?;
-            let check = matches!(command, Cmd::Check { .. });
             let update = matches!(command, Cmd::Update { .. });
             match command {
                 Cmd::Add { module, version } | Cmd::Update { module, version } => {
@@ -401,19 +408,32 @@ fn execute(cli: Cli) -> Result<u8> {
                     )?;
                     println!("verified {} dependency artifacts", entries.len());
                 }
-                Cmd::Check { source } | Cmd::Build { source } => {
+                Cmd::Check { source } => {
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
                     for p in sources(&project, source)? {
-                        if check {
-                            compiler(&project, &["check".into(), p.into_os_string()])?;
-                        } else if model_name(&p)?.is_some() {
-                            build(&project, &p)?;
+                        compiler(&project, &["check".into(), p.into_os_string()])?;
+                    }
+                }
+                Cmd::Build {
+                    source,
+                    output,
+                    force,
+                } => {
+                    registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
+                    for p in sources(&project, source)? {
+                        if model_name(&p)?.is_some() {
+                            build(&project, &p, &project.join(&output), force)?;
                         }
                     }
                 }
                 Cmd::Run { source, input } => {
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
-                    let artifact = build(&project, &project.join(source))?;
+                    let artifact = build(
+                        &project,
+                        &project.join(source),
+                        &project.join(".cache/weightlang/run"),
+                        true,
+                    )?;
                     compiler(
                         &project,
                         &[
@@ -480,7 +500,10 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
         )?,
     )?;
     if !path.join(".gitignore").exists() {
-        fs::write(path.join(".gitignore"), "/build/\n/dist/\n")?;
+        fs::write(
+            path.join(".gitignore"),
+            "/weights/\n/.cache/weightlang/\n/dist/\n",
+        )?;
     }
     println!(
         "created {} (wgt check; wgt build; wgt test)",
@@ -529,18 +552,19 @@ fn compiler(project: &Path, args: &[OsString]) -> Result<()> {
     ensure!(status.success(), "weightc failed: {status}");
     Ok(())
 }
-fn build(project: &Path, source: &Path) -> Result<PathBuf> {
+fn build(project: &Path, source: &Path, output: &Path, force: bool) -> Result<PathBuf> {
     let name = model_name(source)?.context("cannot build a library; select a model source")?;
-    compiler(
-        project,
-        &[
-            "build".into(),
-            source.as_os_str().into(),
-            "-o".into(),
-            project.join("build").into_os_string(),
-        ],
-    )?;
-    let path = project.join("build").join(name);
+    let mut args = vec![
+        "build".into(),
+        source.as_os_str().into(),
+        "-o".into(),
+        output.as_os_str().into(),
+    ];
+    if force {
+        args.push("--force".into());
+    }
+    compiler(project, &args)?;
+    let path = output.join(name);
     Artifact::read(&path)?;
     Ok(path)
 }
@@ -564,7 +588,15 @@ fn test_project(project: &Path) -> Result<()> {
             let source = fixture["source"].as_str().context("test requires source")?;
             manifest::relative_file(source)?;
             if !built.contains_key(source) {
-                built.insert(source.to_owned(), build(project, &project.join(source))?);
+                built.insert(
+                    source.to_owned(),
+                    build(
+                        project,
+                        &project.join(source),
+                        &project.join(".cache/weightlang/test"),
+                        true,
+                    )?,
+                );
             }
             let artifact = &built[source];
             let a = Artifact::read(artifact)?;

@@ -24,7 +24,7 @@ data train:
   [1] -> [1]
 train data=train loss=mse optimizer=adam lr=0.05 epochs=20
 """)
-    return compile_file(src, tmp_path / "build").path
+    return compile_file(src, tmp_path / "weights").path
 
 
 def patch_file(baseline, tmp_path, update=None):
@@ -194,6 +194,6 @@ def test_inspect_reports_token_dtype(tmp_path, capsys):
         "wgt 0.3\nmodel tokens\ninput x: i64[2]\noutput y: f32[2, 3]\n"
         "layer embed: embedding(vocab=4, dim=3)\ninit seed=42\n"
     )
-    artifact = compile_file(src, tmp_path / "build").path
+    artifact = compile_file(src, tmp_path / "weights").path
     assert main(["inspect", str(artifact)]) == 0
     assert "input  x: i64[2]" in capsys.readouterr().out

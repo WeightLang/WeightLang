@@ -289,7 +289,7 @@ def test_documented_plain_pytorch_loader(tmp_path):
     result = build(tmp_path, source("layer body: blocks.residual_mlp(dim=2, hidden=4)", "use std/blocks\n"))
     doc = (ROOT / "docs/artifact.md").read_text()
     code = doc.split("Without WeightLang", 1)[1].split("```python\n", 1)[1].split("```", 1)[0]
-    code = code.replace('root = "build/xor_mlp"', f"root = {str(result.path)!r}")
+    code = code.replace('root = "weights/xor_mlp"', f"root = {str(result.path)!r}")
     namespace = {}
     exec(code, namespace)
     x = torch.randn(3, 2)

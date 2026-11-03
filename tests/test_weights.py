@@ -19,7 +19,7 @@ def model(tmp_path):
         "model test\ninput x: f32[2]\noutput y: f32[2]\n"
         "layer body: pair(n=2)\nlayer body2: pair(n=2)\ninit seed=42\n"
     )
-    return compile_file(source, tmp_path / "build").path
+    return compile_file(source, tmp_path / "weights").path
 
 
 def rewrite(path, update):
@@ -162,7 +162,7 @@ def test_evaluation_rejects_final_softmax(tmp_path):
         "wgt 0.2\nmodel probabilities\ninput x: f32[2]\noutput y: f32[2]\n"
         "layer fc: linear(in=2, out=2)\nlayer probs: softmax\ninit seed=42\n"
     )
-    model = compile_file(source, tmp_path / "build").path
+    model = compile_file(source, tmp_path / "weights").path
     with pytest.raises(WgtError, match="raw logits"):
         evaluate_artifact(model, data_file(tmp_path), "cross_entropy")
 

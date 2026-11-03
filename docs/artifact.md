@@ -1,9 +1,9 @@
 # Artifact format (version 2)
 
-`weightc build model.wgt -o build` writes `build/<model>/`:
+`weightc build model.wgt -o weights` writes `weights/<model>/`:
 
 ```
-build/xor_mlp/
+weights/xor_mlp/
   manifest.json         structure, I/O contract, provenance, hashes, versions
   weights.safetensors   float32 tensors, named <layer>.weight / <layer>.bias
   source.wgt            exact copy of the source that produced the weights
@@ -58,7 +58,7 @@ With WeightLang installed:
 ```python
 from weightlang import load_artifact
 
-model = load_artifact("build/xor_mlp")
+model = load_artifact("weights/xor_mlp")
 model.predict([[0, 1], [1, 1]])   # tensor of shape [2, 1]
 model.module                      # the torch.nn.Sequential
 model.manifest                    # parsed manifest.json
@@ -72,7 +72,7 @@ from collections import OrderedDict
 import torch
 from safetensors.torch import load_file
 
-root = "build/xor_mlp"
+root = "weights/xor_mlp"
 manifest = json.load(open(f"{root}/manifest.json"))
 class Residual(torch.nn.Sequential):
     def forward(self, x):

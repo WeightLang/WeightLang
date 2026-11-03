@@ -92,7 +92,7 @@ def test_wrong_input_shape_is_rejected(xor_build):
 
 
 def test_untrained_artifact_is_labelled(workspace):
-    res = compile_file(workspace / "examples" / "untrained.wgt", workspace / "build")
+    res = compile_file(workspace / "examples" / "untrained.wgt", workspace / "weights")
     assert res.manifest["training"] is None
     assert {t["origin"] for t in res.manifest["weights"]["tensors"].values()} == {"random-init"}
     with pytest.warns(UntrainedWeightsWarning):
@@ -107,16 +107,16 @@ def test_trained_artifact_does_not_warn(xor_build):
 
 
 def test_refuses_to_overwrite_foreign_directory(workspace):
-    (workspace / "build" / "xor_mlp").mkdir()
-    (workspace / "build" / "xor_mlp" / "keep.txt").write_text("mine")
+    (workspace / "weights" / "xor_mlp").mkdir()
+    (workspace / "weights" / "xor_mlp" / "keep.txt").write_text("mine")
     with pytest.raises(WgtError, match="refusing to overwrite"):
-        compile_file(workspace / "examples" / "xor.wgt", workspace / "build")
-    assert (workspace / "build" / "xor_mlp" / "keep.txt").exists()
+        compile_file(workspace / "examples" / "xor.wgt", workspace / "weights")
+    assert (workspace / "weights" / "xor_mlp" / "keep.txt").exists()
 
 
 def test_cli_build_run_inspect_verify(workspace, capsys):
     src = str(workspace / "examples" / "xor.wgt")
-    out = str(workspace / "build")
+    out = str(workspace / "weights")
     assert main(["check", src]) == 0
     assert main(["build", src, "-o", out]) == 0
     capsys.readouterr()

@@ -29,10 +29,10 @@ That compiler currently depends on Python/PyTorch. Install it separately, or set
 wgt new demo                   # creates demo/wgt.mod, main.wgt and tests/main.json
 cd demo
 wgt check                      # parse/type-check every root .wgt, including libraries
-wgt build                      # compile model files into build/; executes training directives
+wgt build                      # compile model files into weights/; executes training directives
 wgt run --input '[[0,1]]'       # builds main.wgt, then infers
 wgt test                       # runs tests/*.json behavior assertions
-wgt graph build/demo --open
+wgt graph weights/demo --open
 ```
 
 `wgt init` initializes an existing directory. Neither creation command overwrites
@@ -41,7 +41,7 @@ behavior test checks two of those rows within an absolute tolerance of 0.001.
 This is a toolchain example, not a held-out generalization benchmark.
 
 `-C DIR` selects a directory; project commands search upward for `wgt.mod`.
-Source paths for build/check/run are relative to the discovered project root.
+Source paths for weights/check/run are relative to the discovered project root.
 Use `wgt build model.wgt` or `wgt run --source model.wgt --input '[1,2]'`
 to select a source. Building always calls the compiler; there is no incremental
 training cache yet.
@@ -122,14 +122,14 @@ not alter provenance. Packages with dependencies cannot be published yet.
 `publish` checks the existing remote tag matches the index commit and invokes
 `gh release create --verify-tag --prerelease`. It does not create/push tags,
 overwrite releases, or claim the CLI's Latest slot. Dry-run uploads nothing.
-Ignore build/ and dist/ in the package's Git configuration.
+Ignore weights/ and dist/ in the package's Git configuration.
 
 ## Native architecture rendering
 
 One command renders HTML and opens the default browser:
 
 ```sh
-wgt graph build/demo --open
+wgt graph weights/demo --open
 ```
 
 Without `-o`, output goes to `<system temporary directory>/weightlang/model.<format>`
@@ -140,17 +140,17 @@ the platform's default opener; if no graphical session is available, the command
 reports failure and retains the generated file.
 
 Use `--stdout` for pipes or agents, e.g.
-`wgt graph build/demo --format json --stdout`. It conflicts with `-o` and `--open`.
+`wgt graph weights/demo --format json --stdout`. It conflicts with `-o` and `--open`.
 
 
 ```sh
-wgt graph build/demo --format html -o model.html
-wgt graph build/demo --format svg -o model.svg
-wgt graph build/demo --format md -o model.md
-wgt graph build/demo --format json -o model.json
-wgt graph build/demo --format toon -o model.toon
-wgt graph build/demo --format mermaid --stdout
-wgt graph build/demo --format dot --stdout
+wgt graph weights/demo --format html -o model.html
+wgt graph weights/demo --format svg -o model.svg
+wgt graph weights/demo --format md -o model.md
+wgt graph weights/demo --format json -o model.json
+wgt graph weights/demo --format toon -o model.toon
+wgt graph weights/demo --format mermaid --stdout
+wgt graph weights/demo --format dot --stdout
 ```
 
 Input is an artifact directory or its manifest.json. All artifact hashes and
@@ -206,3 +206,7 @@ adds `input_shape` and `output_shape` typed strings to each node, e.g.
 `i64[4]`, `f32[4,8]` or `f32[1,28,28]`. Legacy numeric `input`/`output`
 fields retain the last dimension; use the shape strings for full contracts.
 Attention parameter counts include its QKV and output projections.
+
+## Storage and replacement
+
+See [storage conventions](storage.md). wgt build [-o ROOT] [--force] writes weights/<model>/ by default and refuses an existing model unless --force is supplied. run and test rebuild only disposable copies under .cache/weightlang/. Package defaults also use weights/.

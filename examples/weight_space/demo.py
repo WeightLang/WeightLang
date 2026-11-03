@@ -9,7 +9,7 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(description="Directly program y = 2*x + 1 without gradient training")
-    parser.add_argument("-o", "--output", type=Path, default=Path("build/weight-space"))
+    parser.add_argument("-o", "--output", type=Path, default=Path("weights/weight-space"))
     args = parser.parse_args()
     root = args.output.resolve()
     if root.exists():

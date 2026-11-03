@@ -35,7 +35,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
 def _cmd_build(args: argparse.Namespace) -> int:
     from .compiler import compile_file  # imports torch training code lazily
 
-    result = compile_file(args.source, args.out)
+    result = compile_file(args.source, args.out, force=args.force)
     m = result.manifest
     print(f"built {result.path}")
     print(f"  weights sha256 {m['weights']['sha256']}")
@@ -226,7 +226,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("build", help="compile a .wgt file into an artifact directory")
     p.add_argument("source")
-    p.add_argument("-o", "--out", default="build", help="output directory (default: build)")
+    p.add_argument("-o", "--out", default="weights", help="output root; writes <root>/<model>/ (default: weights)")
+    p.add_argument("--force", action="store_true", help="replace an existing WeightLang model directory")
     p.set_defaults(func=_cmd_build)
 
     p = sub.add_parser("run", help="run inference with an artifact")

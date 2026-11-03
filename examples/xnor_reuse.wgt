@@ -1,7 +1,7 @@
 wgt 0.1
 # Weight reuse: take the trained hidden layer of xor_mlp, freeze it,
 # and train only a new head for XNOR.
-# Build examples/xor.wgt into build/ first; the path is relative to this file.
+# Build examples/xor.wgt into weights/ first; the path is relative to this file.
 model xnor_reuse
 
 input  bits: f32[2]
@@ -19,5 +19,5 @@ data xnor:
   [1, 1] -> [1]
 
 init   seed=7
-import hidden from "../build/xor_mlp" layer=hidden freeze
+import hidden from "../weights/xor_mlp" layer=hidden freeze
 train  data=xnor loss=bce optimizer=adam lr=0.05 epochs=300

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import platform
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -259,11 +260,17 @@ def _library_records(program: Program) -> dict[str, Any]:
     return records
 
 
-def compile_program(program: Program, out_dir: str | Path) -> BuildResult:
+def compile_program(program: Program, out_dir: str | Path, *, force: bool = False) -> BuildResult:
     """Build ``program`` and write its artifact to ``out_dir/<model>``."""
 
     if program.path is None:
         raise WgtError("compile_program needs a program parsed from a file")
+    out_root = Path(out_dir)
+    dest = out_root / program.model
+    if dest.is_symlink() or (dest.exists() and not (dest / MANIFEST_FILE).is_file()):
+        raise WgtError(f"refusing to overwrite {dest}: not a regular WeightLang artifact directory")
+    if dest.exists() and not force:
+        raise WgtError(f"refusing to overwrite {dest}: choose another output or pass --force")
     source_path = Path(program.path)
     base = source_path.parent
     layers = _layer_dicts(program)
@@ -290,14 +297,8 @@ def compile_program(program: Program, out_dir: str | Path) -> BuildResult:
             meta["upstream_origin"] = upstream[name]
         tensors_meta[name] = meta
 
-    out_root = Path(out_dir)
-    dest = out_root / program.model
-    if dest.exists() and not (dest / MANIFEST_FILE).is_file():
-        raise WgtError(f"refusing to overwrite {dest}: it exists and is not a WeightLang artifact")
-    tmp = out_root / f".{program.model}.tmp"
-    if tmp.exists():
-        shutil.rmtree(tmp)
-    tmp.mkdir(parents=True)
+    out_root.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix=f".{program.model}-", dir=out_root))
     try:
         write_safetensors(tmp / WEIGHTS_FILE, module.state_dict(), {"format": ARTIFACT_FORMAT, "model": program.model})
         shutil.copyfile(source_path, tmp / SOURCE_FILE)
@@ -333,7 +334,11 @@ def compile_program(program: Program, out_dir: str | Path) -> BuildResult:
             "weights": {"file": WEIGHTS_FILE, "sha256": sha256_file(tmp / WEIGHTS_FILE), "tensors": tensors_meta},
         }
         (tmp / MANIFEST_FILE).write_text(json.dumps(manifest, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+        if dest.is_symlink():
+            raise WgtError(f"refusing to overwrite symlink {dest}")
         if dest.exists():
+            if not force or not (dest / MANIFEST_FILE).is_file():
+                raise WgtError(f"refusing to overwrite {dest}")
             shutil.rmtree(dest)
         tmp.rename(dest)
     except BaseException:
@@ -343,5 +348,5 @@ def compile_program(program: Program, out_dir: str | Path) -> BuildResult:
     return BuildResult(dest, manifest, module)
 
 
-def compile_file(source: str | Path, out_dir: str | Path) -> BuildResult:
-    return compile_program(parse_file(source), out_dir)
+def compile_file(source: str | Path, out_dir: str | Path = "weights", *, force: bool = False) -> BuildResult:
+    return compile_program(parse_file(source), out_dir, force=force)

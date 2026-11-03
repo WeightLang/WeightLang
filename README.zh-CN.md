@@ -42,7 +42,7 @@
 WeightLang 主要面向 AI 编程模型，因此语法小而严格，以行为单位，也方便人审阅。
 
 ```text
- xor.wgt ──weightc build──▶ build/xor_mlp/ ──weightc run──▶ {"prob": [[0.00003], [0.9999], ...]}
+ xor.wgt ──weightc build──▶ weights/xor_mlp/ ──weightc run──▶ {"prob": [[0.00003], [0.9999], ...]}
                               ├─ manifest.json        结构、输入输出、来源、哈希
                               ├─ weights.safetensors  float32 张量，不使用 pickle
                               └─ source.wgt           构建时的原始源码
@@ -103,16 +103,16 @@ python -m venv --system-site-packages .venv
 
 ```sh
 weightc check   examples/xor.wgt               # 解析和类型检查，不构建
-weightc build   examples/xor.wgt -o build      # 初始化 → 训练 → build/xor_mlp/
-weightc run     build/xor_mlp --input '[[0,0],[0,1],[1,0],[1,1]]'
-weightc inspect build/xor_mlp                  # 查看输入输出和每个张量的来源
-weightc verify  build/xor_mlp                  # 重新校验哈希、形状和可加载性
+weightc build   examples/xor.wgt -o weights      # 初始化 → 训练 → weights/xor_mlp/
+weightc run     weights/xor_mlp --input '[[0,0],[0,1],[1,0],[1,1]]'
+weightc inspect weights/xor_mlp                  # 查看输入输出和每个张量的来源
+weightc verify  weights/xor_mlp                  # 重新校验哈希、形状和可加载性
 ```
 
 参考输出：
 
 ```text
-built build/xor_mlp
+built weights/xor_mlp
   weights sha256 7969227a9c0e3528317e1cd22b8da766e5b1a7a705e0ba96078a86cde8296ba2
   tensors trained=4
   training loss 0.7066 -> 0.0001 on 4 rows (xor), train accuracy 1.00
@@ -123,7 +123,7 @@ built build/xor_mlp
 ```python
 from weightlang import load_artifact
 
-model = load_artifact("build/xor_mlp")      # 校验哈希和形状
+model = load_artifact("weights/xor_mlp")      # 校验哈希和形状
 model.predict([[0, 1], [1, 1]])             # tensor([[0.9999], [0.0001]])
 model.module                               # 普通的 torch.nn.Sequential
 ```
@@ -195,7 +195,7 @@ train data=train loss=cross_entropy optimizer=adam lr=0.03 epochs=200
 
 ```wgt
 init   seed=7
-import hidden from "../build/xor_mlp" layer=hidden freeze
+import hidden from "../weights/xor_mlp" layer=hidden freeze
 train  data=xnor loss=bce optimizer=adam lr=0.05 epochs=300
 ```
 
@@ -219,7 +219,7 @@ wgt.sum   提交号，以及索引、manifest、权重和源码的 SHA256；应�
 
 ```sh
 weightc get   examples/remote_reuse                  # 联网下载、校验并写入 wgt.sum
-weightc build examples/remote_reuse/xnor.wgt -o build # 离线构建，根据 wgt.sum 校验缓存
+weightc build examples/remote_reuse/xnor.wgt -o weights # 离线构建，根据 wgt.sum 校验缓存
 ```
 
 `weightc get` 将 tag 解析为提交号，根据 Release 的 `wgt.index.json` 检查各文件大小
@@ -302,7 +302,7 @@ WeightLang 明确引用这篇文章，作为权重读取、差异比较和评估
 **以下功能尚未包含在已发布的 weightc 0.2.0 wheel 中。**
 独立 Rust 工具 `wgt` 提供类似 Cargo 的项目和包管理流程：
 `new/init`、`add/remove/update`、`fetch`、`tree/metadata`、
-`build/run/test/check`、`verify`、`package/publish`、
+`weights/run/test/check`、`verify`、`package/publish`、
 `graph`、`cache`、`doctor`，并支持 PATH 中的 `wgt-子命令` 插件。
 
 ```sh
@@ -311,11 +311,11 @@ wgt new demo
 wgt -C demo check
 wgt -C demo build
 wgt -C demo test
-wgt -C demo graph build/demo --open
+wgt -C demo graph weights/demo --open
 ```
 
 包管理、制品校验和架构渲染用 Rust 实现，不依赖 Python。
-`build/run/test/check` 调用现有的 `weightc`，编译与推理仍需要 Python/PyTorch。
+`weights/run/test/check` 调用现有的 `weightc`，编译与推理仍需要 Python/PyTorch。
 架构图支持 HTML、SVG、Markdown、JSON、TOON、Mermaid、DOT，
 保留嵌套 block、残差跳连、尺寸、参数量和权重来源。
 安装、依赖管理和扩展方式见 [wgt 文档](docs/wgt.md)。
@@ -333,10 +333,10 @@ wgt -C demo graph build/demo --open
 ```sh
 # 需要安装源码版编译器；已发布的 0.2.0 wheel 尚不支持这些示例
 python -m pip install -e .
-weightc build examples/transformer.wgt -o build
-wgt graph build/tiny_transformer --open
-weightc build examples/cnn.wgt -o build
-wgt graph build/tiny_cnn --open
+weightc build examples/transformer.wgt -o weights
+wgt graph weights/tiny_transformer --open
+weightc build examples/cnn.wgt -o weights
+wgt graph weights/tiny_cnn --open
 ```
 
 两个示例都在四行合成数据上达到 100% **训练集**准确率，仅用于验证流程，
@@ -352,3 +352,7 @@ y = 2x + 1 的参数，再比较和评估结果。详见 [补丁指南](docs/wei
 
 代码采用 [MIT](LICENSE) 许可证。Iris 数据和训练权重的 CC BY 4.0 许可及署名要求，
 见 [packages/iris/README.md](packages/iris/README.md)。
+
+## 输出目录
+
+模型默认保存到 `weights/<模型名>/`，用 `-o ROOT` 修改输出根目录。已有模型默认不覆盖，重建需显式传 `--force`。大型临时工作放磁盘上的 `.cache/weightlang/`，小型预览放 `/tmp/weightlang/`。详见[目录规范](docs/storage.md)。

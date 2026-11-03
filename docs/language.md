@@ -104,8 +104,8 @@ A seed reproduces training on the same CPU and PyTorch version, including dropou
 Initialization runs first, imports second, training last:
 
 ```wgt
-import body.fc1 from "../build/source" layer=body.fc1 freeze
-import body from "../build/source" layer=body sha256=<hash>
+import body.fc1 from "../weights/source" layer=body.fc1 freeze
+import body from "../weights/source" layer=body sha256=<hash>
 ```
 
 Import statements copy all tensors under the exact dotted prefix. Source and

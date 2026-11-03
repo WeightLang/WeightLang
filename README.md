@@ -44,7 +44,7 @@ WeightLang is meant to be written mostly by AI coding models, so the syntax is
 small, line-oriented and strict. It should still be easy for a person to review.
 
 ```text
- xor.wgt ──weightc build──▶ build/xor_mlp/ ──weightc run──▶ {"prob": [[0.00003], [0.9999], ...]}
+ xor.wgt ──weightc build──▶ weights/xor_mlp/ ──weightc run──▶ {"prob": [[0.00003], [0.9999], ...]}
                               ├─ manifest.json        structure · I/O · provenance · hashes
                               ├─ weights.safetensors  float32 tensors, no pickle
                               └─ source.wgt           the exact source
@@ -100,14 +100,14 @@ Requirements: Python ≥ 3.10, PyTorch ≥ 2.2, safetensors ≥ 0.4.
 
 ```sh
 weightc check   examples/xor.wgt               # parse and type-check, no build
-weightc build   examples/xor.wgt -o build      # init → train → build/xor_mlp/
-weightc run     build/xor_mlp --input '[[0,0],[0,1],[1,0],[1,1]]'
-weightc inspect build/xor_mlp                  # I/O contract + where each tensor came from
-weightc verify  build/xor_mlp                  # re-check hashes, shapes, loadability
+weightc build   examples/xor.wgt -o weights      # init → train → weights/xor_mlp/
+weightc run     weights/xor_mlp --input '[[0,0],[0,1],[1,0],[1,1]]'
+weightc inspect weights/xor_mlp                  # I/O contract + where each tensor came from
+weightc verify  weights/xor_mlp                  # re-check hashes, shapes, loadability
 ```
 
 ```text
-built build/xor_mlp
+built weights/xor_mlp
   weights sha256 7969227a9c0e3528317e1cd22b8da766e5b1a7a705e0ba96078a86cde8296ba2
   tensors trained=4
   training loss 0.7066 -> 0.0001 on 4 rows (xor), train accuracy 1.00
@@ -118,7 +118,7 @@ From Python:
 ```python
 from weightlang import load_artifact
 
-model = load_artifact("build/xor_mlp")      # verifies hashes and shapes
+model = load_artifact("weights/xor_mlp")      # verifies hashes and shapes
 model.predict([[0, 1], [1, 1]])             # tensor([[0.9999], [0.0001]])
 model.module                                # a plain torch.nn.Sequential
 ```
@@ -188,7 +188,7 @@ Import a layer from another artifact, optionally pin its hash and freeze it:
 
 ```wgt
 init   seed=7
-import hidden from "../build/xor_mlp" layer=hidden freeze
+import hidden from "../weights/xor_mlp" layer=hidden freeze
 train  data=xnor loss=bce optimizer=adam lr=0.05 epochs=300
 ```
 
@@ -213,7 +213,7 @@ wgt.sum   commit + sha256 of the index, manifest, weights and source — commit 
 
 ```sh
 weightc get   examples/remote_reuse                  # network: fetch, verify, write wgt.sum
-weightc build examples/remote_reuse/xnor.wgt -o build # offline: cache checked against wgt.sum
+weightc build examples/remote_reuse/xnor.wgt -o weights # offline: cache checked against wgt.sum
 ```
 
 `weightc get` resolves the tag to a commit, checks every asset's size and sha256
@@ -296,7 +296,7 @@ LLM weight-editing experiments.
 
 **Not yet included in the published weightc 0.2.0 wheel.** The Rust `wgt`
 executable provides Cargo-like project/package commands and external plugins:
-`new/init`, `add/remove/update`, `fetch`, `tree/metadata`, `build/run/test/check`,
+`new/init`, `add/remove/update`, `fetch`, `tree/metadata`, `weights/run/test/check`,
 `verify`, `package/publish`, `graph`, `cache` and `doctor`.
 
 ```sh
@@ -305,7 +305,7 @@ wgt new demo
 wgt -C demo check
 wgt -C demo build
 wgt -C demo test
-wgt -C demo graph build/demo --open
+wgt -C demo graph weights/demo --open
 ```
 
 Package management and architecture rendering run natively without Python.
@@ -329,10 +329,10 @@ convolution and pooling. `std/transformer` and `std/vision` bring the total to
 ```sh
 # Install compiler source too; the released 0.2.0 wheel cannot build these examples.
 python -m pip install -e .
-weightc build examples/transformer.wgt -o build
-wgt graph build/tiny_transformer --open
-weightc build examples/cnn.wgt -o build
-wgt graph build/tiny_cnn --open
+weightc build examples/transformer.wgt -o weights
+wgt graph weights/tiny_transformer --open
+weightc build examples/cnn.wgt -o weights
+wgt graph weights/tiny_cnn --open
 ```
 
 Both examples reach 100% **training** accuracy on four synthetic rows. They are
@@ -348,3 +348,7 @@ edit, diff and evaluation without training. See [the patch guide](docs/weight-sp
 ## License
 
 [MIT](LICENSE)
+
+## Output directories
+
+Models are saved in `weights/<model>/`; `-o ROOT` changes the output root. Existing models require explicit `--force` to replace. Large disposable work stays in the disk-backed `.cache/weightlang/`; small previews use `/tmp/weightlang/`. See [storage conventions](docs/storage.md).
