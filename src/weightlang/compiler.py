@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import platform
 import shutil
 import tempfile
@@ -179,41 +180,37 @@ def _dataset_record(program: Program, name: str, data_sha: str, rows: int) -> di
     return record
 
 
-def _train(program: Program, module: nn.Sequential) -> dict[str, Any]:
+def _train(program: Program, module: nn.Sequential, trainers=None) -> dict[str, Any]:
     assert program.train is not None
     spec = program.train
     x, y, data_sha = _dataset_tensors(program, spec.data)
     if spec.loss == "bce" and not torch.all((y == 0) | (y == 1)):
         raise WgtError("loss=bce requires targets of 0 or 1", spec.line, program.path)
-    loss_fn = _loss_fn(spec.loss)
-    target = _targets(y, spec.loss)
-    params = [p for p in module.parameters() if p.requires_grad]
-    if spec.optimizer == "adam":
-        opt: torch.optim.Optimizer = torch.optim.Adam(params, lr=spec.lr, weight_decay=spec.weight_decay)
-    elif spec.optimizer == "adamw":
-        opt = torch.optim.AdamW(params, lr=spec.lr, weight_decay=spec.weight_decay)
-    else:
-        opt = torch.optim.SGD(params, lr=spec.lr, weight_decay=spec.weight_decay)
+    criterion = _loss_fn(spec.loss)
 
+    def loss_fn(prediction, target):
+        return criterion(prediction, target.to(prediction.device))
+
+    target = _targets(y, spec.loss)
+    from .trainers import Trainer, TrainingContext, backprop, run_custom
+
+    context = TrainingContext(module, x, target, loss_fn, spec, program.seed)
     module.train()
     with torch.no_grad():
         initial_loss = float(loss_fn(module(x), target))
-    if spec.batch is None or spec.batch >= len(x):
-        for _ in range(spec.epochs):  # full batch: deterministic for a fixed seed
-            opt.zero_grad()
-            loss = loss_fn(module(x), target)
-            loss.backward()
-            opt.step()
+    trainer_record = None
+    if spec.trainer == "backprop":
+        backprop(context)
     else:
-        order = torch.Generator().manual_seed(program.seed)  # seeded shuffling, independent of init
-        for _ in range(spec.epochs):
-            perm = torch.randperm(len(x), generator=order)
-            for i in range(0, len(x), spec.batch):
-                idx = perm[i : i + spec.batch]
-                opt.zero_grad()
-                loss = loss_fn(module(x[idx]), target[idx])
-                loss.backward()
-                opt.step()
+        supplied = (trainers or {}).get(spec.trainer)
+        if supplied is None:
+            raise WgtError(f"trainer {spec.trainer!r} is not registered; supply trainers= or --trainer", spec.line, program.path)
+        trainer = supplied if isinstance(supplied, Trainer) else Trainer(supplied)
+        try:
+            trainer_record = run_custom(trainer, context)
+        except Exception as exc:
+            message = exc.message if isinstance(exc, WgtError) else str(exc)
+            raise WgtError(f"trainer {spec.trainer!r} failed: {message}", spec.line, program.path) from exc
     module.eval()
     train_metrics = _evaluate(module, x, y, spec.loss)
     record: dict[str, Any] = {
@@ -229,7 +226,12 @@ def _train(program: Program, module: nn.Sequential) -> dict[str, Any]:
         "final_loss": train_metrics["loss"],
         "dataset": _dataset_record(program, spec.data, data_sha, int(x.shape[0])),
     }
-    if program.version != "0.1":
+    if trainer_record is not None:
+        record["trainer"] = trainer_record
+        del record["optimizer"]
+        if not math.isfinite(initial_loss) or not math.isfinite(train_metrics["loss"]):
+            raise WgtError("custom training produced non-finite loss", spec.line, program.path)
+    if program.version != "0.1" and spec.trainer == "backprop":
         record["weight_decay"] = spec.weight_decay
     if "accuracy" in train_metrics:
         record["train_accuracy"] = train_metrics["accuracy"]
@@ -260,7 +262,7 @@ def _library_records(program: Program) -> dict[str, Any]:
     return records
 
 
-def compile_program(program: Program, out_dir: str | Path, *, force: bool = False) -> BuildResult:
+def compile_program(program: Program, out_dir: str | Path, *, force: bool = False, trainers=None) -> BuildResult:
     """Build ``program`` and write its artifact to ``out_dir/<model>``."""
 
     if program.path is None:
@@ -296,7 +298,7 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
         module = build_module(layers)
         import_records, upstream = _apply_imports(program, module, layers, base)
         apply_freezing(program, module)
-        training = _train(program, module) if program.train is not None else None
+        training = _train(program, module, trainers) if program.train is not None else None
 
     imported = [r["layer"] for r in import_records]
     trainable = {name for name, param in module.named_parameters() if param.requires_grad}
@@ -372,5 +374,5 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
     return BuildResult(dest, manifest, module)
 
 
-def compile_file(source: str | Path, out_dir: str | Path = "weights", *, force: bool = False) -> BuildResult:
-    return compile_program(parse_file(source), out_dir, force=force)
+def compile_file(source: str | Path, out_dir: str | Path = "weights", *, force: bool = False, trainers=None) -> BuildResult:
+    return compile_program(parse_file(source), out_dir, force=force, trainers=trainers)

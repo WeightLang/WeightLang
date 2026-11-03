@@ -1,0 +1,12 @@
+wgt 0.3
+model forward_search
+input x: f32[1]
+output y: f32[1]
+layer fit: linear(in=1, out=1)
+init seed=42
+data samples:
+  [-1] -> [-1]
+  [0] -> [1]
+  [1] -> [3]
+  [2] -> [5]
+train data=samples loss=mse trainer=search lr=0.1 epochs=400

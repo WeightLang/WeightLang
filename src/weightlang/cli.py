@@ -34,6 +34,9 @@ def _cmd_check(args: argparse.Namespace) -> int:
 
 def _cmd_build(args: argparse.Namespace) -> int:
     from .compiler import compile_file  # imports torch training code lazily
+    from .trainers import load_trainers
+
+    trainers = load_trainers(args.trainer)
 
     if args.message and not args.store:
         raise WgtError("--message cannot be used with --no-store")
@@ -50,11 +53,11 @@ def _cmd_build(args: argparse.Namespace) -> int:
         repository = WeightRepository(args.store)
         expected = repository.prepare(args.parent)
         with tempfile.TemporaryDirectory(prefix=".build-", dir=repository.root) as tmp:
-            result = compile_file(args.source, tmp)
+            result = compile_file(args.source, tmp, trainers=trainers)
             report = repository.commit(result.path, message=args.message, parent=args.parent, expected=expected)
         print(json.dumps(report, indent=2))
         return 0
-    result = compile_file(args.source, args.out, force=args.force)
+    result = compile_file(args.source, args.out, force=args.force, trainers=trainers)
     m = result.manifest
     print(f"built {result.path}")
     print(f"  weights sha256 {m['weights']['sha256']}")
@@ -314,6 +317,8 @@ def main(argv: list[str] | None = None) -> int:
         help="build a standalone artifact without recording a version",
     )
     p.set_defaults(store="weights/.revisions")
+    p.add_argument("--trainer", action="append", default=[], metavar="NAME=FILE.py:FUNCTION",
+                   help="load a trusted local Python training algorithm (repeatable)")
     p.add_argument("--parent", help="optional expected HEAD; normally inferred automatically")
     p.add_argument("-m", "--message", default="", help="weight version commit message")
     p.set_defaults(func=_cmd_build)

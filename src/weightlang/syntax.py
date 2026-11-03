@@ -207,13 +207,14 @@ class FreezeStmt:
 class TrainStmt:
     data: str
     loss: str
-    optimizer: str
+    optimizer: str | None
     lr: float
     epochs: int
     line: int
     batch: int | None = None
     validate: str | None = None
     weight_decay: float = 0.0
+    trainer: str = "backprop"
 
 
 @dataclass
@@ -703,8 +704,14 @@ class _FileParser:
         if self.train is not None:
             raise cur.error("only one train statement is supported")
         kv = _parse_kv(cur)
-        required = {"data", "loss", "optimizer", "lr", "epochs"}
-        optional = {"batch", "validate", "weight_decay"}
+        trainer = kv.get("trainer", "backprop")
+        if "trainer" in kv and self.version != "0.3":
+            raise cur.error("trainer selection requires 'wgt 0.3'")
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", trainer):
+            raise cur.error("trainer must be an identifier")
+        custom = trainer != "backprop"
+        required = {"data", "loss", "epochs"} if custom else {"data", "loss", "optimizer", "lr", "epochs"}
+        optional = {"batch", "validate", "trainer", "lr"} if custom else {"batch", "validate", "weight_decay", "trainer"}
         missing = required - set(kv)
         if missing:
             raise cur.error(f"train is missing: {', '.join(sorted(missing))}")
@@ -713,24 +720,24 @@ class _FileParser:
             raise cur.error(f"unknown train option(s): {', '.join(sorted(unknown))}")
         if kv["loss"] not in LOSSES:
             raise cur.error(f"unknown loss {kv['loss']!r}; supported: {', '.join(sorted(LOSSES))}")
-        if kv["optimizer"] not in OPTIMIZERS:
+        if not custom and kv["optimizer"] not in OPTIMIZERS:
             raise cur.error(f"unknown optimizer {kv['optimizer']!r}; supported: {', '.join(sorted(OPTIMIZERS))}")
         if kv["loss"] == "cross_entropy":
             self.need_v02("loss=cross_entropy", line)
-        if kv["optimizer"] == "adamw":
+        if kv.get("optimizer") == "adamw":
             self.need_v02("optimizer=adamw", line)
         for opt in sorted(optional & set(kv)):
             self.need_v02(f"train option {opt}=", line)
         try:
-            lr = float(kv["lr"])
+            lr = float(kv.get("lr", "0.01"))
             wd = float(kv.get("weight_decay", 0))
         except ValueError:
             raise cur.error("lr and weight_decay must be numbers") from None
         if not kv["epochs"].isdigit() or int(kv["epochs"]) <= 0:
             raise cur.error("epochs must be a positive integer")
-        if lr <= 0:
+        if not math.isfinite(lr) or lr <= 0:
             raise cur.error("lr must be positive")
-        if wd < 0:
+        if not math.isfinite(wd) or wd < 0:
             raise cur.error("weight_decay must not be negative")
         batch = None
         if "batch" in kv:
@@ -738,7 +745,7 @@ class _FileParser:
                 raise cur.error("batch must be a positive integer")
             batch = int(kv["batch"])
         self.train = TrainStmt(
-            kv["data"], kv["loss"], kv["optimizer"], lr, int(kv["epochs"]), line, batch, kv.get("validate"), wd
+            kv["data"], kv["loss"], kv.get("optimizer"), lr, int(kv["epochs"]), line, batch, kv.get("validate"), wd, trainer
         )
 
 

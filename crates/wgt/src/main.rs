@@ -88,6 +88,9 @@ enum Cmd {
         /// Replace an existing WeightLang model directory
         #[arg(long)]
         force: bool,
+        /// Load a trusted Python trainer: NAME=FILE.py:FUNCTION (repeatable)
+        #[arg(long = "trainer")]
+        trainers: Vec<String>,
     },
     /// Build in the disposable disk cache and run one model
     Run {
@@ -418,11 +421,18 @@ fn execute(cli: Cli) -> Result<u8> {
                     source,
                     output,
                     force,
+                    trainers,
                 } => {
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
                     for p in sources(&project, source)? {
                         if model_name(&p)?.is_some() {
-                            build(&project, &p, &project.join(&output), force)?;
+                            build_with_trainers(
+                                &project,
+                                &p,
+                                &project.join(&output),
+                                force,
+                                &trainers,
+                            )?;
                         }
                     }
                 }
@@ -553,6 +563,15 @@ fn compiler(project: &Path, args: &[OsString]) -> Result<()> {
     Ok(())
 }
 fn build(project: &Path, source: &Path, output: &Path, force: bool) -> Result<PathBuf> {
+    build_with_trainers(project, source, output, force, &[])
+}
+fn build_with_trainers(
+    project: &Path,
+    source: &Path,
+    output: &Path,
+    force: bool,
+    trainers: &[String],
+) -> Result<PathBuf> {
     let name = model_name(source)?.context("cannot build a library; select a model source")?;
     let mut args = vec![
         "build".into(),
@@ -563,6 +582,9 @@ fn build(project: &Path, source: &Path, output: &Path, force: bool) -> Result<Pa
     ];
     if force {
         args.push("--force".into());
+    }
+    for trainer in trainers {
+        args.extend(["--trainer".into(), trainer.into()]);
     }
     compiler(project, &args)?;
     let path = output.join(name);
