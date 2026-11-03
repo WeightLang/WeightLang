@@ -129,7 +129,7 @@ From a committed, clean package directory whose module path matches its Git
 location:
 
 ```sh
-wgt build
+wgt build -o weights
 wgt package --version v0.1.0 --artifacts weights -o dist
 wgt publish --index dist/wgt.index.json --license MIT --dry-run
 # Push the exact commit and annotated package tag shown in the index, then:

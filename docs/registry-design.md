@@ -48,7 +48,8 @@ Yanking blocks new selections but preserves existing locked builds and downloads
 ## Publisher workflow
 
 ```sh
-wgt package --version v0.1.0
+wgt build -o weights
+wgt package --version v0.1.0 --artifacts weights
 # Push the exact source commit and package tag shown by packaging first.
 wgt publish --index dist/wgt.index.json --name your-owner/model --license MIT --edition 0.3
 ```
