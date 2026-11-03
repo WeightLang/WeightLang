@@ -116,12 +116,16 @@ def build_with_reuse(compile_file, args, output, *, repository=None, expected=No
         raise _failed(args, exc)
 
 
-def command_plan(args):
+def preview_build(args):
     from .repository import WeightRepository
     from .reuse import ReuseError, preview
 
     options = _options(args)
-    repository = WeightRepository(args.store)
+    if args.store and (args.force or args.out != "weights"):
+        raise WgtError("--force and custom -o require --no-store; versioned builds use checkout for standalone output")
+    repository = WeightRepository(args.store) if args.store else None
+    if args.parent and repository.resolve(args.parent) != repository.status()["revision"]:
+        raise WgtError("--parent does not match HEAD")
     try:
         with _baseline(args, repository) as (source, revision):
             report = preview(args.source, source, revision=revision, **options)

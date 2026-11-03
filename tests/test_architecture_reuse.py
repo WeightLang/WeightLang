@@ -136,7 +136,7 @@ def test_cli_automatic_head_and_failure_report(tmp_path, monkeypatch, capsys):
     baseline = json.loads(capsys.readouterr().out)
     assert baseline["reuse"]["status"] == "no_baseline"
     source.write_text(program("next", width=6))
-    assert main(["reuse-plan", str(source), "--reuse-report", "plan.json"]) == 0
+    assert main(["build", str(source), "--dry-run", "--reuse-report", "plan.json"]) == 0
     plan = json.loads(capsys.readouterr().out)
     repo = WeightRepository("weights/.revisions")
     assert repo.resolve() == baseline["revision"]
@@ -192,3 +192,32 @@ def test_missing_baseline_ref_writes_failure_report(tmp_path, monkeypatch, capsy
 def test_python_strict_without_source_is_not_silently_ignored(tmp_path):
     with pytest.raises(ReuseError, match="strict reuse failed"):
         build(tmp_path, program(), reuse_strict=True)
+
+
+@pytest.mark.parametrize("standalone", [False, True])
+def test_build_dry_run_does_not_initialize_store_or_train(tmp_path, monkeypatch, capsys, standalone):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "model.wgt"
+    source.write_text(program())
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("dry-run must not compile, load trainers or prepare a repository")
+
+    monkeypatch.setattr("weightlang.compiler.compile_file", forbidden)
+    monkeypatch.setattr("weightlang.trainers.load_trainers", forbidden)
+    monkeypatch.setattr(WeightRepository, "prepare", forbidden)
+    args = ["build", str(source), "--dry-run"]
+    if standalone:
+        args += ["--no-store"]
+    assert main(args) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "no_baseline"
+    assert report["execution"] == "planned"
+    assert not (tmp_path / "weights").exists()
+
+
+def test_old_reuse_plan_command_removed(capsys):
+    with pytest.raises(SystemExit) as error:
+        main(["reuse-plan", "model.wgt"])
+    assert error.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err

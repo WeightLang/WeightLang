@@ -37,12 +37,16 @@ def _cmd_build(args: argparse.Namespace) -> int:
     from .reuse_cli import build_with_reuse
     from .trainers import load_trainers
 
-    trainers = load_trainers(args.trainer)
-
     if args.message and not args.store:
         raise WgtError("--message cannot be used with --no-store")
     if args.parent and not args.store:
         raise WgtError("--parent cannot be used with --no-store")
+    if args.dry_run:
+        from .reuse_cli import preview_build
+
+        return preview_build(args)
+    trainers = load_trainers(args.trainer)
+
     if args.store:
         import tempfile
         from .repository import WeightRepository
@@ -290,7 +294,7 @@ def _cmd_revision(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from .reuse_cli import add_options as add_reuse_options, command_plan
+    from .reuse_cli import add_options as add_reuse_options
 
     parser = argparse.ArgumentParser(prog="weightc", description="WeightLang compiler (prototype)")
     parser.add_argument("--version", action="version", version=f"weightc {__version__}")
@@ -328,6 +332,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="load a trusted local Python training algorithm (repeatable)")
     p.add_argument("--parent", help="optional expected HEAD; normally inferred automatically")
     p.add_argument("-m", "--message", default="", help="weight version commit message")
+    p.add_argument("--dry-run", action="store_true", help="preview weight reuse without training or recording a version")
     add_reuse_options(p)
     p.set_defaults(func=_cmd_build)
 
@@ -437,12 +442,6 @@ def main(argv: list[str] | None = None) -> int:
         if action == "checkout":
             command.add_argument("-o", "--output", required=True, help="NEW artifact directory")
         command.set_defaults(func=_cmd_revision)
-
-    p = sub.add_parser("reuse-plan", help="preview architecture reuse without training or writing a model")
-    p.add_argument("source")
-    p.add_argument("--store", default="weights/.revisions")
-    add_reuse_options(p)
-    p.set_defaults(func=command_plan)
 
     args = parser.parse_args(argv)
     try:

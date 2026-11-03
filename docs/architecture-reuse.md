@@ -7,11 +7,11 @@ normally. This describes the source implementation, not an existing published wh
 ```sh
 weightc build model.wgt -m baseline
 # Edit model.wgt: add/remove/resize/rename layers.
-weightc reuse-plan model.wgt
+weightc build model.wgt --dry-run
 weightc build model.wgt -m "new architecture"
 
 # Explicitly permit copying leading rows/columns when resizing supported layers.
-weightc reuse-plan model.wgt --reuse overlap
+weightc build model.wgt --dry-run --reuse overlap
 weightc build model.wgt --reuse overlap --reuse-report weights/reuse-result.json
 
 # Rename body -> encoder without losing its weights.
@@ -56,7 +56,7 @@ copying. A corrupted or unresolved baseline is a build error, never a silent fre
 
 ## Visible results and failure
 
-`reuse-plan` prints JSON without training, writing model weights or advancing HEAD.
+`build --dry-run` prints JSON without training, writing model weights or advancing HEAD.
 It builds target shapes on the meta device, but loads the baseline for validation.
 `build` includes the report in its output and in `manifest.json` under `reuse`.
 `weightc inspect ARTIFACT` shows it. `--reuse-report NEW_FILE` saves a separate JSON
