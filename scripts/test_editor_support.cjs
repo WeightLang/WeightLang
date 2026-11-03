@@ -7,8 +7,14 @@ const grammar = path.join(root, 'editors/tree-sitter-wgt');
 const run = (bin, args, cwd = root) => execFileSync(bin, args, {cwd, encoding: 'utf8'});
 run(process.execPath, ['scripts/generate_editor_support.cjs', '--check']);
 console.log(run('tree-sitter', ['test'], grammar));
-const files = ['examples/native_training', 'examples/self_modifying'].filter(dir => fs.existsSync(path.join(root, dir))).flatMap(dir =>
-  fs.readdirSync(path.join(root, dir)).filter(f => f.endsWith('.wgt')).map(f => path.join(root, dir, f)));
+function wgtFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, {withFileTypes: true}).flatMap(entry => {
+    const name = path.join(dir, entry.name);
+    return entry.isDirectory() ? wgtFiles(name) : entry.isFile() && entry.name.endsWith('.wgt') ? [name] : [];
+  });
+}
+const files = ['examples/native_training', 'examples/self_modifying'].flatMap(dir => wgtFiles(path.join(root, dir)));
 files.push(path.join(root, 'editors/vscode/media/example.wgt'));
 run('tree-sitter', ['parse', '--quiet', ...files], grammar);
 const sample = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/forward.wgt');
