@@ -34,8 +34,8 @@ rsvg-convert media/preview.svg -o media/preview.png
 
 `media/example.wgt` is an initialized, untrained model example. Validate it from
 the repository root with `weightc check editors/vscode/media/example.wgt --shapes`.
-The icon uses the project logo from `assets/logo.png`, losslessly PNG-compressed
-to satisfy the Marketplace 1 MB icon limit; decoded pixels are unchanged.
+The icon uses the project logo from `assets/logo.png`, exported at 512 × 512
+pixels to satisfy the Marketplace limits (1024 × 1024 pixels and 1 MB).
 
 Grammar maintenance is documented in `../../docs/editors.md`. For extension
 host testing, use `code --extensionDevelopmentPath=/absolute/path/to/editors/vscode`.
