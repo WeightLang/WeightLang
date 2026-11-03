@@ -76,7 +76,12 @@ fn default_version() -> Result<Option<(PathBuf, String)>> {
 
 /// Latest stable native release, independent of Python/package release tags.
 pub fn latest(remote: &dyn Remote) -> Result<String> {
-    let mut best: Option<([u64; 3], String)> = None;
+    latest_for(remote, std::env::consts::OS, std::env::consts::ARCH)
+}
+
+pub fn latest_for(remote: &dyn Remote, os: &str, arch: &str) -> Result<String> {
+    let asset_name = asset(os, arch)?;
+    let mut best: Option<(Vec<(usize, String)>, String)> = None;
     for page in 1..=100 {
         let bytes = remote.download(
             &format!("https://api.github.com/repos/WeightLang/WeightLang/releases?per_page=100&page={page}"),
@@ -98,19 +103,18 @@ pub fn latest(remote: &dyn Remote) -> Result<String> {
             if validate(version).is_err() {
                 continue;
             }
-            let numbers: Vec<u64> = version
-                .split('.')
-                .map(str::parse)
-                .collect::<std::result::Result<_, _>>()?;
-            let key = [numbers[0], numbers[1], numbers[2]];
-            if best.as_ref().is_none_or(|(previous, _)| key > *previous) {
+            let Some(assets) = release["assets"].as_array() else { continue; };
+            if !assets.iter().any(|a| a["name"] == asset_name)
+                || !assets.iter().any(|a| a["name"] == "SHA256SUMS") { continue; }
+            let key: Vec<_> = version.split('.').map(|part| (part.len(), part.to_owned())).collect();
+            if best.as_ref().is_none_or(|(previous, _)| &key > previous) {
                 best = Some((key, version.to_owned()));
             }
         }
         if releases.len() < 100 {
             return best
                 .map(|(_, version)| version)
-                .context("no stable native wgt release found");
+                .with_context(|| format!("no stable native wgt release with checksums for {os}/{arch}"));
         }
     }
     bail!("too many releases to determine latest wgt; specify --version X.Y.Z")
@@ -118,11 +122,11 @@ pub fn latest(remote: &dyn Remote) -> Result<String> {
 
 pub fn update(base: &Path, version: Option<&str>, offline: bool) -> Result<()> {
     let version = match version {
-        Some(version) => {
+        Some(version) if version != "latest" => {
             validate(version)?;
             version.to_owned()
         }
-        None => {
+        _ => {
             ensure!(
                 !offline,
                 "--offline requires an explicit --version for wgt update"
@@ -316,8 +320,13 @@ pub fn dispatch(args: &[OsString]) -> Result<Option<u8>> {
                 value
             }
             .into();
+        } else if text == "--registry" {
+            i += 1;
+            ensure!(args.get(i).is_some(), "missing --registry value");
         } else if text == "--offline" {
             offline = true;
+        } else if command.as_deref() == Some("update") && text == "--all" {
+            dependency_update = true;
         } else if command.as_deref() == Some("update") && text == "--version" {
             i += 1;
         } else if command.as_deref() == Some("update") && !text.starts_with('-') {
@@ -329,7 +338,7 @@ pub fn dispatch(args: &[OsString]) -> Result<Option<u8>> {
     }
     if matches!(
         command.as_deref(),
-        Some("version" | "toolchain" | "download")
+        Some("version" | "toolchain" | "download" | "self-update")
     ) || (command.as_deref() == Some("update") && !dependency_update)
     {
         return Ok(None);

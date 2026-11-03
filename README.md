@@ -395,3 +395,13 @@ are locked. Bundled libraries need no add: use `import std/nn` in wgt 0.3.
 Publishers run `wgt publish --index dist/wgt.index.json --license MIT --edition 0.3`
 to upload assets and submit a registration PR for maintainer review. See the
 [registry workflow](docs/registry-design.md) for recovery and compatibility details.
+
+### One-command updates
+
+```sh
+wgt update --all   # all model dependencies, with exact new locks
+wgt self-update   # latest stable native wgt for this platform
+```
+
+Existing `wgt update` remains a self-update shorthand. Dependency upgrades finish
+verification before changing project files. See [toolchain and package updates](docs/toolchains.md).

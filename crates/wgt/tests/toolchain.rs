@@ -239,7 +239,7 @@ fn update_download_selection_and_failure_preservation() {
     run(&["download", "8.9.0", "--offline"]);
     assert!(!root.join(PIN).exists());
     assert!(!cache.join("toolchains/default").exists());
-    run(&["update", "--version", "8.9.0", "--offline"]);
+    run(&["self-update", "--version", "8.9.0", "--offline"]);
     assert_eq!(
         fs::read_to_string(cache.join("toolchains/default")).unwrap(),
         "8.9.0\n"
@@ -260,6 +260,8 @@ fn update_download_selection_and_failure_preservation() {
     );
     for args in [
         vec!["update", "--offline"],
+        vec!["self-update", "--version", "latest", "--offline"],
+        vec!["self-update", "--locked"],
         vec!["update", "--version", "7.0.0", "--offline"],
         vec!["update", "--version", "8.9.0", "--locked"],
         vec!["download", "../oops"],
@@ -302,6 +304,11 @@ fn update_download_selection_and_failure_preservation() {
     assert!(fs::read_to_string(root.join("forwarded"))
         .unwrap()
         .contains("github.com/example/models"));
+    let result = command(root, &cache)
+        .args(["--registry", "WeightLang/registry", "update", "--all"])
+        .output().unwrap();
+    assert_eq!(result.status.code(), Some(17));
+    assert!(fs::read_to_string(root.join("forwarded")).unwrap().contains("--all"));
 }
 
 #[test]
@@ -318,9 +325,14 @@ fn latest_native_release_filters_and_orders_versions() {
                 {"tag_name":"wgt-v1.9.0", "draft":false, "prerelease":false},
                 {"tag_name":"wgt-v3.0.0", "draft":true, "prerelease":false},
                 {"tag_name":"wgt-v2.0.0", "draft":false, "prerelease":true},
-                {"tag_name":"wgt-v1.10.0", "draft":false, "prerelease":false}
+                {"tag_name":"wgt-v1.10.0", "draft":false, "prerelease":false,
+                 "assets":[{"name":"wgt-linux-x86_64"},{"name":"SHA256SUMS"}]},
+                {"tag_name":"wgt-v9.0.0", "draft":false, "prerelease":false,
+                 "assets":[{"name":"wgt-macos-aarch64"},{"name":"SHA256SUMS"}]},
+                {"tag_name":"wgt-v9.1.0", "draft":false, "prerelease":false,
+                 "assets":[{"name":"wgt-linux-x86_64"}]}
             ]))?)
         }
     }
-    assert_eq!(toolchain::latest(&Releases).unwrap(), "1.10.0");
+    assert_eq!(toolchain::latest_for(&Releases, "linux", "x86_64").unwrap(), "1.10.0");
 }

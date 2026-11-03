@@ -12,7 +12,7 @@ use weightlang_wgt::{
     artifact::Artifact,
     graph::Graph,
     manifest::{self, Manifest},
-    package_index, registry, toolchain,
+    package_index, registry, toolchain, upgrade,
 };
 
 #[derive(Parser)]
@@ -77,9 +77,17 @@ enum Cmd {
     },
     /// Remove a dependency and its lock entries (does not edit imports)
     Remove { module: String },
-    /// Update wgt (latest or --version), or an explicit dependency
+    /// Update wgt, one dependency, or all dependencies with --all
     Update {
         module: Option<String>,
+        #[arg(long)]
+        version: Option<String>,
+        /// Upgrade every direct model dependency to its latest registered/stable version
+        #[arg(long, conflicts_with_all = ["module", "version"])]
+        all: bool,
+    },
+    /// Download, verify and select the latest stable native wgt
+    SelfUpdate {
         #[arg(long)]
         version: Option<String>,
     },
@@ -243,7 +251,8 @@ fn execute(cli: Cli) -> Result<u8> {
         Cmd::Update {
             module: None,
             version,
-        } => {
+            all: false,
+        } | Cmd::SelfUpdate { version } => {
             ensure!(
                 !cli.locked,
                 "toolchain selection changes are incompatible with --locked"
@@ -430,6 +439,7 @@ fn execute(cli: Cli) -> Result<u8> {
                 | Cmd::Update {
                     module: Some(module),
                     version,
+                    all: false,
                 } => {
                     ensure!(
                         !cli.locked,
@@ -478,6 +488,22 @@ fn execute(cli: Cli) -> Result<u8> {
                     )?;
                     manifest::atomic_write(&manifest_path, text.as_bytes())?;
                     println!("locked {module}@{version}");
+                }
+                Cmd::Update { all: true, .. } => {
+                    ensure!(!cli.locked, "dependency upgrades are incompatible with --locked");
+                    ensure!(!cli.offline, "latest dependency upgrades require network; use fetch --offline --locked to reuse pins");
+                    if manifest.dependencies.is_empty() {
+                        println!("no package dependencies to update");
+                    } else {
+                        let known = manifest::read_lock(&project.join("wgt.sum"))?;
+                        let result = upgrade::latest(&manifest, &known, &cache)?;
+                        upgrade::save(&manifest_path, &result)?;
+                        for change in &result.changes {
+                            println!("{}: {} -> {}{}", change.module, change.before, change.after,
+                                if change.before == change.after { " (already latest)" } else { "" });
+                        }
+                        println!("locked {} package dependencies; toolchain and Python environment unchanged", result.changes.len());
+                    }
                 }
                 Cmd::Remove { module } => {
                     let known = manifest::read_lock(&project.join("wgt.sum"))?;
@@ -869,7 +895,7 @@ fn executable(path: &Path) -> bool {
     }
 }
 fn list_commands() {
-    println!("Built-in: version toolchain download sync new init add remove update fetch tree metadata check build run test verify graph package publish register cache doctor");
+    println!("Built-in: version toolchain self-update download sync new init add remove update fetch tree metadata check build run test verify graph package publish register cache doctor");
     let mut names = std::collections::BTreeSet::new();
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {

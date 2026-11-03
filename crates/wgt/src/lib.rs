@@ -9,3 +9,5 @@ pub mod toolchain;
 mod transforms;
 
 pub mod package_index;
+
+pub mod upgrade;

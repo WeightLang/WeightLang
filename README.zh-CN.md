@@ -396,3 +396,13 @@ wgt add weightlang/gates
 `import std/nn`（wgt 0.3），无需 add。发布者运行
 `wgt publish --index dist/wgt.index.json --license MIT --edition 0.3`，上传制品后
 自动向注册表提交 PR；维护者审核后才可被其他用户发现。详见[注册表文档](docs/registry-design.md)。
+
+### 一键升级
+
+```sh
+wgt update --all   # 升级所有模型包依赖，重新锁定精确版本和哈希
+wgt self-update   # 下载、校验并切换到本平台最新稳定版 wgt
+```
+
+原有 `wgt update` 自更新用法继续兼容。批量升级保留各包的注册来源，全部校验
+成功后才修改项目文件；不更改 Python 环境。详见[升级规则](docs/toolchains.md)。

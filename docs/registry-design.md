@@ -10,6 +10,7 @@ Releases. It is not a Cargo-compatible registry or a remote source-library loade
 wgt add weightlang/gates
 wgt add weightlang/gates --version v0.2.0
 wgt update weightlang/gates
+wgt update --all  # all dependencies, retaining each locked registry
 wgt remove weightlang/gates
 wgt fetch --locked
 wgt fetch --offline --locked

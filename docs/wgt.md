@@ -252,3 +252,15 @@ weight snapshots per branch by default; set 0 to retain all. Legacy projects
 and omitted settings use the same default. The Rust `wgt build` standalone
 output is not subject to revision cleanup. See
 [retention details](weight-version-control.md#default-retention).
+
+## One-command upgrades
+
+```sh
+wgt update --all     # upgrade all direct model packages and lock exact results
+wgt self-update      # download, verify and select latest native wgt for this platform
+```
+
+`wgt update` remains a self-update shorthand; `wgt update owner/name` updates one
+package. Bulk upgrades preserve each registered package's registry identity and
+write project files only after all downloads pass verification. `--all` does not
+change the Python environment or toolchain pin. See [update semantics](toolchains.md).

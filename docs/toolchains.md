@@ -28,14 +28,15 @@ streams and exit status. Ordinary commands never download a missing toolchain;
 they ask you to run `wgt sync` first. `--locked` still permits installing the
 exact pinned toolchain; the selected version enforces dependency locks.
 
-`version`, `toolchain`, `download`, and tool-only `update` deliberately run in the launcher itself, so you can
+`version`, `toolchain`, `download`, `self-update`, and tool-only `update` deliberately run in the launcher itself, so you can
 repair a broken pin or install a missing version. The global `--version` flag
 selects the pinned executable, whereas the `version` command inspects the pin.
 
 ## Update, switch, or download only
 
 ```sh
-wgt update                         # select latest stable native release
+wgt self-update                    # select latest stable native release for this platform
+wgt update                         # compatible shorthand for self-update
 wgt update --version 0.1.0          # select an exact released version, including downgrades
 wgt download 0.1.0                  # cache and verify only; do not change selection
 wgt update --version 0.1.0 --offline # switch to an already cached version
@@ -47,10 +48,12 @@ Downloads and version checks must succeed before selection changes. `--locked`
 rejects selection changes. Offline updates require an exact version. Download
 prints the cached executable path and reuses an already verified download.
 The default is tied to `WEIGHTLANG_CACHE`; it does not replace the launcher binary.
-Only published stable native `X.Y.Z` versions for this platform are available;
+`--version latest` explicitly requests the same latest stable selection.
+Discovery ignores drafts, prereleases, Python/model releases and releases missing
+this platform's executable or SHA256SUMS. Only published stable native `X.Y.Z` versions for this platform are available;
 local imports via `toolchain --path` can also be selected.
 
-`wgt update github.com/owner/models --version 1.2.3` keeps its existing meaning:
+`wgt update github.com/owner/models --version v1.2.3` keeps its existing meaning:
 update that model dependency using the selected project toolchain.
 
 ## Install or import a version
@@ -97,3 +100,25 @@ packager refuses to overwrite an output directory. Missing releases/assets fail
 explicitly; this change does not publish releases or manufacture older binaries.
 Local imports work before releases exist. Linux switching is tested locally;
 Windows/macOS naming is tested, but native execution needs those systems.
+
+## Upgrade all package dependencies
+
+```sh
+wgt update --all     # latest versions of every direct model dependency
+wgt self-update      # latest native tool; does not edit model dependencies
+```
+
+Bulk upgrade uses each registered dependency's locked registry and name; direct
+GitHub dependencies use their latest stable release. It does not switch registries
+or chase a global override. Every package is resolved, downloaded and verified
+before the manifest and wgt.sum are updated. Exact pins and provenance are saved,
+comments are retained, and unchanged versions are reported as already latest.
+Python environment packages and toolchain pins are not changed by `--all`.
+
+A resolution, download or checksum failure leaves the project files unchanged;
+successfully verified downloads may remain in the cache. An ordinary manifest
+write failure restores the previous lock. The two atomic file replacements are
+not a cross-file power-loss transaction. `--offline`, `--locked`, a package name
+or `--version` cannot be combined with bulk latest-version resolution. An empty
+dependency list is a no-op. Explicit updates may cross major versions; there is
+no compatibility solver and callers should run their model behavior tests.
