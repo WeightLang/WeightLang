@@ -36,12 +36,12 @@ def test_minimal_program_and_comments():
 @pytest.mark.parametrize(
     "mutation, message, line",
     [
-        (lambda s: s.replace("wgt 0.1", "wgt 0.3"), "unsupported language version", 1),
+        (lambda s: s.replace("wgt 0.1", "wgt 9.9"), "unsupported language version", 1),
         (lambda s: s.replace("wgt 0.1\n", ""), "must start with a version header", 1),
         (lambda s: s.replace("in=4, out=1", "in=5, out=1"), "expects in=5 but receives 4", 7),
         (lambda s: s.replace("output y: f32[1]", "output y: f32[3]"), "declares 3", 4),
         (lambda s: s.replace("relu", "gelu"), "'gelu' requires 'wgt 0.2'", 6),
-        (lambda s: s.replace("relu", "conv2d"), "unknown layer operation or block 'conv2d'", 6),
+        (lambda s: s.replace("relu", "missing_op"), "unknown layer operation or block 'missing_op'", 6),
         (lambda s: s.replace("f32[2]", "f16[2]"), "supports only f32", 3),
         (lambda s: s.replace("f32[2]", "f32[2, 2]"), "1-D", 3),
         (lambda s: s.replace("init seed=1\n", ""), "missing 'init seed", None),

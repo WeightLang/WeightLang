@@ -270,6 +270,8 @@ in-memory fake of GitHub.
 
 ## Limitations
 
+These limitations describe released 0.2; see below for additions on main.
+
 - **Small language:** nested sequential and residual networks, one 1-D f32
   input/output; no embedding, i64, convolutions, attention or general graphs.
 - **Imports** copy whole layers or nested blocks, not tensor slices. Packages
@@ -316,6 +318,26 @@ The compiler also gains `weightc weights`, `weightc diff` and
 `weightc evaluate --compare` for readable tensors, exact parameter-change
 counts, and baseline/candidate evaluation on the same hashed data.
 See [the weight-space workflow and attribution](docs/weight-space.md).
+
+### Transformer and CNN blocks on main
+
+Unreleased **wgt 0.3** adds fixed-size sequences/images, integer token inputs,
+embedding, learned positions, multi-head causal/bidirectional self-attention,
+convolution and pooling. `std/transformer` and `std/vision` bring the total to
+5 libraries and 21 blocks. These are source building blocks, not pretrained models.
+
+```sh
+# Install compiler source too; the released 0.2.0 wheel cannot build these examples.
+python -m pip install -e .
+weightc build examples/transformer.wgt -o build
+wgt graph build/tiny_transformer --open
+weightc build examples/cnn.wgt -o build
+wgt graph build/tiny_cnn --open
+```
+
+Both examples reach 100% **training** accuracy on four synthetic rows. They are
+smoke tests, not validation benchmarks. See [language rules](docs/language.md)
+for shape conventions and current attention/CNN limitations.
 
 ## License
 

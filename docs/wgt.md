@@ -199,3 +199,10 @@ cargo test --locked
 cargo fmt --check
 cargo clippy --all-targets --locked -- -D warnings
 ```
+
+
+Main also verifies artifact v3 (wgt 0.3 Transformer/CNN models). Graph format v2
+adds `input_shape` and `output_shape` typed strings to each node, e.g.
+`i64[4]`, `f32[4,8]` or `f32[1,28,28]`. Legacy numeric `input`/`output`
+fields retain the last dimension; use the shape strings for full contracts.
+Attention parameter counts include its QKV and output projections.

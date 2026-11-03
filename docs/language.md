@@ -1,7 +1,8 @@
-# WeightLang 0.2
+# WeightLang language
 
-One model per file, one-dimensional f32 feature vectors, explicit initialization
-and tensor origins. Both `wgt 0.1` and `wgt 0.2` are accepted; using new
+One model per file, explicit initialization and tensor origins. Released 0.2
+uses one-dimensional f32 feature vectors. Main additionally accepts **wgt 0.3**
+(unreleased) for fixed-size sequences, i64 tokens and CHW images. Using new
 features in a 0.1 source fails with a line-numbered "requires 'wgt 0.2'" error.
 Existing 0.1 examples remain unchanged.
 
@@ -123,3 +124,43 @@ Artifacts without training are useful for structure/loader tests, not prediction
 
 No embedding, i64 ports, convolution, attention, general graph wiring,
 multidimensional feature shapes, GPU training controls or learning-rate schedules.
+
+
+## wgt 0.3: sequences and images (main, unreleased)
+
+Write `wgt 0.3` to opt in. Existing 0.1/0.2 files retain their vector contracts
+and write artifact v2; 0.3 writes artifact v3. Using multidimensional ports,
+i64 or the operators below in older files reports a version error with a line number.
+
+Shapes describe **one sample**, excluding the optional leading batch dimension:
+`i64[L]` tokens, `f32[L,D]` sequences, `f32[C,H,W]` images.
+All sizes are fixed positive integers. Linear and LayerNorm act on the last
+dimension; residual blocks preserve the entire shape and dtype.
+
+| Operator | Sample input → output |
+|---|---|
+| `embedding(vocab=V, dim=D)` | i64[L] → f32[L,D]; indices in [0,V) |
+| `position_embedding(dim=D, max_len=M)` | f32[L,D] → same; learned positions, L ≤ M |
+| `self_attention(dim=D, heads=H, causal=0)` | f32[L,D] → same; D divisible by H; causal 0 or 1 |
+| `meanpool` | f32[L,D] → f32[D] |
+| `conv2d(in=C, out=O, kernel=K, stride=1, padding=0)` | f32[C,H,W] → f32[O,H′,W′] |
+| `maxpool2d(kernel=K, stride=S)` | f32[C,H,W] → f32[C,H′,W′], no padding |
+| `globalavgpool2d` | f32[C,H,W] → f32[C] |
+| `flatten` | f32[...] → f32[product of sample dimensions] |
+
+Convolution/pooling use square kernels, dilation 1, and
+`floor((size + 2*padding - kernel)/stride) + 1`; empty results are rejected.
+Attention uses learned Q/K/V and output projections with bias and scaled
+dot-product attention. `causal=1` excludes future positions. No padding mask,
+cross-attention, KV cache, RoPE, tokenizer or pretrained checkpoint import is
+provided. CNN support currently covers these basic building blocks.
+
+Inline/CSV training rows remain flat, in row-major order. Inputs reshape to
+the declared sample shape. With cross_entropy, the last output dimension is
+the class count: f32[L,V] expects L integer targets per row and reports token
+accuracy. Other losses expect all output scalars. Read-only evaluation JSON
+uses nested arrays with shape [N, *sample_shape], and CE targets omit the class axis.
+
+Runnable synthetic examples: [Transformer](../examples/transformer.wgt) and
+[CNN](../examples/cnn.wgt). Both demonstrate training and deterministic rebuilds
+on their tiny training sets; neither supplies pretrained weights or a quality benchmark.

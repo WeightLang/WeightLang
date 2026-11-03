@@ -278,6 +278,8 @@ ruff check src tests && ruff format --check src tests
 
 ## 限制
 
+以下描述已发布的 0.2；main 分支的新架构支持见后文。
+
 - **语言规模小**：支持嵌套顺序网络和残差网络，单个一维 f32 输入与输出；
   不支持 embedding、i64、卷积、注意力或通用计算图。
 - **导入粒度**：只能导入完整网络层或嵌套 block，不能导入张量切片。
@@ -321,6 +323,25 @@ wgt -C demo graph build/demo --open
 此外新增 `weightc weights`、`weightc diff` 和 `weightc evaluate --compare`：
 导出可读权重、精确统计改动的参数，在同一份有哈希的数据上比较候选与基线。
 详见 [权重实验流程及引用说明](docs/weight-space.md)。
+
+### main 上新增 Transformer 和 CNN
+
+尚未发布的 **wgt 0.3** 支持固定长度序列、整数 token、Embedding、可学习位置编码、
+多头自注意力（双向或因果）、卷积和池化。`std/transformer` 和 `std/vision`
+加入后，共有 **5 个库、21 个 block**。它们是架构积木，不是预训练模型。
+
+```sh
+# 需要安装源码版编译器；已发布的 0.2.0 wheel 尚不支持这些示例
+python -m pip install -e .
+weightc build examples/transformer.wgt -o build
+wgt graph build/tiny_transformer --open
+weightc build examples/cnn.wgt -o build
+wgt graph build/tiny_cnn --open
+```
+
+两个示例都在四行合成数据上达到 100% **训练集**准确率，仅用于验证流程，
+不代表真实任务或验证集效果。当前没有 tokenizer、预训练模型导入、KV cache、
+padding mask 或交叉注意力。形状及算子规则见 [语言文档](docs/language.md)。
 
 ## 许可证
 

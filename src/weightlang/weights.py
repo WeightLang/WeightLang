@@ -117,15 +117,16 @@ def _number(value) -> bool:
         return False
 
 
-def _matrix(values, rows: int | None, width: int, label: str) -> torch.Tensor:
-    if (
-        not isinstance(values, list)
-        or not values
-        or (rows is not None and len(values) != rows)
-        or any(not isinstance(row, list) or len(row) != width or not all(_number(v) for v in row) for row in values)
-    ):
-        raise WgtError(f"{label} must be a nonempty numeric matrix with shape [N, {width}] and matching rows")
-    return torch.tensor(values, dtype=torch.float32)
+def _array(values, shape, label, *, integer=False, bound=None):
+    def valid(value, dims):
+        if not dims:
+            return _number(value) and (not integer or value == int(value) and 0 <= value < bound)
+        return isinstance(value, list) and len(value) == dims[0] and all(valid(v, dims[1:]) for v in value)
+
+    if not valid(values, shape):
+        kind = "integer class index / token" if integer else "numeric"
+        raise WgtError(f"{label} must contain finite {kind} values with shape {shape} and matching rows")
+    return torch.tensor(values, dtype=torch.int64 if integer else torch.float32)
 
 
 def evaluate_artifact(path: str | Path, data_path: str | Path, loss: str, *, compare: str | Path | None = None) -> dict:
@@ -140,26 +141,24 @@ def evaluate_artifact(path: str | Path, data_path: str | Path, loss: str, *, com
     if not isinstance(data, dict) or set(data) != {"inputs", "targets"}:
         raise WgtError("evaluation data must contain exactly inputs and targets")
     candidate = load_artifact(path, warn_untrained=False)
-    width = candidate.manifest["interface"]["output"]["shape"][0]
-    x = _matrix(data["inputs"], None, candidate.manifest["interface"]["input"]["shape"][0], "inputs")
+    inp = candidate.manifest["interface"]["input"]
+    outshape = candidate.manifest["interface"]["output"]["shape"]
+    width = outshape[-1]
+    if not isinstance(data["inputs"], list) or not data["inputs"]:
+        raise WgtError("inputs must be a nonempty numeric batch")
+    rows = len(data["inputs"])
+    x = _array(data["inputs"], [rows, *inp["shape"]], "inputs", integer=inp["dtype"] == "i64", bound=2**63)
     if loss == "cross_entropy":
-        labels = data["targets"]
-        if (
-            not isinstance(labels, list)
-            or len(labels) != len(x)
-            or any(not _number(v) or v != int(v) or not 0 <= v < width for v in labels)
-        ):
-            raise WgtError(f"cross_entropy targets must be one integer class index per row in [0, {width})")
-        y = torch.tensor(labels, dtype=torch.int64)
+        y = _array(data["targets"], [rows, *outshape[:-1]], "cross_entropy targets", integer=True, bound=width)
     else:
-        y = _matrix(data["targets"], len(x), width, "targets")
+        y = _array(data["targets"], [rows, *outshape], "targets")
         if loss == "bce" and not torch.all((y == 0) | (y == 1)):
             raise WgtError("bce targets must be 0 or 1")
 
     def metrics(artifact):
         _tensors(artifact)
         prediction = artifact.predict(x)
-        if prediction.shape != (len(x), width) or not torch.isfinite(prediction).all():
+        if list(prediction.shape) != [len(x), *outshape] or not torch.isfinite(prediction).all():
             raise WgtError("model produced invalid evaluation outputs")
         if loss == "cross_entropy":
             last = artifact.module
@@ -167,7 +166,7 @@ def evaluate_artifact(path: str | Path, data_path: str | Path, loss: str, *, com
                 last = last[-1]
             if isinstance(last, (nn.Softmax, nn.Sigmoid)):
                 raise WgtError("cross_entropy requires raw logits, not final softmax/sigmoid")
-            value = nn.functional.cross_entropy(prediction, y)
+            value = nn.functional.cross_entropy(prediction.reshape(-1, width), y.reshape(-1))
             accuracy = (prediction.argmax(-1) == y).double().mean().item()
         elif loss == "bce":
             if not torch.all((prediction >= 0) & (prediction <= 1)):

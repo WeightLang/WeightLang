@@ -36,63 +36,11 @@ pub fn dimension(v: &Value) -> Result<u64> {
     ensure!(n > 0, "dimension must be positive");
     Ok(n)
 }
-pub fn expected(
-    layers: &Value,
-    prefix: &str,
-    width: u64,
-    out: &mut BTreeMap<String, Vec<u64>>,
-) -> Result<u64> {
-    let mut w = width;
-    let mut names = std::collections::BTreeSet::new();
-    for l in layers.as_array().context("layers must be an array")? {
-        let name = string(l, "name")?;
-        ensure!(
-            identifier(name) && names.insert(name),
-            "invalid or duplicate layer name"
-        );
-        let path = if prefix.is_empty() {
-            name.to_owned()
-        } else {
-            format!("{prefix}.{name}")
-        };
-        match string(l, "op")? {
-            "linear" => {
-                ensure!(
-                    dimension(&l["args"]["in"])? == w,
-                    "linear input width mismatch at {path}"
-                );
-                let n = dimension(&l["args"]["out"])?;
-                out.insert(format!("{path}.weight"), vec![n, w]);
-                out.insert(format!("{path}.bias"), vec![n]);
-                w = n;
-            }
-            "layernorm" => {
-                ensure!(
-                    dimension(&l["args"]["dim"])? == w,
-                    "layernorm width mismatch"
-                );
-                out.insert(format!("{path}.weight"), vec![w]);
-                out.insert(format!("{path}.bias"), vec![w]);
-            }
-            "seq" | "residual" => {
-                let n = expected(&l["layers"], &path, w, out)?;
-                ensure!(l["op"] != "residual" || n == w, "residual width mismatch");
-                w = n;
-            }
-            "dropout" => {
-                let p = l["args"]["p"].as_f64().context("missing dropout p")?;
-                ensure!((0.0..1.0).contains(&p), "invalid dropout p");
-            }
-            "relu" | "tanh" | "sigmoid" | "gelu" | "silu" | "softmax" | "identity" => {}
-            op => anyhow::bail!("unsupported op {op:?}"),
-        }
-    }
-    Ok(w)
-}
 pub struct Artifact {
     pub root: PathBuf,
     pub manifest: Value,
     pub shapes: BTreeMap<String, Vec<u64>>,
+    pub contracts: crate::contracts::Contracts,
 }
 impl Artifact {
     pub fn read(path: &Path) -> Result<Self> {
@@ -104,7 +52,7 @@ impl Artifact {
         let m: Value = serde_json::from_slice(&fs::read(root.join("manifest.json"))?)?;
         ensure!(
             m["format"] == "weightlang.artifact"
-                && matches!(m["format_version"].as_u64(), Some(1 | 2)),
+                && matches!(m["format_version"].as_u64(), Some(1..=3)),
             "unsupported artifact format"
         );
         ensure!(identifier(string(&m, "model")?), "invalid model name");
@@ -118,28 +66,21 @@ impl Artifact {
             );
         }
         let mut shapes = BTreeMap::new();
-        for side in ["input", "output"] {
+        let input = crate::contracts::TensorType::parse(&m["interface"]["input"])?;
+        let output = crate::contracts::TensorType::parse(&m["interface"]["output"])?;
+        if m["format_version"] != 3 {
             ensure!(
-                m["interface"][side]["dtype"] == "f32",
-                "expected f32 interface"
-            );
-            ensure!(
-                m["interface"][side]["shape"]
-                    .as_array()
-                    .is_some_and(|a| a.len() == 1),
-                "expected 1-D interface"
+                input.dtype == "f32"
+                    && output.dtype == "f32"
+                    && input.shape.len() == 1
+                    && output.shape.len() == 1,
+                "v1/v2 artifacts require 1-D f32 interfaces"
             );
         }
-        let width = expected(
-            &m["layers"],
-            "",
-            dimension(&m["interface"]["input"]["shape"][0])?,
-            &mut shapes,
-        )?;
-        ensure!(
-            width == dimension(&m["interface"]["output"]["shape"][0])?,
-            "output width mismatch"
-        );
+        let mut contracts = crate::contracts::Contracts::new();
+        let inferred =
+            crate::contracts::infer(&m["layers"], "", input, &mut shapes, &mut contracts)?;
+        ensure!(inferred == output, "output shape/dtype mismatch");
         let tensors = m["weights"]["tensors"]
             .as_object()
             .context("missing tensor metadata")?;
@@ -208,6 +149,7 @@ impl Artifact {
             root: root.to_owned(),
             manifest: m,
             shapes,
+            contracts,
         })
     }
     pub fn untrained(&self) -> Vec<String> {

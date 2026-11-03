@@ -1,4 +1,5 @@
-use crate::artifact::{dimension, Artifact};
+use crate::artifact::Artifact;
+use crate::contracts::{Contracts, TensorType};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use serde_json::Value;
@@ -10,6 +11,8 @@ pub struct Node {
     pub path: String,
     pub op: String,
     pub input: u64,
+    pub input_shape: String,
+    pub output_shape: String,
     pub output: u64,
     pub parameters: u64,
     pub origin: String,
@@ -47,7 +50,7 @@ impl Graph {
         let a = Artifact::read(path)?;
         let mut g = Self {
             format: "weightlang.graph".into(),
-            format_version: 1,
+            format_version: 2,
             model: a.manifest["model"].as_str().unwrap().into(),
             weights_sha256: a.manifest["weights"]["sha256"].as_str().unwrap().into(),
             parameters: 0,
@@ -71,10 +74,11 @@ impl Graph {
                 upstream_origin: t["upstream_origin"].as_str().unwrap_or("").into(),
             });
         }
-        let w = dimension(&a.manifest["interface"]["input"]["shape"][0])?;
-        let first = g.node("input", "input", (w, w), "", "", "");
-        let (last, w) = g.layers(&a.manifest["layers"], "", first, w)?;
-        let out = g.node("output", "output", (w, w), "", "", "");
+        let input = TensorType::parse(&a.manifest["interface"]["input"])?;
+        let output = TensorType::parse(&a.manifest["interface"]["output"])?;
+        let first = g.node("input", "input", (&input, &input), "", "", "");
+        let last = g.layers(&a.manifest["layers"], "", first, &a.contracts)?;
+        let out = g.node("output", "output", (&output, &output), "", "", "");
         g.edge(last, out, "flow");
         Ok(g)
     }
@@ -82,7 +86,7 @@ impl Graph {
         &mut self,
         path: &str,
         op: &str,
-        shape: (u64, u64),
+        shape: (&TensorType, &TensorType),
         parent: &str,
         block: &str,
         args: &str,
@@ -93,9 +97,10 @@ impl Graph {
             .tensors
             .iter()
             .filter(|t| {
-                t.name
-                    .strip_prefix(&prefix)
-                    .is_some_and(|s| !s.contains('.'))
+                !matches!(op, "input" | "output" | "seq" | "residual" | "add")
+                    && t.name
+                        .strip_prefix(&prefix)
+                        .is_some_and(|s| op == "self_attention" || !s.contains('.'))
             })
             .collect();
         let mut origins: Vec<_> = owned
@@ -114,8 +119,10 @@ impl Graph {
             id: id.clone(),
             path: path.into(),
             op: op.into(),
-            input: shape.0,
-            output: shape.1,
+            input: shape.0.width(),
+            output: shape.1.width(),
+            input_shape: shape.0.label(),
+            output_shape: shape.1.label(),
             parameters: owned.iter().map(|t| t.elements).sum(),
             origin: origins.join(", "),
             parent: parent.into(),
@@ -136,39 +143,35 @@ impl Graph {
         layers: &Value,
         parent: &str,
         mut previous: String,
-        mut width: u64,
-    ) -> Result<(String, u64)> {
+        contracts: &Contracts,
+    ) -> Result<String> {
         for l in layers.as_array().context("layers")? {
             let name = l["name"].as_str().context("name")?;
             let path = if parent.is_empty() {
-                name.into()
+                name.to_owned()
             } else {
                 format!("{parent}.{name}")
             };
             let op = l["op"].as_str().context("op")?;
-            let output = if op == "linear" {
-                dimension(&l["args"]["out"])?
-            } else {
-                width
-            };
+            let (input, output) = contracts
+                .get(&path)
+                .context("missing inferred layer contract")?;
             let id = self.node(
                 &path,
                 op,
-                (width, output),
+                (input, output),
                 parent,
                 l["block"].as_str().unwrap_or(""),
                 &l.get("args").map(Value::to_string).unwrap_or_default(),
             );
             self.edge(previous, id.clone(), "flow");
             if op == "seq" || op == "residual" {
-                let (last, new_width) = self.layers(&l["layers"], &path, id.clone(), width)?;
-                // Container boundaries carry the complete block's input/output contract.
-                self.nodes.iter_mut().find(|n| n.id == id).unwrap().output = new_width;
+                let last = self.layers(&l["layers"], &path, id.clone(), contracts)?;
                 if op == "residual" {
                     let sum = self.node(
                         &format!("{path}.$add"),
                         "add",
-                        (width, width),
+                        (input, output),
                         parent,
                         "",
                         "",
@@ -179,13 +182,11 @@ impl Graph {
                 } else {
                     previous = last;
                 }
-                width = new_width;
             } else {
                 previous = id;
-                width = output;
             }
         }
-        Ok((previous, width))
+        Ok(previous)
     }
     pub fn render(&self, format: &str) -> Result<String> {
         Ok(match format{
@@ -208,8 +209,8 @@ impl Graph {
                 n.id,
                 escape(&n.path),
                 escape(&n.op),
-                n.input,
-                n.output,
+                n.input_shape,
+                n.output_shape,
                 n.parameters
             );
         }
@@ -230,7 +231,7 @@ impl Graph {
                 n.id,
                 serde_json::to_string(&format!(
                     "{}: {} ({} → {}, {} params)",
-                    n.path, n.op, n.input, n.output, n.parameters
+                    n.path, n.op, n.input_shape, n.output_shape, n.parameters
                 ))
                 .unwrap()
             );
@@ -257,7 +258,7 @@ impl Graph {
         for n in &self.nodes {
             s += &format!(
                 "| {} | {} | {} → {} | {} | {} |\n",
-                n.path, n.op, n.input, n.output, n.parameters, n.origin
+                n.path, n.op, n.input_shape, n.output_shape, n.parameters, n.origin
             );
         }
         s
@@ -287,7 +288,7 @@ impl Graph {
         for n in &self.nodes {
             let (x, y) = coords(&n.id);
             s+=&format!("<g><title>{}</title><rect x=\"{x}\" y=\"{y}\" width=\"740\" height=\"70\" rx=\"12\" fill=\"{}\" stroke=\"#d5cdc1\"/><text x=\"{}\" y=\"{}\" font-size=\"17\" font-weight=\"600\">{} · {}</text><text x=\"{}\" y=\"{}\" font-size=\"13\">{} → {}   |   {} params   |   {}</text></g>",
-                escape(&format!("{} {} {}",n.block,n.args,n.origin)),if n.op=="residual"||n.op=="seq"{"#eae3d7"}else{"#fffdf8"},x+16,y+26,escape(&n.path),escape(&n.op),x+16,y+51,n.input,n.output,n.parameters,escape(&n.origin));
+                escape(&format!("{} {} {}",n.block,n.args,n.origin)),if n.op=="residual"||n.op=="seq"{"#eae3d7"}else{"#fffdf8"},x+16,y+26,escape(&n.path),escape(&n.op),x+16,y+51,n.input_shape,n.output_shape,n.parameters,escape(&n.origin));
         }
         s + "</g></svg>\n"
     }

@@ -11,12 +11,13 @@ A *model file* declares one model. A *library file* (e.g. the bundled
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-LANGUAGE_VERSION = "0.2"
-SUPPORTED_VERSIONS = ("0.1", "0.2")
+LANGUAGE_VERSION = "0.3"
+SUPPORTED_VERSIONS = ("0.1", "0.2", "0.3")
 STD_DIR = Path(__file__).resolve().parent / "std"
 
 # Parameter-free element-wise ops.
@@ -27,12 +28,40 @@ ARG_OPS: dict[str, dict[str, type]] = {
     "layernorm": {"dim": int},
     "dropout": {"p": float},
 }
+_V03_OPS = {
+    "embedding",
+    "position_embedding",
+    "self_attention",
+    "conv2d",
+    "maxpool2d",
+    "globalavgpool2d",
+    "meanpool",
+    "flatten",
+}
+ARG_OPS.update(
+    {
+        "embedding": {"vocab": int, "dim": int},
+        "position_embedding": {"dim": int, "max_len": int},
+        "self_attention": {"dim": int, "heads": int, "causal": int},
+        "conv2d": {"in": int, "out": int, "kernel": int, "stride": int, "padding": int},
+        "maxpool2d": {"kernel": int, "stride": int},
+    }
+)
+OP_DEFAULTS = {"self_attention": {"causal": 0}, "conv2d": {"stride": 1, "padding": 0}}
+PARAM_FREE_OPS |= {"globalavgpool2d", "meanpool", "flatten"}
 BUILTIN_OPS = PARAM_FREE_OPS | set(ARG_OPS)
-PARAM_OPS = {"linear", "layernorm"}  # ops that own trainable tensors
+PARAM_OPS = {
+    "linear",
+    "layernorm",
+    "embedding",
+    "position_embedding",
+    "self_attention",
+    "conv2d",
+}  # ops that own trainable tensors
 STRUCTURAL_OPS = {"seq", "residual"}  # produced by block calls and residual(...)
 LOSSES = {"mse", "bce", "cross_entropy"}
 OPTIMIZERS = {"sgd", "adam", "adamw"}
-DTYPES = {"f32"}
+DTYPES = {"f32", "i64"}
 
 # Ops that need `wgt 0.2`.
 _V02_OPS = {"gelu", "silu", "softmax", "identity", "layernorm", "dropout"}
@@ -101,6 +130,8 @@ class Layer:
     path: str | None = None
     children: list[Layer] = field(default_factory=list)
     block: str | None = None  # e.g. "std/nn.mlp" when produced by a block call
+    input_spec: dict | None = None
+    output_spec: dict | None = None
 
     def to_dict(self) -> dict:
         d: dict = {"name": self.name, "op": self.op, "args": dict(self.args)}
@@ -108,6 +139,9 @@ class Layer:
             d["layers"] = [c.to_dict() for c in self.children]
         if self.block:
             d["block"] = self.block
+        if self.input_spec is not None:
+            d["input"] = self.input_spec
+            d["output"] = self.output_spec
         return d
 
     @property
@@ -289,7 +323,7 @@ def _parse_port(cur: _Cursor) -> tuple[str, str, tuple[int, ...]]:
     cur.expect("punct", ":")
     dtype = cur.ident("dtype")
     if dtype not in DTYPES:
-        raise cur.error(f"unsupported dtype {dtype!r}; WeightLang supports only f32")
+        raise cur.error(f"unsupported dtype {dtype!r}; WeightLang supports only f32 and i64 (i64 requires wgt 0.3)")
     cur.expect("punct", "[")
     dims = [cur.integer("dimension")]
     while cur.peek() == ("punct", ","):
@@ -297,9 +331,7 @@ def _parse_port(cur: _Cursor) -> tuple[str, str, tuple[int, ...]]:
         dims.append(cur.integer("dimension"))
     cur.expect("punct", "]")
     cur.done()
-    if len(dims) != 1:
-        raise cur.error("only 1-D feature vectors are supported, e.g. f32[4]")
-    if dims[0] <= 0:
+    if any(dim <= 0 for dim in dims):
         raise cur.error("dimensions must be positive")
     return name, dtype, tuple(dims)
 
@@ -477,6 +509,8 @@ class _FileParser:
         if kind in self.ports:
             raise cur.error(f"only one {kind} is supported")
         name, dtype, shape = _parse_port(cur)
+        if self.version != "0.3" and (dtype != "f32" or len(shape) != 1):
+            raise cur.error("only 1-D f32 ports in this version; this interface requires 'wgt 0.3'")
         self.ports[kind] = Port(name, dtype, shape, line)
 
     def _stmt_layer(self, cur: _Cursor, line: int) -> None:
@@ -695,7 +729,7 @@ def _resolve(name: str, spec: Spec, scope: Scope, env: dict[str, int], stack: tu
         return Layer(name, "residual", {}, spec.line, spec.path, inner.children, inner.block)
 
     if spec.ns is None and spec.op in BUILTIN_OPS:
-        args = {k: _value(v, env, spec) for k, v in spec.args.items()}
+        args = {**OP_DEFAULTS.get(spec.op, {}), **{k: _value(v, env, spec) for k, v in spec.args.items()}}
         signature = ARG_OPS.get(spec.op, {})
         if set(args) != set(signature):
             if not signature:
@@ -704,10 +738,14 @@ def _resolve(name: str, spec: Spec, scope: Scope, env: dict[str, int], stack: tu
             raise WgtError(f"{spec.op} requires exactly ({want})", spec.line, spec.path)
         for k, t in signature.items():
             if t is int:
-                if not isinstance(args[k], int) or args[k] <= 0:
+                minimum = 0 if k in ("padding", "causal") else 1
+                if not isinstance(args[k], int) or args[k] < minimum:
                     raise WgtError(f"{spec.op} {k} must be a positive integer", spec.line, spec.path)
             else:
                 args[k] = float(args[k])
+        if spec.op == "self_attention":
+            if args["dim"] % args["heads"] or args["causal"] not in (0, 1):
+                raise WgtError("self_attention needs dim divisible by heads and causal=0 or 1", spec.line, spec.path)
         if spec.op == "dropout" and not 0 <= args["p"] < 1:
             raise WgtError("dropout p must be in [0, 1)", spec.line, spec.path)
         return Layer(name, spec.op, args, spec.line, spec.path)
@@ -811,11 +849,18 @@ def parse(source: str, path: str | None = None) -> Program:
     for name, spec in fp.layer_specs:
         if fp.version == "0.1" and (spec.op in _V02_OPS or spec.op == "residual" or spec.ns is not None):
             raise WgtError(f"{spec.op!r} requires 'wgt 0.2'", spec.line, path)
-        layers.append(_resolve(name, spec, fp.scope, {}, ()))
+        resolved = _resolve(name, spec, fp.scope, {}, ())
+
+        def needs_v03(layer):
+            return layer.op in _V03_OPS or any(needs_v03(c) for c in layer.children)
+
+        if fp.version != "0.3" and needs_v03(resolved):
+            raise WgtError(f"{spec.op!r} requires 'wgt 0.3'", spec.line, path)
+        layers.append(resolved)
 
     for ds in fp.datasets.values():
         if ds.file:
-            _load_csv(ds, fp.ports["input"].shape[0], path)
+            _load_csv(ds, math.prod(fp.ports["input"].shape), path)
 
     program = Program(
         version=fp.version or LANGUAGE_VERSION,
@@ -875,30 +920,53 @@ def check(program: Program) -> None:
         raise WgtError("input and output must have different names", program.output.line, path)
     if not any(layer.has_params for layer in program.layers):
         raise WgtError("model has no parameters (add at least one linear layer)", program.layers[0].line, path)
-    width = output_width(program.layers, program.input.shape[0])
-    if width != program.output.shape[0]:
-        raise WgtError(
-            f"shape mismatch: network produces {width} features but output declares {program.output.shape[0]}",
-            program.output.line,
-            path,
-        )
+    if program.version == "0.3":
+        dtype, shape = output_contract(program.layers, program.input.dtype, program.input.shape)
+        if dtype != program.output.dtype or shape != program.output.shape:
+            raise WgtError(
+                f"shape/dtype mismatch: network produces {dtype}{list(shape)}, output declares "
+                f"{program.output.dtype}{list(program.output.shape)}",
+                program.output.line,
+                path,
+            )
+    else:
+        width = output_width(program.layers, program.input.shape[0])
+        if width != program.output.shape[0]:
+            raise WgtError(
+                f"shape mismatch: network produces {width} features but output declares {program.output.shape[0]}",
+                program.output.line,
+                path,
+            )
+    input_size = math.prod(program.input.shape)
+    output_size = math.prod(program.output.shape)
 
     for ds in program.datasets.values():
         if not ds.inputs:
             raise WgtError(f"dataset {ds.name!r} has no rows", ds.line, path)
         twidth = len(ds.targets[0])
         for x, y in zip(ds.inputs, ds.targets):
-            if len(x) != program.input.shape[0] or len(y) != twidth:
+            if len(x) != input_size or len(y) != twidth:
                 raise WgtError(
-                    f"dataset {ds.name!r} rows must be [{program.input.shape[0]} values] -> [{twidth} values]",
+                    f"dataset {ds.name!r} rows must be [{input_size} values] -> [{twidth} values]",
                     ds.line,
                     path,
                 )
+        for row in ds.inputs + ds.targets:
+            if any(not math.isfinite(v) for v in row):
+                raise WgtError("dataset values must be finite", ds.line, path)
+        if program.input.dtype == "i64":
+            for row in ds.inputs:
+                if any(v != int(v) or not 0 <= v < 2**63 for v in row):
+                    raise WgtError("i64 inputs must be non-negative integers below 2**63", ds.line, path)
+            first = program.layers[0]
+            while first.op == "seq":
+                first = first.children[0]
+            if first.op == "embedding" and any(v >= first.args["vocab"] for row in ds.inputs for v in row):
+                raise WgtError("token index outside embedding vocabulary", ds.line, path)
         if program.train is None or ds.name not in (program.train.data, program.train.validate):
-            if twidth != program.output.shape[0] and not (twidth == 1 and program.output.shape[0] > 1):
+            if twidth != output_size and twidth != math.prod(program.output.shape[:-1]):
                 raise WgtError(
-                    f"dataset {ds.name!r} has {twidth} target values per row but output declares "
-                    f"{program.output.shape[0]}",
+                    f"dataset {ds.name!r} has {twidth} target values per row but output declares {output_size}",
                     ds.line,
                     path,
                 )
@@ -948,16 +1016,18 @@ def check(program: Program) -> None:
 
 
 def _check_targets(program: Program, ds: Dataset, train: TrainStmt) -> None:
-    out = program.output.shape[0]
+    out = math.prod(program.output.shape)
     width = len(ds.targets[0])
     if train.loss == "cross_entropy":
-        if width != 1:
+        out = program.output.shape[-1]
+        if width != math.prod(program.output.shape[:-1]):
             raise WgtError(f"loss=cross_entropy needs one class index per row in {ds.name!r}", ds.line, program.path)
-        for (y,) in ds.targets:
-            if y != int(y) or not 0 <= y < out:
-                raise WgtError(
-                    f"dataset {ds.name!r}: class index {y} is not an integer in [0, {out})", ds.line, program.path
-                )
+        for row in ds.targets:
+            for y in row:
+                if not math.isfinite(y) or y != int(y) or not 0 <= y < out:
+                    raise WgtError(
+                        f"dataset {ds.name!r}: class index {y} is not an integer in [0, {out})", ds.line, program.path
+                    )
     elif width != out:
         raise WgtError(
             f"dataset {ds.name!r} has {width} target values per row but output declares {out}", ds.line, program.path
@@ -976,3 +1046,57 @@ def parse_file(path: str | Path) -> Program:
 def is_library_source(text: str) -> bool:
     """A file without a model statement is treated as a library."""
     return not any(_strip_comment(line).split()[:1] == ["model"] for line in text.splitlines())
+
+
+def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...]) -> tuple[str, tuple[int, ...]]:
+    """Static per-sample contracts: batch is always an optional leading runtime dimension."""
+    for layer in layers:
+        layer.input_spec = {"dtype": dtype, "shape": list(shape)}
+        args, op = layer.args, layer.op
+
+        def require(ok, message):
+            if not ok:
+                raise WgtError(f"{layer.name}: {message}", layer.line, layer.path)
+
+        if op in STRUCTURAL_OPS:
+            new_dtype, new_shape = output_contract(layer.children, dtype, shape)
+            if op == "residual":
+                require((new_dtype, new_shape) == (dtype, shape), "residual must preserve complete shape and dtype")
+            dtype, shape = new_dtype, new_shape
+        elif op == "embedding":
+            require(dtype == "i64" and len(shape) == 1, "embedding expects i64[sequence]")
+            dtype, shape = "f32", (*shape, int(args["dim"]))
+        else:
+            require(dtype == "f32", f"{op} expects f32; convert tokens with embedding first")
+            if op == "linear":
+                require(shape[-1] == args["in"], f"linear expects last dimension {args['in']}, got {shape[-1]}")
+                shape = (*shape[:-1], int(args["out"]))
+            elif op == "layernorm":
+                require(shape[-1] == args["dim"], "layernorm dimension mismatch")
+            elif op in ("self_attention", "position_embedding"):
+                require(len(shape) == 2 and shape[-1] == args["dim"], f"{op} expects f32[sequence, dim]")
+                if op == "position_embedding":
+                    require(shape[0] <= args["max_len"], "sequence exceeds max_len")
+            elif op == "meanpool":
+                require(len(shape) == 2, "meanpool expects f32[sequence, dim]")
+                shape = (shape[-1],)
+            elif op == "flatten":
+                shape = (math.prod(shape),)
+            elif op in ("conv2d", "maxpool2d", "globalavgpool2d"):
+                require(len(shape) == 3, f"{op} expects f32[channels, height, width]")
+                channels, height, width = shape
+                if op == "globalavgpool2d":
+                    shape = (channels,)
+                else:
+                    if op == "conv2d":
+                        require(channels == args["in"], "conv2d input channels mismatch")
+                    padding = int(args.get("padding", 0))
+                    kernel, stride = int(args["kernel"]), int(args["stride"])
+                    height, width = (
+                        (height + 2 * padding - kernel) // stride + 1,
+                        (width + 2 * padding - kernel) // stride + 1,
+                    )
+                    require(height > 0 and width > 0, "kernel produces an empty spatial dimension")
+                    shape = (int(args.get("out", channels)), height, width)
+        layer.output_spec = {"dtype": dtype, "shape": list(shape)}
+    return dtype, shape

@@ -55,8 +55,14 @@ def _dataset_tensors(program: Program, name: str) -> tuple[torch.Tensor, torch.T
     ds = program.datasets[name]
     canonical = json.dumps({"inputs": ds.inputs, "targets": ds.targets}, sort_keys=True, separators=(",", ":"))
     return (
-        torch.tensor(ds.inputs, dtype=torch.float32),
-        torch.tensor(ds.targets, dtype=torch.float32),
+        torch.tensor(ds.inputs, dtype=torch.int64 if program.input.dtype == "i64" else torch.float32).reshape(
+            -1, *program.input.shape
+        ),
+        (
+            torch.tensor(ds.targets, dtype=torch.float32)
+            if program.train and program.train.loss == "cross_entropy"
+            else torch.tensor(ds.targets, dtype=torch.float32).reshape(-1, *program.output.shape)
+        ),
         sha256_bytes(canonical.encode()),
     )
 
@@ -132,12 +138,14 @@ def _loss_fn(loss: str) -> nn.Module:
     if loss == "bce":
         return nn.BCELoss()
     if loss == "cross_entropy":
-        return nn.CrossEntropyLoss()
+        from .modern import LastDimCrossEntropy
+
+        return LastDimCrossEntropy()
     return nn.MSELoss()
 
 
 def _targets(y: torch.Tensor, loss: str) -> torch.Tensor:
-    return y[:, 0].long() if loss == "cross_entropy" else y
+    return y.long() if loss == "cross_entropy" else y
 
 
 def _evaluate(module: nn.Module, x: torch.Tensor, y: torch.Tensor, loss: str) -> dict[str, float]:
@@ -149,7 +157,7 @@ def _evaluate(module: nn.Module, x: torch.Tensor, y: torch.Tensor, loss: str) ->
         if loss == "bce":
             result["accuracy"] = float(((pred >= 0.5).float() == y).float().mean())
         elif loss == "cross_entropy":
-            result["accuracy"] = float((pred.argmax(dim=1) == y[:, 0].long()).float().mean())
+            result["accuracy"] = float((pred.argmax(dim=-1).reshape(-1) == y.long().reshape(-1)).float().mean())
     module.train(was_training)
     return result
 
@@ -217,7 +225,7 @@ def _train(program: Program, module: nn.Sequential) -> dict[str, Any]:
         "final_loss": train_metrics["loss"],
         "dataset": _dataset_record(program, spec.data, data_sha, int(x.shape[0])),
     }
-    if program.version == "0.2":
+    if program.version != "0.1":
         record["weight_decay"] = spec.weight_decay
     if "accuracy" in train_metrics:
         record["train_accuracy"] = train_metrics["accuracy"]
@@ -292,20 +300,29 @@ def compile_program(program: Program, out_dir: str | Path) -> BuildResult:
         shutil.copyfile(source_path, tmp / SOURCE_FILE)
         manifest: dict[str, Any] = {
             "format": ARTIFACT_FORMAT,
-            "format_version": ARTIFACT_FORMAT_VERSION,
+            "format_version": 3 if program.version == "0.3" else ARTIFACT_FORMAT_VERSION,
             "language_version": program.version,
             "model": program.model,
             "compiler": {"name": "weightc", "version": __version__},
             "built_with": {"torch": torch.__version__, "python": platform.python_version()},
             "source": {"file": SOURCE_FILE, "sha256": sha256_file(tmp / SOURCE_FILE)},
             "interface": {
-                "input": {"name": program.input.name, "dtype": "f32", "shape": list(program.input.shape)},
-                "output": {"name": program.output.name, "dtype": "f32", "shape": list(program.output.shape)},
-                "batch": "optional leading dimension: [features] or [N, features]",
+                "input": {"name": program.input.name, "dtype": program.input.dtype, "shape": list(program.input.shape)},
+                "output": {
+                    "name": program.output.name,
+                    "dtype": program.output.dtype,
+                    "shape": list(program.output.shape),
+                },
+                "batch": "optional leading batch dimension before the declared sample shape",
             },
             "layers": layers,
             "libraries": _library_records(program),
-            "init": {"seed": program.seed, "method": "PyTorch default initialisation (nn.Linear, nn.LayerNorm)"},
+            "init": {
+                "seed": program.seed,
+                "method": "PyTorch module defaults; learned positions use normal(std=0.02)"
+                if program.version == "0.3"
+                else "PyTorch default initialisation (nn.Linear, nn.LayerNorm)",
+            },
             "imports": import_records,
             "training": training,
             "weights": {"file": WEIGHTS_FILE, "sha256": sha256_file(tmp / WEIGHTS_FILE), "tensors": tensors_meta},

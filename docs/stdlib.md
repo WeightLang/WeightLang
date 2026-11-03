@@ -2,7 +2,8 @@
 
 S1 (built-ins, data and training) and S2 (blocks and reuse) are implemented
 together in **wgt 0.2**, replacing the proposed separate 0.2/0.3 milestones.
-Embedding and i64 remain deferred.
+Embedding and i64 were deferred from 0.2; they are now implemented on main
+under **wgt 0.3**, together with Transformer and CNN building blocks (unreleased).
 
 The four settled decisions are:
 
@@ -10,7 +11,7 @@ The four settled decisions are:
    and separately versioned trained weight packages.
 2. Structured `residual(block(...))` expresses x + f(x).
 3. Standard weight packages live in this repository under `packages/`.
-4. The current interface remains f32; embedding and i64 wait for a later version.
+4. Embedding and i64 were postponed beyond 0.2; the 0.3 extension now provides them.
 
 ## Built-ins and blocks
 
@@ -26,11 +27,17 @@ Dropout is seeded in training and disabled in inference.
 | std/nn | dense_gelu(in, out), dense_relu(in, out), dense_tanh(in, out) |
 | std/heads | classifier(in, classes), binary(in), regressor(in, out) |
 | std/blocks | prenorm_ff(dim, hidden), residual_mlp(dim, hidden) |
+| std/transformer (0.3) | tokens(vocab, dim, max_len), attention(dim, heads), causal_attention(dim, heads) |
+| std/transformer (0.3) | feed_forward(dim, hidden), encoder(dim, heads, hidden), decoder(dim, heads, hidden) |
+| std/vision (0.3) | conv_relu(in, out, kernel), conv_pool(in, out, kernel, pool), classifier(channels, classes) |
 
 The mlp block is linear → gelu → linear. Classifier returns logits, binary
 ends in sigmoid, regressor is linear. prenorm_ff is LayerNorm → mlp;
 residual_mlp wraps it in a residual addition.
 `weightc std` reads the installed library files and lists these signatures.
+Main contains 5 libraries and 21 blocks (released 0.2: 3 libraries, 12 blocks).
+Transformer encoder/decoder blocks use pre-norm residual attention and an MLP;
+`decoder` means decoder-only causal attention, without cross-attention.
 Blocks hold no weights. Their expanded layers, block identity and top-level
 library file hashes are recorded in the artifact. Transitive library hashes are
 not separately recorded; the full expanded architecture is present.

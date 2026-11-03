@@ -1,0 +1,15 @@
+wgt 0.3
+# Synthetic 4x4 vertical/horizontal patterns. Data rows flatten C,H,W in row-major order.
+use std/vision
+model tiny_cnn
+input image: f32[1, 4, 4]
+output logits: f32[2]
+layer features: vision.conv_relu(in=1, out=4, kernel=2)
+layer head: vision.classifier(channels=4, classes=2)
+data lines:
+  [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0] -> [0]
+  [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0] -> [0]
+  [1,1,1,1, 0,0,0,0, 0,0,0,0, 0,0,0,0] -> [1]
+  [0,0,0,0, 0,0,0,0, 1,1,1,1, 0,0,0,0] -> [1]
+init seed=42
+train data=lines loss=cross_entropy optimizer=adam lr=0.03 epochs=80

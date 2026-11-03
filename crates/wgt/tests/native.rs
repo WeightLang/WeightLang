@@ -417,3 +417,64 @@ fn graph_temp_reuse_stdout_and_default_browser() {
     assert!(String::from_utf8_lossy(&result.stderr).contains("diagram saved at"));
     assert!(output.is_file());
 }
+
+#[test]
+fn multidimensional_contracts_infer_attention_and_cnn_weights() {
+    use weightlang_wgt::contracts::{infer, Contracts, TensorType};
+    let mut shapes = BTreeMap::new();
+    let mut contracts = Contracts::new();
+    let tokens = TensorType::parse(&json!({"dtype":"i64","shape":[4]})).unwrap();
+    let layers = json!([
+        {"name":"embed","op":"embedding","args":{"vocab":5,"dim":8}},
+        {"name":"pos","op":"position_embedding","args":{"dim":8,"max_len":4}},
+        {"name":"body","op":"residual","layers":[
+            {"name":"attn","op":"self_attention","args":{"dim":8,"heads":2,"causal":1}}
+        ]},
+        {"name":"pool","op":"meanpool"},
+        {"name":"fc","op":"linear","args":{"in":8,"out":2}}
+    ]);
+    let output = infer(&layers, "", tokens.clone(), &mut shapes, &mut contracts).unwrap();
+    assert_eq!(output.label(), "f32[2]");
+    assert_eq!(shapes["body.attn.qkv.weight"], vec![24, 8]);
+    assert_eq!(shapes["pos.weight"], vec![4, 8]);
+    let mut broken = layers.clone();
+    broken[2]["layers"][0]["args"]["heads"] = json!(3);
+    assert!(infer(
+        &broken,
+        "",
+        tokens.clone(),
+        &mut BTreeMap::new(),
+        &mut Contracts::new()
+    )
+    .is_err());
+    broken = layers;
+    broken[0]["output"] = json!({"dtype":"f32","shape":[9,8]});
+    assert!(infer(
+        &broken,
+        "",
+        tokens,
+        &mut BTreeMap::new(),
+        &mut Contracts::new()
+    )
+    .is_err());
+    let image = TensorType::parse(&json!({"dtype":"f32","shape":[1,8,8]})).unwrap();
+    let cnn = json!([
+        {"name":"conv","op":"conv2d","args":{"in":1,"out":4,"kernel":3,"stride":1,"padding":1}},
+        {"name":"pool","op":"maxpool2d","args":{"kernel":2,"stride":2}},
+        {"name":"flat","op":"flatten"}
+    ]);
+    let out = infer(&cnn, "", image.clone(), &mut shapes, &mut contracts).unwrap();
+    assert_eq!(out.shape, vec![64]);
+    assert_eq!(shapes["conv.weight"], vec![4, 1, 3, 3]);
+    assert_eq!(contracts["pool"].1.shape, vec![4, 4, 4]);
+    let mut invalid = cnn;
+    invalid[0]["args"]["padding"] = json!(u64::MAX);
+    assert!(infer(
+        &invalid,
+        "",
+        image,
+        &mut BTreeMap::new(),
+        &mut Contracts::new()
+    )
+    .is_err());
+}

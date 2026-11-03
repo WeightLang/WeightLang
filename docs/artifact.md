@@ -121,3 +121,22 @@ file_sha256 (the original bytes); license and source are recorded when supplied.
 after training in eval mode. train_accuracy and final_loss refer to training
 rows only. Dataset files and library sources are not copied into artifacts;
 rerunning a build requires the original repository data/libraries.
+
+
+## Format v3 (main, unreleased)
+
+Sources declaring wgt 0.3 emit format_version 3. The current loader and native
+Rust verifier read versions 1, 2 and 3; released weightc 0.2.0 cannot load v3.
+Existing 0.1/0.2 sources still emit v2 with unchanged tensor initialization.
+
+V3 interfaces allow i64 token inputs and multidimensional sample shapes.
+Layers additionally record `input` and `output` objects with dtype and shape;
+loaders check these against recursively inferred contracts. Parameter tensors
+remain F32 safetensors. Embedding owns `weight[V,D]`, learned positions own
+`weight[M,D]`, and self-attention owns `qkv.weight[3D,D]`, `qkv.bias[3D]`,
+`proj.weight[D,D]`, `proj.bias[D]`. Conv2d owns `weight[O,I,K,K]` and `bias[O]`.
+
+The standalone PyTorch loading recipe above covers v1/v2. V3 also needs the
+small modules in [modern.py](../src/weightlang/modern.py), which depend only on
+PyTorch; copy their definitions alongside that recipe and route the new op
+names through `build_modern`. No Python objects are serialized in artifacts.

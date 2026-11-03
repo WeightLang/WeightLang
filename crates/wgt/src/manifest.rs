@@ -85,7 +85,10 @@ impl Manifest {
                         ensure!(module.replace(m.to_string()).is_none(), "duplicate module");
                     }
                     ["wgt", v] => {
-                        ensure!(*v == "0.1" || *v == "0.2", "unsupported wgt edition {v}");
+                        ensure!(
+                            *v == "0.1" || *v == "0.2" || *v == "0.3",
+                            "unsupported wgt edition {v}"
+                        );
                         ensure!(
                             edition.replace(v.to_string()).is_none(),
                             "duplicate wgt edition"

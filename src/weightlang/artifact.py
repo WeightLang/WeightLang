@@ -24,7 +24,7 @@ from .syntax import WgtError
 
 ARTIFACT_FORMAT = "weightlang.artifact"
 ARTIFACT_FORMAT_VERSION = 2
-READABLE_FORMAT_VERSIONS = (1, 2)
+READABLE_FORMAT_VERSIONS = (1, 2, 3)
 MANIFEST_FILE = "manifest.json"
 WEIGHTS_FILE = "weights.safetensors"
 SOURCE_FILE = "source.wgt"
@@ -104,6 +104,12 @@ _ACTIVATIONS: dict[str, type[nn.Module]] = {
 
 def _build_layer(layer: dict[str, Any]) -> nn.Module:
     op, args = layer["op"], layer.get("args", {})
+    from .syntax import _V03_OPS
+
+    if op in _V03_OPS:
+        from .modern import build_modern
+
+        return build_modern(op, args)
     if op == "linear":
         return nn.Linear(args["in"], args["out"])
     if op == "layernorm":
@@ -181,20 +187,39 @@ class Artifact:
         return result
 
     def predict(self, x: torch.Tensor | Sequence[Sequence[float]] | Sequence[float]) -> torch.Tensor:
-        """Run inference. Accepts one feature vector or a batch ``[N, features]``."""
+        """Run inference. Accepts one sample or a batch with the declared sample shape."""
 
         spec = self.manifest["interface"]["input"]
-        tensor = torch.as_tensor(x, dtype=torch.float32)
-        single = tensor.dim() == 1
+        try:
+            raw = torch.as_tensor(x)
+            if spec["dtype"] == "i64":
+                if (
+                    raw.dtype == torch.bool
+                    or raw.is_complex()
+                    or not torch.isfinite(raw).all()
+                    or (raw < 0).any()
+                    or (raw.is_floating_point() and (raw >= 2**63).any())
+                    or (raw.is_floating_point() and not torch.all(raw == raw.trunc()))
+                ):
+                    raise WgtError("i64 inputs must contain finite integer token indices")
+                tensor = raw.to(torch.int64)
+            else:
+                tensor = torch.as_tensor(x, dtype=torch.float32)
+        except (ValueError, TypeError, RuntimeError, OverflowError) as exc:
+            raise WgtError(f"invalid input tensor: {exc}") from None
+        single = tensor.dim() == len(spec["shape"])
         if single:
             tensor = tensor.unsqueeze(0)
-        if tensor.dim() != 2 or list(tensor.shape[1:]) != spec["shape"]:
+        if tensor.dim() != len(spec["shape"]) + 1 or list(tensor.shape[1:]) != spec["shape"]:
             raise WgtError(
-                f"input {spec['name']!r} expects shape [N, {spec['shape'][0]}] or [{spec['shape'][0]}], "
+                f"input {spec['name']!r} expects shape [N, {', '.join(map(str, spec['shape']))}] or {spec['shape']}, "
                 f"got {list(tensor.shape)}"
             )
         with torch.no_grad():
-            out = self.module(tensor)
+            try:
+                out = self.module(tensor)
+            except (IndexError, RuntimeError) as exc:
+                raise WgtError(f"inference failed: {exc}") from None
         return out[0] if single else out
 
 
@@ -239,6 +264,43 @@ def load_artifact(path: str | Path, *, warn_untrained: bool = True) -> Artifact:
     source_path = root / source_meta["file"]
     _check(source_path.is_file(), f"missing source file {source_meta['file']}", root)
     _check(sha256_file(source_path) == source_meta["sha256"], "source sha256 mismatch", source_path)
+
+    if manifest["format_version"] == 3:
+        from .syntax import Layer, output_contract
+
+        def decode_layer(item):
+            return Layer(
+                name=item["name"],
+                op=item["op"],
+                args=item.get("args", {}),
+                line=0,
+                children=[decode_layer(c) for c in item.get("layers", [])],
+            )
+
+        def verify_contracts(items, layers):
+            for item, layer in zip(items, layers):
+                for key, inferred in (("input", layer.input_spec), ("output", layer.output_spec)):
+                    if key in item:
+                        _check(item[key] == inferred, f"recorded {key} contract mismatch at {layer.name}", root)
+                verify_contracts(item.get("layers", []), layer.children)
+
+        try:
+            layers = [decode_layer(item) for item in manifest["layers"]]
+            inp = manifest["interface"]["input"]
+            out = manifest["interface"]["output"]
+            for spec in (inp, out):
+                _check(
+                    spec["dtype"] in ("f32", "i64")
+                    and bool(spec["shape"])
+                    and all(type(n) is int and n > 0 for n in spec["shape"]),
+                    "invalid interface",
+                    root,
+                )
+            dtype, shape = output_contract(layers, inp["dtype"], tuple(inp["shape"]))
+            _check(dtype == out["dtype"] and list(shape) == out["shape"], "output shape/dtype mismatch", root)
+            verify_contracts(manifest["layers"], layers)
+        except (KeyError, TypeError, ValueError, IndexError, ZeroDivisionError) as exc:
+            raise WgtError(f"invalid v3 architecture: {exc}", None, str(root)) from None
 
     module = build_module(manifest["layers"])
     expected = module.state_dict()
