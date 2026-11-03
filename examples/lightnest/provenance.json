@@ -1,0 +1,71 @@
+{
+  "repository": "/home/lightjunction/Documents/GITHUB/lightnest",
+  "commit": "6210dcaa1387c74616f997990f6c40d5c9598442",
+  "scope": "current lightnest/architecture only; archive is historical and excluded",
+  "changes": [
+    "namespace lightnest.architecture -> lightnest_host",
+    "digest dependency replaced with identical hashlib.sha256 implementation"
+  ],
+  "files": {
+    "lightnest/architecture/__init__.py": {
+      "original_sha256": "cf66d31fc7f3ad36a244dcf9b6b98b37da0f217dfd74668aa2decaedf2dc025f",
+      "snapshot_sha256": "cf66d31fc7f3ad36a244dcf9b6b98b37da0f217dfd74668aa2decaedf2dc025f"
+    },
+    "lightnest/architecture/any2any.py": {
+      "original_sha256": "5cc1c82779be3b0b069f363544204ae53e20ba944cb7d4b589e78ed3ceba13b5",
+      "snapshot_sha256": "42ad86dcd9f7c03a8173702e712fdfd0422a8d0c2a40d6ebddbed8c4ba94f6e9"
+    },
+    "lightnest/architecture/attention.py": {
+      "original_sha256": "88a1a196df14840884681c49b78044e15d0cd52bf50cf14734f3302c10698d5e",
+      "snapshot_sha256": "88a1a196df14840884681c49b78044e15d0cd52bf50cf14734f3302c10698d5e"
+    },
+    "lightnest/architecture/byte_tokenizer.py": {
+      "original_sha256": "142b91e64bad4be7f0a4d87080eec4b15f84e0528c0e0d7724928a020cda0320",
+      "snapshot_sha256": "142b91e64bad4be7f0a4d87080eec4b15f84e0528c0e0d7724928a020cda0320"
+    },
+    "lightnest/architecture/context.py": {
+      "original_sha256": "b7ed490c33d2e16b2e4411fe0ba429af7ab958f9c51970be4d0b9cff13c5036b",
+      "snapshot_sha256": "b7ed490c33d2e16b2e4411fe0ba429af7ab958f9c51970be4d0b9cff13c5036b"
+    },
+    "lightnest/architecture/elf_tensor_loader.py": {
+      "original_sha256": "371a75931fe6a473d4faf7502a50a21af74500f46a7956d5a461fb2ce4a06291",
+      "snapshot_sha256": "371a75931fe6a473d4faf7502a50a21af74500f46a7956d5a461fb2ce4a06291"
+    },
+    "lightnest/architecture/generate.py": {
+      "original_sha256": "341f59efcb7c190d3d8f617e0b3a6813822ac4385123a81bb7d34ce0fb70dd2f",
+      "snapshot_sha256": "341f59efcb7c190d3d8f617e0b3a6813822ac4385123a81bb7d34ce0fb70dd2f"
+    },
+    "lightnest/architecture/hnet.py": {
+      "original_sha256": "305c1ed758193c5404116b88be32db2f6b1f94720c0d60de9d86e130fe8770bd",
+      "snapshot_sha256": "305c1ed758193c5404116b88be32db2f6b1f94720c0d60de9d86e130fe8770bd"
+    },
+    "lightnest/architecture/linux_environment.py": {
+      "original_sha256": "e39dd3588085ce85abfa7e27e295020252940f14f42cd2f84a55a1c06b9d572a",
+      "snapshot_sha256": "e39dd3588085ce85abfa7e27e295020252940f14f42cd2f84a55a1c06b9d572a"
+    },
+    "lightnest/architecture/model.py": {
+      "original_sha256": "0531c8ee83306719e5b3b4581cdda529ac22cfcd43052cc29f2bf5bbd4df4806",
+      "snapshot_sha256": "a5954ccf994acfc01c675084a9b5c2f3918042d7322e3025e4dba98f2e121720"
+    },
+    "lightnest/architecture/observe.py": {
+      "original_sha256": "73ceeeaf6ddd2e7b6945e02e7d632469ecbdf7984b2100630504621b5f83fc9c",
+      "snapshot_sha256": "86c5f711bce6985ce2a3b278538a96046d1eaa4e9893d2c39e274b1636830d13"
+    },
+    "lightnest/architecture/ptx_internal.py": {
+      "original_sha256": "e3298768ba22742aeec10a5d492ef60f671955625afd96f9f26e30ea177f43be",
+      "snapshot_sha256": "e3298768ba22742aeec10a5d492ef60f671955625afd96f9f26e30ea177f43be"
+    },
+    "lightnest/architecture/structure.py": {
+      "original_sha256": "e0639fdaeab3a8535e65e5388546a71dea41279f27dcaa0c75791ebc91f53b86",
+      "snapshot_sha256": "e0639fdaeab3a8535e65e5388546a71dea41279f27dcaa0c75791ebc91f53b86"
+    },
+    "lightnest/architecture/x86_internal.py": {
+      "original_sha256": "e00932789021fba29d332d2a1fea22d298115a0b61289d27c43a573db1055469",
+      "snapshot_sha256": "e00932789021fba29d332d2a1fea22d298115a0b61289d27c43a573db1055469"
+    },
+    "lightnest/architecture/x86_world.py": {
+      "original_sha256": "76f1ec114b271c679facaa5f195d6bfffd332c6aac48c165b6ab69aea0e4b88d",
+      "snapshot_sha256": "9277e7c5cee050756fcf18447b9e37626b834b19ffa54505b95de6e977f56daf"
+    }
+  }
+}

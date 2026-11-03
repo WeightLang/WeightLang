@@ -1,0 +1,916 @@
+{
+  "status": "architecture fixtures only; no trained checkpoint or task-quality claim",
+  "device": "cpu",
+  "torch": "2.15.0",
+  "atol": 3e-06,
+  "rtol": 3e-05,
+  "training_check": "autograd and matched SGD step, eval-mode dropout; not a training run",
+  "source_sha256": {
+    "backend.py": "c9d46a9cbc66bd636810f5175f5c69bea86717f9a4d36db08a2dcc763b3be39e",
+    "export_sources.py": "0b784da1e6dcdee30f7e013585330e379e33b630bec70e97783a8c405524cdd0",
+    "lightnest_host/__init__.py": "cf66d31fc7f3ad36a244dcf9b6b98b37da0f217dfd74668aa2decaedf2dc025f",
+    "lightnest_host/any2any.py": "42ad86dcd9f7c03a8173702e712fdfd0422a8d0c2a40d6ebddbed8c4ba94f6e9",
+    "lightnest_host/attention.py": "88a1a196df14840884681c49b78044e15d0cd52bf50cf14734f3302c10698d5e",
+    "lightnest_host/byte_tokenizer.py": "142b91e64bad4be7f0a4d87080eec4b15f84e0528c0e0d7724928a020cda0320",
+    "lightnest_host/context.py": "b7ed490c33d2e16b2e4411fe0ba429af7ab958f9c51970be4d0b9cff13c5036b",
+    "lightnest_host/elf_tensor_loader.py": "371a75931fe6a473d4faf7502a50a21af74500f46a7956d5a461fb2ce4a06291",
+    "lightnest_host/generate.py": "341f59efcb7c190d3d8f617e0b3a6813822ac4385123a81bb7d34ce0fb70dd2f",
+    "lightnest_host/hnet.py": "305c1ed758193c5404116b88be32db2f6b1f94720c0d60de9d86e130fe8770bd",
+    "lightnest_host/linux_environment.py": "e39dd3588085ce85abfa7e27e295020252940f14f42cd2f84a55a1c06b9d572a",
+    "lightnest_host/model.py": "a5954ccf994acfc01c675084a9b5c2f3918042d7322e3025e4dba98f2e121720",
+    "lightnest_host/observe.py": "86c5f711bce6985ce2a3b278538a96046d1eaa4e9893d2c39e274b1636830d13",
+    "lightnest_host/ptx_internal.py": "e3298768ba22742aeec10a5d492ef60f671955625afd96f9f26e30ea177f43be",
+    "lightnest_host/structure.py": "e0639fdaeab3a8535e65e5388546a71dea41279f27dcaa0c75791ebc91f53b86",
+    "lightnest_host/x86_internal.py": "e00932789021fba29d332d2a1fea22d298115a0b61289d27c43a573db1055469",
+    "lightnest_host/x86_world.py": "9277e7c5cee050756fcf18447b9e37626b834b19ffa54505b95de6e977f56daf",
+    "project.py": "d11d28ed0ecb1ef863775442d6a8cd08798b9c7508fb896134e6bf5ed2d76026",
+    "verify.py": "af2ceb9c6e7846108d9bdc986c59ae3c4aa2edb435734fd4ef09cdc8347fc001"
+  },
+  "families": [
+    {
+      "family": "elf",
+      "config": {
+        "width": 16,
+        "capacity": 64
+      },
+      "kernels": 17,
+      "cases": [
+        {
+          "case": "depth_0",
+          "tensors": 4,
+          "max_absolute_error": 3.5762786865234375e-07,
+          "passed": true
+        },
+        {
+          "case": "depth_2",
+          "tensors": 4,
+          "max_absolute_error": 8.344650268554688e-07,
+          "passed": true
+        },
+        {
+          "case": "depth_4",
+          "tensors": 4,
+          "max_absolute_error": 7.152557373046875e-07,
+          "passed": true
+        },
+        {
+          "case": "stream_0_1",
+          "tensors": 4,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "stream_1_4",
+          "tensors": 4,
+          "max_absolute_error": 9.5367431640625e-07,
+          "passed": true
+        },
+        {
+          "case": "stream_4_6",
+          "tensors": 4,
+          "max_absolute_error": 7.152557373046875e-07,
+          "passed": true
+        },
+        {
+          "case": "generate_stop_and_bytes",
+          "tensors": 0,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 4.76837158203125e-07,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 27,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 2.384185791015625e-07,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "rgb",
+      "config": {
+        "width": 16,
+        "chunk_size": 8,
+        "heads": 4,
+        "landmarks": 2,
+        "detail_k": 2,
+        "red_depths": [
+          2,
+          4
+        ],
+        "note_slots": 4
+      },
+      "kernels": 48,
+      "cases": [
+        {
+          "case": "dense_1",
+          "tensors": 29,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "dense_17",
+          "tensors": 29,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "dense_65",
+          "tensors": 29,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "compressed_1",
+          "tensors": 29,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "compressed_17",
+          "tensors": 29,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "compressed_65",
+          "tensors": 29,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "routed_1",
+          "tensors": 29,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "routed_17",
+          "tensors": 29,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "routed_65",
+          "tensors": 29,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "budgeted",
+          "tensors": 59,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 62,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "hnet_dense",
+      "config": {
+        "width": 16,
+        "capacity": 64
+      },
+      "kernels": 25,
+      "cases": [
+        {
+          "case": "depth_0",
+          "tensors": 10,
+          "max_absolute_error": 6.556510925292969e-07,
+          "passed": true
+        },
+        {
+          "case": "depth_2",
+          "tensors": 10,
+          "max_absolute_error": 5.960464477539062e-07,
+          "passed": true
+        },
+        {
+          "case": "depth_4",
+          "tensors": 10,
+          "max_absolute_error": 5.960464477539062e-07,
+          "passed": true
+        },
+        {
+          "case": "stream_0_1",
+          "tensors": 10,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "stream_1_4",
+          "tensors": 10,
+          "max_absolute_error": 4.76837158203125e-07,
+          "passed": true
+        },
+        {
+          "case": "stream_4_6",
+          "tensors": 10,
+          "max_absolute_error": 5.960464477539062e-07,
+          "passed": true
+        },
+        {
+          "case": "generate_stop_and_bytes",
+          "tensors": 0,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 3.5762786865234375e-07,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 38,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "hnet_fixed",
+      "config": {
+        "width": 16,
+        "capacity": 64
+      },
+      "kernels": 25,
+      "cases": [
+        {
+          "case": "depth_0",
+          "tensors": 10,
+          "max_absolute_error": 4.76837158203125e-07,
+          "passed": true
+        },
+        {
+          "case": "depth_2",
+          "tensors": 10,
+          "max_absolute_error": 5.960464477539062e-07,
+          "passed": true
+        },
+        {
+          "case": "depth_4",
+          "tensors": 10,
+          "max_absolute_error": 5.960464477539062e-07,
+          "passed": true
+        },
+        {
+          "case": "stream_0_1",
+          "tensors": 10,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "stream_1_4",
+          "tensors": 10,
+          "max_absolute_error": 4.76837158203125e-07,
+          "passed": true
+        },
+        {
+          "case": "stream_4_6",
+          "tensors": 10,
+          "max_absolute_error": 2.980232238769531e-07,
+          "passed": true
+        },
+        {
+          "case": "generate_stop_and_bytes",
+          "tensors": 0,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 38,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "hnet_dynamic",
+      "config": {
+        "width": 16,
+        "capacity": 64
+      },
+      "kernels": 25,
+      "cases": [
+        {
+          "case": "depth_0",
+          "tensors": 10,
+          "max_absolute_error": 4.76837158203125e-07,
+          "passed": true
+        },
+        {
+          "case": "depth_2",
+          "tensors": 10,
+          "max_absolute_error": 5.960464477539062e-07,
+          "passed": true
+        },
+        {
+          "case": "depth_4",
+          "tensors": 10,
+          "max_absolute_error": 5.960464477539062e-07,
+          "passed": true
+        },
+        {
+          "case": "stream_0_1",
+          "tensors": 10,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "stream_1_4",
+          "tensors": 10,
+          "max_absolute_error": 3.5762786865234375e-07,
+          "passed": true
+        },
+        {
+          "case": "stream_4_6",
+          "tensors": 10,
+          "max_absolute_error": 5.364418029785156e-07,
+          "passed": true
+        },
+        {
+          "case": "generate_stop_and_bytes",
+          "tensors": 0,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 40,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 4.76837158203125e-07,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "any2any",
+      "config": {
+        "width": 32,
+        "heads": 4,
+        "max_bytes": 512,
+        "sequence_limit": 256,
+        "note_slots": 4,
+        "red_depths": [
+          2,
+          4
+        ]
+      },
+      "kernels": 61,
+      "cases": [
+        {
+          "case": "padding_and_request_order",
+          "tensors": 3,
+          "max_absolute_error": 1.9073486328125e-06,
+          "passed": true
+        },
+        {
+          "case": "heads",
+          "tensors": 10,
+          "max_absolute_error": 3.814697265625e-06,
+          "passed": true
+        },
+        {
+          "case": "semantic_embedding",
+          "tensors": 1,
+          "max_absolute_error": 5.960464477539063e-08,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 4.76837158203125e-07,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 81,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "any2any_mean",
+      "config": {
+        "width": 32,
+        "heads": 4,
+        "max_bytes": 512,
+        "sequence_limit": 256,
+        "note_slots": 4,
+        "red_depths": [
+          2,
+          4
+        ]
+      },
+      "kernels": 59,
+      "cases": [
+        {
+          "case": "padding_and_request_order",
+          "tensors": 3,
+          "max_absolute_error": 9.5367431640625e-07,
+          "passed": true
+        },
+        {
+          "case": "heads",
+          "tensors": 10,
+          "max_absolute_error": 1.9073486328125e-06,
+          "passed": true
+        },
+        {
+          "case": "semantic_embedding",
+          "tensors": 1,
+          "max_absolute_error": 5.960464477539063e-08,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 77,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "any2any_chunks",
+      "config": {
+        "width": 32,
+        "heads": 4,
+        "max_bytes": 512,
+        "sequence_limit": 256,
+        "note_slots": 4,
+        "red_depths": [
+          2,
+          4
+        ]
+      },
+      "kernels": 63,
+      "cases": [
+        {
+          "case": "padding_and_request_order",
+          "tensors": 3,
+          "max_absolute_error": 9.5367431640625e-07,
+          "passed": true
+        },
+        {
+          "case": "heads",
+          "tensors": 10,
+          "max_absolute_error": 1.1920928955078125e-06,
+          "passed": true
+        },
+        {
+          "case": "semantic_embedding",
+          "tensors": 1,
+          "max_absolute_error": 6.705522537231445e-08,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 4.76837158203125e-07,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 85,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "any2any_bpe",
+      "config": {
+        "width": 32,
+        "heads": 4,
+        "max_bytes": 512,
+        "sequence_limit": 256,
+        "note_slots": 4,
+        "red_depths": [
+          2,
+          4
+        ],
+        "semantic_bpe": "{\"version\":\"1.0\",\"truncation\":null,\"padding\":null,\"added_tokens\":[],\"normalizer\":null,\"pre_tokenizer\":null,\"post_processor\":null,\"decoder\":null,\"model\":{\"type\":\"BPE\",\"dropout\":null,\"unk_token\":null,\"continuing_subword_prefix\":null,\"end_of_word_suffix\":null,\"fuse_unk\":false,\"byte_fallback\":false,\"ignore_merges\":false,\"vocab\":{\"\u0100\":0,\"\u0101\":1,\"\u0102\":2,\"\u0103\":3,\"\u0104\":4,\"\u0105\":5,\"\u0106\":6,\"\u0107\":7,\"\u0108\":8,\"\u0109\":9,\"\u010a\":10,\"\u010b\":11,\"\u010c\":12,\"\u010d\":13,\"\u010e\":14,\"\u010f\":15,\"\u0110\":16,\"\u0111\":17,\"\u0112\":18,\"\u0113\":19,\"\u0114\":20,\"\u0115\":21,\"\u0116\":22,\"\u0117\":23,\"\u0118\":24,\"\u0119\":25,\"\u011a\":26,\"\u011b\":27,\"\u011c\":28,\"\u011d\":29,\"\u011e\":30,\"\u011f\":31,\"\u0120\":32,\"\u0121\":33,\"\u0122\":34,\"\u0123\":35,\"\u0124\":36,\"\u0125\":37,\"\u0126\":38,\"\u0127\":39,\"\u0128\":40,\"\u0129\":41,\"\u012a\":42,\"\u012b\":43,\"\u012c\":44,\"\u012d\":45,\"\u012e\":46,\"\u012f\":47,\"\u0130\":48,\"\u0131\":49,\"\u0132\":50,\"\u0133\":51,\"\u0134\":52,\"\u0135\":53,\"\u0136\":54,\"\u0137\":55,\"\u0138\":56,\"\u0139\":57,\"\u013a\":58,\"\u013b\":59,\"\u013c\":60,\"\u013d\":61,\"\u013e\":62,\"\u013f\":63,\"\u0140\":64,\"\u0141\":65,\"\u0142\":66,\"\u0143\":67,\"\u0144\":68,\"\u0145\":69,\"\u0146\":70,\"\u0147\":71,\"\u0148\":72,\"\u0149\":73,\"\u014a\":74,\"\u014b\":75,\"\u014c\":76,\"\u014d\":77,\"\u014e\":78,\"\u014f\":79,\"\u0150\":80,\"\u0151\":81,\"\u0152\":82,\"\u0153\":83,\"\u0154\":84,\"\u0155\":85,\"\u0156\":86,\"\u0157\":87,\"\u0158\":88,\"\u0159\":89,\"\u015a\":90,\"\u015b\":91,\"\u015c\":92,\"\u015d\":93,\"\u015e\":94,\"\u015f\":95,\"\u0160\":96,\"\u0161\":97,\"\u0162\":98,\"\u0163\":99,\"\u0164\":100,\"\u0165\":101,\"\u0166\":102,\"\u0167\":103,\"\u0168\":104,\"\u0169\":105,\"\u016a\":106,\"\u016b\":107,\"\u016c\":108,\"\u016d\":109,\"\u016e\":110,\"\u016f\":111,\"\u0170\":112,\"\u0171\":113,\"\u0172\":114,\"\u0173\":115,\"\u0174\":116,\"\u0175\":117,\"\u0176\":118,\"\u0177\":119,\"\u0178\":120,\"\u0179\":121,\"\u017a\":122,\"\u017b\":123,\"\u017c\":124,\"\u017d\":125,\"\u017e\":126,\"\u017f\":127,\"\u0180\":128,\"\u0181\":129,\"\u0182\":130,\"\u0183\":131,\"\u0184\":132,\"\u0185\":133,\"\u0186\":134,\"\u0187\":135,\"\u0188\":136,\"\u0189\":137,\"\u018a\":138,\"\u018b\":139,\"\u018c\":140,\"\u018d\":141,\"\u018e\":142,\"\u018f\":143,\"\u0190\":144,\"\u0191\":145,\"\u0192\":146,\"\u0193\":147,\"\u0194\":148,\"\u0195\":149,\"\u0196\":150,\"\u0197\":151,\"\u0198\":152,\"\u0199\":153,\"\u019a\":154,\"\u019b\":155,\"\u019c\":156,\"\u019d\":157,\"\u019e\":158,\"\u019f\":159,\"\u01a0\":160,\"\u01a1\":161,\"\u01a2\":162,\"\u01a3\":163,\"\u01a4\":164,\"\u01a5\":165,\"\u01a6\":166,\"\u01a7\":167,\"\u01a8\":168,\"\u01a9\":169,\"\u01aa\":170,\"\u01ab\":171,\"\u01ac\":172,\"\u01ad\":173,\"\u01ae\":174,\"\u01af\":175,\"\u01b0\":176,\"\u01b1\":177,\"\u01b2\":178,\"\u01b3\":179,\"\u01b4\":180,\"\u01b5\":181,\"\u01b6\":182,\"\u01b7\":183,\"\u01b8\":184,\"\u01b9\":185,\"\u01ba\":186,\"\u01bb\":187,\"\u01bc\":188,\"\u01bd\":189,\"\u01be\":190,\"\u01bf\":191,\"\u01c0\":192,\"\u01c1\":193,\"\u01c2\":194,\"\u01c3\":195,\"\u01c4\":196,\"\u01c5\":197,\"\u01c6\":198,\"\u01c7\":199,\"\u01c8\":200,\"\u01c9\":201,\"\u01ca\":202,\"\u01cb\":203,\"\u01cc\":204,\"\u01cd\":205,\"\u01ce\":206,\"\u01cf\":207,\"\u01d0\":208,\"\u01d1\":209,\"\u01d2\":210,\"\u01d3\":211,\"\u01d4\":212,\"\u01d5\":213,\"\u01d6\":214,\"\u01d7\":215,\"\u01d8\":216,\"\u01d9\":217,\"\u01da\":218,\"\u01db\":219,\"\u01dc\":220,\"\u01dd\":221,\"\u01de\":222,\"\u01df\":223,\"\u01e0\":224,\"\u01e1\":225,\"\u01e2\":226,\"\u01e3\":227,\"\u01e4\":228,\"\u01e5\":229,\"\u01e6\":230,\"\u01e7\":231,\"\u01e8\":232,\"\u01e9\":233,\"\u01ea\":234,\"\u01eb\":235,\"\u01ec\":236,\"\u01ed\":237,\"\u01ee\":238,\"\u01ef\":239,\"\u01f0\":240,\"\u01f1\":241,\"\u01f2\":242,\"\u01f3\":243,\"\u01f4\":244,\"\u01f5\":245,\"\u01f6\":246,\"\u01f7\":247,\"\u01f8\":248,\"\u01f9\":249,\"\u01fa\":250,\"\u01fb\":251,\"\u01fc\":252,\"\u01fd\":253,\"\u01fe\":254,\"\u01ff\":255,\"\u0161\u0120\":256,\"\u0161\u016c\":257,\"\u0162\u0165\":258,\"\u0168\u0161\u0120\":259,\"\u0170\u0168\u0161\u0120\":260,\"\u0161\u016c\u0170\u0168\u0161\u0120\":261,\"\u0162\u0165\u0174\":262,\"\u0161\u016c\u0170\u0168\u0161\u0120\u0162\u0165\u0174\":263,\"\u0161\u0120\u0161\u016c\u0170\u0168\u0161\u0120\u0162\u0165\u0174\":264,\"\u0161\u016c\u0170\u0168\u0161\u0120\u0162\u0165\u0174\u0161\u0120\u0161\u016c\u0170\u0168\u0161\u0120\u0162\u0165\u0174\":265,\"\u0161\u016c\u0170\u0168\u0161\u0120\u0162\u0165\u0174\u0161\u0120\u0161\u016c\u0170\u0168\u0161\u0120\u0162\u0165\u0174\u0161\":266},\"merges\":[[\"\u0161\",\"\u0120\"],[\"\u0161\",\"\u016c\"],[\"\u0162\",\"\u0165\"],[\"\u0168\",\"\u0161\u0120\"],[\"\u0170\",\"\u0168\u0161\u0120\"],[\"\u0161\u016c\",\"\u0170\u0168\u0161\u0120\"],[\"\u0162\u0165\",\"\u0174\"],[\"\u0161\u016c\u0170\u0168\u0161\u0120\",\"\u0162\u0165\u0174\"],[\"\u0161\u0120\",\"\u0161\u016c\u0170\u0168\u0161\u0120\u0162\u0165\u0174\"],[\"\u0161\u016c\u0170\u0168\u0161\u0120\u0162\u0165\u0174\",\"\u0161\u0120\u0161\u016c\u0170\u0168\u0161\u0120\u0162\u0165\u0174\"],[\"\u0161\u016c\u0170\u0168\u0161\u0120\u0162\u0165\u0174\u0161\u0120\u0161\u016c\u0170\u0168\u0161\u0120\u0162\u0165\u0174\",\"\u0161\"]]}}"
+      },
+      "kernels": 76,
+      "cases": [
+        {
+          "case": "padding_and_request_order",
+          "tensors": 3,
+          "max_absolute_error": 1.9073486328125e-06,
+          "passed": true
+        },
+        {
+          "case": "heads",
+          "tensors": 10,
+          "max_absolute_error": 3.814697265625e-06,
+          "passed": true
+        },
+        {
+          "case": "semantic_memory",
+          "tensors": 5,
+          "max_absolute_error": 4.76837158203125e-07,
+          "passed": true
+        },
+        {
+          "case": "language_tied_embedding",
+          "tensors": 2,
+          "max_absolute_error": 9.5367431640625e-07,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 119,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 4.76837158203125e-07,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "structure",
+      "config": {
+        "width": 8
+      },
+      "kernels": 5,
+      "cases": [
+        {
+          "case": "source_",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "source_696e76616c696420707974686f6e20ff",
+          "tensors": 1,
+          "max_absolute_error": 7.450580596923828e-09,
+          "passed": true
+        },
+        {
+          "case": "source_64656620662878293a0a2072657475726e2078202b20310a",
+          "tensors": 1,
+          "max_absolute_error": 7.450580596923828e-09,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 9,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "token_structure",
+      "config": {
+        "width": 8
+      },
+      "kernels": 7,
+      "cases": [
+        {
+          "case": "source_",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "source_696e76616c696420707974686f6e20ff",
+          "tensors": 1,
+          "max_absolute_error": 7.450580596923828e-09,
+          "passed": true
+        },
+        {
+          "case": "source_64656620662878293a0a2072657475726e2078202b20310a",
+          "tensors": 1,
+          "max_absolute_error": 2.9802322387695312e-08,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 3.725290298461914e-09,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 13,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "ast_structure",
+      "config": {
+        "width": 8
+      },
+      "kernels": 5,
+      "cases": [
+        {
+          "case": "source_",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "source_696e76616c696420707974686f6e20ff",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "source_64656620662878293a0a2072657475726e2078202b20310a",
+          "tensors": 1,
+          "max_absolute_error": 7.450580596923828e-09,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 1.862645149230957e-09,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 9,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 1.862645149230957e-09,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "openat",
+      "config": {
+        "path_size": 8,
+        "width": 4
+      },
+      "kernels": 3,
+      "cases": [
+        {
+          "case": "null_clamp_flags",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 5,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "family": "x86_world",
+      "config": {
+        "condition_width": 4,
+        "candidates": 2,
+        "image_capacity": 256,
+        "memory_size": 512,
+        "output_size": 16,
+        "environment": {
+          "path_size": 8,
+          "width": 4
+        }
+      },
+      "kernels": 6,
+      "cases": [
+        {
+          "case": "rounds_1",
+          "tensors": 7,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "rounds_2",
+          "tensors": 7,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "loss",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "mapped_parameter_gradients",
+          "parameters": 6,
+          "passed": true
+        },
+        {
+          "case": "after_matched_sgd_step",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "save_reload_after_sgd",
+          "tensors": 1,
+          "max_absolute_error": 0.0,
+          "passed": true
+        },
+        {
+          "case": "complete_elf_exit37_invalid_header_ptx_and_acceptance",
+          "passed": true
+        }
+      ]
+    }
+  ]
+}
