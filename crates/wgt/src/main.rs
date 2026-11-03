@@ -50,7 +50,7 @@ struct Cli {
 }
 #[derive(clap::Args, Default)]
 struct DeviceOptions {
-    /// Execution device: native auto/cpu/gpu/BACKEND:N; Torch cpu/cuda/cuda:N
+    /// Execution device: native auto/cpu/gpu/BACKEND:N; other backends define their own IDs
     #[arg(long)]
     device: Option<String>,
     /// Override a layer or parameter device (TARGET=DEVICE), repeatable
