@@ -1,5 +1,30 @@
 # Build and publish
 
+## Automated releases
+
+`.github/workflows/publish-editors.yml` tests and packages editor support when an
+`editors-vX.Y.Z` tag is pushed. The tag must match this extension's package version.
+It publishes to Marketplace using GitHub OIDC and creates a GitHub release with
+the VSIX, editor source archive and SHA-256 checksums. No PAT is stored in GitHub.
+
+The Marketplace publisher's Trusted Publishing policy must name repository owner
+`WeightLang`, repository `WeightLang`, and workflow `publish-editors.yml` (no
+environment). See [Microsoft's setup instructions](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing).
+
+After updating and committing the extension version and lockfile:
+
+```sh
+git tag editors-vX.Y.Z
+git push origin main editors-vX.Y.Z
+```
+
+The workflow can also be dispatched with an existing tag. By default it only
+tests/packages; enable `publish` to publish. Re-running skips an existing
+Marketplace version and preserves existing GitHub release assets. Marketplace
+verification remains asynchronous. CI does not install extensions on your computer.
+
+## Local packaging
+
 From this directory:
 
 ```sh

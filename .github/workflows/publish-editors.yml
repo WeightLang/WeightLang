@@ -1,0 +1,106 @@
+name: Publish editor support
+
+on:
+  push:
+    tags: ['editors-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing editor release tag, for example editors-v0.2.0'
+        required: true
+        type: string
+      publish:
+        description: 'Publish to Marketplace and GitHub (otherwise test/package only)'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: editors-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select and validate the immutable release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^editors-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git checkout --detach "refs/tags/$RELEASE_TAG"
+          version=$(node -p "require('./editors/vscode/package.json').version")
+          test "$RELEASE_TAG" = "editors-v$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - name: Check build storage
+        run: |
+          df -h . "$RUNNER_TEMP"
+          findmnt -T .
+          du -sh editors/vscode/node_modules 2>/dev/null || true
+      - name: Install verification tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y vim neovim libxml2-utils
+          npm install --prefix "$RUNNER_TEMP/wgt-editor-tools" tree-sitter-cli@0.26.9
+          echo "$RUNNER_TEMP/wgt-editor-tools/node_modules/.bin" >> "$GITHUB_PATH"
+          npm ci --prefix editors/vscode
+      - name: Verify highlighting and generated assets
+        run: |
+          node scripts/generate_editor_support.cjs --check
+          npm test --prefix editors/vscode
+          node scripts/test_editor_support.cjs
+          git diff --exit-code
+      - name: Package release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run package --prefix editors/vscode
+          mkdir -p dist/editor-release
+          cp "editors/vscode/weightlang-$VERSION.vsix" dist/editor-release/
+          git archive --format=tar.gz --prefix="weightlang-editors-$VERSION/" \
+            -o "dist/editor-release/weightlang-editors-$VERSION.tar.gz" HEAD \
+            editors scripts/editor-templates scripts/generate_editor_support.cjs \
+            scripts/test_editor_support.cjs docs/editors.md
+          (cd dist/editor-release && sha256sum *.vsix *.tar.gz > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.RELEASE_TAG }}
+          path: dist/editor-release/
+          if-no-files-found: error
+      - name: Publish Marketplace with GitHub OIDC
+        if: github.event_name == 'push' || inputs.publish
+        working-directory: editors/vscode
+        run: npx --no-install vsce publish --oidc --skip-duplicate --packagePath "weightlang-$VERSION.vsix"
+      - name: Publish GitHub release without overwriting existing assets
+        if: github.event_name == 'push' || inputs.publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists; preserving its published artifacts."
+          else
+            printf 'Editor support %s.\n\nSource: %s\n\nValidated TextMate, Tree-sitter, Vim/Neovim and XML assets.\nInstall the VSIX with code --install-extension.\n' \
+              "$VERSION" "$SOURCE_SHA" > "$RUNNER_TEMP/editor-release-notes.md"
+            gh release create "$RELEASE_TAG" dist/editor-release/* \
+              --verify-tag --latest=false --title "Editor support $VERSION" \
+              --notes-file "$RUNNER_TEMP/editor-release-notes.md"
+          fi
