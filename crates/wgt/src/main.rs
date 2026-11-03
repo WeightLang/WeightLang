@@ -541,7 +541,7 @@ fn model_name(path: &Path) -> Result<Option<String>> {
             .unwrap_or("")
             .split_whitespace()
             .collect();
-        if let ["model", name] = words.as_slice() {
+        if let ["model", name] | ["model", name, "extends", ..] = words.as_slice() {
             ensure!(manifest::identifier(name), "invalid model name");
             return Ok(Some(name.to_string()));
         }

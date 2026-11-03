@@ -233,6 +233,7 @@ class Program:
 
     freezing: list[FreezeStmt] = field(default_factory=list)
     inherit: ImportStmt | None = None
+    derivation: object | None = None
 
     def find(self, dotted: str) -> Layer | None:
         return find_layer(self.layers, dotted)
@@ -910,6 +911,10 @@ def _last_leaf(layers: list[Layer]) -> Layer:
 def parse(source: str, path: str | None = None) -> Program:
     """Parse and statically check a model file."""
 
+    from .derivation import is_derived, parse as parse_derived
+
+    if is_derived(source):
+        return parse_derived(source, path)
     fp = _FileParser(source, path, _Loader(), library=False)
     fp.run()
     if fp.model is None:

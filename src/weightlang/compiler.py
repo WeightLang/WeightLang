@@ -269,6 +269,10 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
         raise WgtError("compile_program needs a program parsed from a file")
     out_root = Path(out_dir)
     dest = out_root / program.model
+    if program.derivation is not None:
+        from .derivation import protect_output
+
+        protect_output(program, dest)
     if dest.is_symlink() or (dest.exists() and not (dest / MANIFEST_FILE).is_file()):
         raise WgtError(f"refusing to overwrite {dest}: not a regular WeightLang artifact directory")
     if dest.exists() and not force:
@@ -300,10 +304,19 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
         if reuse_policy is not None or reuse_source is not None or reuse_mapping or reuse_strict or reuse_revision is not None:
             from .reuse import apply as apply_reuse
 
+            if program.derivation is not None:
+                if reuse_mapping or reuse_strict or reuse_policy == "overlap":
+                    raise WgtError("derived models declare weight migration in source; reuse mappings/overlap/strict are incompatible")
+                reuse_source, reuse_policy = None, "none"
             reuse_report, reused_upstream = apply_reuse(
                 program, module, reuse_source, policy=reuse_policy or "exact", mapping=reuse_mapping,
                 strict=reuse_strict, revision=reuse_revision,
             )
+        derivation_record = None
+        if program.derivation is not None:
+            from .derivation import apply as apply_derivation
+
+            derivation_record = apply_derivation(program, module)
         import_records, upstream = _apply_imports(program, module, layers, base)
         upstream = {**reused_upstream, **upstream}
         apply_freezing(program, module)
@@ -362,6 +375,10 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
         }
         if reuse_report is not None:
             manifest["reuse"] = reuse_report
+        if derivation_record is not None:
+            from .derivation import record as record_derivation
+
+            record_derivation(manifest, derivation_record, trainable)
         if program.freezing:
             manifest["training_policy"] = {
                 "format": "weightlang.training-policy",

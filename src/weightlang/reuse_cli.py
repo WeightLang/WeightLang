@@ -126,6 +126,18 @@ def preview_build(args):
     repository = WeightRepository(args.store) if args.store else None
     if args.parent and repository.resolve(args.parent) != repository.status()["revision"]:
         raise WgtError("--parent does not match HEAD")
+    from .syntax import parse_file
+
+    program = parse_file(args.source)
+    if program.derivation is not None:
+        from .derivation import preview as preview_derivation
+
+        if options["mapping"] or options["strict"] or options["policy"] == "overlap":
+            raise WgtError("derived models declare migration in source; automatic reuse overrides are incompatible")
+        report = preview_derivation(program)
+        _write_report(args, report)
+        print(json.dumps(report, indent=2, allow_nan=False))
+        return 0
     try:
         with _baseline(args, repository) as (source, revision):
             report = preview(args.source, source, revision=revision, **options)
