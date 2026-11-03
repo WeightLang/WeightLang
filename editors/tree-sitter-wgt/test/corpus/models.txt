@@ -1,0 +1,339 @@
+==================
+Named axes, graph branches and multiline calls
+==================
+wgt 0.3
+model gated
+const WIDTH = 4
+input x: f32[time=3, feature=WIDTH]
+output y: f32[feature=WIDTH]
+# Two projections have independent parameters; neither is trained here.
+layer gate: linear(WIDTH) -> sigmoid from input
+layer value: linear(
+  out=WIDTH, # The batch axis is implicit.
+) from input
+layer selected: gate * value
+layer pooled: mean(axis=time)
+init seed=42
+
+---
+
+(source_file
+  (directive
+    (number))
+  (model_declaration
+    (identifier))
+  (constant_declaration
+    (identifier)
+    (number))
+  (port_declaration
+    (identifier)
+    (qualified_name
+      (identifier))
+    (array
+      (parameter
+        (identifier))
+      (number)
+      (punctuation)
+      (parameter
+        (identifier))
+      (qualified_name
+        (identifier))))
+  (port_declaration
+    (identifier)
+    (qualified_name
+      (identifier))
+    (array
+      (parameter
+        (identifier))
+      (qualified_name
+        (identifier))))
+  (comment)
+  (layer_declaration
+    (identifier)
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (qualified_name
+          (identifier))))
+    (operator)
+    (qualified_name
+      (identifier))
+    (clause)
+    (qualified_name
+      (identifier)))
+  (layer_declaration
+    (identifier)
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (parameter
+          (identifier))
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (comment)))
+    (clause)
+    (qualified_name
+      (identifier)))
+  (layer_declaration
+    (identifier)
+    (qualified_name
+      (identifier))
+    (operator)
+    (qualified_name
+      (identifier)))
+  (layer_declaration
+    (identifier)
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (parameter
+          (identifier))
+        (qualified_name
+          (identifier)))))
+  (directive
+    (parameter
+      (identifier))
+    (number)))
+
+==================
+Library, quoted hash, shared loop and numeric operators
+==================
+wgt 0.3
+use "path#tag.wgt" as lib
+block cell(dim, hidden=dim * 2):
+  layer fc: linear(in=dim, out=hidden)
+layer memory: recur(3, lib.cell(dim=4))
+const N = (8 // 2) + .5e-2
+freeze memory
+unfreeze memory
+
+---
+
+(source_file
+  (directive
+    (number))
+  (directive
+    (string)
+    (clause)
+    (qualified_name
+      (identifier)))
+  (block_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (parameter
+        (identifier))
+      (qualified_name
+        (identifier))
+      (operator)
+      (number)))
+  (layer_declaration
+    (identifier)
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (parameter
+          (identifier))
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (parameter
+          (identifier))
+        (qualified_name
+          (identifier)))))
+  (layer_declaration
+    (identifier)
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (number)
+        (punctuation)
+        (call
+          (qualified_name
+            (identifier)
+            (identifier))
+          (arguments
+            (parameter
+              (identifier))
+            (number))))))
+  (constant_declaration
+    (identifier)
+    (arguments
+      (number)
+      (operator)
+      (number))
+    (operator)
+    (number))
+  (directive
+    (qualified_name
+      (identifier)))
+  (directive
+    (qualified_name
+      (identifier))))
+
+==================
+Symbolic dimensions, empty shapes and comparisons
+==================
+wgt 0.3
+model empty
+# A runtime time axis may be empty; the scalar output omits all axes.
+dim T min=0 max=16
+require T % 2 == 0
+input x: f32[time=T,feature=4]
+output scalar: f32[] from reduced
+layer reduced: reduce_sum(axis=0)
+init seed=0
+
+---
+
+(source_file
+  (directive
+    (number))
+  (model_declaration
+    (identifier))
+  (comment)
+  (dimension_declaration
+    (identifier)
+    (parameter
+      (identifier))
+    (number)
+    (parameter
+      (identifier))
+    (number))
+  (directive
+    (qualified_name
+      (identifier))
+    (operator)
+    (number)
+    (operator)
+    (number))
+  (port_declaration
+    (identifier)
+    (qualified_name
+      (identifier))
+    (array
+      (parameter
+        (identifier))
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (parameter
+        (identifier))
+      (number)))
+  (port_declaration
+    (identifier)
+    (qualified_name
+      (identifier))
+    (array)
+    (clause)
+    (qualified_name
+      (identifier)))
+  (layer_declaration
+    (identifier)
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (parameter
+          (identifier))
+        (number))))
+  (directive
+    (parameter
+      (identifier))
+    (number)))
+
+==================
+Legacy data and source imports remain editable
+==================
+wgt 0.3
+model old
+input x: f32[1]
+output y: f32[1]
+data samples:
+  [0] -> [1]
+  [-1.5] -> [2e-3]
+layer fc: linear(in=1, out=1)
+import fc from "weights/base" freeze
+train data=samples loss=mse optimizer=adam lr=1e-3 epochs=10
+
+---
+
+(source_file
+  (directive
+    (number))
+  (model_declaration
+    (identifier))
+  (port_declaration
+    (identifier)
+    (qualified_name
+      (identifier))
+    (array
+      (number)))
+  (port_declaration
+    (identifier)
+    (qualified_name
+      (identifier))
+    (array
+      (number)))
+  (directive
+    (qualified_name
+      (identifier))
+    (punctuation))
+  (data_row
+    (array
+      (number))
+    (array
+      (number)))
+  (data_row
+    (array
+      (operator)
+      (number))
+    (array
+      (number)))
+  (layer_declaration
+    (identifier)
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (parameter
+          (identifier))
+        (number)
+        (punctuation)
+        (parameter
+          (identifier))
+        (number))))
+  (directive
+    (qualified_name
+      (identifier))
+    (clause)
+    (string)
+    (qualified_name
+      (identifier)))
+  (directive
+    (parameter
+      (identifier))
+    (qualified_name
+      (identifier))
+    (parameter
+      (identifier))
+    (qualified_name
+      (identifier))
+    (parameter
+      (identifier))
+    (qualified_name
+      (identifier))
+    (parameter
+      (identifier))
+    (number)
+    (parameter
+      (identifier))
+    (number)))

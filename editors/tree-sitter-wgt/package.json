@@ -1,0 +1,7 @@
+{
+  "name":"tree-sitter-wgt",
+  "version":"0.1.0",
+  "private":true,
+  "license":"MIT",
+  "scripts":{"generate":"tree-sitter generate --abi 14","test":"tree-sitter test"}
+}

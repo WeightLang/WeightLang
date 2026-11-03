@@ -1,0 +1,12 @@
+id = "weightlang"
+name = "WeightLang"
+version = "0.1.0"
+schema_version = 1
+authors = ["WeightLang contributors"]
+description = "Syntax highlighting, bracket matching and outline for declarative WeightLang models."
+repository = "https://github.com/WeightLang/WeightLang"
+
+[grammars.wgt]
+repository = "https://github.com/WeightLang/WeightLang"
+rev = "main"
+path = "editors/tree-sitter-wgt"

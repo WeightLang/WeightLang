@@ -14,6 +14,7 @@ TextMate 还区分参数、调用名称、标点和运算符。高亮不判断�
 | TextMate | `editors/WeightLang.tmbundle/` | 同上 |
 | JetBrains IDE（启用 TextMate Bundles 插件） | 导入 `editors/WeightLang.tmbundle/` | 同上 |
 | Vim、Neovim | `editors/vim/` | 两者无界面实际高亮测试通过 |
+| Zed | `editors/zed/`，独立 Tree-sitter 扩展 | 原生解析/查询测试和 WASM 编译通过；未 GUI 验收、未上架 |
 | Emacs | `editors/emacs/wgt-mode.el` | 已提供 mode；未在 Emacs 执行验证 |
 | Kate、KWrite | `editors/kate/wgt.xml` | XML 检查通过；未 GUI 验收 |
 | GtkSourceView 编辑器，如 GNOME Text Editor | `editors/gtksourceview/wgt.lang` | GtkSourceView 5 实际加载/高亮测试通过 |
@@ -73,6 +74,18 @@ vim.cmd('syntax enable')
 也可以把 `editors/vim/` 目录作为整个 Vim package 安装到 `pack/*/start/weightlang/`。
 高亮采用 Vim 自带语法引擎，不依赖 Tree-sitter。
 
+### Zed
+
+在命令面板运行 **`zed: install dev extension`**，选择本仓库的 `editors/zed/`。
+Zed 会从 manifest 固定的提交下载并编译 `editors/tree-sitter-wgt/` 中的解析器；
+首次需要网络及 WASI 工具链，之后高亮可离线工作。打开 `.wgt` 文件后语言应显示 **WeightLang**。
+
+扩展提供高亮、括号配对、注释切换、平铺声明大纲，以及括号内部的续行缩进。
+尚无 LSP、按缩进划分的折叠或嵌套大纲；`wgt init 1` 算法脚本和
+`backend torch-dynamic` 不在该 Tree-sitter 语法支持范围内。
+插件尚未提交 Zed 扩展仓库；本地开发扩展安装不等于上架。
+详见 [Zed 扩展说明](../editors/zed/README.md)。
+
 ### Emacs
 
 ```elisp
@@ -100,8 +113,8 @@ Flatpak 应用可能需要使用其沙箱内的用户数据目录。
 ## 如何继续扩大覆盖
 
 - **分发**：后续发布 VSIX 到 Marketplace/Open VSX、提交编辑器的语言仓库，让用户不用手动复制。
-- **Tree-sitter**：为 Zed、Helix 和偏好 Tree-sitter 的 Neovim 用户编写真正的解析器和高亮查询。
-  当前没有实现，不能只把 TextMate 文件改名后使用。
+- **Tree-sitter**：已实现于 `editors/tree-sitter-wgt/`，Zed 包复用相同查询。
+  Helix、Neovim 可复用解析器，但仍需各自的语言注册；尚未提交这些编辑器的上游仓库。
 - **LSP**：复用 WGT 解析器提供诊断、补全、定义跳转等。它是下一层语义工具，当前没有实现。
 - **GitHub / 网页 / 文档**：需要分别集成 Linguist、Shiki、Pygments 等；仓库带了 grammar
   不会自动让 GitHub 识别新语言。此处尚未注册这些集成。
@@ -124,3 +137,16 @@ npm test --prefix editors/vscode
 TextMate 测试检查具体 token scope，并遍历 examples、packages 和标准库的 `.wgt` 文件。
 Python 测试检查生成文件同步、JSON/plist 等价，以及已安装的 Vim/Neovim 实际行为。
 未安装的 Vim/Neovim 测试会显示 skip。
+
+Tree-sitter 的结构规则在 `editors/tree-sitter-wgt/grammar.js`，高亮查询复用词表：
+
+```sh
+python scripts/generate_tree_sitter_queries.py
+python scripts/generate_tree_sitter_queries.py --check
+(cd editors/tree-sitter-wgt && tree-sitter generate --abi 14 && tree-sitter test)
+python -m pytest tests/test_tree_sitter_support.py -q
+```
+
+新增测试实际编译 C 解析器、遍历声明式模型、执行四种查询，并验证 CRLF/EOF、增量编辑和
+不完整声明后的恢复。需要 Tree-sitter CLI（本地使用 0.26.9）和 C 编译器；缺少 CLI 时会 skip。
+WASM 另用 `tree-sitter build --wasm` 验证；编译成功不等于已经在 Zed GUI 验收。
