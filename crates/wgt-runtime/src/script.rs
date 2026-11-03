@@ -1,8 +1,10 @@
 //! Explicit WGT host scripts, interpreted entirely in Rust. No Python bridge.
 pub mod codegen;
 pub mod compiled;
+mod benchmark;
 mod dataset;
 mod math;
+pub mod testing;
 mod one_hot;
 pub(crate) mod parse;
 use crate::training::{mlp, random, Objective, Optimizer, Trainer};
@@ -26,7 +28,7 @@ pub fn parse(source: &str) -> Result<Program> {
         ensure!(!program.contains_key("forward"), "forward requires model declarations");
     }
     if let Some(main) = program.get("main") { ensure!(main.args.is_empty(), "main takes no arguments"); }
-    else { ensure!(model_name.is_some(), "program requires fn main() or model declarations"); }
+    else { ensure!(model_name.is_some() || program.keys().any(|name| name.starts_with("test_")), "program requires fn main(), test_* functions or model declarations"); }
     Ok(program)
 }
 use parse::{Expr, Program, Statement, Stmt};
@@ -34,7 +36,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     fs::File,
     path::{Path, PathBuf},
-    time::Instant,
 };
 
 const BUILTINS: &[&str] = &[
@@ -255,12 +256,23 @@ fn execute(
 ) -> Result<(Runtime, Value)> {
     let program = parse(source)?;
     ensure!(program.contains_key("main"), "execution requires fn main(); model construction is explicit");
+    execute_program(program, root, max_operations, dependencies, "main")
+}
+
+fn execute_program(
+    program: Program,
+    root: &Path,
+    max_operations: u64,
+    dependencies: BTreeMap<String, String>,
+    entry: &str,
+) -> Result<(Runtime, Value)> {
     let mut runtime = Runtime {
         program,
         compiled: HashMap::new(),
         root: root.into(),
         dependencies,
         remaining: max_operations,
+        gpu_benchmark_restricted: false,
         depth: 0,
         models: Vec::new(),
         adaptive: Vec::new(),
@@ -268,7 +280,7 @@ fn execute(
         rng: 0,
         metrics: BTreeMap::new(),
     };
-    let result = runtime.call("main", Vec::new())?;
+    let result = runtime.call(entry, Vec::new())?;
     Ok((runtime, result))
 }
 pub struct Runtime {
@@ -277,6 +289,8 @@ pub struct Runtime {
     compiled: HashMap<String, compiled::Function>,
     root: PathBuf,
     remaining: u64,
+    // Direct benchmark dispatch cannot honor a capability-scoped compute budget.
+    gpu_benchmark_restricted: bool,
     depth: usize,
     models: Vec<crate::weightfs::Mounted<Trainer>>,
     adaptive: Vec<crate::weightfs::Mounted<crate::adaptive::AdaptiveSession>>,
@@ -411,6 +425,9 @@ impl Runtime {
     }
 
     pub fn call(&mut self, name: &str, args: Vec<Value>) -> Result<Value> {
+        if name == "compute_budget" {
+            self.gpu_benchmark_restricted = true;
+        }
         self.tick()?;
         if let Some(function) = self.compiled.get(name).cloned() {
             ensure!(
@@ -453,6 +470,9 @@ impl Runtime {
             .with_context(|| format!("{name}()"))
     }
     fn builtin(&mut self, name: &str, a: &[Value]) -> Result<Value> {
+        if name == "benchmark" {
+            return self.benchmark(a);
+        }
         let count = match name {
             "random" => 0,
             "dependency" | "len" | "sum" | "sqrt" | "log" | "exp" | "seed" | "jsonl" | "close"
@@ -470,7 +490,7 @@ impl Runtime {
             | "kl_divergence" | "js_divergence" | "cross_entropy_probs" | "temperature_softmax" => 2,
             "hf_dataset" | "fma" | "clip" | "huber" | "linspace" | "vector_slice" => 3,
             "mlp" => 4,
-            "fit" | "reinforce" | "benchmark" | "train" => 5,
+            "fit" | "reinforce" | "train" => 5,
             "gae" => 7,
             _ => bail!("unknown function: {name}"),
         };
@@ -841,44 +861,6 @@ impl Runtime {
                 let index = self.models.len();
                 self.models.push(crate::weightfs::Mounted::auto(trainer)?);
                 Ok(Value::Model(index))
-            }
-            "benchmark" => {
-                let model = a[0].model()?;
-                let x = a[1].vector()?;
-                let (warmup, repeats) = (a[2].integer()?, a[3].integer()?);
-                let label = a[4].text()?;
-                ensure!(
-                    warmup <= 10000 && repeats > 0 && repeats <= 100000,
-                    "invalid benchmark iterations"
-                );
-                self.models[model].lock()?.predict(&x)?; // validate outside timing
-                for _ in 0..warmup {
-                    self.tick()?;
-                    std::hint::black_box(
-                        self.models[model].lock()?
-                            .session
-                            .run(&x)
-                            .map_err(anyhow::Error::msg)?,
-                    );
-                }
-                let mut times = Vec::with_capacity(repeats);
-                for _ in 0..repeats {
-                    self.tick()?;
-                    let start = Instant::now();
-                    std::hint::black_box(
-                        self.models[model].lock()?
-                            .session
-                            .run(&x)
-                            .map_err(anyhow::Error::msg)?,
-                    );
-                    times.push(start.elapsed().as_secs_f64() * 1e6);
-                }
-                times.sort_by(f64::total_cmp);
-                let report = serde_json::json!({"device":"cpu","unit":"us","warmup":warmup,"repeats":repeats,
-                    "mean":times.iter().sum::<f64>()/repeats as f64,"p50":times[(repeats-1)/2],"p95":times[(repeats-1)*95/100],
-                    "scope":"single-vector forward; excludes script dispatch, data loading and training"});
-                self.metrics.insert(label.into(), report.clone());
-                Value::from_json(report)
             }
             _ => bail!("unknown builtin"),
         }

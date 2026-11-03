@@ -63,6 +63,7 @@ pub fn run_with_dependencies(
         root: root.into(),
         dependencies,
         remaining: budget,
+        gpu_benchmark_restricted: false,
         depth: 0,
         models: Vec::new(),
         adaptive: Vec::new(),

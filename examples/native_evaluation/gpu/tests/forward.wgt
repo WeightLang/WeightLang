@@ -1,0 +1,8 @@
+wgt 0.5
+fn test_gpu_forward() {
+    # 同一已训练模型，单样本 [1] -> [1]。独立 GPU 套件让 CPU 主机无需假装测到 GPU。
+    let net = model("../../../../weights/native_evaluation/model.json", "sgd");
+    # GPU 每次计时含上传、提交、等待和回读；零 warmup 也会先进行一次同步验证。
+    let result = benchmark(net, [0.25], 5, 20, "gpu_forward", "gpu");
+    assert(result["device"] != "cpu", "GPU benchmark must never fall back to CPU");
+}

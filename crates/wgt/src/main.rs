@@ -1,3 +1,4 @@
+mod native_tests;
 mod project_ignore;
 
 use anyhow::{ensure, Context, Result};
@@ -329,8 +330,16 @@ enum Cmd {
         #[command(flatten)]
         devices: DeviceOptions,
     },
-    /// Test the current weight revision using tests/*.json
+    /// Run tests/*.wgt functions and tests/*.json fixtures
     Test {
+        /// Match a substring of file::test_name (or JSON fixture path)
+        #[arg(long)]
+        filter: Option<String>,
+        /// Reserved: native test AOT execution is not yet supported
+        #[arg(long)]
+        compiled: bool,
+        #[arg(long, default_value_t = 10_000_000)]
+        max_operations: u64,
         #[command(flatten)]
         runtime: ExecutionOptions,
         #[command(flatten)]
@@ -481,7 +490,7 @@ fn execute(cli: Cli) -> Result<u8> {
     }
     let command = cli.command.context("choose a command; see wgt --help")?;
     let base = fs::canonicalize(&cli.directory).context("project directory does not exist")?;
-    if matches!(&command, Cmd::Check { .. } | Cmd::Build { .. } | Cmd::Package { .. } | Cmd::Install { .. } | Cmd::Train { .. } | Cmd::Export { .. } | Cmd::RetiredRun { .. } | Cmd::Test { .. } | Cmd::Trace { .. } | Cmd::Debug { .. }) {
+    if matches!(&command, Cmd::Check { .. } | Cmd::Build { .. } | Cmd::Package { .. } | Cmd::Install { .. } | Cmd::Train { .. } | Cmd::Export { .. } | Cmd::RetiredRun { .. } | Cmd::Trace { .. } | Cmd::Debug { .. }) {
         compiler_command(&base)?;
     }
     match command {
@@ -1064,12 +1073,25 @@ fn execute(cli: Cli) -> Result<u8> {
                         .collect::<Vec<_>>(),
                     )?;
                 }
-                Cmd::Test { devices, runtime } => {
+                Cmd::Test {
+                    devices,
+                    runtime,
+                    filter,
+                    compiled,
+                    max_operations,
+                } => {
+                    ensure!(max_operations > 0, "max-operations must be positive");
+                    ensure!(std::env::var_os("WGT_HOST_POLICY").is_none(), "wgt test does not yet support WGT_HOST_POLICY; run an explicitly supervised script instead");
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
+                    ensure!(!compiled, "wgt test --compiled is not supported; use interpreted wgt test");
                     test_project(
                         &project,
                         &runtime.devices(devices, config.as_ref(), &project),
                         &runtime,
+                        filter.as_deref(),
+                        max_operations,
+                        cli.offline,
+                        cli.locked,
                     )?;
                 }
                 Cmd::ReleaseAssets {
@@ -1248,24 +1270,57 @@ fn build_with_trainers(
     Artifact::read(&path)?;
     Ok(path)
 }
-fn test_project(project: &Path, devices: &DeviceOptions, runtime: &ExecutionOptions) -> Result<()> {
+fn test_project(
+    project: &Path,
+    devices: &DeviceOptions,
+    runtime: &ExecutionOptions,
+    filter: Option<&str>,
+    max_operations: u64,
+    offline: bool,
+    locked: bool,
+) -> Result<()> {
     let directory = project.join("tests");
     ensure!(
         directory.is_dir(),
-        "no tests/ directory; add JSON input/expected fixtures"
+        "no tests/ directory; add *.wgt test functions or *.json fixtures"
     );
     let mut tests: Vec<_> = fs::read_dir(directory)?
-        .filter_map(|e| e.ok().map(|e| e.path()))
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
         .filter(|p| p.extension().is_some_and(|s| s == "json"))
+        .filter(|p| filter.is_none_or(|f| p.to_string_lossy().contains(f)))
         .collect();
     tests.sort();
-    ensure!(!tests.is_empty(), "no tests/*.json fixtures");
+    let native = native_tests::run(project, filter, max_operations, offline, locked)?;
+    let total = native.total + tests.len();
+    ensure!(
+        total > 0,
+        "no matching tests/*.wgt functions or tests/*.json fixtures"
+    );
     let native_initialization = DeviceOptions::default();
     let mut built = std::collections::BTreeMap::new();
-    let mut failed = 0;
+    let mut failed = native.failed;
     for path in &tests {
         let result = (|| -> Result<()> {
             let fixture: Value = serde_json::from_slice(&fs::read(path)?)?;
+            if let Some(predicted) = native_tests::fixture(project, &fixture, max_operations)? {
+                let atol = fixture
+                    .get("atol")
+                    .map(|v| v.as_f64().context("atol must be numeric"))
+                    .transpose()?
+                    .unwrap_or(1e-6);
+                ensure!(atol.is_finite() && atol >= 0.0, "invalid atol");
+                ensure!(
+                    close(
+                        &predicted,
+                        fixture.get("expected").context("missing expected")?,
+                        atol
+                    ),
+                    "prediction differs from expected: {predicted}"
+                );
+                return Ok(());
+            }
             let source = fixture["source"].as_str().context("test requires source")?;
             manifest::relative_file(source)?;
             if !built.contains_key(source) {
@@ -1327,12 +1382,11 @@ fn test_project(project: &Path, devices: &DeviceOptions, runtime: &ExecutionOpti
             }
         }
     }
-    ensure!(
-        failed == 0,
-        "{failed}/{} behavior tests failed",
-        tests.len()
+    println!(
+        "test result: {} passed; {failed} failed; {total} total",
+        total - failed
     );
-    println!("{} behavior tests passed", tests.len());
+    ensure!(failed == 0, "{failed}/{total} behavior tests failed");
     Ok(())
 }
 fn close(a: &Value, b: &Value, tol: f64) -> bool {

@@ -90,7 +90,7 @@ fn main() {
 | `save(model,path)` | 保存顺序或 forward 训练断点：结构、权重、冻结关系、优化器类别、步数和矩状态；顺序模型另保留共享关系 |
 | `restore(path)` | 读取断点，返回模型及恢复后的优化器 |
 | `save_model(model,path)` | 导出原生推理 IR v1 JSON；不包含优化器；forward 使用 Program 格式，供 model() 或 wgt-native adaptive 加载 |
-| `benchmark(model,input,warmup,repeats,name)` | CPU 单向量前向计时；warmup 0..10000，repeats 1..100000；返回并登记 us 单位 mean/p50/p95、次数与范围 |
+| `benchmark(model,workload,warmup,repeats,name[,mode])` | mode 默认 cpu；支持同步 GPU 前向和 train:cpu MSE 训练步；warmup 0..10000，repeats 1..100000；完整契约见[原生测试](native-testing.md#benchmark) |
 
 脚本整数参数目前限制为 0..1000000000；列表索引仍需满足实际长度。
 每次脚本最多创建 64 个模型、1024 个流句柄（包括已关闭的流）。运行结束自动释放所有资源。
@@ -128,8 +128,8 @@ GAE 使用 `delta[t] = reward[t] + gamma*(1-terminated[t])*next_value[t] - value
 误传自动 reset 后的观测价值。输入是一条顺序轨迹（可串接带显式边界的 episode），不是交错环境批次。
 最后一项以调用者提供的 next_value bootstrap，未提供未来轨迹的优势尾项视为 0。
 
-benchmark 仅计 CPU 前向，排除脚本 dispatch、数据读取和训练。warmup 前另做一次验证前向；
-p50/p95 为排序后 floor((N-1)*q) 项，无插值。没有跨模型速度结论、GPU 同步测量或统计显著性承诺。
+benchmark 默认 CPU 前向，也支持显式同步 GPU 前向及 CPU MSE 训练步。
+p50/p95 为排序后 floor((N-1)*q) 项，无插值；同步范围、训练更新与限制见[原生测试](native-testing.md#benchmark)。
 输出的训练数据损失、采样奖励只描述相应合成例子，不能视为泛化/真实任务质量证明。
 
 ## 保存与续训
@@ -437,3 +437,10 @@ WGT_REQUIRE_GPU=1 cargo test -p weightlang-runtime --features gpu --lib training
 `js_divergence`、`cross_entropy_probs` 和 `temperature_softmax`。
 完整签名、分布检查、零概率及预算规则见[概率分布分析](standard-library.md#概率分布分析)。
 这些接口仅计算脚本数值；不能作为新增 `fit` 损失名称或自动微分表达式使用。
+
+## 原生测试与评估
+
+`wgt test` 原生发现 tests/*.wgt 的无参 test_* 函数，逐测试隔离状态与预算；
+支持过滤、行号诊断、JSON 共存、JSONL 评估以及 CPU/GPU 前向和 CPU 训练步计时。
+AOT 测试入口明确拒绝；完整参数、版本与限制见[原生测试](native-testing.md)，
+可运行项目见[评估示例](../examples/native_evaluation/README.md)。

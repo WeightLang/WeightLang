@@ -1,0 +1,3 @@
+[project]
+module = "local/native-evaluation"
+edition = "0.5"

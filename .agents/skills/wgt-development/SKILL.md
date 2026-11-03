@@ -46,3 +46,8 @@ KL/交叉熵 p>0 且 q=0 报错，JS 支持不相交分布。无张量梯度或�
 例子 std/probability/distributions.wgt、temperature.wgt；完整契约见 docs/standard-library.md。
 
 原生 RL：`train model on (inputs,targets) rate lr clip max_norm;` 等价 train(model,inputs,targets,lr,max_norm)，仅 forward + fn loss，sgd/adam，正有限 lr/max_norm；全批次平均梯度做全局 L2 裁剪后原子更新。`target NAME: f32[N]` 指定 loss 第二形参宽度/名称，默认同输出，不增加 forward 输入。forward/loss 支持有限数字向量常量、detach、exp、log、log_softmax、sum、minimum（相等各半梯度）、clip（有符号字面量边界、端点零梯度）。全部无广播/默认值。完整契约 docs/reinforcement-learning.md，运行例子 examples/native_training/ppo/model.wgt；不支持单独 backward/step、跨调用梯度对象、环境/RNG 全进程续训。
+
+## 原生测试与评估
+
+`wgt test` 发现 tests/*.wgt 的无参 test_* 函数，每个测试独立运行且不执行 main。
+语法与示例见 references/native-testing.md；完整契约 docs/native-testing.md。

@@ -252,3 +252,10 @@ q 在 [0,1]，裁剪边界有限且有序；余弦要求等长非零向量。
 新增 forward/loss 数字向量字面量、detach、exp、log、log_softmax、sum、minimum、clip。
 完整签名、形状/梯度/边界/版本约束和完整可运行例子见[原生强化学习](reinforcement-learning.md)。
 普通脚本的数值/列表函数不因此自动可微；不支持单独 backward/step 或跨调用梯度对象。
+
+## 原生测试与评估
+
+`wgt test` 原生发现 tests/*.wgt 的无参 test_* 函数，逐测试隔离状态与预算；
+支持过滤、行号诊断、JSON 共存、JSONL 评估以及 CPU/GPU 前向和 CPU 训练步计时。
+AOT 测试入口明确拒绝；完整参数、版本与限制见[原生测试](native-testing.md)，
+可运行项目见[评估示例](../examples/native_evaluation/README.md)。
