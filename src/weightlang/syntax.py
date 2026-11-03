@@ -1,4 +1,4 @@
-"""Parser and static checks for WeightLang source files (language versions 0.1 and 0.2).
+"""Parser and static checks for WeightLang source files (language versions 0.1 through 0.3).
 
 The format is line oriented: one statement per line, ``#`` starts a comment.
 Indented lines belong to the preceding ``data`` block (rows) or ``block``
@@ -15,6 +15,8 @@ import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from .expressions import Expression, evaluate, logical_lines, parse_expression
 
 LANGUAGE_VERSION = "0.3"
 SUPPORTED_VERSIONS = ("0.1", "0.2", "0.3")
@@ -74,7 +76,7 @@ _TOKEN_RE = re.compile(
   | (?P<number>-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?(?![A-Za-z0-9_.]))
   | (?P<ident>[A-Za-z_][A-Za-z0-9_]*)
   | (?P<word>[A-Za-z0-9_]+)
-  | (?P<punct>[:=\[\](),./])
+  | (?P<punct>//|[:=\[\](),./+*%\-])
     """,
     re.VERBOSE,
 )
@@ -96,7 +98,7 @@ class WgtError(Exception):
         return f"{where}: {self.message}"
 
 
-Value = int | float | str  # str = reference to a block parameter
+Value = int | float | str | Expression  # str = reference to a block parameter
 
 
 @dataclass
@@ -157,6 +159,7 @@ class Block:
     line: int
     path: str | None
     scope: Scope | None = None
+    defaults: dict[str, Value] = field(default_factory=dict)
 
 
 @dataclass
@@ -167,6 +170,7 @@ class Scope:
     path: str | None
     blocks: dict[str, Block] = field(default_factory=dict)
     uses: dict[str, Scope] = field(default_factory=dict)
+    constants: dict[str, int | float] = field(default_factory=dict)
 
 
 @dataclass
@@ -275,6 +279,7 @@ def _strip_comment(raw: str) -> str:
 class _Cursor:
     def __init__(self, tokens: list[tuple[str, str]], line: int, path: str | None):
         self.tokens = tokens
+        self.version: str | None = None
         self.i = 0
         self.line = line
         self.path = path
@@ -328,17 +333,26 @@ def _number(text: str) -> int | float:
     return int(text) if re.fullmatch(r"-?\d+", text) else float(text)
 
 
-def _parse_port(cur: _Cursor) -> tuple[str, str, tuple[int, ...]]:
+def _parse_port(cur: _Cursor, constants: dict[str, int | float]) -> tuple[str, str, tuple[int, ...]]:
     name = cur.ident("port name")
     cur.expect("punct", ":")
     dtype = cur.ident("dtype")
     if dtype not in DTYPES:
         raise cur.error(f"unsupported dtype {dtype!r}; WeightLang supports only f32 and i64 (i64 requires wgt 0.3)")
     cur.expect("punct", "[")
-    dims = [cur.integer("dimension")]
+
+    def dimension() -> int:
+        if cur.version != "0.3":
+            return cur.integer("dimension")
+        value = evaluate(parse_expression(cur), constants, cur.error)
+        if not isinstance(value, int):
+            raise cur.error("dimension must be an integer")
+        return value
+
+    dims = [dimension()]
     while cur.peek() == ("punct", ","):
         cur.next(",")
-        dims.append(cur.integer("dimension"))
+        dims.append(dimension())
     cur.expect("punct", "]")
     cur.done()
     if any(dim <= 0 for dim in dims):
@@ -391,13 +405,7 @@ def _parse_spec(cur: _Cursor) -> Spec:
             while cur.peek() != ("punct", ")"):
                 key = cur.ident("argument name")
                 cur.expect("punct", "=")
-                kind, text = cur.next(f"value for {key}")
-                if kind == "number":
-                    value: Value = _number(text)
-                elif kind == "ident":
-                    value = text
-                else:
-                    raise cur.error(f"invalid value {text!r} for {key}")
+                value = parse_expression(cur)
                 if key in args:
                     raise cur.error(f"duplicate argument {key!r}")
                 args[key] = value
@@ -440,12 +448,16 @@ class _FileParser:
     def run(self) -> None:
         open_data: Dataset | None = None
         open_block: Block | None = None
-        for lineno, raw in enumerate(self.source.splitlines(), start=1):
-            text = _strip_comment(raw)
+        for lineno, text, multiline in logical_lines(
+            self.source, _strip_comment, lambda message, line: WgtError(message, line, self.path)
+        ):
+            if multiline and self.version != "0.3":
+                raise WgtError("multiline statements require 'wgt 0.3'", lineno, self.path)
             if not text.strip():
                 continue
             if text[0] in " \t":
                 cur = _Cursor(_tokenize(text, lineno, self.path), lineno, self.path)
+                cur.version = self.version
                 if open_data is not None:
                     x = _parse_vector(cur)
                     cur.expect("arrow", what="'->'")
@@ -472,14 +484,15 @@ class _FileParser:
             open_data = None
             open_block = None
             cur = _Cursor(_tokenize(text, lineno, self.path), lineno, self.path)
+            cur.version = self.version
             keyword = cur.ident("statement keyword")
             if self.version is None and keyword != "wgt":
                 raise cur.error("file must start with a version header: wgt 0.2")
             handler = getattr(self, f"_stmt_{keyword}", None)
             if handler is None:
                 raise cur.error(f"unknown statement {keyword!r}")
-            if self.library and keyword not in ("wgt", "use", "block"):
-                raise cur.error(f"{keyword!r} is not allowed in a library file (only use and block)")
+            if self.library and keyword not in ("wgt", "use", "block", "const"):
+                raise cur.error(f"{keyword!r} is not allowed in a library file (only use, block and const)")
             result = handler(cur, lineno)
             if isinstance(result, Dataset) and not result.file:
                 open_data = result
@@ -505,6 +518,17 @@ class _FileParser:
             raise cur.error("library files require 'wgt 0.2'")
         self.version = version
 
+    def _stmt_const(self, cur: _Cursor, line: int) -> None:
+        if self.version != "0.3":
+            raise cur.error("const requires 'wgt 0.3'")
+        name = cur.ident("constant name")
+        cur.expect("punct", "=")
+        value = parse_expression(cur)
+        cur.done()
+        if name in self.scope.constants:
+            raise cur.error(f"duplicate constant {name!r}")
+        self.scope.constants[name] = evaluate(value, self.scope.constants, cur.error)
+
     def _stmt_model(self, cur: _Cursor, line: int) -> None:
         if self.model is not None:
             raise cur.error("only one model per file is supported")
@@ -520,7 +544,7 @@ class _FileParser:
     def _port(self, kind: str, cur: _Cursor, line: int) -> None:
         if kind in self.ports:
             raise cur.error(f"only one {kind} is supported")
-        name, dtype, shape = _parse_port(cur)
+        name, dtype, shape = _parse_port(cur, self.scope.constants)
         if self.version != "0.3" and (dtype != "f32" or len(shape) != 1):
             raise cur.error("only 1-D f32 ports in this version; this interface requires 'wgt 0.3'")
         self.ports[kind] = Port(name, dtype, shape, line)
@@ -563,12 +587,20 @@ class _FileParser:
         self.need_v02("block", line)
         name = cur.ident("block name")
         params: list[str] = []
+        defaults: dict[str, Value] = {}
         cur.expect("punct", "(")
         while cur.peek() != ("punct", ")"):
             p = cur.ident("parameter name")
             if p in params:
                 raise cur.error(f"duplicate parameter {p!r}")
             params.append(p)
+            if cur.peek() == ("punct", "="):
+                if self.version != "0.3":
+                    raise cur.error("parameter defaults require 'wgt 0.3'")
+                cur.next("=")
+                defaults[p] = parse_expression(cur)
+            elif defaults:
+                raise cur.error("required parameters must precede default parameters")
             if cur.peek() == ("punct", ","):
                 cur.next(",")
         cur.expect("punct", ")")
@@ -578,7 +610,7 @@ class _FileParser:
             raise cur.error(f"block name {name!r} shadows a built-in op")
         if name in self.scope.blocks:
             raise cur.error(f"duplicate block {name!r}")
-        block = Block(name, params, [], line, self.path, self.scope)
+        block = Block(name, params, [], line, self.path, self.scope, defaults)
         self.scope.blocks[name] = block
         return block
 
@@ -749,15 +781,12 @@ class _Loader:
 # ---------------------------------------------------------------- resolution
 
 
-def _value(v: Value, env: dict[str, int], spec: Spec) -> int | float:
-    if isinstance(v, str):
-        if v not in env:
-            raise WgtError(f"unknown parameter {v!r}", spec.line, spec.path)
-        return env[v]
-    return v
+def _value(v: Value, env: dict[str, int | float], spec: Spec) -> int | float:
+    return evaluate(v, env, lambda message: WgtError(message, spec.line, spec.path))
 
 
-def _resolve(name: str, spec: Spec, scope: Scope, env: dict[str, int], stack: tuple[str, ...]) -> Layer:
+def _resolve(name: str, spec: Spec, scope: Scope, env: dict[str, int | float], stack: tuple[str, ...]) -> Layer:
+    env = {**scope.constants, **env}
     if spec.op == "residual" and spec.ns is None:
         assert spec.inner is not None
         inner = _resolve(name, spec.inner, scope, env, stack)
@@ -813,12 +842,16 @@ def _resolve(name: str, spec: Spec, scope: Scope, env: dict[str, int], stack: tu
     if label in stack:
         raise WgtError(f"block recursion: {' -> '.join(stack + (label,))}", spec.line, spec.path)
     args = {k: _value(v, env, spec) for k, v in spec.args.items()}
-    if set(args) != set(block.params):
+    if set(args) - set(block.params) or set(block.params) - set(args) - set(block.defaults):
         raise WgtError(
             f"block {block.name} takes ({', '.join(block.params)}), got ({', '.join(args)})", spec.line, spec.path
         )
     int_args: dict[str, int] = {}
-    for k, v in args.items():
+    for k in block.params:
+        v = args[k] if k in args else evaluate(
+            block.defaults[k], {**target.constants, **int_args},
+            lambda message: WgtError(message, block.line, block.path),
+        )
         if not isinstance(v, int) or v <= 0:
             raise WgtError(f"block parameter {k} must be a positive integer", spec.line, spec.path)
         int_args[k] = v

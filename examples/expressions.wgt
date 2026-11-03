@@ -1,0 +1,13 @@
+wgt 0.3
+const WIDTH = 4
+model expression_demo
+input x: f32[WIDTH]
+output y: f32[WIDTH]
+block ff(dim, hidden=dim * 4):
+  layer up: linear(in=dim, out=hidden)
+  layer activation: gelu
+  layer down: linear(in=hidden, out=dim)
+layer body: residual(ff(
+  dim=WIDTH,
+))
+init seed=42
