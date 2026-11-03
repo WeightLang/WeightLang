@@ -49,9 +49,13 @@ be empty, recursive or named after built-in operators. Missing parameters fail
 at their source line. A call expands into a nested sequence with stable names
 such as `body.body.fc1.weight`.
 
-`use std/nn` selects a bundled library; its default alias is `nn`.
+`import std/nn` (wgt 0.3) or `use std/nn` selects a bundled library without
+`wgt add`, network access or model-package locks. `import std/nn as n` chooses
+an alias; model and library files both support this form. Libraries contain
+computation definitions, not pretrained weights, and ship with the compiler; its default alias is `nn`.
 `use "./layers.wgt" as layers` selects a local library relative to the source.
-Library files contain only the version header, `use` and `block` statements.
+Library files allow the version header, `use`, `block`, and (in 0.3) `const`
+and bundled `import std/...` statements. Weight imports remain model-only.
 Cycles are errors. Remote source libraries are not supported.
 `weightc std` lists the available block signatures.
 

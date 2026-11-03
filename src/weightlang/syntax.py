@@ -534,7 +534,8 @@ class _FileParser:
             handler = getattr(self, f"_stmt_{keyword}", None)
             if handler is None:
                 raise cur.error(f"unknown statement {keyword!r}")
-            if self.library and keyword not in ("wgt", "use", "block", "const"):
+            std_import = keyword == "import" and cur.tokens[cur.i:cur.i + 2] == [("ident", "std"), ("punct", "/")]
+            if self.library and keyword not in ("wgt", "use", "block", "const") and not std_import:
                 raise cur.error(f"{keyword!r} is not allowed in a library file (only use, block and const)")
             result = handler(cur, lineno)
             if isinstance(result, Dataset) and not (result.file or result.python or result.entrypoint):
@@ -708,6 +709,11 @@ class _FileParser:
         self.seed = int(kv["seed"])
 
     def _stmt_import(self, cur: _Cursor, line: int) -> None:
+        if cur.tokens[cur.i:cur.i + 2] == [("ident", "std"), ("punct", "/")]:
+            if self.version != "0.3":
+                raise cur.error("standard-library import requires 'wgt 0.3'; use 'use std/<name>' in 0.2")
+            self._stmt_use(cur, line)
+            return
         target = cur.dotted("layer name")
         cur.expect("ident", "from", what="'from'")
         src = cur.expect("string", what="quoted artifact path")[1:-1]

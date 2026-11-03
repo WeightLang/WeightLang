@@ -125,6 +125,19 @@ def test_get_then_offline_build_reuses_published_weights(env, tmp_path):
     assert (load_artifact(res.path).predict(XNOR) >= 0.5).int().flatten().tolist() == [1, 0, 0, 1]
 
 
+def test_get_preserves_registry_provenance(env):
+    gh, consumer, _, _ = env
+    get(consumer, gh)
+    path = consumer / "wgt.sum"
+    with path.open("a") as stream:
+        stream.write(f"{MODULE} v0.1.0 registry WeightLang/registry\n")
+        stream.write(f"{MODULE} v0.1.0 registry-name weightlang/gates\n")
+    get(consumer, gh)
+    sums = read_sum(path)
+    assert sums[(MODULE, "v0.1.0", "registry")] == "WeightLang/registry"
+    assert sums[(MODULE, "v0.1.0", "registry-name")] == "weightlang/gates"
+
+
 def test_build_without_get_explains(env, tmp_path):
     _, consumer, _, _ = env
     with pytest.raises(WgtError, match="run: weightc get"):

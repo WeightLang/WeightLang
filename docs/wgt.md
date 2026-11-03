@@ -53,6 +53,7 @@ training cache yet.
 ## Dependencies
 
 ```sh
+wgt add github.com/WeightLang/WeightLang/packages/gates  # latest stable release, then pin
 wgt add github.com/WeightLang/WeightLang/packages/gates --version v0.2.0
 wgt tree
 wgt metadata
@@ -83,8 +84,26 @@ they fetch unless offline. Explicit fetch rechecks remote tags.
 
 Current scope: **exact versions and direct GitHub dependencies**. This is
 Cargo-like command ergonomics, not Cargo's full feature set: no semver solver,
-transitive dependencies, workspaces, central registry or feature unification.
-`update` therefore requires an explicit version; it never guesses “latest”.
+transitive dependencies, workspaces, hosted registry service or feature unification.
+`add MODULE` and `update MODULE` select the highest numeric stable published
+version for that package; `--version latest` is equivalent. Drafts, prereleases
+and other subdirectory packages are excluded. Discovery follows all GitHub release
+pages (up to 1000, then fails); it does not use the repository-wide Latest release.
+An exact `--version vX.Y.Z` skips discovery. `update` without MODULE still updates
+the toolchain, not model dependencies.
+
+The selected version is fetched and verified before writing an **exact** manifest
+pin and `wgt.sum`; future sync/build commands do not chase latest. Missing release
+assets or verification failures are errors, not permission to fall back silently.
+Discovery requires network access and GitHub API availability/rate allowance;
+`--offline` requires an explicit cached and locked version. `--locked` rejects
+add/update dependency edits. No version ranges or dependency solver are added.
+
+Bundled libraries need no `add`: in `wgt 0.3`, write `import std/nn` or
+`import std/nn as n`. Existing `use std/nn` remains supported. These import
+computation definitions, not pretrained weights; their version follows the compiler.
+Use `wgt add weightlang/gates` for registered names. See [Git registry](registry-design.md)
+for hash locks, registration PRs, and `publish --register-only` recovery.
 
 ## Behavior tests
 
@@ -111,10 +130,10 @@ location:
 
 ```sh
 wgt build
-wgt package --version v0.1.0 --artifacts build -o dist
-wgt publish --index dist/wgt.index.json --dry-run
+wgt package --version v0.1.0 --artifacts weights -o dist
+wgt publish --index dist/wgt.index.json --license MIT --dry-run
 # Push the exact commit and annotated package tag shown in the index, then:
-wgt publish --index dist/wgt.index.json
+wgt publish --index dist/wgt.index.json --license MIT
 ```
 
 `package` consumes **prebuilt** artifacts and needs no Python. It checks source
@@ -124,8 +143,11 @@ empty. `--allow-untrained` is an explicit experimental escape hatch and does
 not alter provenance. Packages with dependencies cannot be published yet.
 
 `publish` checks the existing remote tag matches the index commit and invokes
-`gh release create --verify-tag --prerelease`. It does not create/push tags,
+`gh release create --verify-tag --latest=false`. It does not create/push tags,
 overwrite releases, or claim the CLI's Latest slot. Dry-run uploads nothing.
+By default it then verifies the remote release and submits a registration PR;
+`--license` is required, `--no-register` opts out, and `--register-only` retries
+submission after a partial failure. See [registry workflow](registry-design.md).
 Ignore weights/ and dist/ in the package's Git configuration.
 
 ## Native architecture rendering

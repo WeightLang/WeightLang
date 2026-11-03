@@ -12,7 +12,7 @@ use weightlang_wgt::{
     artifact::Artifact,
     graph::Graph,
     manifest::{self, Manifest},
-    registry, toolchain,
+    package_index, registry, toolchain,
 };
 
 #[derive(Parser)]
@@ -37,6 +37,9 @@ struct Cli {
         help = "Require the existing lock file; refuse resolution changes"
     )]
     locked: bool,
+    /// GitHub Git index repository used for short package names and submissions
+    #[arg(long, global = true, default_value = package_index::DEFAULT_REGISTRY)]
+    registry: String,
     #[arg(long = "list", help = "List built-in commands and PATH extensions")]
     list: bool,
     #[command(subcommand)]
@@ -66,17 +69,16 @@ enum Cmd {
         #[arg(long)]
         module: Option<String>,
     },
-    /// Add an exact dependency, fetch it, then update the manifest and lock
+    /// Add a dependency (latest stable release by default), then pin and fetch it
     Add {
         module: String,
         #[arg(long)]
-        version: String,
+        version: Option<String>,
     },
     /// Remove a dependency and its lock entries (does not edit imports)
     Remove { module: String },
     /// Update wgt (latest or --version), or an explicit dependency
     Update {
-        #[arg(requires = "version")]
         module: Option<String>,
         #[arg(long)]
         version: Option<String>,
@@ -146,10 +148,37 @@ enum Cmd {
         #[arg(long)]
         allow_untrained: bool,
     },
-    /// Upload a prepared package index to a prerelease (requires git and gh)
+    /// Publish release assets and submit a registry PR (requires git and gh)
     Publish {
         #[arg(long)]
         index: PathBuf,
+        /// Registry name owner/package; inferred from the canonical module when omitted
+        #[arg(long)]
+        name: Option<String>,
+        /// Package license expression, e.g. MIT or Apache-2.0
+        #[arg(long, required_unless_present = "no_register")]
+        license: Option<String>,
+        #[arg(long, default_value = "0.3")]
+        edition: String,
+        /// Submit an already uploaded release; useful after a registry submission failure
+        #[arg(long, conflicts_with = "no_register")]
+        register_only: bool,
+        #[arg(long)]
+        no_register: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Verify and propose an existing published package to the registry
+    Register {
+        module: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        version: String,
+        #[arg(long)]
+        license: String,
+        #[arg(long, default_value = "0.3")]
+        edition: String,
         #[arg(long)]
         dry_run: bool,
     },
@@ -338,15 +367,48 @@ fn execute(cli: Cli) -> Result<u8> {
             }
             return Ok(cmd.status()?.code().unwrap_or(1).clamp(0, 255) as u8);
         }
-        Cmd::Publish { index, dry_run } => {
+        Cmd::Register { module, name, version, license, edition, dry_run } => {
+            ensure!(!cli.offline, "registration verification requires network");
+            ensure!(!cli.locked, "--locked forbids registry submissions");
+            let cache = registry::cache_root()?;
+            fs::create_dir_all(&cache)?;
+            let guard = fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(cache.join(".wgt-lock"))?;
+            guard.lock_exclusive()?;
+            package_index::register(&cli.registry, &name, &module, &version, &license, &edition, &cache, dry_run)?;
+        }
+        Cmd::Publish { index, name, license, edition, register_only, no_register, dry_run } => {
             ensure!(dry_run || !cli.offline, "--offline forbids publishing");
+            ensure!(dry_run || !cli.locked, "--locked forbids publishing");
             let index = base.join(index);
             let value: Value = serde_json::from_slice(&fs::read(&index)?)?;
-            ensure!(
-                value["format"] == "weightlang.package-index" && value["format_version"] == 1,
-                "invalid package index"
-            );
-            registry::publish(&value, index.parent().unwrap(), dry_run)?;
+            ensure!(value["format"] == "weightlang.package-index" && value["format_version"] == 1, "invalid package index");
+            let module = value["module"].as_str().context("package module")?;
+            let version = value["version"].as_str().context("package version")?;
+            let parts = manifest::module_parts(module)?;
+            let name = name.unwrap_or_else(|| format!("{}/{}", parts[1], parts.last().unwrap()).to_ascii_lowercase());
+            if !no_register {
+                package_index::repository(&cli.registry)?;
+                let candidate = package_index::Record {
+                    format_version: 1, name: name.clone(), module: module.into(), version: version.into(),
+                    source_commit: value["commit"].as_str().context("source commit")?.into(),
+                    index_sha256: weightlang_wgt::artifact::hash(&fs::read(&index)?),
+                    license: license.clone().context("--license is required for registration")?, edition: edition.clone(), yanked: false,
+                };
+                candidate.validate()?;
+            }
+            if !register_only { registry::publish(&value, index.parent().unwrap(), dry_run)?; }
+            if !no_register {
+                if dry_run {
+                    println!("would verify {module}@{version} and submit {name} to {} (no upload or PR)", cli.registry);
+                } else {
+                    let cache = registry::cache_root()?;
+                    fs::create_dir_all(&cache)?;
+                    let guard = fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(cache.join(".wgt-lock"))?;
+                    guard.lock_exclusive()?;
+                    package_index::register(&cli.registry, &name, module, version, license.as_deref().unwrap(), &edition, &cache, false)
+                        .context("release may already exist; retry wgt publish with --register-only")?;
+                }
+            }
         }
         command => {
             let project = manifest::project(&base)?;
@@ -360,29 +422,47 @@ fn execute(cli: Cli) -> Result<u8> {
                 .truncate(false)
                 .open(cache.join(".wgt-lock"))?;
             guard.lock_exclusive()?;
-            let manifest = Manifest::read(&manifest::manifest_path(&project)?)?;
+            let manifest_path = manifest::manifest_path(&project)?;
+            let manifest = Manifest::read(&manifest_path)?;
             let update = matches!(command, Cmd::Update { .. });
             match command {
                 Cmd::Add { module, version }
                 | Cmd::Update {
                     module: Some(module),
-                    version: Some(version),
+                    version,
                 } => {
                     ensure!(
                         !cli.locked,
                         "dependency edits are incompatible with --locked"
                     );
+                    let mut known = manifest::read_lock(&project.join("wgt.sum"))?;
+                    let requested = module;
+                    let selection = if requested.starts_with("github.com/") { None } else {
+                        Some(package_index::resolve(&cli.registry, &requested, version.as_deref(), &cache, cli.offline)?)
+                    };
+                    let module = selection.as_ref().map(|s| s.record.module.clone()).unwrap_or(requested);
                     if update {
-                        ensure!(
-                            manifest.dependencies.contains_key(&module),
-                            "dependency not found; use wgt add"
-                        );
+                        ensure!(manifest.dependencies.contains_key(&module), "dependency not found; use wgt add");
                     }
                     manifest::module_parts(&module)?;
+                    let version = if let Some(selection) = &selection {
+                        selection.lock(&mut known)?;
+                        selection.record.version.clone()
+                    } else {
+                        // A registered dependency cannot silently bypass its registry on update.
+                        ensure!(!known.keys().any(|(m, _, k)| m == &module && k == "registry-name"),
+                            "use the registered owner/name to add or update this dependency");
+                        match version.as_deref() {
+                            None | Some("latest") => {
+                                ensure!(!cli.offline, "latest version discovery requires network; use --version with an exact cached version offline");
+                                registry::Github::new()?.latest(&module)?
+                            }
+                            Some(version) => version.to_owned(),
+                        }
+                    };
                     manifest::version(&version)?;
                     let text = manifest.edited(&module, Some(&version));
                     let edited = Manifest::parse(&text)?;
-                    let known = manifest::read_lock(&project.join("wgt.sum"))?;
                     let lock = if cli.offline {
                         registry::verify(&edited, &known, &cache)?;
                         known
@@ -396,10 +476,12 @@ fn execute(cli: Cli) -> Result<u8> {
                         &project.join("wgt.sum"),
                         manifest::lock_text(&lock).as_bytes(),
                     )?;
-                    manifest::atomic_write(&manifest::manifest_path(&project)?, text.as_bytes())?;
+                    manifest::atomic_write(&manifest_path, text.as_bytes())?;
                     println!("locked {module}@{version}");
                 }
                 Cmd::Remove { module } => {
+                    let known = manifest::read_lock(&project.join("wgt.sum"))?;
+                    let module = package_index::alias(&module, &manifest, &known)?;
                     ensure!(
                         !cli.locked,
                         "dependency edits are incompatible with --locked"
@@ -417,7 +499,7 @@ fn execute(cli: Cli) -> Result<u8> {
                         manifest::lock_text(&lock).as_bytes(),
                     )?;
                     manifest::atomic_write(
-                        &manifest::manifest_path(&project)?,
+                        &manifest_path,
                         manifest.edited(&module, None).as_bytes(),
                     )?;
                     println!("removed {module}; source imports are unchanged");
@@ -787,7 +869,7 @@ fn executable(path: &Path) -> bool {
     }
 }
 fn list_commands() {
-    println!("Built-in: version toolchain download sync new init add remove update fetch tree metadata check build run test verify graph package publish cache doctor");
+    println!("Built-in: version toolchain download sync new init add remove update fetch tree metadata check build run test verify graph package publish register cache doctor");
     let mut names = std::collections::BTreeSet::new();
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {

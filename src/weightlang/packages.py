@@ -427,7 +427,11 @@ def get(project_dir: Path, fetcher: Fetcher | None = None, cache: Path | None = 
     sum_path = project_dir / SUM_FILE
     known = read_sum(sum_path)
     fetcher = fetcher or GitHubFetcher()
-    new: dict[tuple[str, str, str], str] = {}
+    new: dict[tuple[str, str, str], str] = {
+        key: value for key, value in known.items()
+        if mod.requires.get(key[0]) == key[1]
+        and key[2] in {"registry", "registry-commit", "registry-name", "registry-record"}
+    }
     fetched = []
     for module_path, version in sorted(mod.requires.items()):
         new.update(fetch_module(module_path, version, fetcher, known, cache))

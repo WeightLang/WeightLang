@@ -380,3 +380,18 @@ Source builds support `weightc ablate weights/my_model --suite ablation.json`:
 zero layer outputs, bypass modules or zero tensors, then compare independent
 variants on fixed data without changing model files or retraining.
 See [ablation experiments](docs/ablation.md) for configuration and report semantics.
+
+## Git package registry
+
+The source-built native client supports the reviewed [WeightLang registry](https://github.com/WeightLang/registry):
+
+```sh
+cargo install --git https://github.com/WeightLang/WeightLang --locked weightlang-wgt
+wgt add weightlang/gates
+```
+
+The latest registered version is resolved once, then exact provenance and hashes
+are locked. Bundled libraries need no add: use `import std/nn` in wgt 0.3.
+Publishers run `wgt publish --index dist/wgt.index.json --license MIT --edition 0.3`
+to upload assets and submit a registration PR for maintainer review. See the
+[registry workflow](docs/registry-design.md) for recovery and compatibility details.

@@ -13,6 +13,21 @@ The first published package is `github.com/WeightLang/WeightLang/packages/gates`
 (`packages/gates/` in this repository, tag `packages/gates/v0.1.0`), consumed by
 `examples/remote_reuse/`.
 
+## Latest stable selection (native CLI)
+
+`wgt add github.com/WeightLang/WeightLang/packages/gates` selects the highest
+stable published package version, verifies it, then writes an exact version and
+hashes. `--version latest` is equivalent; `--version v0.1.0` selects explicitly.
+`wgt update MODULE` explicitly refreshes that pin. Builds never follow latest.
+Only releases matching the package subdirectory are considered; draft and
+prerelease releases are excluded. Offline discovery is rejected. Existing exact
+pins, cache verification and `wgt.sum` immutability checks remain in force.
+See [native CLI](wgt.md) for options and [Git registry](registry-design.md)
+for `wgt add owner/name` and `wgt publish` registration PRs.
+
+Standard libraries are bundled: `import std/nn` (wgt 0.3) needs neither `add`
+nor a manifest dependency. This imports computation definitions, not weights.
+
 ## Package identity and versions
 
 Terminology: a **weight package** distributes model artifacts; a source **library**

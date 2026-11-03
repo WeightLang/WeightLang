@@ -54,6 +54,7 @@ block 参数覆盖同名常量，默认值可引用前面的参数。没有运�
 | `data name:` | 定义数据集，后接缩进的数据行或文件选项 | 0.1+；选项 0.2+ |
 | `train data=... loss=... optimizer=... lr=... epochs=...` | 声明一次训练；每个模型最多一条 | 0.1+ |
 | `import body from "../weights/base" layer=body` | 从制品导入兼容的层权重；省略 layer 时使用目标同名路径 | 0.1+；点路径 0.2+ |
+| `import std/nn` / `import std/nn as n` | 导入内置计算库，默认别名 nn；无需 add、联网或包锁；随编译器版本分发，不包含预训练权重 | 0.3；模型和库文件均可用 |
 | `use std/nn` | 加载源码库，默认别名是末段名称 nn | 0.2+ |
 | `use std/heads as h` | `as` 指定库别名；通过 h.classifier 调用 | 0.2+ |
 | `use "./layers.wgt" as local` | 相对当前源文件加载本地库；不支持远程源码库 | 0.2+ |
@@ -378,3 +379,22 @@ Python API 为 `export_python(source, output)`，拒绝覆盖现有文件。
 `--no-store` 没有自动 HEAD，需要 `--reuse-artifact 路径` 指定基线；仍不允许隐式覆盖。
 Python 编译接口对应 `no_train=True`。输出记录 `training: null` 和 `build.no_train: true`，
 区分本次未训练、上游训练权重和新增随机参数。详见[架构迁移](architecture-reuse.md#buildmigrate-without-training)。
+
+### 内置标准库直接导入
+
+完整签名：`import std/<库名> [as <别名>]`，仅支持 wgt 0.3；省略别名时取库名。
+与 `use std/<库名>` 共用命名空间及展开逻辑，重复别名报错；未知库报错。
+不改变 `import <目标层> from "<制品路径>" [layer=...] [sha256=...] [freeze]` 的权重导入语义，
+也不增加远程源码库支持。标准库 block 的参数、默认值及形状限制仍以本参考对应条目为准。
+
+```wgt
+wgt 0.3
+import std/nn as n
+model builtin
+# feature 为单样本特征轴，运行时另加 batch；4 -> 8 -> 4。
+input x: f32[feature=4]
+output y: f32[feature=4]
+# 两次投影参数独立，随模型初始化；标准库不携带已训练权重。
+layer body: n.mlp(in=4, hidden=8, out=4)
+init seed=42
+```

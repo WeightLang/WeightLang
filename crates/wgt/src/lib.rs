@@ -7,3 +7,5 @@ pub mod registry;
 pub mod toolchain;
 
 mod transforms;
+
+pub mod package_index;

@@ -382,3 +382,17 @@ y = 2x + 1 的参数，再比较和评估结果。详见 [补丁指南](docs/wei
 源码版支持 `weightc ablate weights/my_model --suite ablation.json`。
 可屏蔽层输出、跳过层或清零指定权重；每个变体从同一基线独立运行，报告损失、准确率及变化量，保留配置和数据哈希，不改原模型。
 目前是推理时消融，不包含重新训练。配置见[消融实验](docs/ablation.md)。
+
+## Git 包注册表
+
+源码版 `wgt` 支持从 [WeightLang/registry](https://github.com/WeightLang/registry) 添加已审核的模型包：
+
+```sh
+cargo install --git https://github.com/WeightLang/WeightLang --locked weightlang-wgt
+wgt add weightlang/gates
+```
+
+默认选择最新收录版本，随后锁定精确版本、来源和文件哈希。内置库可直接
+`import std/nn`（wgt 0.3），无需 add。发布者运行
+`wgt publish --index dist/wgt.index.json --license MIT --edition 0.3`，上传制品后
+自动向注册表提交 PR；维护者审核后才可被其他用户发现。详见[注册表文档](docs/registry-design.md)。

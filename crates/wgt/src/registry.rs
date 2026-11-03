@@ -48,6 +48,23 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
     );
     Ok(String::from_utf8(out.stdout)?.trim().into())
 }
+/// Select only stable releases belonging to this package, using numeric version order.
+/// Compare digit lengths before bytes so arbitrarily large valid components work too.
+pub fn latest_release(module: &str, releases: &[Value]) -> Result<String> {
+    let prefix = tag(module, "")?;
+    let mut versions: Vec<&str> = releases.iter().filter_map(|release| {
+        if release["draft"].as_bool() != Some(false)
+            || release["prerelease"].as_bool() != Some(false) {
+            return None;
+        }
+        let version = release["tag_name"].as_str()?.strip_prefix(&prefix)?;
+        manifest::version(version).ok()?;
+        Some(version)
+    }).collect();
+    versions.sort_by_key(|v| v[1..].split('.').map(|part| (part.len(), part)).collect::<Vec<_>>());
+    versions.last().map(|v| (*v).to_owned()).context("no stable published release found for package")
+}
+
 pub trait Remote {
     fn resolve(&self, module: &str, version: &str) -> Result<String>;
     fn download(&self, url: &str, max: u64) -> Result<Vec<u8>>;
@@ -56,6 +73,23 @@ pub struct Github {
     client: reqwest::blocking::Client,
 }
 impl Github {
+    pub fn latest(&self, module: &str) -> Result<String> {
+        let parts = manifest::module_parts(module)?;
+        let mut releases = Vec::new();
+        // GitHub's /latest is repository-wide and cannot select monorepo packages.
+        for page in 1..=1000 {
+            let url = format!("https://api.github.com/repos/{}/{}/releases?per_page=100&page={page}", parts[1], parts[2]);
+            let batch: Vec<Value> = serde_json::from_slice(&self.download(&url, 16 * 1024 * 1024)?)
+                .context("invalid GitHub releases response")?;
+            let finished = batch.len() < 100;
+            releases.extend(batch);
+            if finished {
+                return latest_release(module, &releases);
+            }
+        }
+        bail!("too many release pages; specify an exact --version")
+    }
+
     pub fn new() -> Result<Self> {
         Ok(Self {
             client: reqwest::blocking::Client::builder()
@@ -164,7 +198,10 @@ pub fn fetch(
     locked: bool,
     remote: &dyn Remote,
 ) -> Result<Lock> {
-    let mut all = Lock::new();
+    let mut all: Lock = known.iter()
+        .filter(|((m, v, k), _)| manifest.dependencies.get(m) == Some(v)
+            && ["registry", "registry-commit", "registry-name", "registry-record"].contains(&k.as_str()))
+        .map(|(k, v)| (k.clone(), v.clone())).collect();
     for (m, v) in &manifest.dependencies {
         let parts = manifest::module_parts(m)?;
         manifest::version(v)?;
@@ -457,7 +494,7 @@ pub fn publish(index: &Value, output: &Path, dry_run: bool) -> Result<()> {
         "-R",
         &repo,
         "--verify-tag",
-        "--prerelease",
+        "--latest=false",
         "--title",
         tag,
         "--notes",
