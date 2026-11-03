@@ -200,6 +200,19 @@ struct Parser {
     depth: usize,
 }
 impl Parser {
+    fn train_statement(&self) -> bool {
+        if !self.tokens.get(self.pos+1).is_some_and(|t| !t.quoted && t.text=="(") { return true; }
+        let mut depth=0;
+        for (i,t) in self.tokens.iter().enumerate().skip(self.pos+1) {
+            if t.quoted {continue;}
+            match t.text.as_str() {
+                "("=>depth+=1,
+                ")"=>{depth-=1;if depth==0 {return self.tokens.get(i+1).is_some_and(|t| !t.quoted && t.text=="on");}},
+                _=>{},
+            }
+        }
+        false
+    }
     fn sample_block(&self) -> bool {
         if !self.is("(") { return true; }
         let mut depth=0;
@@ -286,6 +299,16 @@ impl Parser {
             let value = self.expr(0)?;
             self.expect(";")?;
             Stmt::Let(name, value)
+        } else if self.is("train") && self.train_statement() {
+            self.expect("train")?;
+            let model = self.expr(0)?;
+            self.expect("on")?; self.expect("(")?;
+            let inputs = self.expr(0)?; self.expect(",")?;
+            let targets = self.expr(0)?; self.expect(")")?;
+            self.expect("rate")?; let rate = self.expr(0)?;
+            self.expect("clip")?; let clip = self.expr(0)?;
+            self.expect(";")?;
+            Stmt::Eval(Expr::Call("train".into(),vec![model,inputs,targets,rate,clip]))
         } else if self.take("if") {
             let condition = self.expr(0)?;
             let yes = self.block()?;

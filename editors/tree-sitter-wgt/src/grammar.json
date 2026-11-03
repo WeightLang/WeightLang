@@ -205,6 +205,22 @@
         {
           "type": "STRING",
           "value": "return"
+        },
+        {
+          "type": "STRING",
+          "value": "train"
+        },
+        {
+          "type": "STRING",
+          "value": "on"
+        },
+        {
+          "type": "STRING",
+          "value": "rate"
+        },
+        {
+          "type": "STRING",
+          "value": "clip"
         }
       ]
     },
@@ -315,6 +331,10 @@
             {
               "type": "STRING",
               "value": "output"
+            },
+            {
+              "type": "STRING",
+              "value": "target"
             }
           ]
         },

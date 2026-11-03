@@ -13,8 +13,8 @@ if (fs.existsSync(nativePath)) {
   require('node:assert/strict').deepEqual(nativeBuiltins, actual, 'Update native-builtins.json from the Rust BUILTINS table');
 }
 const vocabulary = {
-  keywords: 'break continue else fn for frozen if in init input layer let mix model onehot output parameter return sample then wgt while'.split(' '),
-  builtins: [...new Set(nativeBuiltins.concat('read write linear add mul relu tanh sigmoid identity slice positive gate route softmax mean square'.split(' ')))].sort(),
+  keywords: 'break continue else fn for frozen if in init input layer let mix model onehot output parameter return sample then train on rate clip target wgt while'.split(' '),
+  builtins: [...new Set(nativeBuiltins.concat('read write linear add mul relu tanh sigmoid identity slice positive gate route softmax mean square detach minimum log_softmax exp log sum clip'.split(' ')))].sort(),
   types: ['f32', 'prob'],
   constants: ['false', 'null', 'true'],
 };

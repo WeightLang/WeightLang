@@ -103,12 +103,13 @@ prob 无向量形状或默认初值，不能通过 write 改写，也不能直�
 `mix p { then { a } else { b } }` 是 route 的结构化表达式，形状、推理短路和梯度相同。
 每支为一个张量表达式，可选尾随分号，可嵌套；暂不支持块内 let/return。mix/then 为保留名称。
 
-同文件 `fn loss(prediction,target)` 的两个参数名可自选，均为模型输出形状 f32[N]，返回须为 f32[1]。
+同文件 `fn loss(prediction,target)` 的两个参数名可自选，第一参数为模型输出形状 f32[N]，第二参数默认同形；
+可用 `target NAME: f32[M]` 指定第二参数宽度，返回须为 f32[1]。详见[原生 RL](reinforcement-learning.md)。
 仅访问两个输入及局部变量，不访问模型参数，不调用普通辅助函数或执行 I/O/sample。
 使用 forward 张量算子和 let/if/while/return；新增 square(x)、mean(x)、a-b、-a。
 square 返回逐元素平方，mean 沿唯一特征轴平均；减法要求等长，无广播。
 例如 `return mean(square(prediction-target));`，用 `fit(m,x,y,lr,"loss")` 执行。
-fit 按批次轴取平均，targets 为同输出形状的向量列表；仅 forward 模型支持。
+fit 按批次轴取平均，targets 为目标声明宽度（未声明则同输出形状）的向量列表；仅 forward 模型支持。
 损失定义不是宿主回调，不能在 main 中直接调用；构造/检查/编译不会训练。
 模型与损失 tape 共享每样本 64 MiB 张量预算，损失指令也扣除脚本预算；预算不含会话寄存器和优化器。
 整批成功才更新权重和优化器；损失程序保存在 Program/训练断点中，重载后可继续使用。
@@ -141,3 +142,5 @@ f32[N] 沿唯一特征轴归约为 f32[1]，N>0；每项梯度为上游梯度除
 普通函数中的列表平均返回 f64 标量，不自动建立梯度图。无多轴、隐式展平或广播。
 完整[语法契约](reference.zh-CN.md#后缀平均-expressionmean)及
 [训练例子](../examples/native_training/postfix_mean/model.wgt)。
+
+原生 RL 扩展：`train ... on (...) rate ... clip ...;`、独立 target 声明、常量向量、detach、exp/log/log_softmax/sum/minimum/clip 的完整签名和梯度边界见[原生强化学习](reinforcement-learning.md)。

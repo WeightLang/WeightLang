@@ -79,6 +79,7 @@ fn main() {
 | `model(path,optimizer)` | 加载原生顺序 IR 或 forward Program IR v1 JSON，使用新优化器；forward 另可选 none；不是普通 .wgt 模型解析器，也不接受传统 manifest 制品 |
 | `predict(model,input)` | 输入单个 f32 向量，返回输出列表；不改变权重/优化器、不训练 |
 | `fit(model,inputs,targets,lr,loss)` | 一个批次一次更新，返回更新前损失；lr 正有限；loss 为 mse/cross_entropy |
+| `train(model,inputs,targets,rate,max_norm)` | forward 自定义损失的批次平均梯度、全局 L2 裁剪及原子更新；等价 train 语句，见[原生 RL](reinforcement-learning.md) |
 | `reinforce(model,observations,actions,advantages,lr)` | 一批观测的策略梯度更新，返回更新前的 mean(-advantage*log pi(action)) |
 | `sample(model,observation)` | 将模型输出视为 logits，稳定 softmax 后由脚本 RNG 抽取动作索引；forward 模型使用无 tape 的端点短路推理，不提交 write |
 | `gae(rewards,values,next_values,terminated,truncated,gamma,lambda)` | 同长度一维列表；后两种标记是 bool，gamma/lambda 在 [0,1]；返回优势列表 |
@@ -106,7 +107,7 @@ fn main() {
 
 SGD 无 momentum/weight decay；Adam 固定 beta1=0.9、beta2=0.999、eps=1e-8，无 weight decay。
 同一模型句柄保留优化器矩和步数，学习率在每次更新显式指定。当前不支持独立优化器对象、
-混合精度、梯度累积接口、裁剪、任意自定义损失反传或 GPU 训练。forward 模型支持受限的
+混合精度、独立梯度累积接口、任意自定义损失反传或 GPU 训练。forward 模型支持受限的
 `fn loss(prediction,target)` 一阶反传，约束与示例见[可微程序](differentiable-programs.md)。
 
 原生 IR 的 resident/view/add 梯度汇总到存储所有者，共享参数只更新一次；冻结依赖沿用 Session
@@ -118,7 +119,9 @@ SGD 无 momentum/weight decay；Adam 固定 beta1=0.9、beta2=0.999、eps=1e-8�
 
 [REINFORCE 示例](../examples/native_training/reinforce.wgt) 用普通 WGT 函数定义奖励环境，
 从随机策略开始采样、累积批次、更新。RL 是原生可执行的策略梯度和 GAE 原语，当前没有内置
-PPO/DQN、replay buffer、Gym 适配器、多进程环境或外部模拟器。
+PPO/DQN 黑盒训练接口、replay buffer、Gym 适配器、多进程环境或外部模拟器。
+可使用 [train 语句与可微损失](reinforcement-learning.md) 在 WGT 中编写 PPO，
+完整例子见 [ppo/model.wgt](../examples/native_training/ppo/model.wgt)。
 
 GAE 使用 `delta[t] = reward[t] + gamma*(1-terminated[t])*next_value[t] - value[t]`；
 在 terminated 或 truncated 时停止优势递推。截断仍使用最终观测的 next_value，调用者不得

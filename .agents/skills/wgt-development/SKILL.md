@@ -10,7 +10,7 @@ description: 编写和验证本仓库当前原生 WGT 0.5 模型、训练与概�
   读取为 f32[1] 概率，底层参数/梯度暴露 logit；不得 write(prob) 或直接作为 linear 的参数。
 - mix p { then { a } else { b } } 用于 forward/loss 张量混合，每支一个表达式。
   与 route 相同，推理在精确端点短路内联分支；训练/VJP 保留完整梯度。提前 let 的计算不会省略。
-- fn loss(prediction,target) 是无模型参数的张量损失，返回 f32[1]；fit(m,x,y,lr,"loss") 才训练。
+- fn loss(prediction,target) 是无模型参数的张量损失，返回 f32[1]；显式 fit(m,x,y,lr,"loss") 或 train 才训练。
   支持 mean、square、减法与已有张量算子；不是任意宿主函数自动微分。
   平均可写 `x.mean`、`square(prediction-target).mean`，等价 `mean(x)`；后缀优先于一元/二元运算。
   普通函数接受非空一维有限 f64 列表并返回标量；forward/loss 的 f32[N] 归约为可微 f32[1]。
@@ -44,3 +44,5 @@ js_divergence(p,q)、cross_entropy_probs(p,q)、temperature_softmax(logits,tempe
 通过后修正总和；权重归一化要求非负且有正质量，温度有限且>0。单位 nat。
 KL/交叉熵 p>0 且 q=0 报错，JS 支持不相交分布。无张量梯度或新增 fit 目标。
 例子 std/probability/distributions.wgt、temperature.wgt；完整契约见 docs/standard-library.md。
+
+原生 RL：`train model on (inputs,targets) rate lr clip max_norm;` 等价 train(model,inputs,targets,lr,max_norm)，仅 forward + fn loss，sgd/adam，正有限 lr/max_norm；全批次平均梯度做全局 L2 裁剪后原子更新。`target NAME: f32[N]` 指定 loss 第二形参宽度/名称，默认同输出，不增加 forward 输入。forward/loss 支持有限数字向量常量、detach、exp、log、log_softmax、sum、minimum（相等各半梯度）、clip（有符号字面量边界、端点零梯度）。全部无广播/默认值。完整契约 docs/reinforcement-learning.md，运行例子 examples/native_training/ppo/model.wgt；不支持单独 backward/step、跨调用梯度对象、环境/RNG 全进程续训。

@@ -954,6 +954,10 @@
     "named": false
   },
   {
+    "type": "clip",
+    "named": false
+  },
+  {
     "type": "comment",
     "named": true,
     "extra": true
@@ -1059,6 +1063,10 @@
     "named": true
   },
   {
+    "type": "on",
+    "named": false
+  },
+  {
     "type": "output",
     "named": false
   },
@@ -1068,6 +1076,10 @@
   },
   {
     "type": "precision",
+    "named": false
+  },
+  {
+    "type": "rate",
     "named": false
   },
   {
@@ -1085,6 +1097,10 @@
   {
     "type": "string",
     "named": true
+  },
+  {
+    "type": "target",
+    "named": false
   },
   {
     "type": "train",

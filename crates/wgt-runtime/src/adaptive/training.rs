@@ -50,18 +50,24 @@ impl AdaptiveSession {
         remaining: &mut u64,
         tape_budget: usize,
     ) -> Result<f32> {
-        self.train_step_impl(inputs,objective,rate,remaining,tape_budget,false)
+        self.train_step_impl(inputs,objective,rate,remaining,tape_budget,false,None)
     }
 
     pub fn train_custom(&mut self, inputs:&[Vec<f32>], targets:&[Vec<f32>], rate:f32, remaining:&mut u64, tape_budget:usize) -> Result<f32> {
-        self.train_step_impl(inputs,Objective::Mse(targets),rate,remaining,tape_budget,true)
+        self.train_step_impl(inputs,Objective::Mse(targets),rate,remaining,tape_budget,true,None)
     }
 
-    fn train_step_impl(&mut self, inputs:&[Vec<f32>], objective:Objective<'_>, rate:f32, remaining:&mut u64, tape_budget:usize, custom:bool) -> Result<f32> {
+    /// Clip the global batch-mean gradient before committing one optimizer step.
+    pub fn train_clipped(&mut self, inputs:&[Vec<f32>], targets:&[Vec<f32>], rate:f32, clip:f32, remaining:&mut u64, tape_budget:usize)->Result<f32> {
+        ensure!(clip.is_finite() && clip>0.,"gradient clip norm must be positive and finite");
+        self.train_step_impl(inputs,Objective::Mse(targets),rate,remaining,tape_budget,true,Some(clip))
+    }
+
+    fn train_step_impl(&mut self, inputs:&[Vec<f32>], objective:Objective<'_>, rate:f32, remaining:&mut u64, tape_budget:usize, custom:bool, clip:Option<f32>) -> Result<f32> {
         let mut loss_session=if custom {
             let program=self.program.loss.as_ref().context("fit loss requires fn loss(prediction,target)")?;
             let session=Self::prepare((**program).clone(),tape_budget)?;
-            ensure!(session.input_len()==2*self.output_len() && session.output_len()==1,"custom loss shape mismatch");
+            ensure!(session.input_len()>self.output_len() && session.output_len()==1,"custom loss shape mismatch");
             Some(session)
         } else {None};
         ensure!(
@@ -101,7 +107,7 @@ impl AdaptiveSession {
                 Objective::Mse(targets) => {
                     let target = &targets[sample];
                     ensure!(
-                        target.len() == y.len() && target.iter().all(|v| v.is_finite()),
+                        target.len() == loss_session.as_ref().map_or(y.len(),|s|s.input_len()-y.len()) && target.iter().all(|v| v.is_finite()),
                         "invalid target"
                     );
                     if let Some(session)=&mut loss_session {
@@ -150,6 +156,10 @@ impl AdaptiveSession {
             loss.is_finite() && gradients.iter().flatten().all(|v| v.is_finite()),
             "nonfinite loss or gradient"
         );
+        if let Some(limit)=clip {
+            let norm=gradients.iter().flatten().map(|g|f64::from(*g).powi(2)).sum::<f64>().sqrt();
+            if norm>f64::from(limit) {let scale=f64::from(limit)/norm;for g in gradients.iter_mut().flatten(){*g=(f64::from(*g)*scale) as f32;}}
+        }
         state.steps = state
             .steps
             .checked_add(1)

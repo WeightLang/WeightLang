@@ -240,3 +240,15 @@ q 在 [0,1]，裁剪边界有限且有序；余弦要求等长非零向量。
 分布逐项在 [0,1]，总和允许 1e-9 绝对误差，计算前修正该误差；任意权重须显式归一化。
 零概率、公式、预算和例子见[概率分布分析](standard-library.md#概率分布分析)。
 这些是普通脚本分析函数，不提供张量自动微分或新的 `fit` 目标。
+
+## 原生 RL 训练语法
+
+当前 WGT 0.5 支持 `train MODEL on (INPUTS,TARGETS) rate RATE clip MAX_NORM;`，
+等价 `train(model,inputs,targets,rate,max_norm)`，函数形式返回更新前批次平均损失。
+所有参数必填，仅含 fn loss 且使用 sgd/adam 的 forward 模型支持；rate/max_norm 为有限正 f32。
+整批求导取平均、全局 L2 梯度裁剪，然后原子提交一次更新；失败不改变参数或优化器。
+`target NAME: f32[N]` 可指定损失第二参数宽度（1..16384），NAME 须匹配 fn loss 第二形参；
+未声明时沿用输出宽度。它不改变 forward 输入，也不改变内置 MSE 的目标契约。
+新增 forward/loss 数字向量字面量、detach、exp、log、log_softmax、sum、minimum、clip。
+完整签名、形状/梯度/边界/版本约束和完整可运行例子见[原生强化学习](reinforcement-learning.md)。
+普通脚本的数值/列表函数不因此自动可微；不支持单独 backward/step 或跨调用梯度对象。

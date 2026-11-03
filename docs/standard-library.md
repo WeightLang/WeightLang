@@ -199,3 +199,5 @@ KL/JS 的微小负舍入误差截为零；不保证精确实数恒等式。
 - [温度 softmax](../std/probability/temperature.wgt)
 
 可用 `wgt run 文件路径` 或追加 `--compiled` 执行。
+
+forward/loss 的可微 `log_softmax`、`exp`、`log`、`sum`、`clip` 以及 `detach`、`minimum` 契约见[原生 RL](reinforcement-learning.md)。普通脚本中的列表/数值调用仍不建立梯度图；两种执行上下文不可混同。

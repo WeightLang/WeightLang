@@ -65,6 +65,7 @@ const BUILTINS: &[&str] = &[
     "predict",
     "fit",
     "reinforce",
+    "train",
     "sample",
     "gae",
     "jsonl",
@@ -469,7 +470,7 @@ impl Runtime {
             | "kl_divergence" | "js_divergence" | "cross_entropy_probs" | "temperature_softmax" => 2,
             "hf_dataset" | "fma" | "clip" | "huber" | "linspace" | "vector_slice" => 3,
             "mlp" => 4,
-            "fit" | "reinforce" | "benchmark" => 5,
+            "fit" | "reinforce" | "benchmark" | "train" => 5,
             "gae" => 7,
             _ => bail!("unknown function: {name}"),
         };
@@ -705,6 +706,11 @@ impl Runtime {
                     }
                     _ => bail!("loss must be mse or cross_entropy"),
                 };
+                number(loss as f64)
+            }
+            "train" => {
+                let Value::Adaptive(index)=a[0] else {bail!("train requires a forward model with fn loss")};
+                let loss=self.adaptive[index].lock()?.train_clipped(&a[1].matrix()?,&a[2].matrix()?,a[3].float()?,a[4].float()?,&mut self.remaining,64*1024*1024)?;
                 number(loss as f64)
             }
             "reinforce" => {

@@ -6,6 +6,9 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy)]
 enum Edge {
+    Minimum{a:usize,b:usize},
+    Clip{x:usize,low:f32,high:f32},
+    Sum{x:usize},
     Leaf,
     Mean { x: usize },
     Blend { p: usize, a: usize, b: Option<usize> },
@@ -98,6 +101,10 @@ impl Tape {
 
     pub(super) fn record(&mut self, op: Op, value: &[f32]) -> Result<()> {
         let (out, edge) = match op {
+            Op::Constant(r,_) | Op::Unary(r,_,5) => (r,Edge::Leaf),
+            Op::Minimum(r,a,b)=>(r,Edge::Minimum{a:self.reg(a)?,b:self.reg(b)?}),
+            Op::Clip(r,x,low,high)=>(r,Edge::Clip{x:self.reg(x)?,low,high}),
+            Op::Sum(r,x)=>(r,Edge::Sum{x:self.reg(x)?}),
             Op::Mean(r,x) => (r,Edge::Mean{x:self.reg(x)?}),
             Op::Read(r, p) => {
                 self.registers[r] = Some(self.parameters[p]);
@@ -335,7 +342,23 @@ impl ForwardPass {
                         before[b].gradient[i] += g * db;
                     }
                 }
+                Edge::Minimum{a,b} => {
+                    for (i,&g) in node.gradient.iter().enumerate() {
+                        let (av,bv)=(before[a].value[i],before[b].value[i]);
+                        let da=if av<bv {1.} else if av>bv {0.} else {0.5};
+                        before[a].gradient[i]+=g*da;before[b].gradient[i]+=g*(1.-da);
+                    }
+                }
+                Edge::Clip{x,low,high} => {
+                    for (i,&g) in node.gradient.iter().enumerate() {if before[x].value[i]>low && before[x].value[i]<high {before[x].gradient[i]+=g;}}
+                }
+                Edge::Sum{x} => {for g in &mut before[x].gradient {*g+=node.gradient[0];}}
                 Edge::Unary { x, kind } => {
+                    if kind==8 {
+                        let sum:f32=node.gradient.iter().sum();
+                        for (i,&g) in node.gradient.iter().enumerate() {before[x].gradient[i]+=g-node.value[i].exp()*sum;}
+                        continue;
+                    }
                     if kind == 3 {
                         let dot: f32 = node.gradient.iter().zip(&node.value).map(|(g,y)| g*y).sum();
                         for (i, &g) in node.gradient.iter().enumerate() {
@@ -344,11 +367,14 @@ impl ForwardPass {
                         continue;
                     }
                     for (i, &g) in node.gradient.iter().enumerate() {
+                        if g == 0. { continue; }
                         let y = node.value[i];
                         let derivative = match kind {
                             0 => 1. - y * y,
                             1 => y * (1. - y),
                             4 => -1.,
+                            6 => y,
+                            7 => 1. / before[x].value[i],
                             _ => {
                                 if before[x].value[i] > 0. {
                                     1.

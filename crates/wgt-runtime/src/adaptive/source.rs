@@ -10,6 +10,7 @@ pub fn parse(source: &str) -> Result<Program> {
     let forward = functions.get("forward").context("stateful model requires fn forward(input)")?;
     let mut program = Program { version:1, input:String::new(), registers:Vec::new(), parameters:Vec::new(), instructions:Vec::new(), loss:None };
     let (mut model, mut output) = (false, None);
+    let mut target = None;
     for (line, text) in unit.declarations.lines().enumerate() {
         let text = text.split('#').next().unwrap_or("").trim();
         if text.is_empty() || text == "wgt 0.5" { continue; }
@@ -22,6 +23,7 @@ pub fn parse(source: &str) -> Result<Program> {
                 program.input = name.clone();
                 program.registers.push(Register { name, len });
             },
+            "target" => { ensure!(target.is_none(),"duplicate loss target declaration"); target=Some(crate::source::vector_port(body)?); },
             "output" => { ensure!(output.is_none(), "duplicate output"); output = Some(crate::source::vector_port(body)?.1); },
             "parameter" | "frozen" => {
                 let (name, body) = body.split_once(':').context("parameter requires name: f32[shape] = values")?;
@@ -50,14 +52,16 @@ pub fn parse(source: &str) -> Result<Program> {
     let mut lower = Lower { program, sizes, next:0, loops:Vec::new(), output:output.unwrap() };
     lower.block(&forward.body)?;
     ensure!(lower.program.instructions.iter().any(|i| matches!(i,I::Return{..})), "forward requires a return");
+    ensure!(target.is_none() || functions.contains_key("loss"),"target requires fn loss");
     if let Some(loss)=functions.get("loss") {
         ensure!(loss.args.len()==2,"loss requires prediction and target arguments");
         let n=lower.output;
+        let m=if let Some((name,width))=&target { ensure!(*name==loss.args[1],"target name must match second loss argument"); *width } else { n };
         let input="__loss_input".to_string();
-        let program=Program{version:1,input:input.clone(),registers:vec![Register{name:input.clone(),len:n*2}],parameters:vec![],instructions:vec![],loss:None};
-        let mut loss_lower=Lower{program,sizes:HashMap::from([(input.clone(),n*2)]),next:0,loops:vec![],output:1};
+        let program=Program{version:1,input:input.clone(),registers:vec![Register{name:input.clone(),len:n+m}],parameters:vec![],instructions:vec![],loss:None};
+        let mut loss_lower=Lower{program,sizes:HashMap::from([(input.clone(),n+m)]),next:0,loops:vec![],output:1};
         for (i,name) in loss.args.iter().enumerate() {
-            loss_lower.register(name,n)?;
+            loss_lower.register(name,if i==0 {n} else {m})?;
             loss_lower.program.instructions.push(I::Slice{out:name.clone(),input:input.clone(),start:i*n});
         }
         loss_lower.block(&loss.body).context("fn loss")?;
@@ -65,6 +69,14 @@ pub fn parse(source: &str) -> Result<Program> {
         lower.program.loss=Some(Box::new(loss_lower.program));
     }
     Ok(lower.program)
+}
+fn scalar_literal(expr: &Expr) -> Result<f32> {
+    let n=match expr {
+        Expr::Number(n)=>*n,
+        Expr::Unary(op,x) if op=="-"=>{let Expr::Number(n)=**x else {bail!("expected signed numeric literal")};-n},
+        _=>bail!("expected signed numeric literal"),
+    };
+    ensure!((n as f32).is_finite(),"nonfinite numeric literal");Ok(n as f32)
 }
 struct Lower {
     program: Program,
@@ -111,6 +123,11 @@ impl Lower {
             }
         }
         let (instruction,len) = match expr {
+            Expr::List(items) => {
+                let data=items.iter().map(scalar_literal).collect::<Result<Vec<_>>>()?;
+                ensure!(!data.is_empty() && data.len()<=16384,"tensor literal width must be 1..16384");
+                let len=data.len(); (I::Constant{out:out.into(),data},len)
+            },
             Expr::Sample(..) => bail!("sample blocks are discrete host expressions; use mix for differentiable forward/loss"),
             Expr::Unary(op,x) if op=="-" => {
                 let x=self.value(x)?; let len=self.size(&x)?;
@@ -133,6 +150,25 @@ impl Lower {
                 (if op=="*" {I::Mul{out:out.into(),left:a,right:b}} else {I::Add{out:out.into(),left:a,right:b}},len)
             },
             Expr::Call(op,args) => match (op.as_str(),args.as_slice()) {
+                ("detach",[x]) | ("exp",[x]) | ("log",[x]) | ("log_softmax",[x]) => {
+                    let x=self.value(x)?; let len=self.size(&x)?;
+                    (match op.as_str() {"detach"=>I::Detach{out:out.into(),input:x},"exp"=>I::Exp{out:out.into(),input:x},"log"=>I::Log{out:out.into(),input:x},_=>I::LogSoftmax{out:out.into(),input:x}},len)
+                },
+                ("minimum",[a,b]) => {
+                    let a=self.value(a)?; let b=self.value(b)?; let len=self.size(&a)?;
+                    ensure!(len==self.size(&b)?,"minimum shape mismatch");
+                    (I::Minimum{out:out.into(),left:a,right:b},len)
+                },
+                ("clip",[x,low,high]) => {
+                    let low=scalar_literal(low)?;let high=scalar_literal(high)?;
+                    ensure!(low<=high,"invalid clip bounds");
+                    let x=self.value(x)?;let len=self.size(&x)?;
+                    (I::Clip{out:out.into(),input:x,low,high},len)
+                },
+                ("sum",[x]) => {
+                    let x=self.value(x)?;
+                    (I::Sum{out:out.into(),input:x},1)
+                },
                 ("read",[p]) => {let p=self.parameter(p)?; (I::Read{out:out.into(),parameter:p.name.clone()},p.shape.iter().product())},
                 ("linear",[x,w]) | ("linear",[x,w,_]) => {
                     let x=self.value(x)?; let w=self.parameter(w)?;

@@ -46,6 +46,14 @@ pub struct Parameter {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Instruction {
+    Constant { out:String, data:Vec<f32> },
+    Detach { out:String, input:String },
+    Exp { out:String, input:String },
+    Log { out:String, input:String },
+    LogSoftmax { out:String, input:String },
+    Minimum { out:String, left:String, right:String },
+    Clip { out:String, input:String, low:f32, high:f32 },
+    Sum { out:String, input:String },
     Read {
         out: String,
         parameter: String,
@@ -112,6 +120,10 @@ pub enum Instruction {
 
 #[derive(Debug, Clone, Copy)]
 enum Op {
+    Constant(usize,usize),
+    Minimum(usize,usize,usize),
+    Clip(usize,usize,f32,f32),
+    Sum(usize,usize),
     Read(usize, usize),
     Write(usize, usize),
     Linear(usize, usize, usize, Option<usize>),
@@ -213,6 +225,11 @@ impl AdaptiveSession {
                 .checked_add(size.checked_mul(2).context("parameter size overflow")?)
                 .context("budget overflow")?;
         }
+        for instruction in &program.instructions {
+            if let Instruction::Constant{data,..}=instruction {
+                floats=floats.checked_add(data.len()).context("constant size overflow")?;
+            }
+        }
         let mut maximum = 0;
         for r in &program.registers {
             ensure!(r.len > 0, "register length must be positive");
@@ -285,7 +302,29 @@ impl AdaptiveSession {
                         );
                         Op::Binary(r, a, b, matches!(instruction, Instruction::Mul { .. }))
                     }
-                    Instruction::Tanh { out, input }
+                    Instruction::Constant{out,data} => {
+                        let r=dest(out)?;
+                        ensure!(data.len()==len(r) && data.iter().all(|v|v.is_finite()),"invalid tensor constant");
+                        Op::Constant(r,ops.len())
+                    }
+                    Instruction::Minimum{out,left,right} => {
+                        let (r,a,b)=(dest(out)?,reg(left)?,reg(right)?);
+                        ensure!(len(r)==len(a) && len(a)==len(b),"minimum shape mismatch");
+                        Op::Minimum(r,a,b)
+                    }
+                    Instruction::Clip{out,input,low,high} => {
+                        let (r,x)=(dest(out)?,reg(input)?);
+                        ensure!(len(r)==len(x) && low.is_finite() && high.is_finite() && low<=high,"invalid clip shape or bounds");
+                        Op::Clip(r,x,*low,*high)
+                    }
+                    Instruction::Sum{out,input} => {
+                        let (r,x)=(dest(out)?,reg(input)?);ensure!(len(r)==1,"sum output must be f32[1]");Op::Sum(r,x)
+                    }
+                    Instruction::Detach { out, input }
+                    | Instruction::Exp { out, input }
+                    | Instruction::Log { out, input }
+                    | Instruction::LogSoftmax { out, input }
+                    | Instruction::Tanh { out, input }
                     | Instruction::Sigmoid { out, input }
                     | Instruction::Softmax { out, input }
                     | Instruction::Neg { out, input }
@@ -297,6 +336,10 @@ impl AdaptiveSession {
                             Instruction::Sigmoid { .. } => 1,
                             Instruction::Softmax { .. } => 3,
                             Instruction::Neg { .. } => 4,
+                            Instruction::Detach { .. } => 5,
+                            Instruction::Exp { .. } => 6,
+                            Instruction::Log { .. } => 7,
+                            Instruction::LogSoftmax { .. } => 8,
                             _ => 2,
                         };
                         Op::Unary(r, x, kind)
@@ -544,16 +587,34 @@ impl AdaptiveSession {
                     }
                     output = Some(r);
                 }
+                Op::Constant(r,i) => {
+                    let Instruction::Constant{data,..}=&self.program.instructions[i] else {unreachable!()};
+                    self.scratch[..data.len()].copy_from_slice(data);output=Some(r);
+                }
+                Op::Minimum(r,a,b) => {
+                    self.ready(a)?;self.ready(b)?;
+                    for i in 0..self.registers[r].len() {self.scratch[i]=self.registers[a][i].min(self.registers[b][i]);}output=Some(r);
+                }
+                Op::Clip(r,x,low,high) => {
+                    self.ready(x)?;for (i,v) in self.registers[x].iter().enumerate() {self.scratch[i]=v.clamp(low,high);}output=Some(r);
+                }
+                Op::Sum(r,x) => {
+                    self.ready(x)?;self.scratch[0]=self.registers[x].iter().map(|v|f64::from(*v)).sum::<f64>() as f32;output=Some(r);
+                }
                 Op::Unary(r, x, kind) => {
                     self.ready(x)?;
-                    let max = if kind == 3 { self.registers[x].iter().copied().fold(f32::NEG_INFINITY, f32::max) } else { 0. };
-                    let total: f64 = if kind == 3 { self.registers[x].iter().map(|v| (f64::from(*v) - f64::from(max)).exp()).sum() } else { 1. };
+                    let max = if kind == 3 || kind == 8 { self.registers[x].iter().copied().fold(f32::NEG_INFINITY, f32::max) } else { 0. };
+                    let total: f64 = if kind == 3 || kind == 8 { self.registers[x].iter().map(|v| (f64::from(*v) - f64::from(max)).exp()).sum() } else { 1. };
                     for (i, v) in self.registers[x].iter().enumerate() {
                         self.scratch[i] = match kind {
                             0 => v.tanh(),
                             1 => 1. / (1. + (-v).exp()),
                             3 => ((f64::from(*v) - f64::from(max)).exp() / total) as f32,
                             4 => -v,
+                            5 => *v,
+                            6 => v.exp(),
+                            7 => v.ln(),
+                            8 => (f64::from(*v)-f64::from(max)-total.ln()) as f32,
                             _ => v.max(0.),
                         };
                     }

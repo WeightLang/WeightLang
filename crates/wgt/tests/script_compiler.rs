@@ -154,3 +154,28 @@ fn unified_model_and_forward_match_in_native_executables() {
         assert_eq!(actual, serde_json::to_value(expected).unwrap());
     }
 }
+
+#[test]
+fn compiled_ppo_uses_native_training_syntax() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/weightlang/aot-tests");
+    fs::create_dir_all(&root).unwrap();
+    let dir = tempfile::tempdir_in(root).unwrap();
+    let source = dir.path().join("model.wgt");
+    let executable = dir.path().join("ppo");
+    let text = include_str!("../../../examples/native_training/ppo/model.wgt");
+    fs::write(&source, text).unwrap();
+    let expected = script::run(text, dir.path(), 10_000_000).unwrap();
+    script_compiler::compile(&source, &executable).unwrap();
+    fs::remove_file(source).unwrap();
+    let output = Command::new(&executable).env("PATH", "/nonexistent").output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let actual: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let expected=serde_json::to_value(expected).unwrap();
+    // JSON parsing and optimized host f64 arithmetic may differ by one ULP.
+    // Dispatch counts and the initial baseline must still match exactly.
+    assert_eq!(actual["operations"],expected["operations"]);
+    assert_eq!(actual["metrics"]["initial_success_probability"],expected["metrics"]["initial_success_probability"]);
+    for (a,b) in [(&actual["result"],&expected["result"]),(&actual["metrics"]["final_success_probability"],&expected["metrics"]["final_success_probability"])] {
+        assert!((a.as_f64().unwrap()-b.as_f64().unwrap()).abs()<1e-12,"{a} != {b}");
+    }
+}

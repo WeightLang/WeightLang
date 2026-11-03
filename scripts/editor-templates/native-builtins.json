@@ -82,6 +82,7 @@
   "stddev",
   "sum",
   "temperature_softmax",
+  "train",
   "variance",
   "vector_slice",
   "zeros"
