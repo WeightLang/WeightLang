@@ -8,5 +8,5 @@ repository = "https://github.com/WeightLang/WeightLang"
 
 [grammars.wgt]
 repository = "https://github.com/WeightLang/WeightLang"
-rev = "main"
+rev = "92ef7e77ec50d96d41a31197260ac23b82864d52"
 path = "editors/tree-sitter-wgt"
