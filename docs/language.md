@@ -1,100 +1,125 @@
-# WeightLang 0.1 language subset
+# WeightLang 0.2
 
-WeightLang 0.1 is deliberately small: one feed-forward model per file, 1-D
-`f32` feature vectors, inline training data, and explicit weight sources. The
-goal of this subset is a complete, testable loop (source → weights → artifact →
-reload → inference), not expressiveness.
+One model per file, one-dimensional f32 feature vectors, explicit initialization
+and tensor origins. Both `wgt 0.1` and `wgt 0.2` are accepted; using new
+features in a 0.1 source fails with a line-numbered "requires 'wgt 0.2'" error.
+Existing 0.1 examples remain unchanged.
 
-Design rules that make it easy to generate and to review:
+## Model syntax
 
-- One statement per line; the only multi-line construct is a `data` block whose
-  rows are indented. No expression language, no operator precedence.
-- Every statement starts with a keyword. Options are `key=value` pairs.
-- Every weight has an explicit, recorded source. There is no implicit default
-  initialisation and no way to ship random weights without them being labelled.
-- Errors report `file:line: message` and are checked before any training runs.
+One statement per line; comments begin with `#`. Names are identifiers.
+A model needs a version header, `model name`, `input x: f32[N]`,
+`output y: f32[M]`, at least one parameter-bearing layer and `init seed=N`.
+Layers run in source order. Widths are checked before training.
 
-## Example
+| Operator | Meaning | Version |
+|---|---|---|
+| `linear(in=N, out=M)` | Fully connected with bias; positive integer dimensions | 0.1 |
+| `relu`, `tanh`, `sigmoid` | Elementwise activation | 0.1 |
+| `gelu`, `silu`, `identity` | Activation / identity | 0.2 |
+| `softmax` | Normalize on the last dimension | 0.2 |
+| `layernorm(dim=N)` | Normalize the feature dimension; learned weight and bias | 0.2 |
+| `dropout(p=P)` | Training-only dropout, 0 ≤ P < 1; identity at inference | 0.2 |
+| `residual(block(...))` | x + block(x); input and output widths must match | 0.2 |
+
+## Blocks and libraries
 
 ```wgt
-wgt 0.1
-model xor_mlp
-
-input  bits: f32[2]
-output prob: f32[1]
-
-layer hidden: linear(in=2, out=8)
-layer act:    tanh
-layer head:   linear(in=8, out=1)
-layer out:    sigmoid
-
-data xor:
-  [0, 0] -> [0]
-  [0, 1] -> [1]
-  [1, 0] -> [1]
-  [1, 1] -> [0]
-
-init  seed=42
-train data=xor loss=bce optimizer=adam lr=0.05 epochs=1000
+wgt 0.2
+use std/nn
+use std/heads as h
+model classifier
+input x: f32[2]
+output logits: f32[3]
+block features(in, out):
+  layer body: nn.mlp(in=in, hidden=8, out=out)
+layer body: features(in=2, out=4)
+layer head: h.classifier(in=4, classes=3)
+init seed=42
 ```
 
-## Statements
+This example has untrained weights. See `examples/std_mlp.wgt` for training.
+Block arguments are named positive integers and must exactly match the signature.
+Blocks contain only indented layer statements, may call other blocks, and cannot
+be empty, recursive or named after built-in operators. Missing parameters fail
+at their source line. A call expands into a nested sequence with stable names
+such as `body.body.fc1.weight`.
 
-| Statement | Form | Notes |
-|---|---|---|
-| header | `wgt 0.1` | Must be the first statement. Other versions are rejected. |
-| model | `model <name>` | Exactly one. Names the artifact directory. |
-| input | `input <name>: f32[<n>]` | Exactly one. 1-D only. |
-| output | `output <name>: f32[<n>]` | Exactly one. Must equal the last linear layer's `out`. |
-| layer | `layer <name>: linear(in=<n>, out=<m>)` | Fully connected, with bias. |
-| layer | `layer <name>: relu` / `tanh` / `sigmoid` | Element-wise activations, no parameters. |
-| data | `data <name>:` then indented `[x...] -> [y...]` rows | Inline training data; row widths must match input/output. |
-| init | `init seed=<int>` | Required. PyTorch's default `nn.Linear` initialisation, seeded. |
-| import | `import <layer> from "<artifact dir or package path>" [layer=<src>] [sha256=<hex>] [freeze]` | Copy a linear layer's weights from a built artifact. Local paths start with `./`, `../` or `/`; other paths are packages (see packages.md). |
-| train | `train data=<d> loss=<mse\|bce> optimizer=<sgd\|adam> lr=<x> epochs=<n>` | Optional, at most one. Full-batch training. |
+`use std/nn` selects a bundled library; its default alias is `nn`.
+`use "./layers.wgt" as layers` selects a local library relative to the source.
+Library files contain only the version header, `use` and `block` statements.
+Cycles are errors. Remote source libraries are not supported.
+`weightc std` lists the available block signatures.
 
-Comments start with `#` and run to the end of the line.
+`layer skip: residual(nn.mlp(in=4, hidden=8, out=4))` adds the input to
+the block output. A bare operator such as `residual(linear(...))` is rejected.
 
-Layers run in the order written (a sequential network). The compiler checks that
-each `linear.in` equals the width produced so far and that the final width
-equals the declared output.
+## Data
 
-## Where weights come from
+Inline data uses indented `[inputs] -> [targets]` rows:
 
-Weights are produced in a fixed order, independent of statement order:
+```wgt
+data train:
+  [-2, 0] -> [0]
+  [2, 0] -> [1]
+  [0, 2] -> [2]
+```
 
-1. **init** — every `linear` layer is initialised from `seed`.
-2. **import** — listed layers are overwritten with tensors from another
-   artifact. The path is relative to the `.wgt` file. The source artifact is
-   fully verified (hashes, shapes). `layer=` selects the source layer (defaults to
-   the same name); the source and target `linear` sizes must match exactly.
-   `sha256=` pins the source artifact's `weights.safetensors` hash and fails the
-   build on mismatch. `freeze` excludes the layer from training.
-3. **train** — all non-frozen parameters are updated by full-batch gradient
-   descent on the named dataset. `loss=bce` requires a final `sigmoid` layer and
-   0/1 targets.
+In 0.2, optional `license="…"` and `source="…"` annotate inline data.
+External data uses:
 
-Each tensor in the artifact records one origin:
+```text
+data train: file="train.csv" sha256=<64 lowercase hex digits> skip=1 license="CC-BY-4.0" source="<URL>"
+```
 
-| origin | meaning |
-|---|---|
-| `random-init` | Seeded random values; never trained. Outputs depending on it are not meaningful. |
-| `trained` | Initialised randomly, then updated by this file's `train`. |
-| `imported` | Copied unchanged from another artifact (frozen, or no `train`). `upstream_origin` says what it was there. |
-| `imported+trained` | Copied, then fine-tuned by this file's `train`. |
+Paths are relative to the source. Hashes cover the original file bytes, including
+any header. `skip=N` skips initial lines (default 0). Remaining nonempty lines
+must contain comma-separated numbers: the first input-width columns are
+features, all remaining columns are targets. Quoted CSV fields are unsupported.
+A file without a hash, a hash mismatch or malformed row fails before training.
 
-A file without `train` still builds — that is useful for checking structure and
-for testing loaders — but `weightc build`, `weightc run`, `weightc inspect` and
-`load_artifact` all label it as untrained. Importing an untrained tensor does not
-make it trained: `upstream_origin` keeps `random-init`, and the loader still
-warns.
+## Training
 
-Training metrics in the manifest are measured on the training rows only. They
-show that optimisation converged on those rows, not that the model generalises.
+```wgt
+train data=train loss=cross_entropy optimizer=adamw lr=0.01 epochs=200 batch=16 validate=test weight_decay=0.01
+```
 
-## Not in 0.1
+`data`, `loss`, `optimizer`, `lr` and `epochs` are required.
+0.1 supports mse/bce and sgd/adam. 0.2 adds cross_entropy, adamw and these options:
 
-Multiple inputs/outputs, non-sequential graphs, convolutions, attention,
-normalisation, dropout, dtypes other than `f32`, multi-dimensional tensors,
-external datasets, mini-batches, validation splits, learning-rate schedules,
-custom initialisers and partial-tensor imports.
+- `batch=N`: seeded mini-batch shuffling; absent or ≥ dataset size means full batch.
+- `validate=name`: evaluate a separate named dataset after training. Naming the
+  training dataset is rejected; the author must ensure the rows are held out.
+- `weight_decay=P`: nonnegative optimizer weight decay, default zero.
+
+BCE requires a final sigmoid and binary targets. Cross entropy requires one
+integer class index per row in [0, output width), with raw logits; a final
+softmax or sigmoid is rejected. MSE targets match the output width.
+Metrics distinguish training loss/accuracy from validation loss/accuracy.
+A seed reproduces training on the same CPU and PyTorch version, including dropout.
+
+## Imports and origins
+
+Initialization runs first, imports second, training last:
+
+```wgt
+import body.fc1 from "../build/source" layer=body.fc1 freeze
+import body from "../build/source" layer=body sha256=<hash>
+```
+
+Import statements copy all tensors under the exact dotted prefix. Source and
+target expanded structures (operations, arguments, child names) must match.
+`freeze` excludes only that prefix from training and requires a train statement.
+Whole-layer imports also work in 0.1; dotted paths require 0.2.
+Package references use `wgt.mod` and `wgt.sum`; see [packages.md](packages.md).
+
+Each tensor records `random-init`, `trained`, `imported` or
+`imported+trained`. Imported tensors retain `upstream_origin`. Importing an
+untrained tensor does not make it trained. LayerNorm parameters use the same
+origin system even though its default initialization uses constants.
+Artifacts without training are useful for structure/loader tests, not predictions.
+
+## Limits
+
+No embedding, i64 ports, convolution, attention, general graph wiring,
+multidimensional feature shapes, GPU training controls or learning-rate schedules.

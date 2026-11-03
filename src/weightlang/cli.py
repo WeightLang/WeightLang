@@ -6,17 +6,25 @@ import argparse
 import json
 import sys
 import warnings
+from pathlib import Path
 
 from . import __version__
-from .artifact import UntrainedWeightsWarning, load_artifact
-from .syntax import WgtError, parse_file
+from .artifact import UntrainedWeightsWarning, build_module, describe_layer, load_artifact
+from .syntax import STD_DIR, WgtError, is_library_source, parse_file, parse_library
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
-    program = parse_file(args.source)
-    params = sum(
-        layer.args["in"] * layer.args["out"] + layer.args["out"] for layer in program.layers if layer.op == "linear"
-    )
+    path = Path(args.source)
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise WgtError(f"cannot read source: {exc}", path=str(path)) from None
+    if is_library_source(source):
+        scope = parse_library(source, str(path))
+        print(f"ok: library {path}, blocks: {', '.join(scope.blocks)}")
+        return 0
+    program = parse_file(path)
+    params = sum(p.numel() for p in build_module([layer.to_dict() for layer in program.layers]).parameters())
     weights = "trained" if program.train else "random-init only (untrained)"
     if program.imports:
         weights += f", {len(program.imports)} imported layer(s)"
@@ -41,6 +49,10 @@ def _cmd_build(args: argparse.Namespace) -> int:
         if "train_accuracy" in t:
             line += f", train accuracy {t['train_accuracy']:.2f}"
         print(line)
+        if "validation" in t:
+            v = t["validation"]
+            print(f"  validation loss {v['loss']:.4f}" + (f", accuracy {v['accuracy']:.4f}" if "accuracy" in v else ""))
+
     else:
         print("  WARNING: no train statement; weights are random and outputs are not meaningful")
     return 0
@@ -74,7 +86,11 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     )
     print(f"input  {io['input']['name']}: f32{io['input']['shape']}")
     print(f"output {io['output']['name']}: f32{io['output']['shape']}")
-    print("layers " + " -> ".join(layer["name"] + ":" + layer["op"] for layer in m["layers"]))
+    print("layers " + " -> ".join(describe_layer(layer) for layer in m["layers"]))
+    for name, record in m.get("libraries", {}).items():
+        print(f"library {name}: {record}")
+    if (m.get("training") or {}).get("validation"):
+        print("validation " + json.dumps(m["training"]["validation"]))
     print("tensors:")
     for name, meta in m["weights"]["tensors"].items():
         extra = f" (upstream: {meta['upstream_origin']})" if "upstream_origin" in meta else ""
@@ -128,6 +144,30 @@ def _cmd_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_std(args: argparse.Namespace) -> int:
+    for path in sorted(STD_DIR.glob("*.wgt")):
+        scope = parse_library(path.read_text(encoding="utf-8"), str(path))
+        for block in scope.blocks.values():
+            print(f"std/{path.stem}.{block.name}({', '.join(block.params)})")
+    return 0
+
+
+def _cmd_audit(args: argparse.Namespace) -> int:
+    artifact = load_artifact(args.artifact, warn_untrained=False)
+    training = artifact.manifest.get("training") or {}
+    validation = training.get("validation") or {}
+    datasets = [training.get("dataset"), validation.get("dataset")]
+    checks = {
+        "no untrained tensors": not artifact.untrained_tensors,
+        "validation metrics": "loss" in validation,
+        "dataset hashes and licenses": all(d and d.get("sha256") and d.get("license") for d in datasets),
+        "weights below 50 MB": (artifact.path / artifact.manifest["weights"]["file"]).stat().st_size < 50_000_000,
+    }
+    for name, passed in checks.items():
+        print(f"{'pass' if passed else 'fail'}: {name}")
+    return 0 if all(checks.values()) else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="weightc", description="WeightLang compiler (prototype)")
     parser.add_argument("--version", action="version", version=f"weightc {__version__}")
@@ -166,6 +206,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--out", default="dist", help="empty output directory (default: dist)")
     p.add_argument("--allow-untrained", action="store_true", help="allow artifacts with untrained tensors")
     p.set_defaults(func=_cmd_publish)
+
+    p = sub.add_parser("std", help="list bundled standard block signatures")
+    p.set_defaults(func=_cmd_std)
+    p = sub.add_parser("audit", help="check standard weight admission requirements")
+    p.add_argument("artifact")
+    p.set_defaults(func=_cmd_audit)
 
     args = parser.parse_args(argv)
     try:

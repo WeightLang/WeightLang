@@ -108,7 +108,7 @@ def parse_mod(path: Path) -> ModFile:
                 raise err("duplicate module line")
             module = words[1]
         elif words[0] == "wgt" and len(words) == 2:
-            if words[1] != "0.1":
+            if words[1] not in ("0.1", "0.2"):
                 raise err(f"unsupported wgt version {words[1]}")
         elif words[0] == "require" and len(words) == 3:
             try:

@@ -36,11 +36,12 @@ def test_minimal_program_and_comments():
 @pytest.mark.parametrize(
     "mutation, message, line",
     [
-        (lambda s: s.replace("wgt 0.1", "wgt 0.2"), "unsupported language version", 1),
+        (lambda s: s.replace("wgt 0.1", "wgt 0.3"), "unsupported language version", 1),
         (lambda s: s.replace("wgt 0.1\n", ""), "must start with a version header", 1),
         (lambda s: s.replace("in=4, out=1", "in=5, out=1"), "expects in=5 but receives 4", 7),
         (lambda s: s.replace("output y: f32[1]", "output y: f32[3]"), "declares 3", 4),
-        (lambda s: s.replace("relu", "gelu"), "unknown layer operation 'gelu'", 6),
+        (lambda s: s.replace("relu", "gelu"), "'gelu' requires 'wgt 0.2'", 6),
+        (lambda s: s.replace("relu", "conv2d"), "unknown layer operation or block 'conv2d'", 6),
         (lambda s: s.replace("f32[2]", "f16[2]"), "supports only f32", 3),
         (lambda s: s.replace("f32[2]", "f32[2, 2]"), "1-D", 3),
         (lambda s: s.replace("init seed=1\n", ""), "missing 'init seed", None),
@@ -50,7 +51,7 @@ def test_minimal_program_and_comments():
         (lambda s: s + 'import r from "x"\n', "has no parameters", 9),
         (lambda s: s + 'import a from "x" sha256=abc\n', "64 lowercase hex", 9),
         (lambda s: s + "  [1, 2] -> [3]\n", "unexpected indentation", 9),
-        (lambda s: s + "data d:\n  [1, 2] -> [3, 4]\n", "rows must be", 9),
+        (lambda s: s + "data d:\n  [1, 2] -> [3, 4]\n", "2 target values per row but output declares 1", 9),
         (lambda s: s.replace("layer r: relu", "layer a: relu"), "duplicate layer name", 6),
         (lambda s: s + "frobnicate\n", "unknown statement", 9),
     ],

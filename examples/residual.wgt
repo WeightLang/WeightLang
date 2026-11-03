@@ -1,0 +1,14 @@
+wgt 0.2
+use std/blocks
+use std/heads
+model residual_demo
+input x: f32[2]
+output logits: f32[3]
+layer body: blocks.residual_mlp(dim=2, hidden=8)
+layer head: heads.classifier(in=2, classes=3)
+data train:
+  [-2, 0] -> [0]
+  [2, 0] -> [1]
+  [0, 2] -> [2]
+init seed=42
+train data=train loss=cross_entropy optimizer=adam lr=0.03 epochs=200

@@ -1,0 +1,24 @@
+{
+  "layers": [
+    {
+      "name": "body",
+      "op": "seq",
+      "args": {},
+      "layers": [
+        {
+          "name": "logits",
+          "op": "linear",
+          "args": {
+            "in": 2,
+            "out": 3
+          }
+        }
+      ],
+      "block": "std/heads.classifier"
+    }
+  ],
+  "tensors": [
+    "body.logits.bias",
+    "body.logits.weight"
+  ]
+}

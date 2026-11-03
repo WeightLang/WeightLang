@@ -23,7 +23,8 @@ from torch import nn
 from .syntax import WgtError
 
 ARTIFACT_FORMAT = "weightlang.artifact"
-ARTIFACT_FORMAT_VERSION = 1
+ARTIFACT_FORMAT_VERSION = 2
+READABLE_FORMAT_VERSIONS = (1, 2)
 MANIFEST_FILE = "manifest.json"
 WEIGHTS_FILE = "weights.safetensors"
 SOURCE_FILE = "source.wgt"
@@ -84,23 +85,77 @@ def write_safetensors(path: Path, tensors: dict[str, torch.Tensor], metadata: di
             fh.write(blob)
 
 
-def build_module(layers: Sequence[dict[str, Any]]) -> nn.Sequential:
-    """Build the PyTorch module for a declarative layer list."""
+class Residual(nn.Sequential):
+    """``x + f(x)`` where ``f`` is the contained sequence. Children keep their names."""
 
-    modules: OrderedDict[str, nn.Module] = OrderedDict()
+    def forward(self, x: torch.Tensor) -> torch.Tensor:  # noqa: D102
+        return x + super().forward(x)
+
+
+_ACTIVATIONS: dict[str, type[nn.Module]] = {
+    "relu": nn.ReLU,
+    "tanh": nn.Tanh,
+    "sigmoid": nn.Sigmoid,
+    "gelu": nn.GELU,
+    "silu": nn.SiLU,
+    "identity": nn.Identity,
+}
+
+
+def _build_layer(layer: dict[str, Any]) -> nn.Module:
+    op, args = layer["op"], layer.get("args", {})
+    if op == "linear":
+        return nn.Linear(args["in"], args["out"])
+    if op == "layernorm":
+        return nn.LayerNorm(args["dim"])
+    if op == "dropout":
+        return nn.Dropout(args["p"])
+    if op == "softmax":
+        return nn.Softmax(dim=-1)
+    if op in _ACTIVATIONS:
+        return _ACTIVATIONS[op]()
+    if op == "seq":
+        return build_module(layer["layers"])
+    if op == "residual":
+        return Residual(OrderedDict((child["name"], _build_layer(child)) for child in layer["layers"]))
+    raise WgtError(f"unknown layer operation {op!r} in artifact")
+
+
+def build_module(layers: Sequence[dict[str, Any]]) -> nn.Sequential:
+    """Build the PyTorch module for a declarative (possibly nested) layer list."""
+
+    return nn.Sequential(OrderedDict((layer["name"], _build_layer(layer)) for layer in layers))
+
+
+def find_layer_dict(layers: Sequence[dict[str, Any]], dotted: str) -> dict[str, Any] | None:
+    head, _, rest = dotted.partition(".")
     for layer in layers:
-        op = layer["op"]
-        if op == "linear":
-            modules[layer["name"]] = nn.Linear(layer["args"]["in"], layer["args"]["out"])
-        elif op == "relu":
-            modules[layer["name"]] = nn.ReLU()
-        elif op == "tanh":
-            modules[layer["name"]] = nn.Tanh()
-        elif op == "sigmoid":
-            modules[layer["name"]] = nn.Sigmoid()
-        else:
-            raise WgtError(f"unknown layer operation {op!r} in artifact")
-    return nn.Sequential(modules)
+        if layer["name"] == head:
+            return layer if not rest else find_layer_dict(layer.get("layers", []), rest)
+    return None
+
+
+def structure_signature(layer: dict[str, Any]) -> Any:
+    """Op, args and children (with names) of a layer, ignoring provenance such as ``block``."""
+
+    return (
+        layer["op"],
+        sorted(layer.get("args", {}).items()),
+        [(c["name"], structure_signature(c)) for c in layer.get("layers", [])],
+    )
+
+
+def describe_layer(layer: dict[str, Any]) -> str:
+    args = ", ".join(f"{k}={v}" for k, v in layer.get("args", {}).items())
+    if layer["op"] in ("seq", "residual"):
+        inner = " -> ".join(describe_layer(c) for c in layer["layers"])
+        label = layer.get("block") or layer["op"]
+        return (
+            f"{layer['name']}:{label}[{inner}]"
+            if layer["op"] == "seq"
+            else f"{layer['name']}:residual({label})[{inner}]"
+        )
+    return f"{layer['name']}:{layer['op']}" + (f"({args})" if args else "")
 
 
 @dataclass
@@ -165,9 +220,9 @@ def load_artifact(path: str | Path, *, warn_untrained: bool = True) -> Artifact:
 
     _check(manifest.get("format") == ARTIFACT_FORMAT, "manifest format is not weightlang.artifact", manifest_path)
     _check(
-        manifest.get("format_version") == ARTIFACT_FORMAT_VERSION,
+        manifest.get("format_version") in READABLE_FORMAT_VERSIONS,
         f"unsupported artifact format_version {manifest.get('format_version')!r}; "
-        f"this loader reads version {ARTIFACT_FORMAT_VERSION}",
+        f"this loader reads versions {', '.join(map(str, READABLE_FORMAT_VERSIONS))}",
         manifest_path,
     )
 

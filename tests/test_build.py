@@ -35,7 +35,7 @@ def test_reload_gives_identical_outputs(xor_build):
 
 def test_manifest_records_contract_and_versions(xor_build):
     m = json.loads((xor_build.path / "manifest.json").read_text())
-    assert m["format"] == "weightlang.artifact" and m["format_version"] == 1
+    assert m["format"] == "weightlang.artifact" and m["format_version"] == 2
     assert m["language_version"] == "0.1"
     assert m["compiler"]["name"] == "weightc"
     assert m["built_with"]["torch"] == torch.__version__

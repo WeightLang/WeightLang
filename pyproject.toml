@@ -1,6 +1,6 @@
 [project]
 name = "weightlang"
-version = "0.1.0"
+version = "0.2.0"
 description = "WeightLang prototype: compile .wgt network descriptions into runnable PyTorch artifacts"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,6 +29,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+weightlang = ["std/*.wgt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

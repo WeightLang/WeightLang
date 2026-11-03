@@ -1,4 +1,4 @@
-# Artifact format (version 1)
+# Artifact format (version 2)
 
 `weightc build model.wgt -o build` writes `build/<model>/`:
 
@@ -17,17 +17,18 @@ executed from an artifact.
 
 | Field | Meaning |
 |---|---|
-| `format`, `format_version` | `"weightlang.artifact"`, `1`. Loaders reject other versions. |
-| `language_version` | `.wgt` version of the source (`"0.1"`). |
+| `format`, `format_version` | `"weightlang.artifact"`, `2`. This loader also accepts v1. |
+| `language_version` | `.wgt` version of the source (`"0.1"` or `"0.2"`). |
 | `model` | Model name. |
 | `compiler` | `{"name": "weightc", "version": ...}` |
 | `built_with` | PyTorch and Python versions used for the build. |
 | `source` | `{"file": "source.wgt", "sha256": ...}` |
 | `interface` | Input/output names, dtype (`f32`) and feature shape. Inference takes `[features]` or `[N, features]`. |
-| `layers` | Ordered list of `{"name", "op", "args"}`; the whole architecture. |
+| `layers` | Ordered layer objects; seq/residual contain nested `layers` and an optional `block` identity (e.g. std/nn.mlp). |
+| `libraries` | Top-level use alias → name, sha256 and bundled flag. |
 | `init` | Seed and initialisation method. |
 | `imports` | For each imported layer: source path, source model and layer, source weights and manifest sha256, whether it was pinned and frozen. |
-| `training` | `null` if untrained; otherwise dataset name and sha256, rows, loss, optimizer, lr, epochs, initial/final loss and (for `bce`) training-set accuracy. |
+| `training` | `null` if untrained; otherwise dataset name and sha256, rows, loss, optimizer, lr, epochs, initial/final loss and (for bce/cross_entropy) training-set accuracy. Includes batch, weight_decay, `dataset` metadata and optional `validation` with loss, accuracy and dataset. |
 | `weights` | File name, sha256 of the file, and per tensor: shape, dtype, `origin` and (for imports) `upstream_origin`. |
 
 ## Verification on load
@@ -73,11 +74,50 @@ from safetensors.torch import load_file
 
 root = "build/xor_mlp"
 manifest = json.load(open(f"{root}/manifest.json"))
-acts = {"relu": torch.nn.ReLU, "tanh": torch.nn.Tanh, "sigmoid": torch.nn.Sigmoid}
-net = torch.nn.Sequential(OrderedDict(
-    (l["name"], torch.nn.Linear(l["args"]["in"], l["args"]["out"]) if l["op"] == "linear" else acts[l["op"]]())
-    for l in manifest["layers"]
-))
+class Residual(torch.nn.Sequential):
+    def forward(self, x):
+        return x + super().forward(x)
+
+acts = {
+    "relu": torch.nn.ReLU, "tanh": torch.nn.Tanh, "sigmoid": torch.nn.Sigmoid,
+    "gelu": torch.nn.GELU, "silu": torch.nn.SiLU, "identity": torch.nn.Identity,
+}
+
+def layer(l):
+    op, a = l["op"], l.get("args", {})
+    if op in ("seq", "residual"):
+        cls = Residual if op == "residual" else torch.nn.Sequential
+        return cls(OrderedDict((c["name"], layer(c)) for c in l["layers"]))
+    if op == "linear":
+        return torch.nn.Linear(a["in"], a["out"])
+    if op == "layernorm":
+        return torch.nn.LayerNorm(a["dim"])
+    if op == "dropout":
+        return torch.nn.Dropout(a["p"])
+    if op == "softmax":
+        return torch.nn.Softmax(dim=-1)
+    return acts[op]()
+
+net = torch.nn.Sequential(OrderedDict((l["name"], layer(l)) for l in manifest["layers"]))
 net.load_state_dict(load_file(f"{root}/weights.safetensors"))
 net.eval()
 ```
+
+
+## Compatibility and dataset metadata
+
+New builds emit v2, including builds of wgt 0.1 sources. Existing v1 artifacts
+remain readable; no migration or reserialization is required. The original
+gates v0.1.0 consumer and lock file remain unchanged.
+
+Nested tensor names use dots (e.g. body.fc1.weight). A block records its source
+identity as `"block": "std/nn.mlp"`; residual layers retain the same nested
+children and add their result to the input.
+
+`training.dataset` and `training.validation.dataset` record name, rows and
+sha256 of canonical numeric data. File datasets additionally record file and
+file_sha256 (the original bytes); license and source are recorded when supplied.
+`training.validation` contains loss and, for classification, accuracy, measured
+after training in eval mode. train_accuracy and final_loss refer to training
+rows only. Dataset files and library sources are not copied into artifacts;
+rerunning a build requires the original repository data/libraries.

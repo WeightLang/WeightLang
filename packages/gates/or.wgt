@@ -1,0 +1,20 @@
+wgt 0.1
+# Published as github.com/WeightLang/WeightLang/packages/gates/or_mlp.
+model or_mlp
+
+input  bits: f32[2]
+output prob: f32[1]
+
+layer hidden: linear(in=2, out=8)
+layer act:    tanh
+layer head:   linear(in=8, out=1)
+layer out:    sigmoid
+
+data or:
+  [0, 0] -> [0]
+  [0, 1] -> [1]
+  [1, 0] -> [1]
+  [1, 1] -> [1]
+
+init  seed=42
+train data=or loss=bce optimizer=adam lr=0.05 epochs=1000

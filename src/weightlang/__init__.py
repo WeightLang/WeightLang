@@ -1,6 +1,6 @@
 """WeightLang prototype: compile .wgt network descriptions into runnable PyTorch artifacts."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .artifact import Artifact, UntrainedWeightsWarning, load_artifact  # noqa: E402
 from .syntax import Program, WgtError, parse, parse_file  # noqa: E402

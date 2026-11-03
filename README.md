@@ -14,7 +14,7 @@
   <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue">
   <img alt="backend" src="https://img.shields.io/badge/backend-PyTorch-ee4c2c">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
-  <img alt="status" src="https://img.shields.io/badge/status-0.1%20prototype-orange">
+  <img alt="status" src="https://img.shields.io/badge/status-0.2%20prototype-orange">
 </p>
 
 <p align="center">
@@ -65,7 +65,7 @@ sha256 against the release's `SHA256SUMS`, and install it with
 [`uv tool`](https://docs.astral.sh/uv/) if uv is available, otherwise into a
 private virtual environment (no sudo / admin needed). On Linux they install the
 CPU build of PyTorch by default (`WEIGHTLANG_TORCH=default` for PyPI's CUDA
-build). Pin a version with `WEIGHTLANG_VERSION=v0.1.0`. Read the scripts before
+build). Pin a version with `WEIGHTLANG_VERSION=v0.2.0`. Read the scripts before
 piping them to a shell: [install.sh](install.sh), [install.ps1](install.ps1).
 
 <details>
@@ -73,7 +73,7 @@ piping them to a shell: [install.sh](install.sh), [install.ps1](install.ps1).
 
 ```sh
 # With uv, straight from the release wheel
-uv tool install https://github.com/WeightLang/WeightLang/releases/download/v0.1.0/weightlang-0.1.0-py3-none-any.whl
+uv tool install https://github.com/WeightLang/WeightLang/releases/download/v0.2.0/weightlang-0.2.0-py3-none-any.whl
 
 # From PyPI
 uv tool install weightlang        # or: pipx install weightlang
@@ -128,6 +128,8 @@ Artifacts can also be loaded with only `torch` + `safetensors` — see
 | `weightc build FILE -o DIR` | Build an artifact into `DIR/<model>/` |
 | `weightc run ARTIFACT --input JSON` | Run inference; JSON in, JSON out |
 | `weightc inspect ARTIFACT [--json]` | Show interface, layers and tensor provenance |
+| `weightc std` | List bundled block signatures |
+| `weightc audit ARTIFACT` | Check standard weight admission rules |
 | `weightc verify ARTIFACT` | Check hashes, tensor shapes and loadability |
 | `weightc get [DIR]` | Download, verify and lock the packages in `wgt.mod` |
 | `weightc publish PKG --version vX.Y.Z` | Build a package's release assets |
@@ -135,25 +137,20 @@ Artifacts can also be loaded with only `torch` + `safetensors` — see
 ## The language
 
 ```wgt
-wgt 0.1
-model xor_mlp
-
-input  bits: f32[2]
-output prob: f32[1]
-
-layer hidden: linear(in=2, out=8)
-layer act:    tanh
-layer head:   linear(in=8, out=1)
-layer out:    sigmoid
-
-data xor:
-  [0, 0] -> [0]
-  [0, 1] -> [1]
-  [1, 0] -> [1]
-  [1, 1] -> [0]
-
-init  seed=42
-train data=xor loss=bce optimizer=adam lr=0.05 epochs=1000
+wgt 0.2
+use std/nn
+use std/heads
+model std_mlp
+input x: f32[2]
+output logits: f32[3]
+layer body: nn.mlp(in=2, hidden=8, out=4)
+layer head: heads.classifier(in=4, classes=3)
+data train:
+  [-2, 0] -> [0]
+  [2, 0] -> [1]
+  [0, 2] -> [2]
+init seed=42
+train data=train loss=cross_entropy optimizer=adam lr=0.03 epochs=200
 ```
 
 - One statement per line, keyword first, `key=value` options. No expression language.
@@ -169,9 +166,17 @@ train data=xor loss=bce optimizer=adam lr=0.05 epochs=1000
 
 A program without `train` still builds, but `build`, `run`, `inspect` and the
 Python loader all flag it, and importing an untrained tensor does not make it
-trained. Training metrics are reported on the training rows only.
+trained. Training and validation metrics are recorded separately when `validate=` is supplied.
 
 Full reference: [docs/language.md](docs/language.md).
+
+## Standard library
+
+`use std/nn`, `use std/heads` and `use std/blocks` provide MLPs,
+classification/regression heads and pre-norm residual blocks. They expand into
+named layers and contain no pretrained weights. Run `weightc std` to list
+signatures. See [examples/residual.wgt](examples/residual.wgt) and
+[the std reference](docs/stdlib.md).
 
 ## Reusing weights
 
@@ -212,9 +217,14 @@ against the release's `wgt.index.json`, requires the shipped `source.wgt` to equ
 the file in the repository **at that commit**, and verifies the artifact. A later
 moved tag or replaced asset no longer matches `wgt.sum` and is an error.
 
-The first published package is
-[`packages/gates`](packages/gates) → release
-[`packages/gates/v0.1.0`](https://github.com/WeightLang/WeightLang/releases/tag/packages/gates/v0.1.0).
+Available packages:
+
+- [gates v0.2.0](https://github.com/WeightLang/WeightLang/releases/tag/packages/gates/v0.2.0):
+  six two-input gates, each correct on its complete truth table.
+- [iris v0.1.0](https://github.com/WeightLang/WeightLang/releases/tag/packages/iris/v0.1.0):
+  a small classifier with 29/30 held-out accuracy; [data, license and limits](packages/iris).
+- The example above remains pinned to gates v0.1.0 to exercise compatibility.
+
 Publishing your own:
 
 ```sh
@@ -230,7 +240,7 @@ Design, lock-file format and known gaps: [docs/packages.md](docs/packages.md).
 | [docs/language.md](docs/language.md) | Syntax, checks, weight sources and origins |
 | [docs/artifact.md](docs/artifact.md) | Artifact files, manifest fields, verification, loading without WeightLang |
 | [docs/packages.md](docs/packages.md) | Module paths, `wgt.mod`, `wgt.sum`, publishing, fetching, open design |
-| [docs/stdlib.md](docs/stdlib.md) | Standard library design (proposal): built-ins, `std` blocks, standard weights, roadmap |
+| [docs/stdlib.md](docs/stdlib.md) | Standard library: built-ins, `std` blocks, standard weights, roadmap |
 
 ## Development
 
@@ -250,17 +260,16 @@ in-memory fake of GitHub.
 
 | Channel | Status |
 |---|---|
-| GitHub release `v0.1.0` (wheel, sdist, `SHA256SUMS`, install scripts) | published |
+| GitHub release `v0.2.0` (wheel, sdist, `SHA256SUMS`, install scripts) | published |
 | [PyPI `weightlang`](https://pypi.org/project/weightlang/) | published by the manual [`publish-pypi`](.github/workflows/publish-pypi.yml) workflow (trusted publishing); identical files to the GitHub release |
 
 ## Limitations
 
-- **Small language:** sequential networks only (`linear`, `relu`, `tanh`,
-  `sigmoid`), one 1-D `f32` input and output, inline training data, full-batch
-  training, `mse`/`bce`, `sgd`/`adam`.
-- **Imports** copy whole `linear` layers. Packages support direct requirements
-  only, GitHub releases only, and trust-on-first-use hashes without signatures;
-  consumers use the publisher's prebuilt weights.
+- **Small language:** nested sequential and residual networks, one 1-D f32
+  input/output; no embedding, i64, convolutions, attention or general graphs.
+- **Imports** copy whole layers or nested blocks, not tensor slices. Packages
+  support direct requirements only, GitHub releases only, and trust-on-first-use
+  hashes without signatures. Consumers use the publisher's prebuilt weights.
 - **Reproducibility:** rebuilds are byte-identical on the same PyTorch version and
   CPU; across versions or hardware weights may differ, and the hashes will show it.
 - **Runtime:** PyTorch only; no ONNX or other exports.

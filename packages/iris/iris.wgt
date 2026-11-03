@@ -1,0 +1,12 @@
+wgt 0.2
+use std/nn
+use std/heads
+model iris
+input features: f32[4]
+output logits: f32[3]
+layer body: nn.mlp(in=4, hidden=16, out=8)
+layer head: heads.classifier(in=8, classes=3)
+data train: file="train.csv" sha256=b8527f9d15e38315841e2f32b1582257a22366ec70b506a203ef60c726e2928a license="CC-BY-4.0" source="https://archive.ics.uci.edu/dataset/53/iris"
+data test: file="test.csv" sha256=718559932d98bff727cb4474381b796c06e2dfb6248ca0e8a88510f207270bbe license="CC-BY-4.0" source="https://archive.ics.uci.edu/dataset/53/iris"
+init seed=42
+train data=train loss=cross_entropy optimizer=adamw lr=0.01 epochs=200 batch=16 validate=test weight_decay=0.01

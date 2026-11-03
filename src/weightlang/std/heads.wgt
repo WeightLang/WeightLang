@@ -1,0 +1,18 @@
+wgt 0.2
+# std/heads: output heads. Pair them with the matching loss:
+#   classifier -> loss=cross_entropy (raw logits, no softmax)
+#   binary     -> loss=bce           (ends in sigmoid)
+#   regressor  -> loss=mse
+
+# Logits for `classes` classes. Apply softmax only at inference if you need probabilities.
+block classifier(in, classes):
+  layer logits: linear(in=in, out=classes)
+
+# Probability of the positive class.
+block binary(in):
+  layer fc:   linear(in=in, out=1)
+  layer prob: sigmoid
+
+# Unconstrained real-valued outputs.
+block regressor(in, out):
+  layer fc: linear(in=in, out=out)
