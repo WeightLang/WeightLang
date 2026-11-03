@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 import torch
-from safetensors.torch import load_file
+from safetensors.torch import load_file, save as serialize_tensors
 from torch import nn
 
 from .syntax import WgtError
@@ -66,24 +66,28 @@ def write_safetensors(path: Path, tensors: dict[str, torch.Tensor], metadata: di
     if sys.byteorder != "little":
         raise WgtError("writing safetensors on big-endian hosts is not supported")
     header: dict[str, Any] = {"__metadata__": dict(sorted(metadata.items()))}
-    blobs: list[bytes] = []
+    prepared: list[torch.Tensor] = []
     offset = 0
     for name in sorted(tensors):
         t = tensors[name].detach().to("cpu").contiguous()
         if t.dtype != torch.float32:
             raise WgtError(f"tensor {name} must be float32, got {t.dtype}")
-        # clone() gives a storage holding exactly this tensor; no numpy needed (torch does not depend on it)
-        data = bytes(t.clone().untyped_storage())
-        header[name] = {"dtype": "F32", "shape": list(t.shape), "data_offsets": [offset, offset + len(data)]}
-        blobs.append(data)
-        offset += len(data)
+        size = t.numel() * t.element_size()
+        header[name] = {"dtype": "F32", "shape": list(t.shape), "data_offsets": [offset, offset + size]}
+        prepared.append(t)
+        offset += size
     raw = json.dumps(header, separators=(",", ":"), sort_keys=False).encode()
     raw += b" " * (-len(raw) % 8)
     with path.open("wb") as fh:
         fh.write(struct.pack("<Q", len(raw)))
         fh.write(raw)
-        for blob in blobs:
-            fh.write(blob)
+        for tensor in prepared:
+            # The existing safetensors Rust extension handles binary serialization.
+            # One tensor per call also supports aliases and bounds transient copies.
+            # Keep our canonical header: upstream metadata ordering is not stable.
+            encoded = serialize_tensors({"tensor": tensor})
+            header_size = struct.unpack_from("<Q", encoded)[0]
+            fh.write(memoryview(encoded)[8 + header_size:])
 
 
 class Residual(nn.Sequential):

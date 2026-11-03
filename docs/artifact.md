@@ -159,3 +159,9 @@ through shared byte objects and optionally records a parent. This does not chang
 artifact versions 1–3: checkout restores all three original files byte-for-byte.
 Use checkout before passing a stored revision to existing loaders, Rust tools or
 package publishers. [Selective training and examples](weight-iterations.md).
+
+## Native serialization
+
+Weight serialization uses the existing safetensors Rust extension while preserving
+WeightLang's canonical file bytes and hashes. Python handles metadata and orchestration.
+See [local benchmarks and compatibility checks](native-performance.md).
