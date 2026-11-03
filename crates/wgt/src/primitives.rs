@@ -1,4 +1,4 @@
-//! The signature catalog is shared with Python; shape inference is independent.
+//! Native operator signature catalog and shape inference.
 use crate::contracts::TensorType;
 use anyhow::{ensure, Context, Result};
 use serde_json::Value;
@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 fn specs() -> &'static Value {
     static SPECS: OnceLock<Value> = OnceLock::new();
-    SPECS.get_or_init(|| serde_json::from_str(include_str!("../../../src/weightlang/primitive_specs.json")).expect("checked operator catalog"))
+    SPECS.get_or_init(|| serde_json::from_str(include_str!("../../../language/primitive_specs.json")).expect("checked operator catalog"))
 }
 pub fn contains(op: &str) -> bool { specs().get(op).is_some() }
 pub fn infer(op: &str, args: &Value, operands: &[TensorType]) -> Result<TensorType> {
@@ -38,6 +38,25 @@ pub fn infer(op: &str, args: &Value, operands: &[TensorType]) -> Result<TensorTy
         "square" | "rsqrt" | "exp" | "log" | "sin" | "cos" | "softplus" | "shift" | "cumsum" => {
             ensure!(x.dtype == "f32", "tensor math expects f32");
             if op == "cumsum" { axis("axis", false)?; }
+        }
+        "split_axis" => {
+            let a = axis("axis", false)?;
+            let parts = arg("parts")?;
+            ensure!(parts > 0 && x.shape[a] % parts as u64 == 0, "parts must be positive and divide the selected axis");
+            out.shape[a] = parts as u64;
+            out.shape.insert(a + 1, x.shape[a] / parts as u64);
+        }
+        "merge_axes" => {
+            let a = axis("axis", false)?;
+            ensure!(a + 1 < rank, "merge requires two adjacent sample axes");
+            out.shape[a] = x.shape[a].checked_mul(x.shape[a + 1]).context("merged dimension overflow")?;
+            out.shape.remove(a + 1);
+        }
+        "repeat_interleave" => {
+            let a = axis("axis", false)?;
+            let repeats = arg("repeats")?;
+            ensure!(repeats > 0, "repeats must be positive");
+            out.shape[a] = x.shape[a].checked_mul(repeats as u64).context("repeated dimension overflow")?;
         }
         "resize2d" | "pad2d" | "avgpool2d" => {
             ensure!(x.dtype == "f32" && rank == 3 && x.shape.iter().all(|v| *v > 0), "spatial operator expects nonempty f32[C,H,W]");

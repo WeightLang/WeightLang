@@ -1,73 +1,18 @@
-# Default weight version history
+# 模型与数据存储
 
-`weightc train` continues `weights/.revisions` HEAD and commits a new revision.
-`--fresh` explicitly initializes; it does not erase existing history.
-`weightc export model.wgt` explicitly initializes/migrates without training and
-records a revision; `--no-store` exports a standalone model instead.
-`--store PATH` selects another repository. Retention still defaults to the latest
-5 recoverable snapshots; `[revisions] max_versions = 0` disables pruning.
-Immutable metadata and exported model directories remain.
-See [version control](weight-version-control.md) and [command migration](bundles.md).
+完整模型放在 `weights/<model>/`；保留的实验基线、候选结果和报告放在 `weights/<experiment>/`，作为持久数据一起保留。不要将它们当缓存清理，也不要覆盖既有结果；只有提供显式 `--force` 的操作才可以按其具体契约替换。当前原生构建和保存接口拒绝已有目标，并不提供覆盖选项。
 
-`wgt build` / `weightc build` create a source-only ZIP at `dist/model.wgtpkg`.
-They never write model weights or train. `package --weights SOURCE=DIR` explicitly
-includes a complete artifact; `--reference SOURCE=DIR` records hashes only.
-Installing an embedded bundle requires space for its uncompressed contents.
-
-# Storage layout
-
-Model outputs are durable project data, not compiler caches.
-
-| Content | Default location | Retention |
+| 内容 | 位置 | 用途 |
 | --- | --- | --- |
-| Built model | `weights/<model>/` | Keep until explicitly removed |
-| Experiment baseline/candidates/reports | `weights/<experiment>/` | Keep together |
-| Local scratch and run/test models | .cache/weightlang/ | Disposable; use disk storage |
-| Downloaded dependencies | ~/.cache/weightlang/ | Shared disk cache; WEIGHTLANG_CACHE overrides it |
-| Small temporary previews/logs | /tmp/weightlang/ on Linux | Disposable; default preview overwritten |
-| Release archives | dist/ | Explicit publishing outputs |
-| Rust compiler output | target/ | Rust's own cache, never the default model output |
+| 模型与保留的实验 | `weights/` | 持久保存 |
+| 大型数据、下载和构建中间文件 | 磁盘上的项目路径或 `.cache/weightlang/` | 按需缓存 |
+| Rust 编译缓存 | `target/` | 仅编译器缓存，不是模型输出 |
+| 小型临时文件 | `/tmp/weightlang/` | 仅本任务产生的可丢弃内容 |
 
-weightc export --no-store model.wgt writes `weights/<model>/` relative to the current directory.
-wgt export resolves it relative to the discovered project root. The name comes
-from the source's model declaration, not the source filename.
+预计写入超过 100 MB 前，检查目标目录、剩余空间、实际挂载和冗余内容。大文件不能放在 tmpfs，包括 `/tmp` 或 `/dev/shm` 的内存挂载。结束后只清理本任务产生且不再需要的临时文件，不删除已有权重、实验、缓存或其他工作。
 
-Both standalone export commands accept -o ROOT and write `ROOT/<model>/`.
-An existing model is protected by default. --force explicitly permits replacement
-of a WeightLang model directory; unrelated directories and symlinks are refused
-even with --force. Keep baselines in separate directories before rebuilding.
-This is a default-path change; existing artifact paths still work.
+`weightc legacy-build` 默认向 `weights/<source stem>/` 输出 `model.json`、`checkpoint.json`、`source.wgt` 和完成标记 `manifest.json`。这些文件应作为完整目录保留。`save_model` 写入推理模型；`save` 写入包含优化器状态的训练断点，两者不能互换。调用者还需保存数据及脚本进度；断点不自动保存脚本 RNG 和外部依赖。详见[原生训练](native-training.md#保存与续训)。
 
-wgt run and wgt test check out the current weight HEAD in .cache/weightlang/run/ and
-.cache/weightlang/test/ respectively. These are disposable working copies;
-they never replace the models kept in weights/.
-wgt package never scans weights/ automatically. Explicit --weights/--reference selects artifacts.
-The legacy wgt release-assets command reads weights/; --artifacts ROOT overrides it.
-Package publishing stages intermediate models in .cache/weightlang/publish/
-inside the package and removes its temporary staging directory afterward.
+原生编译的 Cargo 中间文件使用当前目录下的 `.cache/weightlang/aot/`；编译不执行训练或生成权重。单文件脚本的依赖锁位于包缓存中的 `scripts/<脚本规范路径的 SHA256>/wgt.sum`；项目脚本使用项目的 `wgt.sum`。完整路径及依赖规则见[原生训练](native-training.md#单文件依赖注释与直接执行)。
 
-A model directory contains manifest.json, weights.safetensors, and source.wgt.
-Retain the complete directory. A safetensors file alone does not retain its
-interface or provenance.
-
-`wgt new/init` installs default `.gitignore` rules for `weights/` (including
-`.revisions`), `checkpoints/`, common model files (`*.safetensors`, `*.pt`,
-`*.pth`, `*.ckpt`, `*.gguf`, `*.onnx`, `pytorch_model*.bin`, `model*.bin`,
-`adapter_model.bin`), local environments, caches and build/package outputs.
-Missing rules are prepended to an existing file, preserving its contents and
-the precedence of explicit user exceptions. Sources, experiment definitions
-and dependency lockfiles remain versioned. Ignore rules do not untrack files
-already committed or remove weights from existing Git history.
-Large cache/download/build operations must use a disk-backed filesystem:
-check the actual mount, including custom paths, before starting.
-Do not place large weights or datasets in /tmp, /dev/shm, or a tmpfs cache.
-The tools do not automatically detect every filesystem type.
-
-Small scratch files must stay inside the project-named temporary root:
-/tmp/weightlang/ (the platform temporary directory plus weightlang elsewhere).
-wgt graph weights/my_model --open overwrites /tmp/weightlang/model.html.
-HTML embeds bounded tensor previews, not a complete copy of large weight files.
-Use explicit -o to keep a visualization on disk.
-
-Other projects use the same convention: `/tmp/<project>/` for small scratch,
-a project-specific disk cache for large disposable data.
+其他项目使用 `/tmp/<project>/` 保存小型临时文件，并使用各自的磁盘缓存。

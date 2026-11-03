@@ -1,7 +1,0 @@
-wgt 0.2
-# Architecture only. The demo sets y = 2*x + 1 by explicit weight edits.
-model affine
-input x: f32[1]
-output y: f32[1]
-layer fc: linear(in=1, out=1)
-init seed=42

@@ -74,7 +74,7 @@ impl Record {
             "invalid registry digest"
         );
         ensure!(
-            ["0.1", "0.2", "0.3"].contains(&self.edition.as_str()),
+            ["0.1", "0.2", "0.3", "0.5"].contains(&self.edition.as_str()),
             "unsupported package edition"
         );
         ensure!(
@@ -174,7 +174,7 @@ pub fn select(
             "package changes canonical module"
         );
         module = Some(record.module.clone());
-        if !record.yanked && exact.is_none_or(|v| v == record.version) {
+        if record.edition == "0.5" && !record.yanked && exact.is_none_or(|v| v == record.version) {
             matches.push((record, checksum));
         }
     }

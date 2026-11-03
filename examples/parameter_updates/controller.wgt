@@ -1,8 +1,0 @@
-wgt 0.3
-model update_direction
-input feedback: f32[2]
-output delta: f32[2]
-# 两个反馈分量映射到目标模型的两个连接；更新方向是普通模型输出。
-# 脚本显式提供 [out,in]=[2,2] 的系数，尚未训练；无隐藏状态。
-layer direction: linear(in=2,out=2,bias=0)
-init seed=7

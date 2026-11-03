@@ -1,7 +1,12 @@
 //! Native f32 inference with checked parameter expressions and reusable CPU storage.
 //! `Session::run` allocates no heap memory. Preparation and transport may allocate.
+pub mod source;
 pub mod execution;
+pub mod adaptive;
+pub mod training;
+pub mod script;
 mod parameter_ops;
+mod quantized;
 pub use parameter_ops::{ParameterInfo, ParameterWrite};
 #[cfg(feature = "gpu")]
 mod gpu;
@@ -39,7 +44,10 @@ pub struct Parameter {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Value {
     Resident { data: Vec<f32> },
+    Packed { storage: String, group: usize, data: Vec<u8>, scales: Vec<f32> },
+    PackedFile { storage: String, group: usize, path: PathBuf, offset: u64, scales_offset: u64 },
     File { path: PathBuf, offset: u64 },
+    ResidentFile { path: PathBuf, offset: u64 },
     View { source: String, start: usize },
     Add { base: String, delta: String },
 }
@@ -72,6 +80,7 @@ pub struct Report {
 #[derive(Debug)]
 enum Storage {
     Resident(Box<[f32]>),
+    Packed(quantized::Packed),
     File { handle: File, offset: u64 },
     View { source: usize, start: usize },
     Add { base: usize, delta: usize },
@@ -173,6 +182,38 @@ impl Session {
                         .context("resident size overflow")?;
                     (Storage::Resident(data.into_boxed_slice()), 0usize)
                 }
+                Value::Packed { storage, group, data, scales } => {
+                    let packed = quantized::Packed::new(&storage, group, &p.shape, data, scales)?;
+                    resident = resident.checked_add(packed.bytes()).context("packed budget overflow")?;
+                    (Storage::Packed(packed), 0)
+                }
+                Value::PackedFile { storage, group, path, offset, scales_offset } => {
+                    let (_, _, n, count) = quantized::Packed::layout(&storage, group, &p.shape)?;
+                    let scale_bytes = bytes(count)?;
+                    let packed_bytes = n.checked_add(scale_bytes).context("packed budget overflow")?;
+                    resident = resident.checked_add(packed_bytes).context("packed budget overflow")?;
+                    ensure!(resident <= budget, "packed storage exceeds budget");
+                    let mut file = File::open(root.join(path))?;
+                    let length = file.metadata()?.len();
+                    ensure!(offset.checked_add(n as u64).is_some_and(|v| v<=length) && scales_offset.checked_add(scale_bytes as u64).is_some_and(|v| v<=length), "truncated packed file");
+                    let mut data = vec![0; n];
+                    file.seek(SeekFrom::Start(offset))?;
+                    file.read_exact(&mut data)?;
+                    file.seek(SeekFrom::Start(scales_offset))?;
+                    let mut scales = Vec::with_capacity(count);
+                    for _ in 0..count { let mut raw=[0;4]; file.read_exact(&mut raw)?; scales.push(f32::from_le_bytes(raw)); }
+                    let packed = quantized::Packed::new(&storage, group, &p.shape, data, scales)?;
+                    (Storage::Packed(packed), 0)
+                }
+                Value::ResidentFile { path, offset } => {
+                    resident = resident.checked_add(byte_len).context("resident size overflow")?;
+                    ensure!(resident <= budget, "resident storage exceeds budget");
+                    let mut handle = File::open(root.join(path))?;
+                    ensure!(offset % 4 == 0 && offset.checked_add(byte_len as u64).is_some_and(|v| v<=handle.metadata().map(|m| m.len()).unwrap_or(0)), "invalid resident file range");
+                    let mut data = zero_buffer(len)?;
+                    read_add(&mut handle, offset, &mut data).map_err(anyhow::Error::msg)?;
+                    (Storage::Resident(data.into_boxed_slice()), 0)
+                }
                 Value::File { path, offset } => {
                     ensure!(offset % 4 == 0, "file offset must be f32-aligned");
                     let handle =
@@ -216,7 +257,7 @@ impl Session {
             parameters.push(Tensor {
                 shape: p.shape,
                 len,
-                frozen: p.frozen,
+                frozen: p.frozen || matches!(storage, Storage::Packed(_)),
                 storage,
             });
         }
@@ -257,12 +298,8 @@ impl Session {
                             "bias must have shape [out]"
                         );
                     }
-                    workspace = workspace.max(
-                        parameters[weight]
-                            .len
-                            .checked_add(if bias.is_some() { output } else { 0 })
-                            .context("workspace overflow")?,
-                    );
+                    let dense = if matches!(parameters[weight].storage, Storage::Packed(_)) { 0 } else { parameters[weight].len };
+                    workspace = workspace.max(dense.checked_add(if bias.is_some() { output } else { 0 }).context("workspace overflow")?);
                     let op = Op::Linear {
                         weight,
                         bias,
@@ -334,6 +371,33 @@ impl Session {
                     input,
                     output,
                 } => {
+                    if matches!(self.parameters[weight].storage, Storage::Packed(_)) {
+                        self.workspace[..if bias.is_some() { output } else { 0 }].fill(0.);
+                        if let Some(bias) = bias {
+                            accumulate(&mut self.parameters, bias, 0, &mut self.workspace[..output])?;
+                        }
+                        if let Storage::Packed(packed) = &self.parameters[weight].storage {
+                            for row in 0..output {
+                                self.right[row] = packed.dot(row, &self.left[..input]) + if bias.is_some() { self.workspace[row] } else { 0. };
+                            }
+                        }
+                        std::mem::swap(&mut self.left, &mut self.right);
+                        width = output;
+                        continue;
+                    }
+                    // Resident matrices do not need copying. Keep expression/file fallback below.
+                    if matches!(self.parameters[weight].storage, Storage::Resident(_)) {
+                        self.workspace[..if bias.is_some() { output } else { 0 }].fill(0.);
+                        if let Some(bias) = bias { accumulate(&mut self.parameters, bias, 0, &mut self.workspace[..output])?; }
+                        if let Storage::Resident(data) = &self.parameters[weight].storage {
+                            for row in 0..output {
+                                self.right[row] = quantized::dot(&data[row*input..(row+1)*input], &self.left[..input]) + if bias.is_some() { self.workspace[row] } else { 0. };
+                            }
+                        }
+                        std::mem::swap(&mut self.left, &mut self.right);
+                        width = output;
+                        continue;
+                    }
                     let n = self.parameters[weight].len;
                     self.workspace[..n].fill(0.);
                     accumulate(&mut self.parameters, weight, 0, &mut self.workspace[..n])?;
@@ -397,6 +461,9 @@ fn accumulate(
             for (dst, src) in out.iter_mut().zip(data[start..].iter()) {
                 *dst += src;
             }
+        }
+        Storage::Packed(packed) => {
+            for (i, value) in out.iter_mut().enumerate() { *value += packed.value(start+i); }
         }
         Storage::File { handle, offset } => {
             read_add(handle, *offset + start as u64 * 4, out)?;

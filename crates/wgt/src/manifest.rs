@@ -32,8 +32,6 @@ pub struct ProjectConfig {
     #[serde(default)]
     pub runtime: RuntimeConfig,
     #[serde(default)]
-    pub environment: Option<crate::environment::EnvironmentConfig>,
-    #[serde(default)]
     pub dependencies: BTreeMap<String, String>,
 }
 #[derive(Debug, Deserialize, Serialize)]
@@ -77,12 +75,9 @@ impl ProjectConfig {
             "invalid project.module"
         );
         ensure!(
-            ["0.1", "0.2", "0.3"].contains(&config.project.edition.as_str()),
+            ["0.5"].contains(&config.project.edition.as_str()),
             "unsupported edition"
         );
-        if let Some(environment) = &config.environment {
-            environment.validate()?;
-        }
         for (module, v) in &config.dependencies {
             module_parts(module)?;
             version(v)?;
@@ -192,7 +187,7 @@ impl Manifest {
                     }
                     ["wgt", v] => {
                         ensure!(
-                            *v == "0.1" || *v == "0.2" || *v == "0.3",
+                            *v == "0.5",
                             "unsupported wgt edition {v}"
                         );
                         ensure!(
@@ -216,7 +211,7 @@ impl Manifest {
         }
         Ok(Self {
             module: module.context("missing module declaration")?,
-            edition: edition.unwrap_or("0.1".into()),
+            edition: edition.unwrap_or("0.5".into()),
             dependencies,
             text: text.into(),
         })

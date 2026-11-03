@@ -10,7 +10,12 @@ repository = "https://github.com/WeightLang/WeightLang"
 name = "wgt"
 path = "src/main.rs"
 
+[[bin]]
+name = "weightc"
+path = "src/weightc.rs"
+
 [dependencies]
+weightlang-runtime = { path = "../wgt-runtime", default-features = false }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
@@ -20,6 +25,3 @@ serde_json = "1"
 sha2 = "0.10"
 tempfile = "3"
 toml_edit = { version = "0.22", features = ["serde"] }
-flate2 = "1"
-tar = "0.4"
-zip = { version = "4.6", default-features = false, features = ["deflate"] }

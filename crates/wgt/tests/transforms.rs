@@ -297,7 +297,7 @@ fn merges_coalesce_axes_and_reject_duplicates_and_container_conflicts() {
 }
 
 fn artifact(root: &std::path::Path) -> Value {
-    let source = b"wgt 0.3\nmodel demo\n";
+    let source = b"wgt 0.5\nmodel demo\n";
     let header = b"{}      ";
     let mut weights = (header.len() as u64).to_le_bytes().to_vec();
     weights.extend(header);
@@ -352,17 +352,17 @@ fn artifact_validation_and_graph_rendering_use_inferred_named_shapes() {
 
 #[cfg(unix)]
 #[test]
-fn check_shapes_is_forwarded_to_compiler() {
+fn check_shapes_reports_removed_python_cli() {
     use std::{os::unix::fs::PermissionsExt, process::Command};
     let scratch = std::env::temp_dir().join("weightlang");
     fs::create_dir_all(&scratch).unwrap();
     let temp = tempfile::tempdir_in(scratch).unwrap();
     fs::write(
         temp.path().join("wgt.mod"),
-        "module local/shapes\nwgt 0.3\n",
+        "module local/shapes\nwgt 0.5\n",
     )
     .unwrap();
-    fs::write(temp.path().join("model.wgt"), "wgt 0.3\nmodel demo\n").unwrap();
+    fs::write(temp.path().join("model.wgt"), "wgt 0.5\nmodel demo\n").unwrap();
     let compiler = temp.path().join("compiler");
     fs::write(&compiler, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
     fs::set_permissions(&compiler, fs::Permissions::from_mode(0o755)).unwrap();
@@ -380,13 +380,7 @@ fn check_shapes_is_forwarded_to_compiler() {
         ])
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.starts_with("check\n"));
-    assert!(stdout.contains("--shapes\n"));
-    assert!(stdout.contains("--error-format\njson\n"));
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Python weightc CLI has been removed"));
+    assert!(!temp.path().join("args.txt").exists());
 }

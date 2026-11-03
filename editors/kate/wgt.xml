@@ -2,24 +2,28 @@
 <!DOCTYPE language SYSTEM "language.dtd">
 <language name="WeightLang" version="1" kateversion="5.0" section="Sources" extensions="*.wgt" mimetype="text/x-wgt" author="WeightLang contributors" license="MIT">
 <highlighting>
-<list name="keywords"><item>adapter</item><item>as</item><item>block</item><item>config</item><item>const</item><item>data</item><item>dim</item><item>freeze</item><item>from</item><item>import</item><item>inherit</item><item>init</item><item>input</item><item>layer</item><item>model</item><item>output</item><item>parameter</item><item>require</item><item>return</item><item>share</item><item>train</item><item>unfreeze</item><item>use</item><item>weight</item><item>wgt</item><item>wtype</item></list>
-<list name="builtins"><item>adam</item><item>adamw</item><item>add</item><item>avgpool2d</item><item>bce</item><item>broadcast</item><item>cat</item><item>concat</item><item>conv1d</item><item>conv2d</item><item>cos</item><item>cross_entropy</item><item>cumsum</item><item>dropout</item><item>embedding</item><item>eq</item><item>exp</item><item>flatten</item><item>gather</item><item>gelu</item><item>globalavgpool2d</item><item>identity</item><item>last</item><item>layernorm</item><item>linear</item><item>log</item><item>lt</item><item>masked_softmax</item><item>matmul</item><item>maxpool2d</item><item>mean</item><item>meanpool</item><item>mix</item><item>mse</item><item>mul</item><item>pad2d</item><item>ponder</item><item>position_embedding</item><item>rearrange</item><item>recur</item><item>reduce</item><item>reduce_max</item><item>reduce_mean</item><item>reduce_sum</item><item>relu</item><item>repeat</item><item>residual</item><item>resize2d</item><item>rmsnorm</item><item>rope_attention</item><item>route</item><item>rsqrt</item><item>scale</item><item>scan</item><item>scan_state</item><item>scatter_add</item><item>self_attention</item><item>seq</item><item>sgd</item><item>shift</item><item>sigmoid</item><item>silu</item><item>sin</item><item>slice</item><item>softmax</item><item>softplus</item><item>sparse_moe</item><item>square</item><item>stack</item><item>sum</item><item>tanh</item><item>transpose</item><item>transpose_axes</item><item>where</item></list>
-<list name="types"><item>bool</item><item>f32</item><item>i64</item></list>
+<list name="keywords"><item>break</item><item>continue</item><item>else</item><item>fn</item><item>for</item><item>frozen</item><item>if</item><item>in</item><item>init</item><item>input</item><item>layer</item><item>let</item><item>model</item><item>output</item><item>parameter</item><item>return</item><item>wgt</item><item>while</item></list>
+<list name="builtins"><item>add</item><item>append</item><item>assert</item><item>batch</item><item>benchmark</item><item>close</item><item>column</item><item>dependency</item><item>exp</item><item>fit</item><item>gae</item><item>hf_dataset</item><item>identity</item><item>jsonl</item><item>len</item><item>linear</item><item>log</item><item>metric</item><item>mlp</item><item>model</item><item>mul</item><item>positive</item><item>predict</item><item>random</item><item>range</item><item>read</item><item>reinforce</item><item>relu</item><item>restore</item><item>sample</item><item>save</item><item>save_model</item><item>seed</item><item>sigmoid</item><item>slice</item><item>sqrt</item><item>sum</item><item>tanh</item><item>write</item></list>
+<list name="types"><item>f32</item></list>
+<list name="constants"><item>false</item><item>null</item><item>true</item></list>
 <contexts><context name="Normal" attribute="Normal" lineEndContext="#stay">
 <DetectChar char="#" attribute="Comment" context="Comment"/>
 <DetectChar char="&quot;" attribute="String" context="String"/>
 <keyword String="keywords" attribute="keywords" context="#stay"/>
 <keyword String="builtins" attribute="builtins" context="#stay"/>
+<keyword String="constants" attribute="Number" context="#stay"/>
+<RegExpr String="[!&lt;&gt;=+*/%&amp;|\-]" attribute="Operator" context="#stay"/>
 <keyword String="types" attribute="types" context="#stay"/>
 <RegExpr String="(?&lt;![\w.])-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?(?![\w.])" attribute="Number" context="#stay"/>
 </context>
 <context name="Comment" attribute="Comment" lineEndContext="#pop"/>
-<context name="String" attribute="String" lineEndContext="#pop"><DetectChar char="&quot;" attribute="String" context="#pop"/></context>
+<context name="String" attribute="String" lineEndContext="#pop"><RegExpr String="\\." attribute="String" context="#stay"/><DetectChar char="&quot;" attribute="String" context="#pop"/></context>
 </contexts><itemDatas>
 <itemData name="Normal" defStyleNum="dsNormal"/>
 <itemData name="keywords" defStyleNum="dsKeyword"/>
 <itemData name="builtins" defStyleNum="dsFunction"/>
 <itemData name="types" defStyleNum="dsDataType"/>
+<itemData name="Operator" defStyleNum="dsOperator"/>
 <itemData name="Number" defStyleNum="dsDecVal"/>
 <itemData name="String" defStyleNum="dsString"/>
 <itemData name="Comment" defStyleNum="dsComment"/>

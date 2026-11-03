@@ -1,0 +1,1064 @@
+{
+  "layers": [
+    {
+      "name": "recurrent",
+      "op": "scan_state",
+      "args": {},
+      "layers": [
+        {
+          "name": "raw_q",
+          "op": "slice",
+          "args": {
+            "step": 1,
+            "axis": -1,
+            "start": 0,
+            "stop": 4
+          },
+          "inputs": [
+            "input"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              13
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4
+            ]
+          }
+        },
+        {
+          "name": "q_unit",
+          "op": "seq",
+          "args": {},
+          "layers": [
+            {
+              "name": "squared",
+              "op": "square",
+              "args": {},
+              "inputs": [
+                "input"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "total",
+              "op": "reduce_sum",
+              "args": {
+                "keepdim": 1,
+                "axis": -1
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              }
+            },
+            {
+              "name": "stabilized",
+              "op": "shift",
+              "args": {
+                "value": 1e-06
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              }
+            },
+            {
+              "name": "inverse",
+              "op": "rsqrt",
+              "args": {},
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              }
+            },
+            {
+              "name": "expanded",
+              "op": "broadcast",
+              "args": {},
+              "inputs": [
+                "inverse",
+                "input"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "output",
+              "op": "mul",
+              "args": {},
+              "inputs": [
+                "input",
+                "expanded"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              }
+            }
+          ],
+          "inputs": [
+            "raw_q"
+          ],
+          "block": "std/tensor_math.l2norm",
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4
+            ]
+          }
+        },
+        {
+          "name": "q",
+          "op": "scale",
+          "args": {
+            "factor": 0.5
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4
+            ]
+          }
+        },
+        {
+          "name": "raw_k",
+          "op": "slice",
+          "args": {
+            "step": 1,
+            "axis": -1,
+            "start": 4,
+            "stop": 8
+          },
+          "inputs": [
+            "input"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              13
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4
+            ]
+          }
+        },
+        {
+          "name": "k",
+          "op": "seq",
+          "args": {},
+          "layers": [
+            {
+              "name": "squared",
+              "op": "square",
+              "args": {},
+              "inputs": [
+                "input"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "total",
+              "op": "reduce_sum",
+              "args": {
+                "keepdim": 1,
+                "axis": -1
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              }
+            },
+            {
+              "name": "stabilized",
+              "op": "shift",
+              "args": {
+                "value": 1e-06
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              }
+            },
+            {
+              "name": "inverse",
+              "op": "rsqrt",
+              "args": {},
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              }
+            },
+            {
+              "name": "expanded",
+              "op": "broadcast",
+              "args": {},
+              "inputs": [
+                "inverse",
+                "input"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "output",
+              "op": "mul",
+              "args": {},
+              "inputs": [
+                "input",
+                "expanded"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  4
+                ]
+              }
+            }
+          ],
+          "inputs": [
+            "raw_k"
+          ],
+          "block": "std/tensor_math.l2norm",
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4
+            ]
+          }
+        },
+        {
+          "name": "v",
+          "op": "slice",
+          "args": {
+            "step": 1,
+            "axis": -1,
+            "start": 8,
+            "stop": 11
+          },
+          "inputs": [
+            "input"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              13
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              3
+            ]
+          }
+        },
+        {
+          "name": "g",
+          "op": "slice",
+          "args": {
+            "step": 1,
+            "axis": -1,
+            "start": 11,
+            "stop": 12
+          },
+          "inputs": [
+            "input"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              13
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1
+            ]
+          }
+        },
+        {
+          "name": "beta",
+          "op": "slice",
+          "args": {
+            "step": 1,
+            "axis": -1,
+            "start": 12,
+            "stop": 13
+          },
+          "inputs": [
+            "input"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              13
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1
+            ]
+          }
+        },
+        {
+          "name": "decay",
+          "op": "exp",
+          "args": {},
+          "inputs": [
+            "g"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1
+            ]
+          }
+        },
+        {
+          "name": "decay_matrix",
+          "op": "split_axis",
+          "args": {
+            "axis": -1,
+            "parts": 1
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "name": "decay_full",
+          "op": "broadcast",
+          "args": {},
+          "inputs": [
+            "decay_matrix",
+            "state0"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              1
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4,
+              3
+            ]
+          }
+        },
+        {
+          "name": "prior",
+          "op": "mul",
+          "args": {},
+          "inputs": [
+            "state0",
+            "decay_full"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4,
+              3
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4,
+              3
+            ]
+          }
+        },
+        {
+          "name": "k_row",
+          "op": "split_axis",
+          "args": {
+            "axis": -1,
+            "parts": 1
+          },
+          "inputs": [
+            "k"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              4
+            ]
+          }
+        },
+        {
+          "name": "predicted",
+          "op": "matmul",
+          "args": {},
+          "inputs": [
+            "k_row",
+            "prior"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              4
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              3
+            ]
+          }
+        },
+        {
+          "name": "negative",
+          "op": "scale",
+          "args": {
+            "factor": -1.0
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              3
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              3
+            ]
+          }
+        },
+        {
+          "name": "v_row",
+          "op": "split_axis",
+          "args": {
+            "axis": -1,
+            "parts": 1
+          },
+          "inputs": [
+            "v"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              3
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              3
+            ]
+          }
+        },
+        {
+          "name": "error",
+          "op": "add",
+          "args": {},
+          "inputs": [
+            "v_row",
+            "negative"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              3
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              3
+            ]
+          }
+        },
+        {
+          "name": "beta_matrix",
+          "op": "split_axis",
+          "args": {
+            "axis": -1,
+            "parts": 1
+          },
+          "inputs": [
+            "beta"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "name": "beta_full",
+          "op": "broadcast",
+          "args": {},
+          "inputs": [
+            "beta_matrix",
+            "error"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              1
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              3
+            ]
+          }
+        },
+        {
+          "name": "update",
+          "op": "mul",
+          "args": {},
+          "inputs": [
+            "error",
+            "beta_full"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              3
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              3
+            ]
+          }
+        },
+        {
+          "name": "k_column",
+          "op": "split_axis",
+          "args": {
+            "axis": -1,
+            "parts": 4
+          },
+          "inputs": [
+            "k"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4,
+              1
+            ]
+          }
+        },
+        {
+          "name": "outer",
+          "op": "matmul",
+          "args": {},
+          "inputs": [
+            "k_column",
+            "update"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4,
+              1
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4,
+              3
+            ]
+          }
+        },
+        {
+          "name": "next_state",
+          "op": "add",
+          "args": {},
+          "inputs": [
+            "prior",
+            "outer"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4,
+              3
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4,
+              3
+            ]
+          }
+        },
+        {
+          "name": "q_row",
+          "op": "split_axis",
+          "args": {
+            "axis": -1,
+            "parts": 1
+          },
+          "inputs": [
+            "q"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              4
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              4
+            ]
+          }
+        },
+        {
+          "name": "result_row",
+          "op": "matmul",
+          "args": {},
+          "inputs": [
+            "q_row",
+            "next_state"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              4
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              3
+            ]
+          }
+        },
+        {
+          "name": "result",
+          "op": "merge_axes",
+          "args": {
+            "axis": -2
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              3
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              3
+            ]
+          }
+        }
+      ],
+      "returns": {
+        "output": "result",
+        "state0": "next_state"
+      },
+      "results": {
+        "output": {
+          "dtype": "f32",
+          "shape": [
+            0,
+            2,
+            3
+          ]
+        },
+        "state0": {
+          "dtype": "f32",
+          "shape": [
+            2,
+            4,
+            3
+          ]
+        }
+      },
+      "inputs": [
+        "input",
+        "memory"
+      ],
+      "input": {
+        "dtype": "f32",
+        "shape": [
+          0,
+          2,
+          13
+        ]
+      },
+      "output": {
+        "dtype": "f32",
+        "shape": [
+          0,
+          2,
+          3
+        ]
+      }
+    }
+  ],
+  "interface": {
+    "input": {
+      "name": "packed",
+      "dtype": "f32",
+      "shape": [
+        0,
+        2,
+        13
+      ],
+      "shape_expr": [
+        "T",
+        2,
+        13
+      ]
+    },
+    "output": {
+      "name": "y",
+      "dtype": "f32",
+      "shape": [
+        0,
+        2,
+        3
+      ],
+      "shape_expr": [
+        "T",
+        2,
+        3
+      ]
+    },
+    "batch": "optional leading batch dimension before the declared sample shape",
+    "inputs": [
+      {
+        "name": "packed",
+        "dtype": "f32",
+        "shape": [
+          0,
+          2,
+          13
+        ],
+        "shape_expr": [
+          "T",
+          2,
+          13
+        ]
+      },
+      {
+        "name": "memory",
+        "dtype": "f32",
+        "shape": [
+          2,
+          4,
+          3
+        ],
+        "shape_expr": [
+          2,
+          4,
+          3
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "y",
+        "dtype": "f32",
+        "shape": [
+          0,
+          2,
+          3
+        ],
+        "shape_expr": [
+          "T",
+          2,
+          3
+        ],
+        "from": "recurrent.output"
+      },
+      {
+        "name": "state",
+        "dtype": "f32",
+        "shape": [
+          2,
+          4,
+          3
+        ],
+        "shape_expr": [
+          2,
+          4,
+          3
+        ],
+        "from": "recurrent.state0"
+      }
+    ],
+    "dimensions": {
+      "T": {
+        "min": 0,
+        "max": 65
+      }
+    },
+    "constraints": []
+  }
+}

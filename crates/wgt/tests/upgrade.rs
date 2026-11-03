@@ -9,7 +9,7 @@ use weightlang_wgt::{
     upgrade::{self, Candidate},
 };
 
-const SOURCE: &[u8] = b"wgt 0.2\nmodel demo\ninput x: f32[1]\noutput y: f32[1]\nlayer fc: linear(in=1, out=1)\ninit seed=1\n";
+const SOURCE: &[u8] = b"wgt 0.5\nmodel demo\ninput x: f32[1]\noutput y: f32[1]\nlayer fc: linear(in=1, out=1)\ninit seed=1\n";
 const COMMIT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 struct Packages {
     broken: bool,
@@ -80,7 +80,7 @@ impl Remote for Packages {
     }
 }
 fn manifest() -> Manifest {
-    Manifest::parse("# retain comment\nmodule local/demo\nwgt 0.3\nrequire github.com/example/a v0.1.0\nrequire github.com/example/b v0.1.0\n").unwrap()
+    Manifest::parse("# retain comment\nmodule local/demo\nwgt 0.5\nrequire github.com/example/a v0.1.0\nrequire github.com/example/b v0.1.0\n").unwrap()
 }
 #[test]
 fn all_dependencies_are_pinned_and_failure_leaves_project_unchanged() {
@@ -155,7 +155,7 @@ fn registered_dependencies_use_locked_registry_and_name() {
                     source_commit: COMMIT.into(),
                     index_sha256: hash(&remote.index("a")),
                     license: "MIT".into(),
-                    edition: "0.3".into(),
+                    edition: "0.5".into(),
                     yanked: false,
                 },
             })

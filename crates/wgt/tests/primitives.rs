@@ -52,3 +52,30 @@ fn tensor_math_dtype_axis_and_float_arguments() {
         assert!(primitives::infer("shift", &args, &[x.clone()]).is_err());
     }
 }
+
+#[test]
+fn symbolic_layout_contracts_and_overflow() {
+    for dtype in ["f32", "i64", "bool"] {
+        for length in [0, 4] {
+            let x = tensor(dtype, &[length,6]);
+            let split = primitives::infer("split_axis", &json!({"axis":-1,"parts":2}), &[x.clone()]).unwrap();
+            assert_eq!(split, tensor(dtype, &[length,2,3]));
+            assert_eq!(primitives::infer("merge_axes", &json!({"axis":-2}), &[split]).unwrap(), x);
+            assert_eq!(primitives::infer("repeat_interleave", &json!({"axis":0,"repeats":3}), &[x]).unwrap(), tensor(dtype, &[length*3,6]));
+        }
+    }
+    for (op,args) in [
+        ("split_axis",json!({"axis":0,"parts":3})),
+        ("split_axis",json!({"axis":0,"parts":0})),
+        ("split_axis",json!({"axis":0,"parts":2.0})),
+        ("merge_axes",json!({"axis":1})),
+        ("repeat_interleave",json!({"axis":0,"repeats":0})),
+        ("repeat_interleave",json!({"axis":-3,"repeats":1})),
+    ] {
+        assert!(primitives::infer(op,&args,&[tensor("f32", &[4,6])]).is_err());
+    }
+    // Use a synthetic type to exercise arithmetic overflow without allocating tensors.
+    let huge = TensorType { dtype:"f32".into(), shape:vec![u64::MAX,2], axes:vec![None,None] };
+    assert!(primitives::infer("merge_axes",&json!({"axis":0}),&[huge.clone()]).is_err());
+    assert!(primitives::infer("repeat_interleave",&json!({"axis":0,"repeats":2}),&[huge]).is_err());
+}

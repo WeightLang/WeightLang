@@ -24,6 +24,10 @@
           "named": true
         },
         {
+          "type": "literal",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -75,6 +79,10 @@
           "named": true
         },
         {
+          "type": "literal",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -122,6 +130,69 @@
       "types": [
         {
           "type": "arguments",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "body",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "arguments",
+          "named": true
+        },
+        {
+          "type": "array",
+          "named": true
+        },
+        {
+          "type": "body",
+          "named": true
+        },
+        {
+          "type": "call",
+          "named": true
+        },
+        {
+          "type": "clause",
+          "named": true
+        },
+        {
+          "type": "literal",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "operator",
+          "named": true
+        },
+        {
+          "type": "parameter",
+          "named": true
+        },
+        {
+          "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "qualified_name",
+          "named": true
+        },
+        {
+          "type": "script_keyword",
+          "named": true
+        },
+        {
+          "type": "string",
           "named": true
         }
       ]
@@ -191,6 +262,10 @@
         },
         {
           "type": "clause",
+          "named": true
+        },
+        {
+          "type": "literal",
           "named": true
         },
         {
@@ -271,6 +346,10 @@
           "named": true
         },
         {
+          "type": "literal",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -322,6 +401,10 @@
             "named": false
           },
           {
+            "type": "frozen",
+            "named": false
+          },
+          {
             "type": "import",
             "named": false
           },
@@ -335,6 +418,10 @@
           },
           {
             "type": "parameter",
+            "named": false
+          },
+          {
+            "type": "precision",
             "named": false
           },
           {
@@ -397,6 +484,10 @@
           "named": true
         },
         {
+          "type": "literal",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -418,6 +509,36 @@
         },
         {
           "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "function_declaration",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "arguments",
+          "named": true
+        },
+        {
+          "type": "body",
           "named": true
         }
       ]
@@ -459,6 +580,10 @@
           "named": true
         },
         {
+          "type": "literal",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -484,6 +609,11 @@
         }
       ]
     }
+  },
+  {
+    "type": "literal",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "model_declaration",
@@ -518,6 +648,10 @@
         },
         {
           "type": "clause",
+          "named": true
+        },
+        {
+          "type": "literal",
           "named": true
         },
         {
@@ -604,6 +738,10 @@
           "named": true
         },
         {
+          "type": "literal",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -651,6 +789,11 @@
     }
   },
   {
+    "type": "script_keyword",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "source_file",
     "named": true,
     "root": true,
@@ -680,6 +823,10 @@
           "named": true
         },
         {
+          "type": "function_declaration",
+          "named": true
+        },
+        {
           "type": "layer_declaration",
           "named": true
         },
@@ -695,11 +842,19 @@
     }
   },
   {
+    "type": "!",
+    "named": false
+  },
+  {
     "type": "!=",
     "named": false
   },
   {
     "type": "%",
+    "named": false
+  },
+  {
+    "type": "&&",
     "named": false
   },
   {
@@ -747,6 +902,10 @@
     "named": false
   },
   {
+    "type": ";",
+    "named": false
+  },
+  {
     "type": "<",
     "named": false
   },
@@ -791,6 +950,10 @@
     "named": false
   },
   {
+    "type": "break",
+    "named": false
+  },
+  {
     "type": "comment",
     "named": true,
     "extra": true
@@ -804,6 +967,10 @@
     "named": false
   },
   {
+    "type": "continue",
+    "named": false
+  },
+  {
     "type": "data",
     "named": false
   },
@@ -812,7 +979,23 @@
     "named": false
   },
   {
+    "type": "else",
+    "named": false
+  },
+  {
     "type": "extends",
+    "named": false
+  },
+  {
+    "type": "false",
+    "named": false
+  },
+  {
+    "type": "fn",
+    "named": false
+  },
+  {
+    "type": "for",
     "named": false
   },
   {
@@ -824,11 +1007,23 @@
     "named": false
   },
   {
+    "type": "frozen",
+    "named": false
+  },
+  {
     "type": "identifier",
     "named": true
   },
   {
+    "type": "if",
+    "named": false
+  },
+  {
     "type": "import",
+    "named": false
+  },
+  {
+    "type": "in",
     "named": false
   },
   {
@@ -848,7 +1043,15 @@
     "named": false
   },
   {
+    "type": "let",
+    "named": false
+  },
+  {
     "type": "model",
+    "named": false
+  },
+  {
+    "type": "null",
     "named": false
   },
   {
@@ -861,6 +1064,10 @@
   },
   {
     "type": "parameter",
+    "named": false
+  },
+  {
+    "type": "precision",
     "named": false
   },
   {
@@ -884,6 +1091,10 @@
     "named": false
   },
   {
+    "type": "true",
+    "named": false
+  },
+  {
     "type": "unfreeze",
     "named": false
   },
@@ -900,7 +1111,23 @@
     "named": false
   },
   {
+    "type": "while",
+    "named": false
+  },
+  {
     "type": "wtype",
+    "named": false
+  },
+  {
+    "type": "{",
+    "named": false
+  },
+  {
+    "type": "||",
+    "named": false
+  },
+  {
+    "type": "}",
     "named": false
   }
 ]

@@ -4,7 +4,7 @@ use weightlang_wgt::manifest::{self, Manifest, ProjectConfig};
 const CONFIG: &str = r#"# preserved comment
 [project]
 module = "local/demo"
-edition = "0.3"
+edition = "0.5"
 [model]
 source = "models/main.wgt"
 output = "weights"
@@ -88,7 +88,7 @@ fn sync_is_offline_idempotent_and_locked() {
     assert!(!run(&["-C", "demo", "sync", "--no-env", "--locked"])
         .status
         .success());
-    fs::write(project.join("wgt.mod"), "module local/other\nwgt 0.2\n").unwrap();
+    fs::write(project.join("wgt.mod"), "module local/other\nwgt 0.5\n").unwrap();
     assert!(manifest::manifest_path(&project).is_err());
     assert!(!run(&["-C", "demo", "sync", "--no-env"]).status.success());
 }

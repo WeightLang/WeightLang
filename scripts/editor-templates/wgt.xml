@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE language SYSTEM "language.dtd">
+<language name="WeightLang" version="1" kateversion="5.0" section="Sources" extensions="*.wgt" mimetype="text/x-wgt" author="WeightLang contributors" license="MIT">
+<highlighting>
+<list name="keywords">@@keywords_ITEMS@@</list>
+<list name="builtins">@@builtins_ITEMS@@</list>
+<list name="types">@@types_ITEMS@@</list>
+<list name="constants">@@constants_ITEMS@@</list>
+<contexts><context name="Normal" attribute="Normal" lineEndContext="#stay">
+<DetectChar char="#" attribute="Comment" context="Comment"/>
+<DetectChar char="&quot;" attribute="String" context="String"/>
+<keyword String="keywords" attribute="keywords" context="#stay"/>
+<keyword String="builtins" attribute="builtins" context="#stay"/>
+<keyword String="constants" attribute="Number" context="#stay"/>
+<RegExpr String="[!&lt;&gt;=+*/%&amp;|\-]" attribute="Operator" context="#stay"/>
+<keyword String="types" attribute="types" context="#stay"/>
+<RegExpr String="(?&lt;![\w.])-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?(?![\w.])" attribute="Number" context="#stay"/>
+</context>
+<context name="Comment" attribute="Comment" lineEndContext="#pop"/>
+<context name="String" attribute="String" lineEndContext="#pop"><RegExpr String="\\." attribute="String" context="#stay"/><DetectChar char="&quot;" attribute="String" context="#pop"/></context>
+</contexts><itemDatas>
+<itemData name="Normal" defStyleNum="dsNormal"/>
+<itemData name="keywords" defStyleNum="dsKeyword"/>
+<itemData name="builtins" defStyleNum="dsFunction"/>
+<itemData name="types" defStyleNum="dsDataType"/>
+<itemData name="Operator" defStyleNum="dsOperator"/>
+<itemData name="Number" defStyleNum="dsDecVal"/>
+<itemData name="String" defStyleNum="dsString"/>
+<itemData name="Comment" defStyleNum="dsComment"/>
+</itemDatas></highlighting><general><comments><comment name="singleLine" start="#"/></comments><keywords casesensitive="1"/></general></language>

@@ -60,7 +60,7 @@ impl Artifact {
             .with_context(|| format!("invalid artifact manifest {}", manifest_path.display()))?;
         ensure!(
             m["format"] == "weightlang.artifact"
-                && matches!(m["format_version"].as_u64(), Some(1..=7)),
+                && matches!(m["format_version"].as_u64(), Some(1..=8)),
             "unsupported artifact format"
         );
         ensure!(identifier(string(&m, "model")?), "invalid model name");
@@ -141,11 +141,17 @@ impl Artifact {
             ensure!(m["interface"].get("parameter_ids").is_none() && m["interface"].get("parameter_shares").is_none(), "parameter identities require v6");
             Vec::new()
         };
-        if m["format_version"] == 7 {
+        if m["format_version"] == 7 || (m["format_version"] == 8 && m["interface"].get("weight_types").is_some()) {
             aliases = crate::weight_types::parameter_aliases(&m["layers"], &shapes, &aliases)?;
             crate::weight_types::validate(&m["interface"], &shapes, &aliases)?;
         } else {
             ensure!(m["interface"].get("weight_types").is_none() && m["interface"].get("weight_assignments").is_none(), "weight types require v7");
+        }
+        if m["format_version"] == 8 {
+            let precision_aliases = crate::weight_types::parameter_aliases(&m["layers"], &shapes, &aliases)?;
+            crate::precision::validate(&m["interface"], &m["layers"], &precision_aliases)?;
+        } else {
+            ensure!(m["interface"].get("precision").is_none(), "precision requires v8");
         }
         let mut ranges = Vec::new();
         for (name, shape) in &shapes {

@@ -1,0 +1,1698 @@
+{
+  "layers": [
+    {
+      "name": "attention",
+      "op": "seq",
+      "args": {},
+      "layers": [
+        {
+          "name": "q_proj",
+          "op": "linear",
+          "args": {
+            "in": 32,
+            "out": 64,
+            "bias": 0
+          },
+          "inputs": [
+            "input"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              32
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              64
+            ]
+          }
+        },
+        {
+          "name": "q_split",
+          "op": "split_axis",
+          "args": {
+            "axis": -1,
+            "parts": 4
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              64
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              4,
+              16
+            ]
+          }
+        },
+        {
+          "name": "q_raw",
+          "op": "slice",
+          "args": {
+            "step": 1,
+            "axis": -1,
+            "start": 0,
+            "stop": 8
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              4,
+              16
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              4,
+              8
+            ]
+          }
+        },
+        {
+          "name": "q_norm",
+          "op": "rmsnorm",
+          "args": {
+            "dim": 8,
+            "eps": 1e-06,
+            "offset": 1.0
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              4,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              4,
+              8
+            ]
+          }
+        },
+        {
+          "name": "q_heads",
+          "op": "transpose_axes",
+          "args": {
+            "axis1": 0,
+            "axis2": 1
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              4,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              8
+            ]
+          }
+        },
+        {
+          "name": "q_rotated",
+          "op": "seq",
+          "args": {},
+          "layers": [
+            {
+              "name": "rotating",
+              "op": "slice",
+              "args": {
+                "step": 1,
+                "axis": -1,
+                "start": 0,
+                "stop": 4
+              },
+              "inputs": [
+                "input"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  8
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "halves",
+              "op": "split_axis",
+              "args": {
+                "axis": -1,
+                "parts": 2
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  2,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "first_half",
+              "op": "slice",
+              "args": {
+                "step": 1,
+                "axis": -2,
+                "start": 0,
+                "stop": 1
+              },
+              "inputs": [
+                "halves"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  2,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  1,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "first",
+              "op": "merge_axes",
+              "args": {
+                "axis": -2
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  1,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "second_half",
+              "op": "slice",
+              "args": {
+                "step": 1,
+                "axis": -2,
+                "start": 1,
+                "stop": 2
+              },
+              "inputs": [
+                "halves"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  2,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  1,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "second",
+              "op": "merge_axes",
+              "args": {
+                "axis": -2
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  1,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "negative",
+              "op": "scale",
+              "args": {
+                "factor": -1.0
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "rotated",
+              "op": "cat",
+              "args": {
+                "axis": -1
+              },
+              "inputs": [
+                "negative",
+                "first"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "cosine",
+              "op": "broadcast",
+              "args": {},
+              "inputs": [
+                "arg1",
+                "rotating"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  1,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "sine",
+              "op": "broadcast",
+              "args": {},
+              "inputs": [
+                "arg2",
+                "rotating"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  1,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "real",
+              "op": "mul",
+              "args": {},
+              "inputs": [
+                "rotating",
+                "cosine"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "imaginary",
+              "op": "mul",
+              "args": {},
+              "inputs": [
+                "rotated",
+                "sine"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "mixed",
+              "op": "add",
+              "args": {},
+              "inputs": [
+                "real",
+                "imaginary"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "passthrough",
+              "op": "slice",
+              "args": {
+                "step": 1,
+                "axis": -1,
+                "start": 4,
+                "stop": 8
+              },
+              "inputs": [
+                "input"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  8
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "output",
+              "op": "cat",
+              "args": {
+                "axis": -1
+              },
+              "inputs": [
+                "mixed",
+                "passthrough"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  8
+                ]
+              }
+            }
+          ],
+          "returns": {
+            "output": "output"
+          },
+          "results": {
+            "output": {
+              "dtype": "f32",
+              "shape": [
+                4,
+                1,
+                8
+              ]
+            }
+          },
+          "inputs": [
+            "q_heads",
+            "arg1",
+            "arg2"
+          ],
+          "block": "std/rotary.partial",
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              8
+            ]
+          }
+        },
+        {
+          "name": "gate_raw",
+          "op": "slice",
+          "args": {
+            "step": 1,
+            "axis": -1,
+            "start": 8,
+            "stop": 16
+          },
+          "inputs": [
+            "q_split"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              4,
+              16
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              4,
+              8
+            ]
+          }
+        },
+        {
+          "name": "gate_flat",
+          "op": "merge_axes",
+          "args": {
+            "axis": -2
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              4,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              32
+            ]
+          }
+        },
+        {
+          "name": "gate",
+          "op": "sigmoid",
+          "args": {},
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              32
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              32
+            ]
+          }
+        },
+        {
+          "name": "k_proj",
+          "op": "linear",
+          "args": {
+            "in": 32,
+            "out": 16,
+            "bias": 0
+          },
+          "inputs": [
+            "input"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              32
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              16
+            ]
+          }
+        },
+        {
+          "name": "k_split",
+          "op": "split_axis",
+          "args": {
+            "axis": -1,
+            "parts": 2
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              16
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              2,
+              8
+            ]
+          }
+        },
+        {
+          "name": "k_norm",
+          "op": "rmsnorm",
+          "args": {
+            "dim": 8,
+            "eps": 1e-06,
+            "offset": 1.0
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              2,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              2,
+              8
+            ]
+          }
+        },
+        {
+          "name": "k_heads",
+          "op": "transpose_axes",
+          "args": {
+            "axis1": 0,
+            "axis2": 1
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              2,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              8
+            ]
+          }
+        },
+        {
+          "name": "k_rotated",
+          "op": "seq",
+          "args": {},
+          "layers": [
+            {
+              "name": "rotating",
+              "op": "slice",
+              "args": {
+                "step": 1,
+                "axis": -1,
+                "start": 0,
+                "stop": 4
+              },
+              "inputs": [
+                "input"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  8
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "halves",
+              "op": "split_axis",
+              "args": {
+                "axis": -1,
+                "parts": 2
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  2,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "first_half",
+              "op": "slice",
+              "args": {
+                "step": 1,
+                "axis": -2,
+                "start": 0,
+                "stop": 1
+              },
+              "inputs": [
+                "halves"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  2,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  1,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "first",
+              "op": "merge_axes",
+              "args": {
+                "axis": -2
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  1,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "second_half",
+              "op": "slice",
+              "args": {
+                "step": 1,
+                "axis": -2,
+                "start": 1,
+                "stop": 2
+              },
+              "inputs": [
+                "halves"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  2,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  1,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "second",
+              "op": "merge_axes",
+              "args": {
+                "axis": -2
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  1,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "negative",
+              "op": "scale",
+              "args": {
+                "factor": -1.0
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  2
+                ]
+              }
+            },
+            {
+              "name": "rotated",
+              "op": "cat",
+              "args": {
+                "axis": -1
+              },
+              "inputs": [
+                "negative",
+                "first"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  2
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "cosine",
+              "op": "broadcast",
+              "args": {},
+              "inputs": [
+                "arg1",
+                "rotating"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  1,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "sine",
+              "op": "broadcast",
+              "args": {},
+              "inputs": [
+                "arg2",
+                "rotating"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  1,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "real",
+              "op": "mul",
+              "args": {},
+              "inputs": [
+                "rotating",
+                "cosine"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "imaginary",
+              "op": "mul",
+              "args": {},
+              "inputs": [
+                "rotated",
+                "sine"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "mixed",
+              "op": "add",
+              "args": {},
+              "inputs": [
+                "real",
+                "imaginary"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "passthrough",
+              "op": "slice",
+              "args": {
+                "step": 1,
+                "axis": -1,
+                "start": 4,
+                "stop": 8
+              },
+              "inputs": [
+                "input"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  8
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              }
+            },
+            {
+              "name": "output",
+              "op": "cat",
+              "args": {
+                "axis": -1
+              },
+              "inputs": [
+                "mixed",
+                "passthrough"
+              ],
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  4
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  8
+                ]
+              }
+            }
+          ],
+          "returns": {
+            "output": "output"
+          },
+          "results": {
+            "output": {
+              "dtype": "f32",
+              "shape": [
+                2,
+                1,
+                8
+              ]
+            }
+          },
+          "inputs": [
+            "k_heads",
+            "arg1",
+            "arg2"
+          ],
+          "block": "std/rotary.partial",
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              8
+            ]
+          }
+        },
+        {
+          "name": "k_expanded",
+          "op": "repeat_interleave",
+          "args": {
+            "axis": 0,
+            "repeats": 2
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              8
+            ]
+          }
+        },
+        {
+          "name": "k_transposed",
+          "op": "transpose_axes",
+          "args": {
+            "axis1": -1,
+            "axis2": -2
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              8,
+              1
+            ]
+          }
+        },
+        {
+          "name": "v_proj",
+          "op": "linear",
+          "args": {
+            "in": 32,
+            "out": 16,
+            "bias": 0
+          },
+          "inputs": [
+            "input"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              32
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              16
+            ]
+          }
+        },
+        {
+          "name": "v_heads",
+          "op": "seq",
+          "args": {},
+          "layers": [
+            {
+              "name": "split",
+              "op": "split_axis",
+              "args": {
+                "axis": -1,
+                "parts": 2
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  1,
+                  16
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  1,
+                  2,
+                  8
+                ]
+              }
+            },
+            {
+              "name": "transposed",
+              "op": "transpose_axes",
+              "args": {
+                "axis1": -3,
+                "axis2": -2
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  1,
+                  2,
+                  8
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  2,
+                  1,
+                  8
+                ]
+              }
+            }
+          ],
+          "block": "std/rotary.heads",
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              16
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              8
+            ]
+          }
+        },
+        {
+          "name": "v_expanded",
+          "op": "repeat_interleave",
+          "args": {
+            "axis": 0,
+            "repeats": 2
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              2,
+              1,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              8
+            ]
+          }
+        },
+        {
+          "name": "logits",
+          "op": "matmul",
+          "args": {},
+          "inputs": [
+            "q_rotated",
+            "k_transposed"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "name": "scaled",
+          "op": "scale",
+          "args": {
+            "factor": 0.3535533905932738
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              1
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "name": "probabilities",
+          "op": "masked_softmax",
+          "args": {
+            "axis": -1
+          },
+          "inputs": [
+            "scaled",
+            "arg3"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              1
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "name": "attended",
+          "op": "matmul",
+          "args": {},
+          "inputs": [
+            "probabilities",
+            "v_expanded"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              1
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              8
+            ]
+          }
+        },
+        {
+          "name": "merged",
+          "op": "seq",
+          "args": {},
+          "layers": [
+            {
+              "name": "transposed",
+              "op": "transpose_axes",
+              "args": {
+                "axis1": -3,
+                "axis2": -2
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  4,
+                  1,
+                  8
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  1,
+                  4,
+                  8
+                ]
+              }
+            },
+            {
+              "name": "merged",
+              "op": "merge_axes",
+              "args": {
+                "axis": -2
+              },
+              "input": {
+                "dtype": "f32",
+                "shape": [
+                  1,
+                  4,
+                  8
+                ]
+              },
+              "output": {
+                "dtype": "f32",
+                "shape": [
+                  1,
+                  32
+                ]
+              }
+            }
+          ],
+          "block": "std/rotary.merge_heads",
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              4,
+              1,
+              8
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              32
+            ]
+          }
+        },
+        {
+          "name": "gated",
+          "op": "mul",
+          "args": {},
+          "inputs": [
+            "merged",
+            "gate"
+          ],
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              32
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              32
+            ]
+          }
+        },
+        {
+          "name": "o_proj",
+          "op": "linear",
+          "args": {
+            "in": 32,
+            "out": 32,
+            "bias": 0
+          },
+          "input": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              32
+            ]
+          },
+          "output": {
+            "dtype": "f32",
+            "shape": [
+              1,
+              32
+            ]
+          }
+        }
+      ],
+      "returns": {
+        "output": "o_proj"
+      },
+      "results": {
+        "output": {
+          "dtype": "f32",
+          "shape": [
+            1,
+            32
+          ]
+        }
+      },
+      "inputs": [
+        "input",
+        "cos",
+        "sin",
+        "keep"
+      ],
+      "block": "std/gated_attention.attention",
+      "input": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          32
+        ]
+      },
+      "output": {
+        "dtype": "f32",
+        "shape": [
+          1,
+          32
+        ]
+      }
+    }
+  ],
+  "interface": {
+    "input": {
+      "name": "x",
+      "dtype": "f32",
+      "shape": [
+        1,
+        32
+      ],
+      "shape_expr": [
+        "T",
+        32
+      ]
+    },
+    "output": {
+      "name": "y",
+      "dtype": "f32",
+      "shape": [
+        1,
+        32
+      ],
+      "shape_expr": [
+        "T",
+        32
+      ]
+    },
+    "batch": "optional leading batch dimension before the declared sample shape",
+    "inputs": [
+      {
+        "name": "x",
+        "dtype": "f32",
+        "shape": [
+          1,
+          32
+        ],
+        "shape_expr": [
+          "T",
+          32
+        ]
+      },
+      {
+        "name": "cos",
+        "dtype": "f32",
+        "shape": [
+          1,
+          1,
+          4
+        ],
+        "shape_expr": [
+          1,
+          "T",
+          4
+        ]
+      },
+      {
+        "name": "sin",
+        "dtype": "f32",
+        "shape": [
+          1,
+          1,
+          4
+        ],
+        "shape_expr": [
+          1,
+          "T",
+          4
+        ]
+      },
+      {
+        "name": "keep",
+        "dtype": "bool",
+        "shape": [
+          4,
+          1,
+          1
+        ],
+        "shape_expr": [
+          4,
+          "T",
+          "T"
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "y",
+        "dtype": "f32",
+        "shape": [
+          1,
+          32
+        ],
+        "shape_expr": [
+          "T",
+          32
+        ],
+        "from": "attention"
+      }
+    ],
+    "dimensions": {
+      "T": {
+        "min": 1,
+        "max": 65
+      }
+    },
+    "constraints": []
+  }
+}

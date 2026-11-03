@@ -12,7 +12,6 @@ use std::{
 };
 use weightlang_wgt::{
     artifact::Artifact,
-    environment,
     graph::Graph,
     manifest::{self, Manifest},
     package_index, registry, toolchain, upgrade,
@@ -23,7 +22,7 @@ use weightlang_wgt::{
     name = "wgt",
     version,
     about = "WeightLang package manager and architecture renderer",
-    after_help = "Extensions: wgt <name> runs wgt-<name> from PATH. Run wgt sync to prepare Python/PyTorch for build/run/test/check; package management and graph rendering are native Rust."
+    after_help = "Extensions: wgt <name> runs wgt-<name> from PATH. Run wgt sync to synchronize model dependencies; use wgt script for native execution."
 )]
 struct Cli {
     #[arg(short = 'C', long = "directory", global = true, default_value = ".")]
@@ -50,7 +49,7 @@ struct Cli {
 }
 #[derive(clap::Args, Default)]
 struct DeviceOptions {
-    /// Default execution device (cpu, cuda, cuda:N)
+    /// Execution device: native auto/cpu/gpu/BACKEND:N; Torch cpu/cuda/cuda:N
     #[arg(long)]
     device: Option<String>,
     /// Override a layer or parameter device (TARGET=DEVICE), repeatable
@@ -61,7 +60,7 @@ struct DeviceOptions {
     device_map: Option<PathBuf>,
 }
 impl DeviceOptions {
-    fn with_config(mut self, config: Option<&manifest::ProjectConfig>, project: &Path) -> Self {
+    fn with_config(mut self, config: Option<&manifest::ProjectConfig>, _project: &Path) -> Self {
         if let Some(config) = config {
             self.device = self.device.or_else(|| config.runtime.device.clone());
             // An explicit map replaces project placements; explicit --place overrides individual entries.
@@ -82,7 +81,6 @@ impl DeviceOptions {
                 self.placements = inherited;
             }
         }
-        self.device = self.device.or_else(|| environment::active_device(project));
         self
     }
     fn args(&self) -> Vec<OsString> {
@@ -97,6 +95,48 @@ impl DeviceOptions {
             args.extend(["--place".into(), placement.into()]);
         }
         args
+    }
+}
+#[derive(clap::Args)]
+struct ExecutionOptions {
+    /// Native inference runtime
+    #[arg(long, default_value = "weightlang-runtime", value_parser = ["weightlang-runtime"])]
+    backend: String,
+    /// Managed host and GPU buffer budget, in bytes
+    #[arg(long, default_value_t = 536870912)]
+    memory_budget: usize,
+    /// Require the native allocation-free CPU path
+    #[arg(long)]
+    strict_zero_alloc: bool,
+}
+impl ExecutionOptions {
+    fn args(&self) -> Vec<OsString> {
+        let mut args = vec![
+            "--backend".into(),
+            self.backend.clone().into(),
+            "--memory-budget".into(),
+            self.memory_budget.to_string().into(),
+        ];
+        if self.strict_zero_alloc {
+            args.push("--strict-zero-alloc".into());
+        }
+        args
+    }
+    fn devices(
+        &self,
+        devices: DeviceOptions,
+        config: Option<&manifest::ProjectConfig>,
+        project: &Path,
+    ) -> DeviceOptions {
+        let native_device = devices
+            .device
+            .clone()
+            .or_else(|| config.and_then(|c| c.runtime.device.clone()));
+        let mut devices = devices.with_config(config, project);
+        if self.backend == "weightlang-runtime" {
+            devices.device = Some(native_device.unwrap_or_else(|| "auto".into()));
+        }
+        devices
     }
 }
 #[derive(Subcommand)]
@@ -158,14 +198,11 @@ enum Cmd {
     Download { version: String },
     /// Fetch and verify every pinned dependency
     Fetch,
-    /// Prepare Python/PyTorch and synchronize model dependencies
+    /// Synchronize native model dependencies without installing host runtimes
     Sync {
-        /// Synchronize only model dependencies; do not prepare Python
-        #[arg(long, conflicts_with = "upgrade_env")]
+        /// Deprecated compatibility flag; sync never installs a Python environment
+        #[arg(long, hide = true)]
         no_env: bool,
-        /// Re-resolve Python packages instead of reusing the environment lock
-        #[arg(long, conflicts_with = "locked")]
-        upgrade_env: bool,
     },
     /// Print direct dependency tree
     Tree,
@@ -173,7 +210,7 @@ enum Cmd {
     Metadata,
     /// Explain a compiler diagnostic code
     Explain { code: String },
-    /// Check all sources using weightc, without training
+    /// Legacy model check (removed; use weightc check for native scripts)
     Check {
         source: Option<PathBuf>,
         /// Show inferred layer shapes and named axes
@@ -242,6 +279,18 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Execute a WGT 0.5 compilation unit
+    #[command(name = "run", alias = "script")]
+    Script {
+        source: PathBuf,
+        #[arg(long, conflicts_with = "compiled")]
+        check: bool,
+        /// Compile through Rust/Cargo and run the native executable.
+        #[arg(long)]
+        compiled: bool,
+        #[arg(long, default_value_t = 10_000_000)]
+        max_operations: u64,
+    },
     /// Continue the current weight revision; use --fresh to explicitly initialize
     Train {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -262,14 +311,17 @@ enum Cmd {
         /// Replace an existing WeightLang model directory
         #[arg(long)]
         force: bool,
-        /// Load a trusted Python trainer: NAME=FILE.py:FUNCTION (repeatable)
+        /// Retired trainer bindings; this legacy command reports migration guidance
         #[arg(long = "trainer")]
         trainers: Vec<String>,
         #[command(flatten)]
         devices: DeviceOptions,
     },
     /// Run the current weight revision without training
-    Run {
+    #[command(name = "retired-run", hide = true)]
+    RetiredRun {
+        #[command(flatten)]
+        runtime: ExecutionOptions,
         #[arg(long)]
         source: Option<PathBuf>,
         #[arg(long)]
@@ -279,6 +331,8 @@ enum Cmd {
     },
     /// Test the current weight revision using tests/*.json
     Test {
+        #[command(flatten)]
+        runtime: ExecutionOptions,
         #[command(flatten)]
         devices: DeviceOptions,
     },
@@ -331,7 +385,7 @@ enum Cmd {
         /// Package license expression, e.g. MIT or Apache-2.0
         #[arg(long, required_unless_present = "no_register")]
         license: Option<String>,
-        #[arg(long, default_value = "0.3")]
+        #[arg(long, default_value = "0.5")]
         edition: String,
         /// Submit an already uploaded release; useful after a registry submission failure
         #[arg(long, conflicts_with = "no_register")]
@@ -350,7 +404,7 @@ enum Cmd {
         version: String,
         #[arg(long)]
         license: String,
-        #[arg(long, default_value = "0.3")]
+        #[arg(long, default_value = "0.5")]
         edition: String,
         #[arg(long)]
         dry_run: bool,
@@ -396,7 +450,19 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    let cli = Cli::parse();
+    let mut args: Vec<_> = std::env::args_os().collect();
+    // A positional .wgt file is the script subcommand, including after global flags.
+    let mut index = 1;
+    while index < args.len() {
+        let arg = args[index].to_string_lossy();
+        if ["-C", "--directory", "--registry"].contains(&arg.as_ref()) { index += 2; continue; }
+        if arg.starts_with('-') { index += 1; continue; }
+        if Path::new(&args[index]).extension().is_some_and(|e| e == "wgt") {
+            args.insert(index, OsString::from("script"));
+        }
+        break;
+    }
+    let cli = Cli::parse_from(args);
     match execute(cli) {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
@@ -415,7 +481,24 @@ fn execute(cli: Cli) -> Result<u8> {
     }
     let command = cli.command.context("choose a command; see wgt --help")?;
     let base = fs::canonicalize(&cli.directory).context("project directory does not exist")?;
+    if matches!(&command, Cmd::Check { .. } | Cmd::Build { .. } | Cmd::Package { .. } | Cmd::Install { .. } | Cmd::Train { .. } | Cmd::Export { .. } | Cmd::RetiredRun { .. } | Cmd::Test { .. } | Cmd::Trace { .. } | Cmd::Debug { .. }) {
+        compiler_command(&base)?;
+    }
     match command {
+        Cmd::Script { source, check, compiled, max_operations } => {
+            let path = base.join(source);
+            if check {
+                weightlang_wgt::script_dependencies::metadata(&fs::read_to_string(&path)?)?;
+                weightlang_runtime::script::parse(&fs::read_to_string(&path)?)?;
+                println!("ok: native WGT script; no execution");
+            } else if compiled {
+                return weightlang_wgt::script_compiler::run_options(&path, max_operations, cli.offline, cli.locked);
+            } else {
+                let dependencies = weightlang_wgt::script_dependencies::prepare(&path, cli.offline, cli.locked)?;
+                let report = weightlang_runtime::script::run_with_dependencies(&fs::read_to_string(&path)?, path.parent().unwrap(), max_operations, dependencies)?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Cmd::Update {
             module: None,
             version,
@@ -546,8 +629,7 @@ fn execute(cli: Cli) -> Result<u8> {
             for (tool, reason) in [
                 ("git", "remote tags / publishing"),
                 ("gh", "publishing only"),
-                ("uv", "managed runtime preparation; bootstrapped if missing"),
-                ("weightc", "optional external compiler override"),
+                ("weightc", "native script compiler"),
             ] {
                 println!(
                     "{tool}: {} ({reason})",
@@ -557,9 +639,6 @@ fn execute(cli: Cli) -> Result<u8> {
                 );
             }
             println!("cache: {}", registry::cache_root()?.display());
-            if let Ok(project) = manifest::project(&base) {
-                environment::doctor(&project)?;
-            }
         }
         Cmd::External(args) => {
             let name = args[0].to_str().context("extension name must be UTF-8")?;
@@ -599,7 +678,9 @@ fn execute(cli: Cli) -> Result<u8> {
             let module = value["module"].as_str().context("package module")?;
             let version = value["version"].as_str().context("package version")?;
             let parts = manifest::module_parts(module)?;
-            let name = name.unwrap_or_else(|| format!("{}/{}", parts[1], parts.last().unwrap()).to_ascii_lowercase());
+            let name = name.unwrap_or_else(|| {
+                format!("{}/{}", parts[1], parts.last().unwrap()).to_ascii_lowercase()
+            });
             if !no_register {
                 package_index::repository(&cli.registry)?;
                 let candidate = package_index::Record {
@@ -708,7 +789,7 @@ fn execute(cli: Cli) -> Result<u8> {
                             println!("{}: {} -> {}{}", change.module, change.before, change.after,
                                 if change.before == change.after { " (already latest)" } else { "" });
                         }
-                        println!("locked {} package dependencies; toolchain and Python environment unchanged", result.changes.len());
+                        println!("locked {} package dependencies; toolchain unchanged", result.changes.len());
                     }
                 }
                 Cmd::Remove { module } => {
@@ -736,10 +817,7 @@ fn execute(cli: Cli) -> Result<u8> {
                     )?;
                     println!("removed {module}; source imports are unchanged");
                 }
-                Cmd::Sync {
-                    no_env,
-                    upgrade_env,
-                } => {
+                Cmd::Sync { no_env: _ } => {
                     ensure!(
                         !cli.locked || project.join("wgt.sum").is_file(),
                         "--locked requires wgt.sum; run wgt sync first"
@@ -770,15 +848,7 @@ fn execute(cli: Cli) -> Result<u8> {
                         "synchronized {} dependencies (wgt.sum)",
                         manifest.dependencies.len()
                     );
-                    if !no_env {
-                        environment::sync(
-                            &project,
-                            config.as_ref(),
-                            cli.offline,
-                            cli.locked,
-                            upgrade_env,
-                        )?;
-                    }
+
                 }
                 Cmd::Fetch => {
                     let known = manifest::read_lock(&project.join("wgt.sum"))?;
@@ -961,7 +1031,8 @@ fn execute(cli: Cli) -> Result<u8> {
                         }
                     }
                 }
-                Cmd::Run {
+                Cmd::RetiredRun {
+                    runtime,
                     source,
                     input,
                     devices,
@@ -970,13 +1041,14 @@ fn execute(cli: Cli) -> Result<u8> {
                     let source = source
                         .or_else(|| config.as_ref().and_then(|c| c.model.source.clone()))
                         .unwrap_or_else(|| "main.wgt".into());
-                    let devices = devices.with_config(config.as_ref(), &project);
+                    let devices = runtime.devices(devices, config.as_ref(), &project);
+                    let native_initialization = DeviceOptions::default();
                     let artifact = build(
                         &project,
                         &project.join(source),
                         &project.join(".cache/weightlang/run"),
                         true,
-                        &devices,
+                        &native_initialization,
                     )?;
                     compiler(
                         &project,
@@ -988,12 +1060,17 @@ fn execute(cli: Cli) -> Result<u8> {
                         ]
                         .into_iter()
                         .chain(devices.args())
+                        .chain(runtime.args())
                         .collect::<Vec<_>>(),
                     )?;
                 }
-                Cmd::Test { devices } => {
+                Cmd::Test { devices, runtime } => {
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
-                    test_project(&project, &devices.with_config(config.as_ref(), &project))?;
+                    test_project(
+                        &project,
+                        &runtime.devices(devices, config.as_ref(), &project),
+                        &runtime,
+                    )?;
                 }
                 Cmd::ReleaseAssets {
                     version,
@@ -1049,7 +1126,7 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
     fs::write(
         path.join("wgt.toml"),
         format!(
-            "[project]\nmodule = {}\nedition = \"0.2\"\n\n[model]\nsource = \"main.wgt\"\noutput = \"weights\"\n\n[revisions]\nmax_versions = 5\n\n[environment]\npython = \"3.12\"\nbackend = \"auto\"\n\n[dependencies]\n",
+            "[project]\nmodule = {}\nedition = \"0.5\"\n\n[model]\nsource = \"main.wgt\"\noutput = \"weights\"\n\n[revisions]\nmax_versions = 5\n\n[dependencies]\n",
             serde_json::to_string(&module)?
         ),
     )?;
@@ -1058,21 +1135,10 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
         path.join(toolchain::PIN),
         format!("{}\n", toolchain::CURRENT),
     )?;
-    fs::write(
-        path.join("main.wgt"),
-        format!(
-            "wgt 0.2\n# Learn a tiny identity map on four explicit training rows.\nmodel {name}\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ndata identity:\n  [0, 0] -> [0, 0]\n  [0, 1] -> [0, 1]\n  [1, 0] -> [1, 0]\n  [1, 1] -> [1, 1]\ninit seed=42\ntrain data=identity loss=mse optimizer=adam lr=0.05 epochs=400\n"
-        ),
-    )?;
-    fs::write(
-        path.join("tests/main.json"),
-        serde_json::to_vec_pretty(
-            &json!({"source":"main.wgt","input":[[0,1],[1,0]],"expected":[[0,1],[1,0]],"atol":0.001}),
-        )?,
-    )?;
+    fs::write(path.join("main.wgt"), "wgt 0.5\n# One feature and one output; all iterations update the same initialized model.\nfn main() {\n    let model = mlp([1, 4, 1], \"tanh\", 42, \"adam\");\n    for step in range(0, 100) {\n        let loss = fit(model, [[0], [1]], [[0], [1]], 0.03, \"mse\");\n    }\n    metric(\"training_steps\", 100);\n    return model;\n}\n")?;
     project_ignore::initialize(path)?;
     println!(
-        "created {} (wgt sync; wgt check; wgt build; wgt train --fresh; wgt test)",
+        "created {} (wgt sync; wgt script main.wgt; weightc legacy-build main.wgt)",
         path.display()
     );
     Ok(())
@@ -1104,16 +1170,10 @@ fn model_name(path: &Path) -> Result<Option<String>> {
     }
     Ok(None)
 }
-fn compiler_command(project: &Path) -> Result<Command> {
-    if let Some(path) = std::env::var_os("WEIGHTC") {
-        return Ok(Command::new(path));
-    }
-    if let Some(command) = environment::compiler_command(project)? {
-        return Ok(command);
-    }
-    let path = find_executable("weightc").context("weightc is unavailable; run wgt sync to prepare Python/PyTorch, or set WEIGHTC to an external compiler")?;
-    Ok(Command::new(path))
+fn compiler_command(_project: &Path) -> Result<Command> {
+    anyhow::bail!("the Python weightc CLI has been removed; this legacy wgt command has no native implementation yet. Use weightc compile/check/legacy-build for wgt 0.5, wgt script for native execution, legacy Python models and callbacks are no longer supported. See docs/weightc-migration.md")
 }
+
 #[derive(Debug)]
 struct CompilerFailure(u8);
 impl std::fmt::Display for CompilerFailure {
@@ -1188,7 +1248,7 @@ fn build_with_trainers(
     Artifact::read(&path)?;
     Ok(path)
 }
-fn test_project(project: &Path, devices: &DeviceOptions) -> Result<()> {
+fn test_project(project: &Path, devices: &DeviceOptions, runtime: &ExecutionOptions) -> Result<()> {
     let directory = project.join("tests");
     ensure!(
         directory.is_dir(),
@@ -1200,6 +1260,7 @@ fn test_project(project: &Path, devices: &DeviceOptions) -> Result<()> {
         .collect();
     tests.sort();
     ensure!(!tests.is_empty(), "no tests/*.json fixtures");
+    let native_initialization = DeviceOptions::default();
     let mut built = std::collections::BTreeMap::new();
     let mut failed = 0;
     for path in &tests {
@@ -1215,7 +1276,7 @@ fn test_project(project: &Path, devices: &DeviceOptions) -> Result<()> {
                         &project.join(source),
                         &project.join(".cache/weightlang/test"),
                         true,
-                        devices,
+                        &native_initialization,
                     )?,
                 );
             }
@@ -1226,6 +1287,7 @@ fn test_project(project: &Path, devices: &DeviceOptions) -> Result<()> {
                 .arg("run")
                 .arg(&artifact)
                 .args(devices.args())
+                .args(runtime.args())
                 .arg("--input")
                 .arg(serde_json::to_string(
                     fixture.get("input").context("missing input")?,
@@ -1318,7 +1380,7 @@ fn executable(path: &Path) -> bool {
 }
 fn list_commands() {
     println!(
-        "Built-in: version toolchain self download new init add remove update fetch sync tree metadata check build run test verify graph package publish register cache doctor"
+        "Built-in: version toolchain self download new init add remove update fetch sync tree metadata check script build run test verify graph package publish register cache doctor"
     );
     let mut names = std::collections::BTreeSet::new();
     if let Some(path) = std::env::var_os("PATH") {

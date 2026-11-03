@@ -1,8 +1,12 @@
 # WeightLang for Zed
 
 Syntax highlighting, bracket pairing, comment toggling and a declaration outline
-for declarative `.wgt` models. Colors follow your Zed theme. No Python, PyTorch,
+for WGT 0.5 models and functions. Colors follow your Zed theme. No Python, PyTorch,
 model execution, Rust extension code or language server is needed for highlighting.
+
+The local parser supports 0.5, but `extension.toml` still pins the previous published
+grammar commit. Installation below will not receive this update until the new grammar
+is published and `rev` is updated. No Zed release or GUI acceptance is claimed.
 
 ## Install locally
 
@@ -25,9 +29,9 @@ No installer modifies your settings or overwrites another extension.
 
 - Highlights declarations, builtin operations, types, parameters, numbers,
   strings and comments. A `#` inside a quoted path remains part of the string.
-- Lists model, block, layer, input/output, constant and dimension declarations
+- Lists functions, model, block, layer, input/output, constant and dimension declarations
   in the outline. Declarations remain flat rather than nested by indentation.
-- Pairs parentheses, square brackets and quotes; indents bracketed continuations.
+- Pairs braces, parentheses, square brackets and quotes; indents nested function bodies.
 - Does not provide completion, diagnostics, definition navigation, formatting or
   indentation-aware block folding.
 - Excludes `wgt init 1` algorithm scripts and `backend torch-dynamic` function bodies.
@@ -38,8 +42,8 @@ check is separate from actual Zed GUI acceptance; the latter is not automated he
 ## Development
 
 Change the parser in [tree-sitter-wgt](../tree-sitter-wgt/README.md), regenerate
-queries with `python scripts/generate_tree_sitter_queries.py`, and run
-`python -m pytest tests/test_tree_sitter_support.py -q` from the repository root.
+queries with `node scripts/generate_editor_support.cjs`, and run
+`node scripts/test_editor_support.cjs` from the repository root.
 After publishing a grammar change, update the manifest's `rev` to its full commit
 hash. Do not use a moving branch for released grammar dependencies.
 

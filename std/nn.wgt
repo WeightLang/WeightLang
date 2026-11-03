@@ -1,0 +1,43 @@
+wgt 0.5
+# std/nn: feed-forward building blocks.
+# Bundled with weightc and versioned with the language. Blocks hold no weights;
+# they expand into layers at compile time (e.g. body.fc1, body.act, body.fc2).
+
+# linear -> gelu -> linear
+block mlp(in, hidden, out):
+  layer fc1: linear(in=in, out=hidden)
+  layer act: gelu
+  layer fc2: linear(in=hidden, out=out)
+
+# linear -> relu -> linear
+block mlp_relu(in, hidden, out):
+  layer fc1: linear(in=in, out=hidden)
+  layer act: relu
+  layer fc2: linear(in=hidden, out=out)
+
+# linear -> tanh -> linear
+block mlp_tanh(in, hidden, out):
+  layer fc1: linear(in=in, out=hidden)
+  layer act: tanh
+  layer fc2: linear(in=hidden, out=out)
+
+# Two hidden layers: linear -> gelu -> linear -> gelu -> linear
+block mlp2(in, h1, h2, out):
+  layer fc1:  linear(in=in, out=h1)
+  layer act1: gelu
+  layer fc2:  linear(in=h1, out=h2)
+  layer act2: gelu
+  layer fc3:  linear(in=h2, out=out)
+
+# One linear layer followed by an activation: a hidden layer / feature extractor.
+block dense_gelu(in, out):
+  layer fc:  linear(in=in, out=out)
+  layer act: gelu
+
+block dense_relu(in, out):
+  layer fc:  linear(in=in, out=out)
+  layer act: relu
+
+block dense_tanh(in, out):
+  layer fc:  linear(in=in, out=out)
+  layer act: tanh

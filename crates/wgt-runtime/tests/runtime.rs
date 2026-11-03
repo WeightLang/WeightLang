@@ -99,6 +99,10 @@ fn contracts_streaming_and_allocation_free_execution() {
         AllocationPolicy::Strict,
     )
     .unwrap();
+    let packed_model: Model = serde_json::from_str(r#"{"version":1,"input":2,"parameters":[
+        {"name":"w","shape":[1,2],"kind":"packed","storage":"int4","group":2,"data":[169],"scales":[1]}
+    ],"layers":[{"op":"linear","weight":"w"}]}"#).unwrap();
+    let mut packed = Session::prepare(packed_model, Path::new("."), 100).unwrap();
     COUNTING.store(true, Ordering::SeqCst);
     for _ in 0..100 {
         let mut effective = [0.; 4];
@@ -116,6 +120,7 @@ fn contracts_streaming_and_allocation_free_execution() {
         assert_eq!(session.run(&[2., 1.]).unwrap(), &[7., 12.5]);
         assert_eq!(streamed.run(&[2., 1.]).unwrap(), &[7., 12.5]);
         assert_eq!(strict.run(&[2., 1.]).unwrap(), &[7., 12.5]);
+        assert_eq!(packed.run(&[2., 1.]).unwrap(), &[4.]);
     }
     COUNTING.store(false, Ordering::SeqCst);
     assert_eq!(ALLOCATIONS.load(Ordering::SeqCst), 0);

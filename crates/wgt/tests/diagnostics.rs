@@ -2,10 +2,10 @@
 use std::{fs, os::unix::fs::PermissionsExt, process::Command};
 
 #[test]
-fn diagnostic_commands_forward_options_and_preserve_single_json_error() {
+fn diagnostic_commands_report_removed_python_cli() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("wgt.mod"), "module local/debug\nwgt 0.3\n").unwrap();
-    fs::write(temp.path().join("model.wgt"), "wgt 0.3\nmodel demo\n").unwrap();
+    fs::write(temp.path().join("wgt.mod"), "module local/debug\nwgt 0.5\n").unwrap();
+    fs::write(temp.path().join("model.wgt"), "wgt 0.5\nmodel demo\n").unwrap();
     let compiler = temp.path().join("compiler");
     fs::write(&compiler, "#!/bin/sh\nprintf '%s\\n' \"$@\" > args.txt\nprintf '%s\\n' '{\"code\":\"E0301\"}' >&2\nexit 7\n").unwrap();
     fs::set_permissions(&compiler, fs::Permissions::from_mode(0o755)).unwrap();
@@ -48,21 +48,8 @@ fn diagnostic_commands_forward_options_and_preserve_single_json_error() {
             .arg("--offline")
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(7));
-        assert_eq!(
-            String::from_utf8_lossy(&output.stderr),
-            "{\"code\":\"E0301\"}\n"
-        );
-        let forwarded = fs::read_to_string(temp.path().join("args.txt")).unwrap();
-        assert!(forwarded.contains("--error-format\njson\n"));
-        if args[0] != "check" {
-            assert!(forwarded.contains("--weights\nweights/saved\n"));
-        }
-        if args[0] == "debug" {
-            assert!(forwarded.contains("--steps\n3\n"));
-        }
-        if args[0] == "trace" {
-            assert!(forwarded.contains("--sample\nsample.json\n"));
-        }
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Python weightc CLI has been removed"));
+        assert!(!temp.path().join("args.txt").exists());
     }
 }

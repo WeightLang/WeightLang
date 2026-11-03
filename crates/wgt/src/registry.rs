@@ -1,5 +1,6 @@
 use crate::{
-    artifact::{hash, hash_file, Artifact, FILES},
+    artifact::{hash, hash_file},
+    package_artifact::{Info, index_files},
     manifest::{self, Lock, Manifest},
 };
 use anyhow::{bail, ensure, Context, Result};
@@ -177,7 +178,9 @@ pub fn verify(manifest: &Manifest, lock: &Lock, cache: &Path) -> Result<Vec<Valu
         for name in names {
             ensure!(manifest::identifier(name), "invalid locked artifact name");
             let path = module_dir(cache, m, v).join(name);
-            for file in FILES {
+            let metadata: Value = serde_json::from_slice(&fs::read(path.join("manifest.json"))?)?;
+            let descriptor = json!({"format":metadata["format"]});
+            for file in index_files(&descriptor)? {
                 let expected = lock
                     .get(&(m.clone(), v.clone(), format!("{name}/{file}")))
                     .context("incomplete lock file")?;
@@ -190,7 +193,8 @@ pub fn verify(manifest: &Manifest, lock: &Lock, cache: &Path) -> Result<Vec<Valu
                     "cache hash mismatch: {m}@{v}/{name}/{file}"
                 );
             }
-            Artifact::read(&path)?;
+
+            Info::read(&path)?;
             result.push(json!({"module":m,"version":v,"artifact":name,"path":path}));
         }
     }
@@ -256,8 +260,8 @@ pub fn fetch(
             ensure!(manifest::identifier(name), "invalid artifact name");
             let dir = stage.path().join(name);
             fs::create_dir(&dir)?;
-            for file in FILES {
-                let meta = &art["files"][file];
+            for file in index_files(art)? {
+                let meta = &art["files"][*file];
                 let asset = meta["asset"].as_str().context("missing asset")?;
                 manifest::relative_file(asset)?;
                 ensure!(!asset.contains('/'), "asset must be a filename");
@@ -297,9 +301,9 @@ pub fn fetch(
                 hash(&bytes) == art["files"]["source.wgt"]["sha256"],
                 "tagged source does not match artifact"
             );
-            let artifact = Artifact::read(&dir)?;
+            let artifact = Info::read(&dir)?;
             ensure!(
-                artifact.manifest["model"] == *name,
+                artifact.name == *name && artifact.files() == index_files(art)?,
                 "artifact model differs from index"
             );
         }
@@ -406,27 +410,25 @@ pub fn package(
         if !path.join("manifest.json").is_file() {
             continue;
         }
-        let art = Artifact::read(&path)?;
-        let name = art.manifest["model"].as_str().context("missing model")?;
+        let art = Info::read(&path)?;
+        let name = art.name.as_str();
         ensure!(
-            allow_untrained || art.untrained().is_empty(),
+            allow_untrained || art.untrained.is_empty(),
             "{name}: untrained tensors; use --allow-untrained only for explicit experiments"
         );
-        let hash = art.manifest["source"]["sha256"]
-            .as_str()
-            .context("missing source hash")?;
+        let hash = &art.source_hash;
         let source = sources
             .iter()
-            .find(|p| hash_file(p).is_ok_and(|h| h == hash))
+            .find(|p| hash_file(p).is_ok_and(|h| &h == hash))
             .with_context(|| format!("{name}: no matching source in package"))?;
         let mut files = serde_json::Map::new();
-        for file in FILES {
+        for file in art.files() {
             let asset = format!("{name}.{file}");
             fs::copy(path.join(file), stage.path().join(&asset))?;
-            files.insert(file.into(),json!({"asset":asset,"sha256":hash_file(&path.join(file))?,"size":fs::metadata(path.join(file))?.len()}));
+            files.insert((*file).into(),json!({"asset":asset,"sha256":hash_file(&path.join(file))?,"size":fs::metadata(path.join(file))?.len()}));
         }
         ensure!(!records.contains_key(name), "duplicate model {name}");
-        records.insert(name.into(),json!({"source_path":source.file_name().unwrap().to_str().context("non-UTF8 source")?,"untrained_tensors":art.untrained(),"files":files}));
+        records.insert(name.into(),json!({"source_path":source.file_name().unwrap().to_str().context("non-UTF8 source")?,"format":if art.native { "weightlang.native-build.v1" } else { "weightlang.artifact" },"untrained_tensors":art.untrained,"files":files}));
     }
     ensure!(
         !records.is_empty(),
@@ -512,8 +514,8 @@ pub fn publish(index: &Value, output: &Path, dry_run: bool) -> Result<()> {
         .context("artifacts")?
         .values()
     {
-        for file in FILES {
-            let meta = &art["files"][file];
+        for file in index_files(art)? {
+            let meta = &art["files"][*file];
             let asset = meta["asset"].as_str().context("asset")?;
             manifest::relative_file(asset)?;
             ensure!(!asset.contains('/'), "invalid asset");

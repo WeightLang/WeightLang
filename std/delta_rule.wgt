@@ -1,0 +1,39 @@
+wgt 0.5
+use std/tensor_math
+
+# 单步 gated delta rule 的可组合参考实现，无参数、未训练。
+# input: [heads,2*key_dim+value_dim+2]，末轴依次为 q/k/v/g/beta。
+# state0: [heads,key_dim,value_dim]；状态由调用方提供，不保存在模型中。
+# q/k 在末轴 L2Norm，g 是对数衰减，beta 是写入门（调用方通常传 sigmoid）。
+# scale 必须由调用方传 1/sqrt(key_dim)，WGT 不隐式做 Python 数学调用。
+block normalized_step(key_dim,value_dim,scale):
+  layer raw_q: slice(axis=-1,start=0,stop=key_dim) from input
+  layer q_unit: tensor_math.l2norm() from raw_q
+  layer q: scale(factor=scale)
+  layer raw_k: slice(axis=-1,start=key_dim,stop=2*key_dim) from input
+  layer k: tensor_math.l2norm() from raw_k
+  layer v: slice(axis=-1,start=2*key_dim,stop=2*key_dim+value_dim) from input
+  layer g: slice(axis=-1,start=2*key_dim+value_dim,stop=2*key_dim+value_dim+1) from input
+  layer beta: slice(axis=-1,start=2*key_dim+value_dim+1,stop=2*key_dim+value_dim+2) from input
+  # g: [heads,1] -> [heads,1,1]，仅广播到当前 head 的状态矩阵。
+  layer decay: exp from g
+  layer decay_matrix: split_axis(axis=-1,parts=1)
+  layer decay_full: broadcast from decay_matrix,state0
+  layer prior: mul(state0,decay_full)
+  # 用 key 从衰减状态读取预测值，再按 beta 写入 value 的预测误差。
+  layer k_row: split_axis(axis=-1,parts=1) from k
+  layer predicted: matmul from k_row,prior
+  layer negative: scale(factor=-1)
+  layer v_row: split_axis(axis=-1,parts=1) from v
+  layer error: add(v_row,negative)
+  layer beta_matrix: split_axis(axis=-1,parts=1) from beta
+  layer beta_full: broadcast from beta_matrix,error
+  layer update: mul(error,beta_full)
+  layer k_column: split_axis(axis=-1,parts=key_dim) from k
+  layer outer: matmul from k_column,update
+  layer next_state: add(prior,outer)
+  # 输出在更新后读取；不同时间步共享同一递推规则，状态梯度跨块保持连接。
+  layer q_row: split_axis(axis=-1,parts=1) from q
+  layer result_row: matmul from q_row,next_state
+  layer result: merge_axes(axis=-2)
+  return output=result state0=next_state

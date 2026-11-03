@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<language id="wgt" name="WeightLang" version="2.0" _section="Source">
+<metadata><property name="globs">*.wgt</property><property name="line-comment-start">#</property></metadata>
+<styles><style id="keywords" name="Keyword" map-to="def:keyword"/><style id="builtins" name="Builtin" map-to="def:function"/><style id="types" name="Type" map-to="def:type"/></styles>
+<definitions><context id="wgt"><include>
+<context id="comment" class="comment" style-ref="def:comment" end-at-line-end="true"><start>#</start></context>
+<context id="string" class="string" style-ref="def:string" end-at-line-end="true"><start>"</start><end>"</end><include><context id="escape" style-ref="def:special-char"><match>\\.</match></context></include></context>
+<context id="keywords" style-ref="keywords">@@keywords_TAGS@@</context>
+<context id="builtins" style-ref="builtins">@@builtins_TAGS@@</context>
+<context id="types" style-ref="types">@@types_TAGS@@</context>
+<context id="constants" style-ref="def:boolean">@@constants_TAGS@@</context>
+<context id="operator" style-ref="def:operator"><match>[!&lt;&gt;=+*/%&amp;|\-]</match></context>
+<context id="number" style-ref="def:decimal"><match>(?&lt;![\w.])-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?(?![\w.])</match></context>
+</include></context></definitions></language>

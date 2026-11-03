@@ -96,7 +96,7 @@ impl Gpu {
         for p in &cpu.parameters {
             streamed.push(match p.storage {
                 Storage::File { .. } => true,
-                Storage::Resident(_) => false,
+                Storage::Resident(_) | Storage::Packed(_) => false,
                 Storage::View { source, .. } => streamed[source],
                 Storage::Add { base, delta } => streamed[base] || streamed[delta],
             });
@@ -125,7 +125,13 @@ impl Gpu {
                     output <= limits.max_compute_workgroups_per_dimension as usize,
                     "linear output exceeds GPU dispatch limit"
                 );
-                let n = cpu.parameters[weight].len + if bias.is_some() { output } else { 0 };
+                let n = match &cpu.parameters[weight].storage {
+                    Storage::Packed(p) => {
+                        ensure!(!bias.is_some_and(|b| streamed[b]), "GPU packed weights require resident bias");
+                        p.data.len().div_ceil(4) + p.scales.len() + if bias.is_some() { output } else { 0 }
+                    }
+                    _ => cpu.parameters[weight].len + if bias.is_some() { output } else { 0 },
+                };
                 ensure!(
                     n <= u32::MAX as usize,
                     "parameter exceeds GPU u32 indexing range"
@@ -151,7 +157,7 @@ impl Gpu {
             .checked_add(bytes(scratch_len)?)
             .and_then(|n| n.checked_add(cpu.report.activation_bytes))
             .and_then(|n| n.checked_add(cpu.report.output.checked_mul(4)?))
-            .and_then(|n| n.checked_add(cpu.ops.len().checked_mul(16)?))
+            .and_then(|n| n.checked_add(cpu.ops.len().checked_mul(32)?))
             .context("GPU memory accounting overflow")?;
         ensure!(
             cpu.report
@@ -242,10 +248,12 @@ impl Gpu {
         let layout = pipeline.get_bind_group_layout(0);
         let mut weights = HashMap::new();
         for (&(weight, bias), &n) in cached {
-            materialize(cpu, weight, bias)?;
+            let packed = if matches!(cpu.parameters[weight].storage, Storage::Packed(_)) {
+                Some(packed_contents(cpu, weight, bias)?)
+            } else { materialize(cpu, weight, bias)?; None };
             let b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("resident effective weights"),
-                contents: bytemuck::cast_slice(&cpu.workspace[..n]),
+                contents: packed.as_deref().unwrap_or_else(|| bytemuck::cast_slice(&cpu.workspace[..n])),
                 usage: storage,
             });
             weights.insert((weight, bias), b);
@@ -285,6 +293,13 @@ impl Gpu {
                     None,
                 ),
             };
+            let (format, group, stride, words) = match *op {
+                Op::Linear { weight, .. } => match &cpu.parameters[weight].storage {
+                    Storage::Packed(p) => (p.format, p.group as u32, p.stride as u32, p.data.len().div_ceil(4) as u32),
+                    _ => (0, 1, input as u32, (input*output) as u32),
+                },
+                _ => (0,1,0,0),
+            };
             let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("operator contract"),
                 contents: bytemuck::cast_slice(&[
@@ -292,6 +307,7 @@ impl Gpu {
                     u32::try_from(output)?,
                     code,
                     bias_flag,
+                    format, group, stride, words,
                 ]),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
@@ -365,9 +381,12 @@ impl Gpu {
         ensure!(input.len() == cpu.report.input, "input length mismatch");
         if self.revision != cpu.revision {
             for (&(weight, bias), buffer) in &self.weights {
-                let n = materialize(cpu, weight, bias)?;
-                self.queue
-                    .write_buffer(buffer, 0, bytemuck::cast_slice(&cpu.workspace[..n]));
+                if matches!(cpu.parameters[weight].storage, Storage::Packed(_)) {
+                    self.queue.write_buffer(buffer, 0, &packed_contents(cpu, weight, bias)?);
+                } else {
+                    let n = materialize(cpu, weight, bias)?;
+                    self.queue.write_buffer(buffer, 0, bytemuck::cast_slice(&cpu.workspace[..n]));
+                }
             }
             self.revision = cpu.revision;
         }
@@ -430,4 +449,18 @@ fn materialize(cpu: &mut Session, weight: usize, bias: Option<usize>) -> Result<
             .map_err(anyhow::Error::msg)?;
     }
     Ok(count)
+}
+
+fn packed_contents(cpu: &mut Session, weight: usize, bias: Option<usize>) -> Result<Vec<u8>> {
+    let Storage::Packed(packed) = &cpu.parameters[weight].storage else { unreachable!() };
+    let mut data = packed.data.clone();
+    data.resize(data.len().div_ceil(4)*4, 0);
+    data.extend_from_slice(bytemuck::cast_slice(&packed.scales));
+    if let Some(bias) = bias {
+        let count = cpu.parameters[bias].len;
+        cpu.workspace[..count].fill(0.);
+        accumulate(&mut cpu.parameters, bias, 0, &mut cpu.workspace[..count]).map_err(anyhow::Error::msg)?;
+        data.extend_from_slice(bytemuck::cast_slice(&cpu.workspace[..count]));
+    }
+    Ok(data)
 }

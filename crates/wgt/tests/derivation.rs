@@ -3,16 +3,16 @@
 use std::{fs, os::unix::fs::PermissionsExt, process::Command};
 
 #[test]
-fn discovers_derived_model_for_build() {
+fn derived_export_reports_removed_python_cli() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(
         temp.path().join("wgt.mod"),
-        "module local/derived\nwgt 0.3\n",
+        "module local/derived\nwgt 0.5\n",
     )
     .unwrap();
     fs::write(
         temp.path().join("child.wgt"),
-        "wgt 0.3\nmodel child extends \"weights/base\" sha256=\"hash\":\n  remove layer old\n",
+        "wgt 0.5\nmodel child extends \"weights/base\" sha256=\"hash\":\n  remove layer old\n",
     )
     .unwrap();
     let compiler = temp.path().join("compiler");
@@ -30,7 +30,6 @@ fn discovers_derived_model_for_build() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    let args = fs::read_to_string(temp.path().join("args.txt")).unwrap();
-    assert!(args.starts_with("export\n"));
-    assert!(args.contains("child.wgt\n"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Python weightc CLI has been removed"));
+    assert!(!temp.path().join("args.txt").exists());
 }

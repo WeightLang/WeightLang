@@ -1,3 +1,5 @@
+> **历史接口说明 / Historical interfaces:** 当前源码已清退全部 Python 实现和测试。本文中的 Python API、`.py` 脚本和旧 CLI 示例已停用；仅 Rust 实现部分继续有效。参见[原生入口与迁移边界](weightc-migration.md)。
+
 # Packages
 
 > 当前命令已拆分：`build` 生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
@@ -29,7 +31,7 @@ pins, cache verification and `wgt.sum` immutability checks remain in force.
 See [native CLI](wgt.md) for options and [Git registry](registry-design.md)
 for `wgt add owner/name` and `wgt publish` registration PRs.
 
-Standard libraries are bundled: `import std/nn` (wgt 0.3) needs neither `add`
+Standard libraries are bundled: `import std/nn` (wgt 0.5) needs neither `add`
 nor a manifest dependency. This imports computation definitions, not weights.
 
 ## Package identity and versions
@@ -38,11 +40,11 @@ Terminology: a **weight package** distributes model artifacts; a source **librar
 contains reusable `block` declarations. The historical `module` field identifies
 the package path, not a source file. See [project hierarchy](project-layout.md).
 
-A package is a directory with a `wgt.mod` inside a GitHub repository:
+A package is a directory with a `wgt.mod` inside a GitHub repository. The following is a current-format illustration; the published gates v0.1.0 retains its original source and manifest:
 
 ```
 module github.com/WeightLang/WeightLang/packages/gates
-wgt 0.1
+wgt 0.5
 ```
 
 The module path is `github.com/<owner>/<repo>[/<subdir>]` and must match the
@@ -54,7 +56,7 @@ A consumer lists requirements in its own `wgt.mod`:
 
 ```
 module github.com/WeightLang/WeightLang/examples/remote_reuse
-wgt 0.1
+wgt 0.5
 
 require github.com/WeightLang/WeightLang/packages/gates v0.1.0
 ```
@@ -155,3 +157,12 @@ module, version and commit in `imports[].package`.
 - License fields in published manifests and license reporting for imports.
 - Private repositories and authentication.
 - Referencing large or restricted datasets.
+
+## Native single-file script dependencies
+
+A native script can declare the same exact-version `[dependencies]` table in a leading
+`# /// script` / `# ///` TOML comment block. `wgt FILE.wgt` resolves and verifies those
+packages before interpreting or compiling the script. Without inline metadata, the nearest
+project configuration remains authoritative. This reuses the current release artifact format;
+it does not introduce function imports or change the native model loader's supported formats.
+See [single-file scripts](native-training.md#单文件依赖注释与直接执行).

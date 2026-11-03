@@ -32,8 +32,8 @@ npm run preview
 rsvg-convert media/preview.svg -o media/preview.png
 ```
 
-`media/example.wgt` is an initialized, untrained model example. Validate it from
-the repository root with `weightc check editors/vscode/media/example.wgt --shapes`.
+`media/example.wgt` explicitly trains a synthetic regression model when run. Check it without executing training from
+the repository root with `weightc check editors/vscode/media/example.wgt`.
 The icon uses the project logo from `assets/logo.png`, exported at 512 × 512
 pixels to satisfy the Marketplace limits (1024 × 1024 pixels and 1 MB).
 

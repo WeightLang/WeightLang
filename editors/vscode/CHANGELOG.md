@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Update highlighting to WGT 0.5 functions, control flow, native training and forward builtins.
+- Handle JSON string escapes, boolean/null literals, logical operators and brace pairing.
+- Replace retired Python generators with an offline Node generator and native editor checks.
+
 ## 0.1.0
 
 - Recognize `.wgt` files as WeightLang.

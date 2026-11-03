@@ -1,9 +1,10 @@
 # 编辑器语法高亮
 
-仓库提供声明式 `.wgt` 的离线高亮配置，不需要 Python、PyTorch 或运行模型。
+仓库提供 WGT 0.5 `.wgt` 的离线高亮配置，不需要 Python、PyTorch 或运行模型。
 颜色跟随编辑器主题。支持关键字、内置算子、类型、数值、双引号字符串和 `#` 注释；
-TextMate 还区分参数、调用名称、标点和运算符。高亮不判断版本是否合法，也不做形状检查。
-实验性的 `backend torch-dynamic` Python 风格函数体目前不在支持范围内。
+支持 `fn`、控制流、训练与自更新前向内置函数、布尔/null 字面量、JSON 字符串转义及花括号。
+TextMate 还区分函数定义、参数、调用名称、标点和运算符。高亮不判断版本是否合法，也不做形状检查。
+词表以当前 Rust 实现为准；旧模型材料不代表 0.5 可执行功能。
 
 ## 支持范围
 
@@ -77,10 +78,11 @@ vim.cmd('syntax enable')
 ### Zed
 
 在命令面板运行 **`zed: install dev extension`**，选择本仓库的 `editors/zed/`。
+注意：当前 manifest 仍固定在旧远端提交，本地 0.5 解析器尚未发布；需发布后更新 rev 才能通过上述安装方式获得本次更新。
 Zed 会从 manifest 固定的提交下载并编译 `editors/tree-sitter-wgt/` 中的解析器；
 首次需要网络及 WASI 工具链，之后高亮可离线工作。打开 `.wgt` 文件后语言应显示 **WeightLang**。
 
-扩展提供高亮、括号配对、注释切换、平铺声明大纲，以及括号内部的续行缩进。
+扩展提供高亮、括号配对、注释切换、平铺声明大纲，函数大纲，以及括号和花括号内部的缩进。
 尚无 LSP、按缩进划分的折叠或嵌套大纲；`wgt init 1` 算法脚本和
 `backend torch-dynamic` 不在该 Tree-sitter 语法支持范围内。
 插件尚未提交 Zed 扩展仓库；本地开发扩展安装不等于上架。
@@ -121,32 +123,21 @@ Flatpak 应用可能需要使用其沙箱内的用户数据目录。
 
 ## 维护与验证
 
-不要分别修改生成文件。修改 `scripts/generate_editor_support.py`，然后运行：
+使用 Node 生成器，不依赖已移除的 Python 实现：
 
 ```sh
-python scripts/generate_editor_support.py
-python scripts/generate_editor_support.py --check
-python -m pytest tests/test_editor_support.py -q
-npm ci --prefix editors/vscode
+node scripts/generate_editor_support.cjs
+node scripts/generate_editor_support.cjs --check
 npm test --prefix editors/vscode
-```
-
-生成器只用 Python 标准库，以 AST 读取 `syntax.py` 的语句处理器、算子集合和类型；
-不导入 WeightLang，不执行或初始化模型。命名轴简写和结构词维护在生成器中。
-新增语法时检查词表提取是否覆盖新的声明方式；词表不是语法验证器。
-TextMate 测试检查具体 token scope，并遍历 examples、packages 和标准库的 `.wgt` 文件。
-Python 测试检查生成文件同步、JSON/plist 等价，以及已安装的 Vim/Neovim 实际行为。
-未安装的 Vim/Neovim 测试会显示 skip。
-
-Tree-sitter 的结构规则在 `editors/tree-sitter-wgt/grammar.js`，高亮查询复用词表：
-
-```sh
-python scripts/generate_tree_sitter_queries.py
-python scripts/generate_tree_sitter_queries.py --check
 (cd editors/tree-sitter-wgt && tree-sitter generate --abi 14 && tree-sitter test)
-python -m pytest tests/test_tree_sitter_support.py -q
+node scripts/test_editor_support.cjs
 ```
 
-新增测试实际编译 C 解析器、遍历声明式模型、执行四种查询，并验证 CRLF/EOF、增量编辑和
-不完整声明后的恢复。需要 Tree-sitter CLI（本地使用 0.26.9）和 C 编译器；缺少 CLI 时会 skip。
-WASM 另用 `tree-sitter build --wasm` 验证；编译成功不等于已经在 Zed GUI 验收。
+生成器从 Rust 的 BUILTINS 提取普通函数，显式维护 0.5 声明、控制流和 forward 运算。
+修改生成器及 scripts/editor-templates/，不要直接修改生成的词表、TextMate、Vim、Emacs、
+Kate、GtkSourceView 或高亮查询。Tree-sitter 结构规则在 grammar.js；结构变更后提交生成的 C/JSON。
+编辑器解析器允许部分旧语法以便阅读迁移材料，不替代 weightc check。
+
+测试覆盖具体 TextMate scope、仓库源码遍历、Tree-sitter 语料和四种查询。
+新增 0.5 样例覆盖训练循环、自更新 forward、嵌套花括号、逻辑运算与字符串转义。
+本次未逐一 GUI 验收，也未发布 Marketplace、Open VSX 或 Zed 更新。

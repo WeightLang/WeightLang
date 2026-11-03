@@ -1,0 +1,600 @@
+==================
+examples/native_training/supervised.wgt
+==================
+wgt 0.5
+# 每行一个合成样本：input 的唯一轴是特征，target 是对应的 y=2x+1。
+# batch 只读取当前小批次；每个 epoch 重新打开数据源，不把整个数据集载入内存。
+# 声明式模型和训练函数位于同一个编译单元；仅显式构造时初始化。
+model Regression
+input x: f32[1]
+output y: f32[1]
+# hidden 将一个特征映射到八维，tanh 后投影回单个回归值。
+layer hidden: linear(in=1,out=8)
+layer activation: tanh
+layer result: linear(in=8,out=1)
+init seed=42
+
+fn main() {
+    # [1,8,1] 的隐藏层使用 tanh；所有批次共享同一模型参数，初始权重未经训练。
+    let model = Regression("adam");
+    let first = 0;
+    let last = 0;
+    for epoch in range(0, 150) {
+        let data = jsonl("samples.jsonl");
+        while true {
+            let rows = batch(data, 4);
+            if len(rows) == 0 { break; }
+            # 输入 [batch,feature=1]，目标 [batch,output=1]；fit 对样本和输出维度平均 MSE。
+            last = fit(model, column(rows, "input"), column(rows, "target"), 0.03, "mse");
+            if epoch == 0 { first = last; }
+        }
+        close(data);
+    }
+    metric("initial_batch_loss", first);
+    metric("final_batch_loss", last);
+    # 这些指标只检验合成训练任务，不能视为真实数据的泛化结果。
+    assert(last < first * 0.01, "synthetic training did not converge");
+    benchmark(model, [0.25], 10, 100, "inference");
+    return predict(model, [0.25]);
+}
+
+---
+
+(source_file
+  (directive
+    (number))
+  (comment)
+  (comment)
+  (comment)
+  (model_declaration
+    (identifier))
+  (port_declaration
+    (identifier)
+    (qualified_name
+      (identifier))
+    (array
+      (number)))
+  (port_declaration
+    (identifier)
+    (qualified_name
+      (identifier))
+    (array
+      (number)))
+  (comment)
+  (layer_declaration
+    (identifier)
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (parameter
+          (identifier))
+        (number)
+        (punctuation)
+        (parameter
+          (identifier))
+        (number))))
+  (layer_declaration
+    (identifier)
+    (qualified_name
+      (identifier)))
+  (layer_declaration
+    (identifier)
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (parameter
+          (identifier))
+        (number)
+        (punctuation)
+        (parameter
+          (identifier))
+        (number))))
+  (directive
+    (parameter
+      (identifier))
+    (number))
+  (function_declaration
+    (identifier)
+    (arguments)
+    (body
+      (comment)
+      (script_keyword)
+      (parameter
+        (identifier))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (string)))
+      (script_keyword)
+      (parameter
+        (identifier))
+      (number)
+      (script_keyword)
+      (parameter
+        (identifier))
+      (number)
+      (script_keyword)
+      (qualified_name
+        (identifier))
+      (script_keyword)
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (number)
+          (punctuation)
+          (number)))
+      (body
+        (script_keyword)
+        (parameter
+          (identifier))
+        (call
+          (qualified_name
+            (identifier))
+          (arguments
+            (string)))
+        (script_keyword)
+        (literal)
+        (body
+          (script_keyword)
+          (parameter
+            (identifier))
+          (call
+            (qualified_name
+              (identifier))
+            (arguments
+              (qualified_name
+                (identifier))
+              (punctuation)
+              (number)))
+          (script_keyword)
+          (call
+            (qualified_name
+              (identifier))
+            (arguments
+              (qualified_name
+                (identifier))))
+          (operator)
+          (number)
+          (body
+            (script_keyword))
+          (comment)
+          (parameter
+            (identifier))
+          (call
+            (qualified_name
+              (identifier))
+            (arguments
+              (qualified_name
+                (identifier))
+              (punctuation)
+              (call
+                (qualified_name
+                  (identifier))
+                (arguments
+                  (qualified_name
+                    (identifier))
+                  (punctuation)
+                  (string)))
+              (punctuation)
+              (call
+                (qualified_name
+                  (identifier))
+                (arguments
+                  (qualified_name
+                    (identifier))
+                  (punctuation)
+                  (string)))
+              (punctuation)
+              (number)
+              (punctuation)
+              (string)))
+          (script_keyword)
+          (qualified_name
+            (identifier))
+          (operator)
+          (number)
+          (body
+            (parameter
+              (identifier))
+            (qualified_name
+              (identifier))))
+        (call
+          (qualified_name
+            (identifier))
+          (arguments
+            (qualified_name
+              (identifier)))))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (string)
+          (punctuation)
+          (qualified_name
+            (identifier))))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (string)
+          (punctuation)
+          (qualified_name
+            (identifier))))
+      (comment)
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (operator)
+          (qualified_name
+            (identifier))
+          (operator)
+          (number)
+          (punctuation)
+          (string)))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (array
+            (number))
+          (punctuation)
+          (number)
+          (punctuation)
+          (number)
+          (punctuation)
+          (string)))
+      (script_keyword)
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (array
+            (number)))))))
+
+==================
+examples/self_modifying/model.wgt
+==================
+wgt 0.5
+# 所有模型共享同一版本头和端口声明。本例系数为手工初始化，未训练。
+model AdaptiveMemory
+# x=[观测, 查询]；y 为一个查询结果，不含 batch 轴。
+input x: f32[2]
+output y: f32[1]
+# memory 的轴为 [输出, 输入]，同时是跨调用保留的状态和 linear 权重。
+parameter memory: f32[1,1] = [0]
+frozen updater: f32[1,1] = [0.5]
+frozen router: f32[1,1] = [1]
+
+fn forward(x) {
+    let observation = slice(x, 0, 1);
+    let query = slice(x, 1, 1);
+    let delta = linear(observation, updater);
+    let old = read(memory);
+    let next = add(old, delta);
+    # 写回立即影响本次后续计算，仅在成功返回时提交；预算/数值错误回滚。
+    write(memory, next);
+    let gate = linear(observation, router);
+    # 硬分支不可微；反向只沿实际执行路径传播。
+    if positive(gate) {
+        let y = linear(query, memory);
+        return y;
+    }
+    return query;
+}
+
+fn main() {
+    # 自更新模型通过显式 write 更新状态，不隐式创建外部优化器。
+    let model = AdaptiveMemory("none");
+    assert(predict(model, [2, 3])[0] == 3, "first state update");
+    return predict(model, [4, 3]);
+}
+
+---
+
+(source_file
+  (directive
+    (number))
+  (comment)
+  (model_declaration
+    (identifier))
+  (comment)
+  (port_declaration
+    (identifier)
+    (qualified_name
+      (identifier))
+    (array
+      (number)))
+  (port_declaration
+    (identifier)
+    (qualified_name
+      (identifier))
+    (array
+      (number)))
+  (comment)
+  (directive
+    (qualified_name
+      (identifier))
+    (punctuation)
+    (qualified_name
+      (identifier))
+    (array
+      (number)
+      (punctuation)
+      (number))
+    (operator)
+    (array
+      (number)))
+  (directive
+    (qualified_name
+      (identifier))
+    (punctuation)
+    (qualified_name
+      (identifier))
+    (array
+      (number)
+      (punctuation)
+      (number))
+    (operator)
+    (array
+      (number)))
+  (directive
+    (qualified_name
+      (identifier))
+    (punctuation)
+    (qualified_name
+      (identifier))
+    (array
+      (number)
+      (punctuation)
+      (number))
+    (operator)
+    (array
+      (number)))
+  (function_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier)))
+    (body
+      (script_keyword)
+      (parameter
+        (identifier))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (number)
+          (punctuation)
+          (number)))
+      (script_keyword)
+      (parameter
+        (identifier))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (number)
+          (punctuation)
+          (number)))
+      (script_keyword)
+      (parameter
+        (identifier))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (qualified_name
+            (identifier))))
+      (script_keyword)
+      (parameter
+        (identifier))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))))
+      (script_keyword)
+      (parameter
+        (identifier))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (qualified_name
+            (identifier))))
+      (comment)
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (qualified_name
+            (identifier))))
+      (script_keyword)
+      (parameter
+        (identifier))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (qualified_name
+            (identifier))))
+      (comment)
+      (script_keyword)
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))))
+      (body
+        (script_keyword)
+        (parameter
+          (identifier))
+        (call
+          (qualified_name
+            (identifier))
+          (arguments
+            (qualified_name
+              (identifier))
+            (punctuation)
+            (qualified_name
+              (identifier))))
+        (script_keyword)
+        (qualified_name
+          (identifier)))
+      (script_keyword)
+      (qualified_name
+        (identifier))))
+  (function_declaration
+    (identifier)
+    (arguments)
+    (body
+      (comment)
+      (script_keyword)
+      (parameter
+        (identifier))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (string)))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (call
+            (qualified_name
+              (identifier))
+            (arguments
+              (qualified_name
+                (identifier))
+              (punctuation)
+              (array
+                (number)
+                (punctuation)
+                (number))))
+          (array
+            (number))
+          (operator)
+          (number)
+          (punctuation)
+          (string)))
+      (script_keyword)
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (array
+            (number)
+            (punctuation)
+            (number)))))))
+
+==================
+Logical operators, escaped strings, multiline expressions and EOF
+==================
+wgt 0.5
+fn main() {
+    let message = "escaped \"# string";
+    let flags = [true, false, null];
+    for step in range(0, 3) {
+        if !flags[0] || (step >= 1 && step != 2) {
+            continue;
+        } else { break; }
+    }
+    return message;
+}
+
+---
+
+(source_file
+  (directive
+    (number))
+  (function_declaration
+    (identifier)
+    (arguments)
+    (body
+      (script_keyword)
+      (parameter
+        (identifier))
+      (string)
+      (script_keyword)
+      (parameter
+        (identifier))
+      (array
+        (literal)
+        (punctuation)
+        (literal)
+        (punctuation)
+        (literal))
+      (script_keyword)
+      (qualified_name
+        (identifier))
+      (script_keyword)
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (number)
+          (punctuation)
+          (number)))
+      (body
+        (script_keyword)
+        (operator)
+        (qualified_name
+          (identifier))
+        (array
+          (number))
+        (operator)
+        (arguments
+          (qualified_name
+            (identifier))
+          (operator)
+          (number)
+          (operator)
+          (qualified_name
+            (identifier))
+          (operator)
+          (number))
+        (body
+          (script_keyword))
+        (script_keyword)
+        (body
+          (script_keyword)))
+      (script_keyword)
+      (qualified_name
+        (identifier)))))

@@ -29,7 +29,20 @@ const onig = require('vscode-oniguruma');
   check('# linear f32 "quoted"', 'linear', 'comment.line.number-sign.wgt');
   for (const n of ['-1.2e-3', '.5', '42', '1.']) check(`const N = ${n}`, n, 'constant.numeric.wgt');
   check('layer y: custom.block(width=4)', 'custom.block', 'entity.name.function.wgt');
-  check('layer y: mean(axis=time)', 'mean', 'support.function.wgt');
+  check('let y = predict(net, [1]);', 'predict', 'support.function.wgt');
+  const vocabulary = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../vocabulary.json')));
+  for (const word of vocabulary.keywords) check(word, word, 'keyword.control.wgt');
+  for (const word of vocabulary.builtins) check(word + '(x);', word, 'support.function.wgt');
+  for (const word of vocabulary.constants) check('return ' + word + ';', word, 'constant.language.wgt');
+  check('fn forward(x) {', 'forward', 'entity.name.function.wgt');
+  for (const op of ['&&', '||', '!', '==', '!=', '<=', '>=']) check('if x ' + op + ' y {', op, 'keyword.operator.wgt');
+  for (const mark of ['{', '}', ';']) check(mark, mark, 'punctuation.wgt');
+  check(String.raw`return "escaped \"# still string"; # comment`, '# still', 'string.quoted.double.wgt');
+  check(String.raw`return "escaped \"# still string"; # comment`, '# comment', 'comment.line.number-sign.wgt');
+  const comparison = grammar.tokenizeLine('x == 1', tm.INITIAL);
+  assert(!comparison.tokens[0].scopes.includes('variable.parameter.wgt'));
+  const legacy = grammar.tokenizeLine('torch gelu i64', tm.INITIAL);
+  assert(legacy.tokens.every(t => !t.scopes.includes('support.function.wgt') && !t.scopes.includes('storage.type.wgt')));
   const broken = grammar.tokenizeLine('use "unfinished', tm.INITIAL);
   const next = grammar.tokenizeLine('model next', broken.ruleStack);
   assert(next.tokens[0].scopes.includes('keyword.control.wgt'), 'unfinished strings must not swallow later lines');
@@ -46,7 +59,7 @@ const onig = require('vscode-oniguruma');
       }
     }
   }
-  for (const dir of ['examples', 'src/weightlang/std', 'packages']) walk(path.resolve(__dirname, '../..', dir));
+  for (const dir of ['examples', 'std', 'packages']) walk(path.resolve(__dirname, '../..', dir));
   console.log(`TextMate scope assertions passed; tokenized ${count} WGT files.`);
   registry.dispose();
 })().catch(error => {console.error(error); process.exit(1);});

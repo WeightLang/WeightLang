@@ -1,8 +1,0 @@
-wgt 0.3
-model python_init
-# 四维输入到四维输出；Python 生成器只在构建时调用。
-input x: f32[4]
-output y: f32[4]
-layer projection: linear(4)
-# 生成单位映射用于展示算法入口，尚未训练；不含数据或训练回调。
-init python="generate.py:initialize" seed=42

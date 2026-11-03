@@ -1,0 +1,41 @@
+wgt 0.5
+use std/nn
+
+block tokens(vocab, dim, max_len):
+  layer embedding: embedding(vocab=vocab, dim=dim)
+  layer position: position_embedding(dim=dim, max_len=max_len)
+
+block attention(dim, heads):
+  layer norm: layernorm(dim=dim)
+  layer attention: self_attention(dim=dim, heads=heads, causal=0)
+
+block causal_attention(dim, heads):
+  layer norm: layernorm(dim=dim)
+  layer attention: self_attention(dim=dim, heads=heads, causal=1)
+
+block feed_forward(dim, hidden):
+  layer norm: layernorm(dim=dim)
+  layer mlp: nn.mlp(in=dim, hidden=hidden, out=dim)
+
+# Pre-norm encoder: bidirectional attention followed by feed-forward.
+block encoder(dim, heads, hidden):
+  layer attention: residual(attention(dim=dim, heads=heads))
+  layer ff: residual(feed_forward(dim=dim, hidden=hidden))
+
+# Decoder-only block: causal self-attention; no encoder cross-attention.
+block decoder(dim, heads, hidden):
+  layer attention: residual(causal_attention(dim=dim, heads=heads))
+  layer ff: residual(feed_forward(dim=dim, hidden=hidden))
+
+# Gated feed-forward; defaults keep architecture declarations compact.
+block swiglu(dim, hidden=dim * 4):
+  layer gate: linear(in=dim, out=hidden) -> silu from input
+  layer value: linear(in=dim, out=hidden) from input
+  layer gated: mul(gate, value)
+  layer down: linear(in=hidden, out=dim)
+
+block gated_decoder(dim, heads, hidden=dim * 4):
+  layer attention: residual(causal_attention(dim=dim, heads=heads))
+  layer norm: layernorm(dim=dim)
+  layer ff: swiglu(dim=dim, hidden=hidden)
+  layer result: add(attention, ff)

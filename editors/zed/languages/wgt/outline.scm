@@ -4,3 +4,4 @@
 (port_declaration name: (identifier) @name) @item
 (constant_declaration name: (identifier) @name) @item
 (dimension_declaration name: (identifier) @name) @item
+(function_declaration name: (identifier) @name) @item

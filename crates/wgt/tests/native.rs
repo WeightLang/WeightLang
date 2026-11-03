@@ -30,7 +30,7 @@ fn artifact(root: &Path, residual: bool) {
     let mut bytes = (header.len() as u64).to_le_bytes().to_vec();
     bytes.extend(header);
     bytes.extend([0u8; 24]);
-    let source=b"wgt 0.2\nmodel demo\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ninit seed=42\n";
+    let source=b"wgt 0.5\nmodel demo\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ninit seed=42\n";
     let m = json!({"format":"weightlang.artifact","format_version":2,"model":"demo",
         "source":{"file":"source.wgt","sha256":hash(source)},
         "weights":{"file":"weights.safetensors","sha256":hash(&bytes),"tensors":{
@@ -94,7 +94,7 @@ impl Remote for Fake {
 }
 fn manifest() -> Manifest {
     Manifest::parse(&format!(
-        "module local/demo\nwgt 0.2\nrequire {MODULE} {VERSION}\n"
+        "module local/demo\nwgt 0.5\nrequire {MODULE} {VERSION}\n"
     ))
     .unwrap()
 }
@@ -114,7 +114,7 @@ fn malicious_paths_and_duplicate_declarations_are_rejected() {
         assert!(manifest::version(v).is_err());
     }
     assert!(Manifest::parse("module a\nmodule b").is_err());
-    assert!(Manifest::parse("module a\nwgt 0.2\nwgt 0.2").is_err());
+    assert!(Manifest::parse("module a\nwgt 0.5\nwgt 0.5").is_err());
     assert!(Manifest::parse(&format!(
         "module a\nrequire {MODULE} {VERSION}\nrequire {MODULE} {VERSION}"
     ))
@@ -123,7 +123,7 @@ fn malicious_paths_and_duplicate_declarations_are_rejected() {
 #[test]
 fn manifest_edits_preserve_comments() {
     let m = Manifest::parse(&format!(
-        "# hello\nmodule local/a\nwgt 0.2\nrequire {MODULE} v0.1.0 # pinned\n"
+        "# hello\nmodule local/a\nwgt 0.5\nrequire {MODULE} v0.1.0 # pinned\n"
     ))
     .unwrap();
     let text = m.edited(MODULE, Some(VERSION));
@@ -323,7 +323,7 @@ fn native_package_pins_committed_sources_and_refuses_partial_or_untrained() {
     let art = arts.join("demo");
     artifact(&art, false);
     fs::copy(art.join("source.wgt"), pkg.join("main.wgt")).unwrap();
-    fs::write(pkg.join("wgt.mod"), format!("module {MODULE}\nwgt 0.2\n")).unwrap();
+    fs::write(pkg.join("wgt.mod"), format!("module {MODULE}\nwgt 0.5\n")).unwrap();
     registry::git(&repo, &["init", "-q"]).unwrap();
     registry::git(&repo, &["add", "."]).unwrap();
     registry::git(
@@ -353,7 +353,7 @@ fn native_package_pins_committed_sources_and_refuses_partial_or_untrained() {
     );
     assert!(output.join("wgt.index.json").exists());
     assert!(registry::package(&pkg, &arts, VERSION, &output, true).is_err());
-    fs::write(pkg.join("missing.wgt"), "wgt 0.2\nmodel missing\n").unwrap();
+    fs::write(pkg.join("missing.wgt"), "wgt 0.5\nmodel missing\n").unwrap();
     registry::git(&repo, &["add", "."]).unwrap();
     registry::git(
         &repo,
@@ -564,4 +564,63 @@ fn weight_domain_v7_artifact_validation() {
     manifest["interface"]["weight_assignments"][0]["stop"] = json!(1);
     fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
     assert!(Artifact::read(root.path()).is_err());
+}
+
+#[test]
+fn inline_script_dependencies_resolve_verified_cache_in_both_execution_modes() {
+    use sha2::{Digest, Sha256};
+    let temp = std::env::temp_dir().join("weightlang");
+    fs::create_dir_all(&temp).unwrap();
+    let dir = tempfile::tempdir_in(temp).unwrap();
+    let cache = dir.path().join("cache");
+    let fake = Fake::new(&dir.path().join("fixture"));
+    let lock = registry::fetch(&manifest(), &Lock::new(), &cache, false, &fake).unwrap();
+    let source = dir.path().join("train.wgt");
+    let body = format!(r#"# /// script
+# [dependencies]
+# "{MODULE}" = "{VERSION}"
+# ///
+wgt 0.5
+fn main() {{
+    let reader = jsonl(dependency("{MODULE}") + "/demo/manifest.json");
+    let rows = batch(reader, 1);
+    close(reader);
+    return rows[0]["model"];
+}}
+"#);
+    fs::write(&source, body).unwrap();
+    let key = format!("{:x}", Sha256::digest(source.canonicalize().unwrap().to_string_lossy().as_bytes()));
+    let state = cache.join("scripts").join(key);
+    fs::create_dir_all(&state).unwrap();
+    fs::write(state.join("wgt.sum"), manifest::lock_text(&lock)).unwrap();
+    for compiled in [false,true] {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_wgt"));
+        cmd.env("WEIGHTLANG_CACHE", &cache).arg("--offline").arg("--locked").arg(&source);
+        if compiled { cmd.arg("--compiled"); }
+        let output = cmd.output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["result"], "demo");
+    }
+    assert!(!dir.path().join("wgt.toml").exists());
+    assert!(!dir.path().join("wgt.sum").exists());
+    // Project scripts use the project's existing declaration and lock instead.
+    fs::write(&source, format!("wgt 0.5\nfn main() {{ return dependency(\"{MODULE}\"); }}")).unwrap();
+    fs::write(dir.path().join("wgt.toml"), format!("[project]\nmodule=\"local/test\"\nedition=\"0.5\"\n[dependencies]\n\"{MODULE}\"=\"{VERSION}\"\n")).unwrap();
+    fs::write(dir.path().join("wgt.sum"), manifest::lock_text(&lock)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_wgt")).env("WEIGHTLANG_CACHE", &cache)
+        .args(["--offline", "--locked"]).arg(&source).output().unwrap();
+    assert!(output.status.success(), "{}",String::from_utf8_lossy(&output.stderr));
+    fs::write(registry::module_dir(&cache,MODULE,VERSION).join("demo/source.wgt"), "tampered").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_wgt")).env("WEIGHTLANG_CACHE", &cache)
+        .arg("--offline").arg(&source).output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("source sha256 mismatch"), "{}", String::from_utf8_lossy(&output.stderr));
+    // An explicit empty block must not inherit the now-corrupted project dependency.
+    fs::write(&source, "# /// script\n# [dependencies]\n# ///\nwgt 0.5\nfn main() { return 42; }").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_wgt")).env("WEIGHTLANG_CACHE", &cache)
+        .args(["--offline", "--locked"]).arg(&source).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["result"], 42.0);
 }

@@ -7,17 +7,16 @@
 
 ![WeightLang syntax highlighting preview](media/preview.png)
 
-Write and review `.wgt` models with clear keywords, tensor types, named axes,
-operators and graph connections. WeightLang describes the model; Python owns the
-application, data and training loop.
+Write and review WGT 0.5 models, native training functions and self-updating forward functions.
+Highlighting does not execute code or validate model shapes.
 
 ## A small extension, a clearer model
 
 | Feature | What you get |
 | --- | --- |
 | Syntax highlighting | Keywords, built-in operators, types, numbers, strings and comments |
-| Tensor expressions | Named axes, graph connections, loops and multiline expressions |
-| Editing essentials | Toggle `#` comments; pair brackets, parentheses and double quotes |
+| Tensor expressions | Functions, control flow, training calls and multiline expressions |
+| Editing essentials | Toggle `#` comments; pair braces, brackets, parentheses and double quotes |
 | Theme support | Standard TextMate scopes follow your current color theme |
 | Offline by design | No runtime dependencies, telemetry, network requests or executable extension code |
 
@@ -34,11 +33,10 @@ models, install the separate [WeightLang toolchain](https://github.com/WeightLan
 
 ## Scope
 
-This extension covers the declarative WGT syntax implemented in the WeightLang
-repository, including WGT 0.3 constructs. Highlighting is lexical: it does not
+This extension covers the current WGT 0.5 vocabulary, including native training
+and self-updating forward functions. Highlighting is lexical: it does not
 validate language versions or shapes, train models, or provide completion,
-definition navigation or diagnostics. Experimental `backend torch-dynamic`
-Python-like function bodies are not supported.
+definition navigation or diagnostics. The local changes have not been published.
 
 ## 中文说明
 

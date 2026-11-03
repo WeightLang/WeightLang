@@ -81,6 +81,7 @@ pub fn latest(remote: &dyn Remote) -> Result<String> {
 
 pub fn latest_for(remote: &dyn Remote, os: &str, arch: &str) -> Result<String> {
     let asset_name = asset(os, arch)?;
+    let compiler_name = compiler_asset(os, arch)?;
     let mut best: Option<(Vec<(usize, String)>, String)> = None;
     for page in 1..=100 {
         let bytes = remote.download(
@@ -103,18 +104,27 @@ pub fn latest_for(remote: &dyn Remote, os: &str, arch: &str) -> Result<String> {
             if validate(version).is_err() {
                 continue;
             }
-            let Some(assets) = release["assets"].as_array() else { continue; };
-            if !assets.iter().any(|a| a["name"] == asset_name)
-                || !assets.iter().any(|a| a["name"] == "SHA256SUMS") { continue; }
-            let key: Vec<_> = version.split('.').map(|part| (part.len(), part.to_owned())).collect();
+            let Some(assets) = release["assets"].as_array() else {
+                continue;
+            };
+            if !assets.iter().any(|a| a["name"] == compiler_name)
+                || !assets.iter().any(|a| a["name"] == asset_name)
+                || !assets.iter().any(|a| a["name"] == "SHA256SUMS")
+            {
+                continue;
+            }
+            let key: Vec<_> = version
+                .split('.')
+                .map(|part| (part.len(), part.to_owned()))
+                .collect();
             if best.as_ref().is_none_or(|(previous, _)| &key > previous) {
                 best = Some((key, version.to_owned()));
             }
         }
         if releases.len() < 100 {
-            return best
-                .map(|(_, version)| version)
-                .with_context(|| format!("no stable native wgt release with checksums for {os}/{arch}"));
+            return best.map(|(_, version)| version).with_context(|| {
+                format!("no stable native wgt release with checksums for {os}/{arch}")
+            });
         }
     }
     bail!("too many releases to determine latest wgt; specify --version X.Y.Z")
@@ -158,6 +168,16 @@ pub fn asset(os: &str, arch: &str) -> Result<String> {
         if os == "windows" { ".exe" } else { "" }
     ))
 }
+pub fn compiler_asset(os: &str, arch: &str) -> Result<String> {
+    Ok(asset(os, arch)?.replacen("wgt-", "weightc-", 1))
+}
+fn compiler_binary(directory: &Path) -> PathBuf {
+    directory.join(if cfg!(windows) {
+        "weightc.exe"
+    } else {
+        "weightc"
+    })
+}
 fn directory(version: &str) -> Result<PathBuf> {
     validate(version)?;
     Ok(registry::cache_root()?
@@ -172,7 +192,7 @@ fn directory(version: &str) -> Result<PathBuf> {
 fn binary(directory: &Path) -> PathBuf {
     directory.join(if cfg!(windows) { "wgt.exe" } else { "wgt" })
 }
-fn probe(path: &Path, version: &str) -> Result<()> {
+fn probe(path: &Path, name: &str, version: &str) -> Result<()> {
     let result = Command::new(path)
         .arg("--version")
         .env("_WGT_VERSION_PROBE", "1")
@@ -181,8 +201,8 @@ fn probe(path: &Path, version: &str) -> Result<()> {
         .context("run toolchain version check")?;
     ensure!(
         result.status.success()
-            && String::from_utf8_lossy(&result.stdout).trim() == format!("wgt {version}"),
-        "toolchain does not report wgt {version}"
+            && String::from_utf8_lossy(&result.stdout).trim() == format!("{name} {version}"),
+        "toolchain does not report {name} {version}"
     );
     Ok(())
 }
@@ -201,7 +221,22 @@ pub fn cached(version: &str) -> Result<Option<PathBuf>> {
         hash(&fs::read(&path)?) == expected.trim(),
         "cached wgt {version} failed SHA256 verification; reinstall with wgt toolchain {version}"
     );
-    probe(&path, version)?;
+    let compiler = compiler_binary(&directory);
+    ensure!(
+        compiler.is_file(),
+        "cached toolchain has no native weightc; install a complete native release"
+    );
+    ensure!(
+        fs::metadata(&compiler)?.len() <= 128 * 1024 * 1024,
+        "cached compiler too large"
+    );
+    let expected = fs::read_to_string(directory.join("weightc.sha256"))?;
+    ensure!(
+        hash(&fs::read(&compiler)?) == expected.trim(),
+        "cached weightc failed SHA256 verification"
+    );
+    probe(&compiler, "weightc", version)?;
+    probe(&path, "wgt", version)?;
     Ok(Some(path))
 }
 pub fn install(version: &str, source: Option<&Path>, offline: bool) -> Result<PathBuf> {
@@ -230,6 +265,24 @@ pub fn install(version: &str, source: Option<&Path>, offline: bool) -> Result<Pa
             std::env::consts::ARCH,
         )?
     };
+    let compiler_bytes = if let Some(source) = source {
+        let compiler = compiler_binary(source.parent().context("toolchain source has no parent")?);
+        ensure!(
+            fs::metadata(&compiler)
+                .context("--path requires a sibling native weightc binary")?
+                .len()
+                <= 128 * 1024 * 1024,
+            "compiler executable too large"
+        );
+        fs::read(compiler)?
+    } else {
+        download_compiler(
+            &Github::new()?,
+            version,
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        )?
+    };
     let parent = directory.parent().unwrap();
     fs::create_dir_all(parent)?;
     let staging = tempfile::tempdir_in(parent)?;
@@ -240,7 +293,16 @@ pub fn install(version: &str, source: Option<&Path>, offline: bool) -> Result<Pa
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
     }
-    probe(&path, version)?;
+    let compiler = compiler_binary(staging.path());
+    fs::write(&compiler, &compiler_bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&compiler, fs::Permissions::from_mode(0o755))?;
+    }
+    probe(&compiler, "weightc", version)?;
+    fs::write(staging.path().join("weightc.sha256"), hash(&compiler_bytes))?;
+    probe(&path, "wgt", version)?;
     fs::write(staging.path().join("sha256"), hash(&bytes))?;
     // Serialize installs; never replace a working immutable version.
     use fs2::FileExt;
@@ -263,14 +325,58 @@ pub fn install(version: &str, source: Option<&Path>, offline: bool) -> Result<Pa
     Ok(binary(&directory))
 }
 pub fn download(remote: &dyn Remote, version: &str, os: &str, arch: &str) -> Result<Vec<u8>> {
+    download_asset(remote, version, &asset(os, arch)?)
+}
+pub fn download_compiler(
+    remote: &dyn Remote,
+    version: &str,
+    os: &str,
+    arch: &str,
+) -> Result<Vec<u8>> {
+    download_asset(remote, version, &compiler_asset(os, arch)?)
+}
+fn download_asset(remote: &dyn Remote, version: &str, name: &str) -> Result<Vec<u8>> {
     validate(version)?;
-    let name = asset(os, arch)?;
     let base = format!("https://github.com/WeightLang/WeightLang/releases/download/wgt-v{version}");
-    let sums = String::from_utf8(remote.download(&format!("{base}/SHA256SUMS"), 64 * 1024).with_context(|| format!("wgt {version} native release unavailable; import a trusted local executable with wgt toolchain {version} --path PATH"))?)?;
-    let expected = checksum(&sums, &name)?;
+    let sums = String::from_utf8(remote.download(&format!("{base}/SHA256SUMS"), 64 * 1024)?)?;
+    let expected = checksum(&sums, name)?;
     let bytes = remote.download(&format!("{base}/{name}"), 128 * 1024 * 1024)?;
-    ensure!(hash(&bytes) == expected, "wgt download SHA256 mismatch");
+    ensure!(hash(&bytes) == expected, "{name} download SHA256 mismatch");
     Ok(bytes)
+}
+
+/// Both installed launchers follow the same verified native toolchain selection.
+pub fn dispatch_compiler(args: &[OsString]) -> Result<Option<u8>> {
+    if std::env::var_os("_WGT_VERSION_PROBE").is_some() {
+        return Ok(None);
+    }
+    let selection = match discover(Path::new("."))? {
+        Some(pin) => Some(pin),
+        None => default_version()?,
+    };
+    let Some((_, version)) = selection else {
+        return Ok(None);
+    };
+    if version == CURRENT {
+        return Ok(None);
+    }
+    ensure!(
+        std::env::var_os("_WGT_DISPATCHED").is_none(),
+        "selected toolchain does not satisfy weightc {version}"
+    );
+    let wgt = cached(&version)?.with_context(|| {
+        format!("native toolchain {version} is not cached; run wgt download {version}")
+    })?;
+    let status = Command::new(compiler_binary(wgt.parent().unwrap()))
+        .args(args)
+        .env("_WGT_DISPATCHED", &version)
+        .status()?;
+    Ok(Some(
+        status
+            .code()
+            .and_then(|n| u8::try_from(n).ok())
+            .unwrap_or(1),
+    ))
 }
 
 pub fn checksum(sums: &str, name: &str) -> Result<String> {

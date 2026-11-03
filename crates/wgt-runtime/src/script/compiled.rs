@@ -1,0 +1,113 @@
+//! Shared execution support for generated Rust; no AST evaluation.
+use super::*;
+
+pub fn index(object: Value, index: Value) -> Result<Value> {
+    match object {
+        Value::List(v) => v
+            .get(index.integer()?)
+            .cloned()
+            .context("list index out of bounds"),
+        Value::Object(v) => v
+            .get(index.text()?)
+            .cloned()
+            .context("missing object field"),
+        _ => bail!("index requires list or object"),
+    }
+}
+pub fn unary(op: &str, value: Value) -> Result<Value> {
+    if op == "!" {
+        Ok(Value::Bool(!value.boolean()?))
+    } else {
+        number(-value.number()?)
+    }
+}
+pub fn binary(op: &str, left: Value, right: Value) -> Result<Value> {
+    match op {
+        "&&" | "||" => Ok(Value::Bool(right.boolean()?)),
+        "==" => Ok(Value::Bool(left == right)),
+        "!=" => Ok(Value::Bool(left != right)),
+        "+" => match (&left, &right) {
+            (Value::Text(a), Value::Text(b)) => Ok(Value::Text(format!("{a}{b}"))),
+            _ => number(left.number()? + right.number()?),
+        },
+        "-" => number(left.number()? - right.number()?),
+        "*" => number(left.number()? * right.number()?),
+        "/" => number(left.number()? / right.number()?),
+        "%" => number(left.number()? % right.number()?),
+        "<" => Ok(Value::Bool(left.number()? < right.number()?)),
+        "<=" => Ok(Value::Bool(left.number()? <= right.number()?)),
+        ">" => Ok(Value::Bool(left.number()? > right.number()?)),
+        ">=" => Ok(Value::Bool(left.number()? >= right.number()?)),
+        _ => bail!("unknown operator"),
+    }
+}
+
+#[derive(Clone)]
+pub struct Function {
+    pub args: Vec<&'static str>,
+    pub body: fn(&mut Runtime, &mut Env) -> Result<Flow>,
+}
+
+pub fn run(functions: Vec<(&'static str, Function)>, root: &Path, budget: u64) -> Result<Report> {
+    run_with_dependencies(functions, root, budget, BTreeMap::new())
+}
+pub fn run_with_dependencies(
+    functions: Vec<(&'static str, Function)>,
+    root: &Path,
+    budget: u64,
+    dependencies: BTreeMap<String, String>,
+) -> Result<Report> {
+    let mut runtime = Runtime {
+        program: HashMap::new(),
+        compiled: functions.into_iter().map(|(n, f)| (n.into(), f)).collect(),
+        root: root.into(),
+        dependencies,
+        remaining: budget,
+        depth: 0,
+        models: Vec::new(),
+        adaptive: Vec::new(),
+        readers: Vec::new(),
+        rng: 0,
+        metrics: BTreeMap::new(),
+    };
+    let result = runtime.call("main", Vec::new())?.json()?;
+    Ok(Report {
+        result,
+        metrics: runtime.metrics,
+        operations: budget - runtime.remaining,
+    })
+}
+
+/// Generated executables resolve data against the original root unless relocated explicitly.
+pub fn entry(functions: Vec<(&'static str, Function)>, root: &str) -> Result<()> {
+    entry_with_dependencies(functions, root, Vec::new())
+}
+pub fn entry_with_dependencies(
+    functions: Vec<(&'static str, Function)>,
+    root: &str,
+    dependencies: Vec<(&str, &str)>,
+) -> Result<()> {
+    let mut root = PathBuf::from(root);
+    let mut budget = 10_000_000;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--root" => root = PathBuf::from(args.next().context("--root needs a directory")?),
+            "--max-operations" => {
+                budget = args
+                    .next()
+                    .context("--max-operations needs a value")?
+                    .parse()?
+            }
+            _ => bail!("unknown argument: {arg}; accepts --root DIRECTORY --max-operations N"),
+        }
+    }
+    let dependencies = dependencies
+        .into_iter()
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect();
+    let report = run_with_dependencies(functions, &root, budget, dependencies)
+        .with_context(|| root.display().to_string())?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}

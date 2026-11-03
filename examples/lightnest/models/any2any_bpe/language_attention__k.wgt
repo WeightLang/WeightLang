@@ -1,8 +1,0 @@
-wgt 0.3
-model language_attention__k
-# 单样本形状不含 batch；动态宿主把独立位置折叠到 batch 后调用。
-# 参数来自本次架构初始化，不是训练权重；完整动态计算见 backend.py。
-input x: f32[128]
-output y: f32[128]
-layer op: linear(in=128, out=128)
-init seed=42

@@ -1,8 +1,0 @@
-wgt 0.3
-model lean_linear
-# 每行有 3 个输入特征；batch 由 Python 提供。
-input x: f32[3]
-output y: f32[2]
-# 所有行共享 [out,in] 权重；偏置沿行广播。仅初始化，未经训练。
-layer projection: linear(in=3,out=2,bias=1)
-init seed=0

@@ -1,8 +1,0 @@
-wgt 0.3
-use std/recurrent as r
-model sequence_classifier
-input x: f32[8,4]
-output logits: f32[3]
-layer memory: r.gru(features=4, hidden=16)
-layer head: last -> linear(in=16, out=3)
-init seed=42

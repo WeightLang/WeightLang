@@ -1,0 +1,34 @@
+wgt 0.5
+
+# 将 [time,heads*width] 拆为 [heads,time,width]；time 可以是有界符号维度。
+# 可选 batch 始终在样本轴之外。此块不创建参数，不隐式复制不同头的权重。
+block heads(count):
+  layer split: split_axis(axis=-1,parts=count)
+  layer transposed: transpose_axes(axis1=-3,axis2=-2)
+
+# [heads,time,width] -> [time,heads*width]，非连续布局允许按需复制并保留梯度。
+block merge_heads():
+  layer transposed: transpose_axes(axis1=-3,axis2=-2)
+  layer merged: merge_axes(axis=-2)
+
+# input 的末轴为 dim，只旋转前 rotary 个通道；余下通道原样传递。
+# rotary 必须为偶数，split_axis 会验证整除；dim/rotary 的范围由 slice 校验。
+# arg1/arg2 是 cos/sin，需可显式广播到旋转区，例如 [1,time,rotary]。
+# 不生成位置，不持有 cache，无参数、无训练；位置数据由显式输入提供。
+block partial(dim,rotary):
+  layer rotating: slice(axis=-1,start=0,stop=rotary) from input
+  layer halves: split_axis(axis=-1,parts=2)
+  layer first_half: slice(axis=-2,start=0,stop=1) from halves
+  layer first: merge_axes(axis=-2)
+  layer second_half: slice(axis=-2,start=1,stop=2) from halves
+  layer second: merge_axes(axis=-2)
+  layer negative: scale(factor=-1)
+  layer rotated: cat(axis=-1) from negative,first
+  layer cosine: broadcast from arg1,rotating
+  layer sine: broadcast from arg2,rotating
+  layer real: mul(rotating,cosine)
+  layer imaginary: mul(rotated,sine)
+  layer mixed: add(real,imaginary)
+  layer passthrough: slice(axis=-1,start=rotary,stop=dim) from input
+  layer output: cat(axis=-1) from mixed,passthrough
+  return output=output

@@ -1,4 +1,0 @@
-# Install WeightLang from the current repository; its 0.3 runtime is unreleased.
-torch>=2.13
-safetensors>=0.4
-tokenizers==0.23.3

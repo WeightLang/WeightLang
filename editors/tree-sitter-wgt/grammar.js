@@ -1,5 +1,5 @@
 // An error-tolerant editor grammar, not a replacement for WeightLang validation.
-// Newlines terminate statements except inside parenthesized/bracketed expressions.
+// Newlines terminate declarations; function bodies use balanced braces and semicolons.
 // Indentation is deliberately not semantic here: declarations remain flat in the
 // tree, so editing an unfinished block does not hide later model declarations.
 module.exports = grammar({
@@ -12,7 +12,12 @@ module.exports = grammar({
     comment: _ => /#[^\n]*/,
     _statement: $ => choice($.model_declaration, $.block_declaration, $.layer_declaration,
       $.port_declaration, $.constant_declaration, $.dimension_declaration,
-      $.directive, $.data_row),
+      $.directive, $.data_row, $.function_declaration),
+    function_declaration: $ => seq('fn', field('name', $.identifier), $.arguments, repeat($._newline), $.body),
+    // Balanced editor structure; semantic validation belongs to the Rust frontend.
+    body: $ => seq('{', repeat(choice($._item, $._newline, $.body, $.script_keyword, ';')), '}'),
+    script_keyword: _ => choice('let', 'if', 'else', 'while', 'for', 'in', 'break', 'continue', 'return'),
+    literal: _ => choice('true', 'false', 'null'),
     model_declaration: $ => seq('model', field('name', $.identifier), repeat($._item)),
     block_declaration: $ => seq('block', field('name', $.identifier), $.arguments, ':'),
     layer_declaration: $ => seq('layer', field('name', $.identifier), ':', repeat1($._item)),
@@ -20,10 +25,10 @@ module.exports = grammar({
     constant_declaration: $ => seq('const', field('name', $.identifier), '=', repeat1($._item)),
     dimension_declaration: $ => seq('dim', field('name', $.identifier), repeat($._item)),
     directive: $ => seq(field('keyword', choice('wgt', 'require', 'use', 'import', 'inherit',
-      'freeze', 'unfreeze', 'data', 'init', 'train', 'config', 'parameter', 'share', 'adapter', 'wtype', 'weight', 'return')), repeat1($._item)),
+      'freeze', 'unfreeze', 'data', 'init', 'train', 'config', 'parameter', 'share', 'adapter', 'wtype', 'weight', 'frozen', 'precision', 'return')), repeat1($._item)),
     data_row: $ => seq($.array, '->', $.array),
     _item: $ => choice($.call, $.parameter, $.qualified_name, $.number, $.string,
-      $.array, $.arguments, $.operator, $.punctuation, $.clause),
+      $.array, $.arguments, $.literal, $.operator, $.punctuation, $.clause),
     clause: _ => choice('from', 'as', 'extends'),
     call: $ => prec(2, seq(field('function', $.qualified_name), $.arguments)),
     qualified_name: $ => seq($.identifier, repeat(seq('.', $.identifier))),
@@ -32,8 +37,8 @@ module.exports = grammar({
     array: $ => seq('[', repeat(choice($._item, $._newline)), ']'),
     identifier: _ => /[A-Za-z_][A-Za-z0-9_]*/,
     number: _ => /(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?/,
-    string: _ => /"[^"\n]*"/,
-    operator: _ => choice('->', '==', '!=', '<=', '>=', '//', '=', '+', '-', '*', '/', '%', '<', '>'),
+    string: _ => /"([^"\\\n]|\\[^\n])*"/,
+    operator: _ => choice('->', '==', '!=', '<=', '>=', '//', '&&', '||', '!', '=', '+', '-', '*', '/', '%', '<', '>'),
     punctuation: _ => choice(',', ':'),
   },
 });

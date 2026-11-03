@@ -1,3 +1,5 @@
+> **历史接口说明 / Historical interfaces:** 当前源码已清退全部 Python 实现和测试。本文中的 Python API、`.py` 脚本和旧 CLI 示例已停用；仅 Rust 实现部分继续有效。参见[原生入口与迁移边界](../weightc-migration.md)。
+
 # WeightLang Revision Store v1
 
 Status: implemented, experimental interoperability contract. MUST/MUST NOT are

@@ -123,6 +123,15 @@ fn local_install_dispatch_forwarding_and_tamper_detection() {
     let source = root.join("trusted executable");
     fs::write(&source, "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'wgt 8.9.0'; exit 0; fi\nprintf '%s\\n' \"$@\" > forwarded\nexit 17\n").unwrap();
     fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
+    let missing_compiler = command(root, &cache)
+        .args(["toolchain", "8.9.0", "--offline", "--path"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(!missing_compiler.status.success());
+    assert!(!cache.join("toolchains/8.9.0").exists());
+    fs::write(root.join("weightc"), "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'weightc 8.9.0'; exit 0; fi\nprintf '%s\\n' \"$@\" > compiler-forwarded\nexit 19\n").unwrap();
+    fs::set_permissions(root.join("weightc"), fs::Permissions::from_mode(0o755)).unwrap();
     assert!(command(root, &cache)
         .args(["toolchain", "8.9.0", "--offline", "--path"])
         .arg(&source)
@@ -152,6 +161,31 @@ fn local_install_dispatch_forwarding_and_tamper_detection() {
         .unwrap()
         .status
         .success());
+    let compiler = Command::new(env!("CARGO_BIN_EXE_weightc"))
+        .current_dir(root)
+        .env("WEIGHTLANG_CACHE", &cache)
+        .args(["check", "future.wgt"])
+        .output()
+        .unwrap();
+    assert_eq!(compiler.status.code(), Some(19));
+    assert_eq!(
+        fs::read_to_string(root.join("compiler-forwarded")).unwrap(),
+        "check\nfuture.wgt\n"
+    );
+    let compiler_path = cache
+        .join("toolchains/8.9.0")
+        .join(format!(
+            "{}-{}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ))
+        .join("weightc");
+    let compiler_bytes = fs::read(&compiler_path).unwrap();
+    fs::write(&compiler_path, "tampered compiler").unwrap();
+    let rejected = command(root, &cache).arg("--version").output().unwrap();
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("SHA256"));
+    fs::write(&compiler_path, compiler_bytes).unwrap();
     let path = cache
         .join("toolchains/8.9.0")
         .join(format!(
@@ -219,6 +253,12 @@ fn update_download_selection_and_failure_preservation() {
         let source = root.join(format!("wgt-{version}"));
         fs::write(&source, format!("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'wgt {version}'; exit 0; fi\nprintf '%s\\n' \"$@\" > forwarded\nexit 17\n")).unwrap();
         fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(
+            root.join("weightc"),
+            format!("#!/bin/sh\necho 'weightc {version}'\n"),
+        )
+        .unwrap();
+        fs::set_permissions(root.join("weightc"), fs::Permissions::from_mode(0o755)).unwrap();
         assert!(command(root, &cache)
             .args(["toolchain", version, "--path"])
             .arg(source)
@@ -306,9 +346,12 @@ fn update_download_selection_and_failure_preservation() {
         .contains("github.com/example/models"));
     let result = command(root, &cache)
         .args(["--registry", "WeightLang/registry", "update", "--all"])
-        .output().unwrap();
+        .output()
+        .unwrap();
     assert_eq!(result.status.code(), Some(17));
-    assert!(fs::read_to_string(root.join("forwarded")).unwrap().contains("--all"));
+    assert!(fs::read_to_string(root.join("forwarded"))
+        .unwrap()
+        .contains("--all"));
 }
 
 #[test]
@@ -326,7 +369,7 @@ fn latest_native_release_filters_and_orders_versions() {
                 {"tag_name":"wgt-v3.0.0", "draft":true, "prerelease":false},
                 {"tag_name":"wgt-v2.0.0", "draft":false, "prerelease":true},
                 {"tag_name":"wgt-v1.10.0", "draft":false, "prerelease":false,
-                 "assets":[{"name":"wgt-linux-x86_64"},{"name":"SHA256SUMS"}]},
+                 "assets":[{"name":"wgt-linux-x86_64"},{"name":"weightc-linux-x86_64"},{"name":"SHA256SUMS"}]},
                 {"tag_name":"wgt-v9.0.0", "draft":false, "prerelease":false,
                  "assets":[{"name":"wgt-macos-aarch64"},{"name":"SHA256SUMS"}]},
                 {"tag_name":"wgt-v9.1.0", "draft":false, "prerelease":false,
@@ -334,7 +377,10 @@ fn latest_native_release_filters_and_orders_versions() {
             ]))?)
         }
     }
-    assert_eq!(toolchain::latest_for(&Releases, "linux", "x86_64").unwrap(), "1.10.0");
+    assert_eq!(
+        toolchain::latest_for(&Releases, "linux", "x86_64").unwrap(),
+        "1.10.0"
+    );
 }
 
 #[test]

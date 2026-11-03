@@ -6,8 +6,8 @@
 
 # Language changes
 
-- For every public language change, update [docs/reference.zh-CN.md](docs/reference.zh-CN.md), related topic docs and WGT skill references/examples in the same change. This includes parser/version rules, expressions, defaults, shape/dtype contracts, graph/loop/runtime behavior, training/import/freezing and `src/weightlang/std/*.wgt` changes.
-- Treat `syntax.py`, `expressions.py`, `std/*.wgt` and relevant runtime/training code as authoritative. Document purpose, complete signatures, parameters/defaults, constraints, versions, limitations and a valid example. Distinguish initialized structures, trained weights, local implementation and released features; parsing alone does not prove execution support.
+- For every public language change, update [docs/reference.zh-CN.md](docs/reference.zh-CN.md), related topic docs and WGT skill references/examples in the same change. This includes parser/version rules, expressions, defaults, shape/dtype contracts, graph/loop/runtime behavior, training/import/freezing and `std/*.wgt` changes.
+- Treat `crates/wgt-runtime/src/script/`, `language/primitive_specs.json`, `std/*.wgt` and relevant native runtime/training code as authoritative. Document purpose, complete signatures, parameters/defaults, constraints, versions, limitations and a valid example. Distinguish initialized structures, trained weights, local implementation and released features; parsing alone does not prove execution support.
 - Compare the reference against all `_stmt_*` handlers, operator sets/defaults and standard-library signatures. Parse complete examples locally, run focused behavior checks for semantic changes, verify links and run `git diff --check`. Report unverified items; no remote CI is required for documentation maintenance. Do this as part of the task, not with a background generator.
 
 # WGT authoring
@@ -17,7 +17,7 @@
 
 # Architectural boundary
 
-- Python is the application entry point. WGT defines model parameters, shape contracts and tensor computation; Python owns data preparation, loss, optimization, training loops, inference orchestration and sampling.
-- `weightlang.load` must build source models in memory without artifact output, training-data access or training callbacks. Explicit imports/derivations and freezing remain part of construction. CLI training is an explicit convenience, not an implicit model-loading side effect.
+- The target architecture is a complete native WeightLang workflow: WGT scripts own data preparation, loss, optimization, training loops, reinforcement learning and benchmarks, executed without Python. Python sources, tests and packaging have been retired; do not restore Python entrypoints or implement native paths as Python callback wrappers. See docs/native-training.md for the currently implemented subset and remaining migration boundaries.
+- Native model loading must remain separate from explicitly executing training scripts. Do not implicitly train or create artifacts during loading.
 - Runtime data crosses the model boundary as explicit tensor inputs. Standard libraries reuse computation; adding masks, conditions or caches may require language/runtime input contracts. Do not claim multi-input or cache support without implementation and behavioral tests.
-- Compose existing Python modules in Python first. Do not add arbitrary Python execution to WGT forward as a shortcut. Keep architecture, model artifacts and optimizer-bearing training checkpoints distinct.
+- Do not add arbitrary Python execution to WGT forward or native scripts as a shortcut. Keep architecture, model artifacts and optimizer-bearing training checkpoints distinct. Model loading remains separate from explicitly executing a training script.

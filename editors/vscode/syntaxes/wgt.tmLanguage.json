@@ -12,23 +12,48 @@
     {
       "name": "string.quoted.double.wgt",
       "begin": "\"",
-      "end": "\"|$"
+      "end": "\"|$",
+      "patterns": [
+        {
+          "name": "constant.character.escape.wgt",
+          "match": "\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4})"
+        }
+      ]
     },
     {
-      "name": "keyword.control.wgt",
-      "match": "\\b(?:adapter|as|block|config|const|data|dim|freeze|from|import|inherit|init|input|layer|model|output|parameter|require|return|share|train|unfreeze|use|weight|wgt|wtype)\\b"
-    },
-    {
-      "name": "storage.type.wgt",
-      "match": "\\b(?:bool|f32|i64)\\b"
-    },
-    {
-      "name": "variable.parameter.wgt",
-      "match": "\\b[A-Za-z_]\\w*(?=\\s*=)"
+      "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": {
+          "name": "keyword.control.wgt"
+        },
+        "2": {
+          "name": "entity.name.function.wgt"
+        }
+      }
     },
     {
       "name": "support.function.wgt",
-      "match": "(?<![\\w.])(?:adam|adamw|add|avgpool2d|bce|broadcast|cat|concat|conv1d|conv2d|cos|cross_entropy|cumsum|dropout|embedding|eq|exp|flatten|gather|gelu|globalavgpool2d|identity|last|layernorm|linear|log|lt|masked_softmax|matmul|maxpool2d|mean|meanpool|mix|mse|mul|pad2d|ponder|position_embedding|rearrange|recur|reduce|reduce_max|reduce_mean|reduce_sum|relu|repeat|residual|resize2d|rmsnorm|rope_attention|route|rsqrt|scale|scan|scan_state|scatter_add|self_attention|seq|sgd|shift|sigmoid|silu|sin|slice|softmax|softplus|sparse_moe|square|stack|sum|tanh|transpose|transpose_axes|where)\\b"
+      "match": "(?<![\\w.])(?:add|append|assert|batch|benchmark|close|column|dependency|exp|fit|gae|hf_dataset|identity|jsonl|len|linear|log|metric|mlp|model|mul|positive|predict|random|range|read|reinforce|relu|restore|sample|save|save_model|seed|sigmoid|slice|sqrt|sum|tanh|write)(?=\\s*\\()"
+    },
+    {
+      "name": "keyword.control.wgt",
+      "match": "\\b(?:break|continue|else|fn|for|frozen|if|in|init|input|layer|let|model|output|parameter|return|wgt|while)\\b"
+    },
+    {
+      "name": "storage.type.wgt",
+      "match": "\\b(?:f32)\\b"
+    },
+    {
+      "name": "constant.language.wgt",
+      "match": "\\b(?:false|null|true)\\b"
+    },
+    {
+      "name": "variable.parameter.wgt",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*=(?!=))"
+    },
+    {
+      "name": "support.function.wgt",
+      "match": "\\b(?:linear|relu|tanh|sigmoid|identity)\\b"
     },
     {
       "name": "constant.numeric.wgt",
@@ -36,15 +61,15 @@
     },
     {
       "name": "entity.name.function.wgt",
-      "match": "\\b[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)?(?=\\s*\\()"
+      "match": "\\b[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*(?=\\s*\\()"
     },
     {
       "name": "keyword.operator.wgt",
-      "match": "->|==|!=|<=|>=|//|[<>=+*/%\\-]"
+      "match": "==|!=|<=|>=|&&|\\|\\||[<>=!+*/%\\-]"
     },
     {
       "name": "punctuation.wgt",
-      "match": "[\\[\\](),.:]"
+      "match": "[\\[\\](){},.:;]"
     }
   ]
 }

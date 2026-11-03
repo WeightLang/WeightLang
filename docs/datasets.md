@@ -1,97 +1,40 @@
-# 独立数据与 Python 入口（wgt 0.3，当前源码实现）
+# 原生数据集加载
 
-> 当前命令已拆分：`build` 生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
-> 旧构建示例使用 `weightc legacy-build`；详见[分发包、元数据与迁移规范](bundles.md)。
+## 原生数据集加载器（wgt 0.5，当前源码）
 
+原生脚本由 Rust 执行，无 Python datasets 依赖；解释和编译模式共用读取实现。
+模型构造不会自动读取数据；脚本显式打开流并调用 batch。
 
-完整可运行示例见 [external_data](../examples/external_data/model.wgt) 和
-[Python 回调示例](../examples/external_data/python.wgt)。这些是合成数据示例，未发布。
-
-数据文件 `data_x.wgt` 只含版本头与一个或多个 `data` 声明，不需要模型、层或 init：
-
-```wgt
-wgt 0.3
-data samples:
-  [0] -> [1]
-  [1] -> [3]
-```
-
-模型通过 `data samples: file="data_x.wgt" sha256=<原始文件摘要>` 引用。
-默认读取同名数据集；`dataset="另一个名字"` 显式选择。
-数据文件也可引用其他文件；路径始终相对声明所在文件，每层都需 SHA256，禁止循环引用。
-独立数据文件不允许模型声明或 Python 加载器；Python 加载器直接声明在模型中。
-`weightc check data_x.wgt` 只检查声明语法，不读取外部载荷或验证模型形状；
-检查引用它的模型时会验证所选文件数据及形状。
-
-## 文件加载
-
-完整选项：`data NAME: file="PATH" sha256=HEX [format=FORMAT] [dataset=NAME] [skip=0] [license="TEXT"] [source="TEXT"]`。
-所有文件必须提供原始字节的 64 位小写 SHA256。format 默认从扩展名推断；未知格式报错。
-0.2 的旧文件行为保持 CSV；新格式和选项要求 0.3。
-
-| 格式 | 内容 |
+| 函数 | 完整契约 |
 | --- | --- |
-| csv / tsv | 数字列，输入列在前、目标列在后；支持带引号的数字字段，忽略空行和以 # 开头的行 |
-| json | `{"inputs": [[0], [1]], "targets": [[1], [3]]}` |
-| jsonl | 每行 `{"inputs": [0], "targets": [1]}`；忽略空行 |
-| npz | NumPy 数组 inputs、targets；形状均为 `[样本数, 展平宽度]`；禁止 pickle/object 数组 |
-| wgt | 上述独立数据声明；dataset 默认取当前数据集名 |
+| `jsonl(path)` | 本地 UTF-8 JSONL，path 相对脚本目录（绝对路径也可用）；每行一个 JSON 值，空行报错；打开时读取文件句柄 |
+| `hf_dataset(dataset,config,split)` | 三个非空字符串全部必填，无默认配置/split；例如 `hf_dataset("scikit-learn/iris","default","train")`；创建流，在首次 batch 时请求网络 |
+| `batch(reader,count)` | count 为 1..65536 的整数；保留尾批，到末尾反复返回 []；返回原始 JSON 值列表，HF 每行是列名到值的对象；不自动分词、转张量、shuffle 或补齐 |
+| `close(reader)` | 释放文件/网络客户端；重复关闭无操作，关闭后 batch 报错 |
 
-skip 默认 0，只允许 CSV/TSV/JSONL，按原始文本行跳过；dataset 仅用于 wgt。
-所有格式最终都需要非空、等行数的 inputs/targets，有限数值且每行宽度一致。
-多维样本按最后一维最快的顺序展平。输入宽度须等于输入形状乘积；
-MSE/BCE 目标匹配输出宽度，交叉熵每个位置一个合法类别索引。
-整数输入还需符合 i64 与词表范围。数据全部载入内存，目前不支持流式迭代器。
+HF 使用 [Dataset Viewer rows API](https://huggingface.co/docs/dataset-viewer/rows)，
+每次请求最多 100 行，较大 batch 自动分页，读取偏移由流持有。
+只支持该 API 可访问且有 Parquet 导出的配置/split；不是 Python load_dataset 的全功能替代。
+通过环境变量 HF_TOKEN 提供可选 Bearer 凭据，遵循服务端访问权限；
+没有配置发现、revision 固定、离线缓存、下载脚本执行、本地 Parquet 解码或媒体文件自动下载。
+图像/音频等字段保留服务端 JSON 描述，不转换成像素/波形。
+不在磁盘生成数据副本，也不创建模型制品。
 
-## Python 数据与训练
+单行最大 1 MiB、单批有效载荷最大 16 MiB；HF 单次 HTTP 响应也限制 16 MiB，
+这些是载荷边界，不是进程内存上限。请求超时 30 秒；HTTP 失败（含 401/403/429）、
+无效 JSON、缺失字段、截断单元格、错序/提前空页均报错，无自动重试或静默丢行。
+HF 的一次 batch 失败不提交读取偏移；总行数变化会报错，但不能检测所有远端内容更新，
+需要严格复现时应使用固定的本地 JSONL 快照。
+JSONL 错误可能已经消费输入；应关闭并重新打开。
+每次运行累计最多创建 1024 个流（包括已关闭的流）。
 
-```wgt
-data samples: python="hooks.py:load"
-train data=samples loss=mse epochs=1 python="hooks.py:train"
+完整可运行示例：[huggingface.wgt](../examples/native_training/huggingface.wgt)。
+它只加载五条公开 Iris 样本，不训练；需要网络：
+
+```sh
+cargo run -p weightlang-wgt --bin wgt -- script examples/native_training/huggingface.wgt
+# 同一脚本也支持 script FILE --compiled
 ```
 
-路径相对模型文件；`:函数名` 可省略，data 默认 load，train 默认 train。
-函数必须是脚本顶层可调用对象。脚本依赖从当前 Python 环境导入。
-执行具有普通 Python 进程权限；解析、check、build --no-train 不执行脚本或入口点。
-独立制品的推理不需要原脚本。trace/debug 对 Python 数据要求显式 `--sample`。
-
-`load(context)` 返回且仅返回 `{"inputs": rows, "targets": rows}`。
-rows 可为二维列表或可转换为列表的张量/数组，每行是展平数值，不能是标量。
-context 为 `weightlang.datasets.DataContext`：
-
-| 属性 | 含义 |
-| --- | --- |
-| name | 当前数据集名 |
-| source_dir | 模型文件所在目录的绝对 Path，可用于读取相对文件 |
-| input_shape / output_shape | 不含 batch 的声明形状 tuple |
-| input_dtype | f32 或 i64 |
-| seed | 模型 init seed，加载器自行使用以保持可复现 |
-
-`train(context)` 使用现有 [TrainingContext](trainers.md#python-api)，原地更新允许训练的参数，
-返回有限数值指标字典或 None。必填 data/loss/epochs；可选 lr=0.01、batch、validate。
-不接受 optimizer、weight_decay 或 trainer。不能替换结构、改形状/dtype、修改冻结参数或产生非有限权重。
-模型文件声明回调后无需命令行再次注册。
-
-## 安装包入口点
-
-用 `entrypoint="NAME"` 代替 python。data 使用 `weightlang.data_loaders` 组，
-train 使用 `weightlang.trainers` 组；这是 Python 安装包 metadata 入口点，不是命令行 main。
-名称必须恰好匹配一个已安装入口点；缺失、重名或非可调用对象都报错。
-包的 pyproject.toml 示例：
-
-```toml
-[project.entry-points."weightlang.data_loaders"]
-my_data = "my_package.data:load"
-
-[project.entry-points."weightlang.trainers"]
-my_train = "my_package.training:train"
-```
-
-```wgt
-data samples: entrypoint="my_data"
-train data=samples loss=mse epochs=20 entrypoint="my_train"
-```
-
-file、python、entrypoint 互斥；train 的 trainer、python、entrypoint 互斥。
-脚本记录路径与源码 SHA256；安装包入口记录名称、目标与发行包版本（若可得），
-它们并不固定传递依赖。最终数据内容摘要与训练指标进入制品 manifest。
+训练时可将数值列在 WGT 中组成 [batch,features] 输入和 [batch,outputs] 目标，
+显式交给 fit；字符串/媒体不隐式转成数值张量。

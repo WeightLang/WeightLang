@@ -14,7 +14,7 @@ fn record(v: &str) -> Record {
         source_commit: "a".repeat(40),
         index_sha256: "b".repeat(64),
         license: "MIT".into(),
-        edition: "0.3".into(),
+        edition: "0.5".into(),
         yanked: false,
     }
 }
@@ -80,7 +80,7 @@ fn pins_reject_replacement_and_preserve_initial_provenance() {
     selected.registry = "attacker/index".into();
     assert!(selected.lock(&mut lock).is_err());
     let manifest = Manifest::parse(
-        "module local/test\nwgt 0.3\nrequire github.com/Example/models/packages/gates v1.0.0\n",
+        "module local/test\nwgt 0.5\nrequire github.com/Example/models/packages/gates v1.0.0\n",
     )
     .unwrap();
     assert_eq!(
@@ -111,7 +111,7 @@ fn registry_lock_survives_exact_refetch() {
     }
     .lock(&mut lock)
     .unwrap();
-    let manifest = Manifest::parse("module local/test\nwgt 0.3\n").unwrap();
+    let manifest = Manifest::parse("module local/test\nwgt 0.5\n").unwrap();
     let cache = tempfile::tempdir().unwrap();
     assert!(
         registry::fetch(&manifest, &lock, cache.path(), false, &NoNetwork)
@@ -122,4 +122,13 @@ fn registry_lock_survives_exact_refetch() {
     let mut value = serde_json::to_value(record("v1.0.0")).unwrap();
     value["untrusted_field"] = json!(true);
     assert!(serde_json::from_value::<Record>(value).is_err());
+}
+
+#[test]
+fn old_registry_records_are_retained_but_not_selected_for_05() {
+    let mut old = record("v9.0.0");
+    old.edition = "0.3".into();
+    let records = vec![(old, "old".into()), (record("v0.5.0"), "new".into())];
+    assert_eq!(package_index::select("example/gates", None, records.clone()).unwrap().0.version, "v0.5.0");
+    assert!(package_index::select("example/gates", Some("v9.0.0"), records).is_err());
 }

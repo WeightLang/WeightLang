@@ -1,0 +1,12 @@
+wgt 0.5
+# std/blocks: width-preserving blocks for deeper networks.
+use std/nn
+
+# layernorm -> mlp; keeps the width `dim`.
+block prenorm_ff(dim, hidden):
+  layer norm: layernorm(dim=dim)
+  layer ff:   nn.mlp(in=dim, hidden=hidden, out=dim)
+
+# x + mlp(layernorm(x)): a pre-norm residual feed-forward block.
+block residual_mlp(dim, hidden):
+  layer res: residual(prenorm_ff(dim=dim, hidden=hidden))
