@@ -152,16 +152,25 @@ weightlang-viewer .wl-flow {
   overscroll-behavior: contain;
   outline: none;
 }
-/* Top margin clears the floating title and controls. */
-weightlang-viewer .wl-flow > svg { display: block; margin: 128px auto 96px; overflow: visible; }
+/* A free canvas: generous empty space on every side lets the graph be dragged
+   anywhere; scrollbars are hidden. --stage-top keeps fitted graphs below the title. */
+weightlang-viewer { --stage-top: 112px; }
+weightlang-viewer .wl-flow { cursor: grab; scrollbar-width: none; user-select: none; -webkit-user-select: none; }
+weightlang-viewer .wl-flow::-webkit-scrollbar { display: none; }
+weightlang-viewer .wl-flow > svg { display: block; margin: 75vh 75vw; overflow: visible; }
 weightlang-viewer .wl-flow.wl-panning { cursor: grabbing; user-select: none; }
+weightlang-viewer .wl-flow.wl-moving { cursor: grabbing; user-select: none; }
+weightlang-viewer .wl-moving .wl-node { cursor: grabbing; }
 
 /* Floating layers let clicks through except on their own controls. */
 weightlang-viewer :is(.wl-header, .wl-hud, .wl-legend-row) { position: absolute; z-index: 3; pointer-events: none; }
 weightlang-viewer :is(.wl-hud, .wl-legend-row) > *,
 weightlang-viewer .wl-hud > * > * { pointer-events: auto; }
 weightlang-viewer .wl-header { top: 22px; left: 28px; max-width: min(46vw, 560px); }
-weightlang-viewer .wl-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.24em; color: var(--selection); }
+weightlang-viewer .wl-eyebrow { font-weight: 650; letter-spacing: 0.02em; color: var(--selection); }
+weightlang-viewer .wl-model-title { cursor: pointer; border-radius: 6px; pointer-events: auto; }
+weightlang-viewer .wl-model-title:hover { color: var(--selection); }
+weightlang-viewer .wl-model-title:focus-visible { outline: 2px solid var(--selection); outline-offset: 3px; }
 weightlang-viewer .wl-summary { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 weightlang-viewer .wl-hud { top: 18px; right: 20px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: calc(100% - 40px); }
 weightlang-viewer .wl-hud > * { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
@@ -235,6 +244,14 @@ weightlang-viewer .wl-node-info h2 { margin-top: 6px; font-size: 21px; font-weig
 weightlang-viewer .wl-node-info p { margin: 6px 0; line-height: 1.7; overflow-wrap: anywhere; }
 weightlang-viewer .wl-node-info .wl-node-path { margin-top: 2px; font: 12px var(--font-mono); color: var(--muted); }
 weightlang-viewer .wl-node-info .wl-node-description { margin-top: 12px; }
+/* Source notes: the author's comments, then the declaring WGT line. */
+weightlang-viewer .wl-source { margin: 14px 0 6px; }
+weightlang-viewer .wl-source + .wl-source { margin-top: 8px; }
+weightlang-viewer .wl-node-info .wl-source-comment { margin: 0 0 8px; padding-left: 12px; font-style: italic; white-space: pre-wrap; box-shadow: inset 2px 0 var(--selection); }
+weightlang-viewer .wl-node-info .wl-source-comment:is([data-kind="block"], [data-kind="parent"]) { color: var(--muted); box-shadow: inset 2px 0 var(--control-hover); }
+weightlang-viewer .wl-source-caption { display: block; margin-bottom: 2px; font: normal 600 10.5px var(--font-ui); letter-spacing: 0.02em; color: var(--muted); }
+weightlang-viewer .wl-source-code { margin: 0; padding: 9px 12px; overflow-x: auto; font: 12px/1.6 var(--font-mono); background: var(--control-bg); border-radius: 10px; white-space: pre; }
+weightlang-viewer .wl-source-where { display: block; margin-bottom: 2px; font: 10.5px var(--font-ui); color: var(--muted); }
 weightlang-viewer .wl-category-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--accent, var(--muted)); --accent: var(--cat-other); }
 weightlang-viewer .wl-category-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 weightlang-viewer .wl-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 9px 16px; margin: 18px 0 0; font-size: 13px; }
@@ -284,6 +301,8 @@ weightlang-viewer .wl-node-chip { font: 600 10px var(--font-ui); fill: var(--acc
 weightlang-viewer .wl-node-op { font: 11.5px var(--font-ui); fill: var(--muted); }
 weightlang-viewer .wl-node-shape { font: 11.5px var(--font-mono); fill: var(--muted); }
 weightlang-viewer .wl-node-meta { font: 11px var(--font-ui); fill: var(--muted); opacity: 0.85; }
+/* First line of the source comment, written by the model author. */
+weightlang-viewer .wl-node-remark { font: italic 11.5px var(--font-ui); fill: var(--text); opacity: 0.72; }
 weightlang-viewer .wl-transform-arrow { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.8; }
 weightlang-viewer .wl-tensor-plane { fill: var(--tensor-plane); stroke: none; }
 weightlang-viewer .wl-tensor-glyph:not([data-rank="3"]) .wl-tensor-plane { fill: transparent; }
@@ -369,7 +388,7 @@ weightlang-viewer .wl-exporting * { transition: none !important; animation: none
   weightlang-viewer .wl-hud { top: 96px; left: 12px; right: 12px; max-width: none; align-items: stretch; }
   weightlang-viewer .wl-hud > * { justify-content: flex-start; }
   weightlang-viewer .wl-search-box { flex: 1 1 160px; width: auto; }
-  weightlang-viewer .wl-flow > svg { margin-top: 200px; }
+  weightlang-viewer { --stage-top: 200px; }
   weightlang-viewer .wl-legend-row { left: 12px; right: 12px; bottom: 60px; max-width: none; }
   weightlang-viewer .wl-categories { display: none; }
   weightlang-viewer .wl-zoom { right: 12px; bottom: 12px; }

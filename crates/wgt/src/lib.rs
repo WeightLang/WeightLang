@@ -25,3 +25,4 @@ pub mod script_compiler;
 pub mod script_dependencies;
 
 pub mod package_artifact;
+pub mod sources;

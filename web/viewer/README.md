@@ -40,7 +40,9 @@ The viewer is a full-bleed stage (default `height: 100vh`); set the element's
 
 ## Layout of the stage
 
-The whole viewer is one dotted canvas. The model title floats top-left; search,
+The whole viewer is one dotted canvas. The top-left shows two lines: the model
+name, then “WeightLang · parameters · nodes”. Clicking the model name opens its
+source notes (header comment and commented interface declarations). Search,
 expand and view settings float top-right; the legend floats bottom-left; zoom and
 export float bottom-right. Floating layers let clicks through except on their
 controls. Nothing is framed: nodes are borderless cards lifted by shadow.
@@ -50,6 +52,25 @@ remembers its position until reload. × or Escape closes it and clears the
 selection. `load()` and switching between overview and expanded mode close it
 when the selected node no longer exists. On screens up to 760px it becomes a
 bottom sheet.
+
+## Code as comments
+
+`wgt graph` exports include `sources`: the artifact's `source.wgt` (key `model`)
+and every bundled `std/...` module it uses, transitively. Third-party package
+sources are not embedded. The viewer attaches comments to what they describe:
+
+- a run of `#` lines directly above a declaration (no blank line in between), and a
+  trailing `# …` on the same line, belong to that `model`, `input`, `output`,
+  `block` or `layer`; comments before the first declaration form the header;
+- a layer that calls a block (`transformer.decoder(...)`, `residual(attention(...))`,
+  `scan(..., gru_cell(...))`) passes that block's layer comments to its child paths.
+
+Cards show the first comment line in italics (compact cards replace the path line;
+tensor cards use the bottom line). The popup shows the full comment, the comment of
+the block the layer calls, the comment of the block it belongs to, and the
+declaring source line with its file and line number. Search also matches comments.
+`parseSourceComments(text, module)` and `sourceNotes(graph)` are exported; embedders
+can attach their own `sources` object before `load()`.
 
 ## Control flow
 
@@ -99,11 +120,18 @@ exported for reuse.
 
 ## Navigate the canvas
 
-- **Zoom:** toolbar buttons, `+` / `-` / `0` (fit) while the canvas has focus, or
-  Ctrl/⌘ + wheel (trackpad pinch). Clicking the percentage restores 100%. Fit shows
-  the whole graph when it stays at least 75% legible; otherwise it fits the cross
-  axis and scrolls along the flow.
-- **Pan:** plain wheel/trackpad scrolling, or drag empty canvas space with the mouse.
+- **Zoom:** the mouse wheel zooms around the cursor; trackpad pinch (Ctrl/⌘ + wheel)
+  zooms; toolbar buttons and `+` / `-` / `0` (fit) work while the canvas has focus.
+  Clicking the percentage restores 100%. Fit (toolbar or double-click on empty
+  space) centers the whole graph when it stays at least 75% legible; otherwise it
+  fits the cross axis and starts at the top.
+- **Pan:** drag anywhere on the canvas — generous empty space surrounds the graph
+  so it can be pushed freely. Trackpad two-finger scrolling and Shift + wheel pan.
+  Scrollbars are hidden.
+- **Arrange:** drag a node to move it; edges, labels and loop/route regions follow.
+  A plain click (no movement) still opens the popup. Moved positions survive
+  language/theme changes in the same view; ↺ in the toolbar (or `resetLayout()`)
+  restores the automatic layout.
 - **Keyboard:** Tab to a node; arrow keys along the flow follow edges, arrow keys
   across it move between nodes of the same rank; Enter/Space selects.
 - **Search:** matches node paths, operators, titles, std blocks, shapes and parameter
@@ -136,6 +164,7 @@ viewer.setTensorAxes('f32[2,3,4,5,6]', [0, 2, 4]); // at most 3 original axes
 viewer.setExpanded(true);              // overview ⇄ all internal nodes
 viewer.selectNode(id);                 // selects, opens the popup, expands if internal
 viewer.closePopup();
+viewer.resetLayout();                  // discard dragged node positions
 viewer.setZoom(1.5); viewer.fitView();
 const svgText = viewer.exportSVG();    // standalone SVG string
 const pngBlob = await viewer.exportPNG(2);

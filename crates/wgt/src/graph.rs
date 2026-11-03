@@ -47,6 +47,9 @@ pub struct Graph {
     pub edges: Vec<Edge>,
     pub tensors: Vec<Tensor>,
     pub baseline_sha256: Option<String>,
+    /// Model source and used std modules, so viewers can show code comments.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub sources: std::collections::BTreeMap<String, String>,
     #[serde(skip)]
     pub tensor_data: Vec<crate::preview::TensorData>,
 }
@@ -70,6 +73,7 @@ impl Graph {
             baseline_sha256: base
                 .as_ref()
                 .map(|b| b.manifest["weights"]["sha256"].as_str().unwrap().to_owned()),
+            sources: crate::sources::collect(&a.root, &a.manifest),
             tensor_data,
         };
         for (name, shape) in &a.shapes {

@@ -16,8 +16,8 @@ const translations = [
     "Fit width"
   ],
   [
-    "沿箭头阅读：输入 → 特征处理 → 输出。点击模块查看说明，方向键沿连线移动；Ctrl + 滚轮缩放，拖动空白处平移。形状不含批次维度。",
-    "Follow the arrows: input → processing → output. Select a module for details; arrow keys follow connections. Ctrl + wheel zooms, drag empty space to pan. Shapes omit the batch axis."
+    "沿箭头阅读：输入 → 特征处理 → 输出。滚轮缩放，拖动画布平移，拖动节点调整位置，双击空白处适应画布；点击模块查看说明和源码注释。形状不含批次维度。",
+    "Follow the arrows: input → processing → output. Wheel zooms, drag the canvas to pan, drag nodes to rearrange, double-click empty space to fit; select a module for details and source comments. Shapes omit the batch axis."
   ],
   [
     "实线 → 数据流",
@@ -443,7 +443,7 @@ translations.push(['搜索节点', 'Search nodes'],
   ['下游', 'Outputs to'], ['输入输出', 'Input / output'], ['映射', 'Projection'], ['注意力', 'Attention'],
   ['归一化', 'Normalization'], ['激活', 'Activation'], ['汇聚', 'Pooling'], ['合并', 'Merge'], ['组合', 'Structure'],
   ['循环', 'Recurrent'], ['其他', 'Other']);
-translations.push(['自动视图', 'Auto view'], ['数据流', 'Data flow'], ['残差旁路', 'Residual skip'], ['循环反馈', 'Loop feedback'],
+translations.push(['调用模块', 'Calls'], ['所在模块', 'Inside'], ['恢复自动布局', 'Restore automatic layout'], ['模型源码', 'model source'], ['此图没有附带源码注释。', 'This graph has no attached source comments.'], ['自动视图', 'Auto view'], ['数据流', 'Data flow'], ['残差旁路', 'Residual skip'], ['循环反馈', 'Loop feedback'],
   ['门控信号', 'Gate signal'], ['路由分支', 'Route branch'], ['说明', 'Help'], ['关闭', 'Close'],
   ['各步共享权重', 'weights shared across steps'], ['路由', 'Route'], ['只执行被选中的分支', 'only the selected branch runs'],
   ['分支', 'Branch'], ['下一步', 'next step'], ['停止概率', 'halt probability'], ['门', 'gate'], ['门控', 'Gate'],
@@ -591,6 +591,108 @@ export function graphRegions(nodes, edges, positions) {
     }
   }
   return regions.sort((a, b) => b.width * b.height - a.width * a.height);
+}
+/** Split a line into code and a trailing `# comment` (a `#` after whitespace, outside quotes). */
+function splitComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) { if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === '#' && (i === 0 || /\s/.test(line[i - 1]))) return [line.slice(0, i).trimEnd(), line.slice(i + 1).trim()];
+  }
+  return [line.trimEnd(), ''];
+}
+/**
+ * Comments attached to declarations in one WGT module. A run of `#` lines directly
+ * above a declaration (no blank line between) and a trailing `# …` on the same line
+ * both belong to it. Comments before the first declaration form the module header.
+ */
+export function parseSourceComments(text, module = 'model') {
+  const result = {module, header: '', model: null, aliases: {}, interface: {input: [], output: []}, layers: {}, blocks: {}};
+  const header = [];
+  let run = [], block = null, declared = false;
+  String(text).split(/\r?\n/).forEach((raw, index) => {
+    const trimmed = raw.trim();
+    if (!trimmed) { if (!declared) header.push(...run); run = []; return; }
+    if (trimmed.startsWith('#')) { run.push(trimmed.replace(/^#\s?/, '')); return; }
+    const [code, trailing] = splitComment(raw);
+    const comment = [...run, trailing].filter(Boolean).join('\n');
+    run = [];
+    const indent = raw.length - raw.trimStart().length, statement = code.trim();
+    if (!indent) block = null;
+    let match;
+    if (/^wgt\s/.test(statement) || (match = /^use\s+(\S+)(?:\s+as\s+(\w+))?/.exec(statement))) {
+      if (match) result.aliases[match[2] || match[1].split('/').pop()] = match[1];
+      if (!declared && comment) header.push(comment);
+      return;
+    }
+    const entry = {comment, code: statement, line: index + 1};
+    if ((match = /^model\s+(\w+)/.exec(statement))) { declared = true; result.model = {...entry, name: match[1]}; }
+    else if (!indent && (match = /^(input|output)\s+(\w+)/.exec(statement))) { declared = true; result.interface[match[1]].push({...entry, name: match[2]}); }
+    else if ((match = /^block\s+(\w+)/.exec(statement))) { declared = true; block = match[1]; result.blocks[block] = {...entry, layers: {}}; }
+    else if ((match = /^layer\s+(\w+)\s*:\s*(.*)$/.exec(statement))) {
+      declared = true;
+      (block && indent ? result.blocks[block].layers : result.layers)[match[1]] = {...entry, expression: match[2]};
+    }
+  });
+  result.header = header.join('\n');
+  return result;
+}
+/**
+ * Map source comments and code lines onto graph nodes. `graph.sources` holds the model
+ * source (`model`) and the std modules it uses. Top-level layers match node paths;
+ * a layer that calls a block (`transformer.decoder(...)`, `residual(attention(...))`)
+ * passes that block's layer comments down to its child paths. Returns
+ * `{notes: Map(nodeId → {comment, code, source, line, block, blockComment}), model}`.
+ */
+export function sourceNotes(graph) {
+  const notes = new Map();
+  if (!graph?.sources?.model) return {notes, model: null};
+  const modules = Object.entries(graph.sources).map(([name, text]) => parseSourceComments(text, name));
+  const blocks = new Map();
+  for (const owner of modules)
+    for (const [name, block] of Object.entries(owner.blocks)) blocks.set(`${owner.module === 'model' ? 'model' : owner.module}.${name}`, {...block, owner});
+  const resolve = (expression, owner) => {
+    for (const [, call] of String(expression).matchAll(/([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\(/g)) {
+      const [head, tail] = call.includes('.') ? call.split('.') : [null, call];
+      const key = head ? `${owner.aliases[head]}.${tail}` : `${owner.module}.${tail}`;
+      if (blocks.has(key)) return key;
+    }
+    return null;
+  };
+  const byPath = new Map(graph.nodes.map((n) => [n.path || n.id, n]));
+  const visit = (prefix, layers, owner, depth, parent) => {
+    if (depth > 32) return;
+    for (const [name, layer] of Object.entries(layers)) {
+      const path = prefix ? `${prefix}.${name}` : name, node = byPath.get(path);
+      const call = resolve(layer.expression, owner), block = call && blocks.get(call);
+      if (node) notes.set(node.id, {comment: layer.comment, code: layer.code, source: owner.module, line: layer.line,
+        block: call, blockComment: block?.comment || '', parentBlock: parent?.key || null, parentComment: parent?.comment || ''});
+      if (block) visit(path, block.layers, block.owner, depth + 1, {key: call, comment: block.comment});
+    }
+  };
+  const model = modules.find((m) => m.module === 'model');
+  visit('', model.layers, model, 0, null);
+  for (const kind of ['input', 'output']) {
+    const nodes = graph.nodes.filter((n) => n.op === kind && !n.parent), declarations = model.interface[kind];
+    declarations.forEach((declaration, i) => {
+      const node = nodes.find((n) => n.path === declaration.name) || (nodes.length === declarations.length ? nodes[i] : null);
+      if (node) notes.set(node.id, {comment: declaration.comment, code: declaration.code, source: 'model', line: declaration.line});
+    });
+  }
+  return {notes, model: {name: model.model?.name, comment: model.model?.comment || model.header, header: model.header,
+    code: model.model?.code || '', line: model.model?.line, interface: model.interface}};
+}
+/** Rough SVG text width for truncation: CJK glyphs are about twice as wide. */
+function fitText(text, width, size = 12) {
+  let used = 0, out = '';
+  for (const ch of String(text)) {
+    used += (ch.codePointAt(0) > 0x2e80 ? 1 : 0.58) * size;
+    if (used > width) return out.trimEnd() + '…';
+    out += ch;
+  }
+  return out;
 }
 /* Extensible vocabulary: operators, std blocks and visual categories are data, not
    hard-coded branches. Embedders register their own entries; unknown operators
@@ -992,7 +1094,7 @@ function num(v) {
       ? v.toExponential(3)
       : Number(v.toPrecision(5)).toString();
 }
-const template = "<header class=\"wl-header\"><div class=\"wl-title\"><span class=\"wl-eyebrow\">WEIGHTLANG</span><h1></h1><div class=\"wl-summary\"></div></div></header><div class=\"wl-hud\"><div class=\"wl-actions\"><label class=\"wl-search-box\"><input class=\"wl-search\" type=\"search\" data-label=\"搜索节点\" autocomplete=\"off\"><span class=\"wl-search-count\" aria-live=\"polite\"></span></label><button class=\"wl-expand\" aria-pressed=\"false\">展开内部层</button></div><div class=\"wl-header-tools\"><select class=\"wl-presentation\" aria-label=\"Display / 显示\"><option value=\"auto\">自动视图</option><option value=\"tensors\">张量视图</option><option value=\"compact\">紧凑视图</option></select><select class=\"wl-direction\" aria-label=\"Layout / 布局\"><option value=\"TB\">纵向布局</option><option value=\"LR\">横向布局</option></select><select class=\"wl-theme\" aria-label=\"Theme / 主题\"><option value=\"auto\">跟随系统</option><option value=\"light\">亮色</option><option value=\"dark\">暗色</option></select><select class=\"wl-language\" aria-label=\"Language / 语言\"><option value=\"zh-CN\">中文</option><option value=\"en\">English</option></select></div></div><div class=\"wl-workspace\"><div class=\"wl-flow\"></div><div class=\"wl-legend-row\"><div class=\"wl-key\"><span data-kind=\"flow\">数据流</span><span data-kind=\"skip\">残差旁路</span><span data-kind=\"loop\">循环反馈</span><span data-kind=\"gate\">门控信号</span><span data-kind=\"route\">路由分支</span></div><div class=\"wl-categories\"></div><button class=\"wl-help\" aria-expanded=\"false\" data-label=\"说明\">?</button><div class=\"wl-footnotes\" hidden><p class=\"wl-note\">沿箭头阅读：输入 → 特征处理 → 输出。点击模块查看说明，方向键沿连线移动；Ctrl + 滚轮缩放，拖动空白处平移。形状不含批次维度。</p><p class=\"wl-shape-note\">格子表示元素位置，不是运行值；省略号表示只展示部分元素。</p></div></div><div class=\"wl-zoom\" role=\"toolbar\"><button class=\"wl-zoom-out\" data-label=\"缩小\">−</button><button class=\"wl-zoom-level\" data-label=\"实际大小\">100%</button><button class=\"wl-zoom-in\" data-label=\"放大\">+</button><button class=\"wl-fit\" data-label=\"适应画布\">⤢</button><button class=\"wl-export-svg\" data-label=\"导出 SVG\">SVG</button><button class=\"wl-export-png\" data-label=\"导出 PNG\">PNG</button></div><section class=\"wl-explorer wl-popup\" role=\"dialog\" hidden><div class=\"wl-popup-bar\"><span class=\"wl-popup-grip\"></span><button class=\"wl-popup-close\" data-label=\"关闭\">×</button></div><div class=\"wl-popup-body\"><div class=\"wl-node-info\" aria-live=\"polite\"><h2>从输入开始看</h2><p>选择左侧模块，查看它的作用和形状变化。</p></div><button class=\"wl-inspect-toggle\" aria-expanded=\"false\">查看参数值</button><div class=\"wl-weight-tools\" hidden><div class=\"wl-panel-heading\"><h2>权重检查</h2><span class=\"wl-origin\"></span></div><label class=\"wl-tensor-label\">参数张量<select class=\"wl-tensor\"></select></label><div class=\"wl-statistics\"></div><div class=\"wl-controls\"><label>View <select class=\"wl-mode\"></select></label><label class=\"wl-row-control\">Rows <select class=\"wl-row\"></select></label><label class=\"wl-column-control\">Columns <select class=\"wl-column\"></select></label></div><div class=\"wl-fixed\"></div><div class=\"wl-presets\"></div><p class=\"wl-description\"></p><div class=\"wl-plot\"><canvas tabindex=\"0\" aria-label=\"Tensor values\"></canvas></div><div class=\"wl-legend\"><span class=\"wl-low\"></span><span class=\"wl-gradient\"></span><span class=\"wl-high\"></span></div><output class=\"wl-readout\" aria-live=\"polite\">Point at a cell to inspect its coordinates and value.</output><div class=\"wl-files\"><label>Full weights for exact large-tensor slices<input class=\"wl-current-file\" type=\"file\" accept=\".safetensors\"></label><label class=\"wl-baseline-file-label\">Baseline weights<input class=\"wl-baseline-file\" type=\"file\" accept=\".safetensors\"></label></div><p class=\"wl-note\">下图是参数值，不是模型运行时的激活或注意力概率；不能据此判断训练效果。</p></div></div></section></div><p class=\"wl-error\" role=\"alert\"></p>";
+const template = "<header class=\"wl-header\"><div class=\"wl-title\"><h1 class=\"wl-model-title\" tabindex=\"0\" role=\"button\"></h1><div class=\"wl-summary\"></div></div></header><div class=\"wl-hud\"><div class=\"wl-actions\"><label class=\"wl-search-box\"><input class=\"wl-search\" type=\"search\" data-label=\"搜索节点\" autocomplete=\"off\"><span class=\"wl-search-count\" aria-live=\"polite\"></span></label><button class=\"wl-expand\" aria-pressed=\"false\">展开内部层</button></div><div class=\"wl-header-tools\"><select class=\"wl-presentation\" aria-label=\"Display / 显示\"><option value=\"auto\">自动视图</option><option value=\"tensors\">张量视图</option><option value=\"compact\">紧凑视图</option></select><select class=\"wl-direction\" aria-label=\"Layout / 布局\"><option value=\"TB\">纵向布局</option><option value=\"LR\">横向布局</option></select><select class=\"wl-theme\" aria-label=\"Theme / 主题\"><option value=\"auto\">跟随系统</option><option value=\"light\">亮色</option><option value=\"dark\">暗色</option></select><select class=\"wl-language\" aria-label=\"Language / 语言\"><option value=\"zh-CN\">中文</option><option value=\"en\">English</option></select></div></div><div class=\"wl-workspace\"><div class=\"wl-flow\"></div><div class=\"wl-legend-row\"><div class=\"wl-key\"><span data-kind=\"flow\">数据流</span><span data-kind=\"skip\">残差旁路</span><span data-kind=\"loop\">循环反馈</span><span data-kind=\"gate\">门控信号</span><span data-kind=\"route\">路由分支</span></div><div class=\"wl-categories\"></div><button class=\"wl-help\" aria-expanded=\"false\" data-label=\"说明\">?</button><div class=\"wl-footnotes\" hidden><p class=\"wl-note\">沿箭头阅读：输入 → 特征处理 → 输出。滚轮缩放，拖动画布平移，拖动节点调整位置，双击空白处适应画布；点击模块查看说明和源码注释。形状不含批次维度。</p><p class=\"wl-shape-note\">格子表示元素位置，不是运行值；省略号表示只展示部分元素。</p></div></div><div class=\"wl-zoom\" role=\"toolbar\"><button class=\"wl-zoom-out\" data-label=\"缩小\">−</button><button class=\"wl-zoom-level\" data-label=\"实际大小\">100%</button><button class=\"wl-zoom-in\" data-label=\"放大\">+</button><button class=\"wl-fit\" data-label=\"适应画布\">⤢</button><button class=\"wl-reset-layout\" data-label=\"恢复自动布局\" hidden>↺</button><button class=\"wl-export-svg\" data-label=\"导出 SVG\">SVG</button><button class=\"wl-export-png\" data-label=\"导出 PNG\">PNG</button></div><section class=\"wl-explorer wl-popup\" role=\"dialog\" hidden><div class=\"wl-popup-bar\"><span class=\"wl-popup-grip\"></span><button class=\"wl-popup-close\" data-label=\"关闭\">×</button></div><div class=\"wl-popup-body\"><div class=\"wl-node-info\" aria-live=\"polite\"><h2>从输入开始看</h2><p>选择左侧模块，查看它的作用和形状变化。</p></div><button class=\"wl-inspect-toggle\" aria-expanded=\"false\">查看参数值</button><div class=\"wl-weight-tools\" hidden><div class=\"wl-panel-heading\"><h2>权重检查</h2><span class=\"wl-origin\"></span></div><label class=\"wl-tensor-label\">参数张量<select class=\"wl-tensor\"></select></label><div class=\"wl-statistics\"></div><div class=\"wl-controls\"><label>View <select class=\"wl-mode\"></select></label><label class=\"wl-row-control\">Rows <select class=\"wl-row\"></select></label><label class=\"wl-column-control\">Columns <select class=\"wl-column\"></select></label></div><div class=\"wl-fixed\"></div><div class=\"wl-presets\"></div><p class=\"wl-description\"></p><div class=\"wl-plot\"><canvas tabindex=\"0\" aria-label=\"Tensor values\"></canvas></div><div class=\"wl-legend\"><span class=\"wl-low\"></span><span class=\"wl-gradient\"></span><span class=\"wl-high\"></span></div><output class=\"wl-readout\" aria-live=\"polite\">Point at a cell to inspect its coordinates and value.</output><div class=\"wl-files\"><label>Full weights for exact large-tensor slices<input class=\"wl-current-file\" type=\"file\" accept=\".safetensors\"></label><label class=\"wl-baseline-file-label\">Baseline weights<input class=\"wl-baseline-file\" type=\"file\" accept=\".safetensors\"></label></div><p class=\"wl-note\">下图是参数值，不是模型运行时的激活或注意力概率；不能据此判断训练效果。</p></div></div></section></div><p class=\"wl-error\" role=\"alert\"></p>";
 let viewerCount = 0;
 const edgeKinds = ['flow', 'skip', 'recurrent', 'conditional', 'halt', 'gate', 'active'];
 const kindRoles = {skip: 'skip', recurrent: 'loop', conditional: 'route', halt: 'gate'};
@@ -1124,25 +1226,47 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
   /** Canvas interaction: Ctrl/⌘ + wheel zoom, mouse drag pan, keyboard shortcuts, search and export. */
   bindCanvas() {
     const flow = this.q('.wl-flow');
+    // A mouse wheel zooms around the cursor; pinch (Ctrl/⌘ + wheel) zooms; trackpad
+    // two-finger scrolling and Shift + wheel keep panning natively.
     flow.addEventListener('wheel', (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
+      const mouseWheel = e.deltaMode !== 0 || (e.deltaX === 0 && Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= 50);
+      if (e.shiftKey || !(e.ctrlKey || e.metaKey || mouseWheel)) return;
       e.preventDefault();
-      const bounds = flow.getBoundingClientRect();
-      this.setZoom(this.zoom * Math.exp(-e.deltaY * 0.0015), {x: e.clientX - bounds.left, y: e.clientY - bounds.top});
+      const bounds = flow.getBoundingClientRect(), speed = mouseWheel ? 0.0015 : 0.01;
+      this.setZoom(this.zoom * Math.exp(-e.deltaY * speed), {x: e.clientX - bounds.left, y: e.clientY - bounds.top});
     }, {passive: false});
+    // Drag empty canvas to pan, drag a node to move it. Pointer capture starts only
+    // after a few pixels so a plain click still reaches the node.
     let drag = null;
     flow.onpointerdown = (e) => {
-      if (e.pointerType !== 'mouse' || e.button !== 0 || e.target.closest('.wl-node')) return;
-      drag = {x: e.clientX, y: e.clientY, left: flow.scrollLeft, top: flow.scrollTop};
-      flow.setPointerCapture(e.pointerId);
-      flow.classList.add('wl-panning');
+      if (e.pointerType === 'touch' || e.button !== 0) return;
+      const node = e.target.closest('.wl-node'), position = node && this.layout?.positions.get(node.dataset.id);
+      drag = {x: e.clientX, y: e.clientY, left: flow.scrollLeft, top: flow.scrollTop, pointer: e.pointerId, moved: false,
+        node: position ? node.dataset.id : null, origin: position && {x: position.x, y: position.y}};
     };
     flow.onpointermove = (e) => {
       if (!drag) return;
-      flow.scrollLeft = drag.left - (e.clientX - drag.x);
-      flow.scrollTop = drag.top - (e.clientY - drag.y);
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (!drag.moved) {
+        if (Math.hypot(dx, dy) < 4) return;
+        drag.moved = true;
+        flow.setPointerCapture(drag.pointer);
+        flow.classList.add(drag.node ? 'wl-moving' : 'wl-panning');
+      }
+      if (drag.node) this.moveNode(drag.node, drag.origin.x + dx / this.zoom, drag.origin.y + dy / this.zoom);
+      else { flow.scrollLeft = drag.left - dx; flow.scrollTop = drag.top - dy; }
     };
-    flow.onpointerup = flow.onpointercancel = () => { drag = null; flow.classList.remove('wl-panning'); };
+    flow.onpointerup = flow.onpointercancel = () => {
+      if (drag?.moved) { this.suppressClick = true; setTimeout(() => { this.suppressClick = false; }); }
+      drag = null;
+      flow.classList.remove('wl-panning', 'wl-moving');
+    };
+    flow.addEventListener('click', (e) => { if (this.suppressClick) { e.stopPropagation(); this.suppressClick = false; } }, true);
+    flow.ondblclick = (e) => { if (!e.target.closest('.wl-node')) this.fitView(); };
+    this.q('.wl-reset-layout').onclick = () => this.resetLayout();
+    const title = this.q('.wl-model-title');
+    title.onclick = () => this.showModelNotes();
+    title.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.showModelNotes(); } };
     flow.onkeydown = (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === 'Escape') { this.closePopup(); return; }
@@ -1258,9 +1382,11 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
   }
   renderNodeContent(node, width, height) {
     const group = svg('g', {class: 'wl-node-content'}), path = node.path || node.id, category = nodeCategory(node);
-    const junction = junctionOps.has(node.op);
+    const junction = junctionOps.has(node.op), note = this.sourceNotes?.notes.get(node.id);
+    const remark = note?.comment?.split('\n')[0] || '';
     group.append(svg('rect', {width, height, rx: junction ? height / 2 : 14, class: 'wl-node-background'}));
-    group.append(svg('title', {}, `${categoryTitle(category, this.language)} · ${path}\n${node.input_shape || ''} → ${node.output_shape || ''}`));
+    group.append(svg('title', {}, `${categoryTitle(category, this.language)} · ${path}\n${node.input_shape || ''} → ${node.output_shape || ''}${note?.comment ? '\n\n' + note.comment : ''}`));
+    if (note?.comment) group.setAttribute('data-commented', 'true');
     // Loops and routes carry a glyph; other nodes a category dot. No borders or badges.
     const glyph = {recurrent: '↻', route: '⑂'}[category];
     const cy = junction ? height / 2 - 7 : 20.5, cx = junction ? 22 : 20;
@@ -1273,7 +1399,9 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
       return group;
     }
     if (!this.tensorView()) {
-      group.append(svg('text', {x: 16, y: 47, class: 'wl-node-op'}, path.length > 36 ? '…' + path.slice(-35) : path));
+      // The source comment replaces the path line when present; the path stays in the tooltip and popup.
+      group.append(remark ? svg('text', {x: 16, y: 47, class: 'wl-node-remark'}, fitText(remark, width - 32, 11.5))
+        : svg('text', {x: 16, y: 47, class: 'wl-node-op'}, path.length > 36 ? '…' + path.slice(-35) : path));
       group.append(svg('text', {x: 16, y: 68, class: 'wl-node-shape'}, `${node.input_shape || ''} → ${node.output_shape || ''}`));
       if (node.parameters > 0)
         group.append(svg('text', {x: width - 16, y: 25, 'text-anchor': 'end', class: 'wl-node-meta'},
@@ -1293,9 +1421,12 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
       }
       if (!single) group.append(svg('path', {d:`M${width/2-14},${height/2+8}h26m-6,-5l6,5l-6,5`,class:'wl-transform-arrow'}));
     }
-    group.append(svg('text', {x:16,y:height-10,class:'wl-node-meta'},
-      `${(node.parameters || 0).toLocaleString()} ${this.language === 'en' ? 'parameters' : '参数'}` +
-      (node.members > 1 ? ` · ${node.members - 1} ${this.language === 'en' ? 'inner nodes' : '个内部节点'}` : '')));
+    const meta = `${(node.parameters || 0).toLocaleString()} ${this.language === 'en' ? 'parameters' : '参数'}` +
+      (node.members > 1 ? ` · ${node.members - 1} ${this.language === 'en' ? 'inner nodes' : '个内部节点'}` : '');
+    if (remark) {
+      group.append(svg('text', {x: width - 16, y: 25, 'text-anchor': 'end', class: 'wl-node-meta'}, meta));
+      group.append(svg('text', {x: 16, y: height - 10, class: 'wl-node-remark'}, fitText(remark, width - 32, 11.5)));
+    } else group.append(svg('text', {x:16,y:height-10,class:'wl-node-meta'}, meta));
     return group;
   }
   t(text) { return translate(text, this.language); }
@@ -1371,6 +1502,12 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
       this.data.model || this.data.title || this.t("Neural network");
     const summary = this.q(".wl-summary"), en = this.language === 'en';
     summary.replaceChildren();
+    const brand = document.createElement('span');
+    brand.className = 'wl-eyebrow';
+    brand.textContent = 'WeightLang';
+    summary.append(brand);
+    this.sourceNotes = sourceNotes(this.data);
+    this.q('.wl-model-title').title = this.sourceNotes.model?.comment || '';
     const facts = [
       `${(this.data.parameters || 0).toLocaleString()}${en ? ' parameters' : ' 个参数'}`,
       `${this.data.nodes.length}${en ? ' internal nodes' : ' 个内部节点'}`,
@@ -1416,6 +1553,13 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     const gap = this.expanded ? 54 : direction === 'LR' ? 56 : 28;
     const layout = this.options.layout?.({nodes: visible.nodes, edges: visible.edges, width, height, gap, direction}) ||
       layoutGraph(visible.nodes, visible.edges, width, height, gap, {direction, size: (n) => junctionOps.has(n.op) ? pill : null});
+    const viewKey = [this.expanded, direction, tensorView, width, height].join('|');
+    if (this.movedNodes?.key !== viewKey) this.movedNodes = {key: viewKey, positions: new Map()};
+    for (const [id, moved] of this.movedNodes.positions) {
+      const position = layout.positions.get(id);
+      if (position) Object.assign(position, moved);
+    }
+    this.q('.wl-reset-layout').hidden = !this.movedNodes.positions.size;
     const {routes, extent, start} = routeEdges(visible.edges, layout.positions, direction);
     const shift = Math.max(0, 16 - start);
     const canvasWidth = direction === 'LR' ? layout.width : Math.max(layout.width, extent + 24) + shift,
@@ -1442,29 +1586,25 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     diagram.append(defs);
     // Control-flow regions sit beneath everything: loop bodies, routes and their branches.
     const regionLayer = svg('g', {class: 'wl-regions'});
-    if (this.expanded) for (const region of graphRegions(visible.nodes, visible.edges, layout.positions)) {
-      const group = svg('g', {class: 'wl-region', 'data-kind': region.kind});
-      group.append(svg('rect', {x: region.x, y: region.y, width: region.width, height: region.height, rx: region.kind === 'branch' ? 14 : 22}));
-      const label = region.kind === 'loop' ? `↻  ${nodeTitle(region.node, this.language)} · ${this.t('各步共享权重')}`
-        : region.kind === 'route' ? `⑂  ${this.t('路由')} · ${this.t('只执行被选中的分支')}` : `${this.t('分支')} ${region.index}`;
-      group.append(svg('text', {x: region.x + 14, y: region.y + (region.kind === 'branch' ? 17 : 21), class: 'wl-region-label'}, label));
-      regionLayer.append(group);
-    }
+    this.regionLayer = regionLayer;
+    this.drawRegions();
     const content = svg('g', {class: 'wl-content', transform: direction === 'LR' ? `translate(0 ${shift})` : `translate(${shift} 0)`});
     diagram.append(content);
     content.append(regionLayer);
     const edgeLayer = svg('g', {class: 'wl-edges'}), labelLayer = svg('g', {class: 'wl-edge-labels'});
     const notes = annotateEdges(visible.nodes, visible.edges), roles = new Set();
+    this.edgeElements = [];
+    this.labelElements = [];
     routes.forEach((route, i) => {
       const role = notes[i].role || kindRoles[route.kind] || 'flow';
       roles.add(role);
       const marker = role === 'gate' ? 'gate' : edgeKinds.includes(route.kind) ? route.kind : 'flow';
-      edgeLayer.append(svg("path", {
+      this.edgeElements[i] = edgeLayer.appendChild(svg("path", {
         d: route.d, class: "wl-edge", "data-kind": route.kind, "data-role": role, "data-marker": marker,
         "data-from": route.edge.from, "data-to": route.edge.to, "marker-end": `url(#${this.uid}-arrow-${marker})`,
       }));
       if (notes[i].label && route.label)
-        labelLayer.append(svg('text', {x: route.label[0] + 6, y: route.label[1] + 4, class: 'wl-edge-label', 'data-role': role,
+        this.labelElements[i] = labelLayer.appendChild(svg('text', {x: route.label[0] + 6, y: route.label[1] + 4, class: 'wl-edge-label', 'data-role': role,
           'data-from': route.edge.from, 'data-to': route.edge.to}, this.t(notes[i].label) + (notes[i].index != null ? ' ' + notes[i].index : '')));
     });
     content.append(edgeLayer);
@@ -1543,7 +1683,10 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     pathLine.className = 'wl-node-path'; pathLine.textContent = path;
     const description = document.createElement('p');
     description.className = 'wl-node-description'; description.textContent = nodeDescription(node, this.language);
-    info.append(chip, heading, pathLine, description);
+    info.append(chip, heading, pathLine);
+    const note = this.sourceNotes?.notes.get(node.id);
+    if (note) info.append(this.sourcePanel(note));
+    info.append(description);
     const facts = document.createElement('dl');
     facts.className = 'wl-facts';
     const fact = (label, value) => {
@@ -1592,6 +1735,99 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     }
     this.dispatchEvent(new CustomEvent("node-select", { detail: node, bubbles: true }));
   }
+  /** Comment, block comment and the declaring source line, as written in the WGT code. */
+  sourcePanel(note) {
+    const panel = document.createElement('div');
+    panel.className = 'wl-source';
+    // Own comment first; then the block this layer calls; then the block it belongs to.
+    const seen = new Set();
+    for (const [text, kind, label] of [[note.comment, 'comment', ''],
+      [note.blockComment, 'block', note.block ? `${this.t('调用模块')} ${note.block}` : ''],
+      [note.parentComment, 'parent', note.parentBlock ? `${this.t('所在模块')} ${note.parentBlock}` : '']]) {
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      const quote = document.createElement('p');
+      quote.className = 'wl-source-comment';
+      quote.dataset.kind = kind;
+      if (label) {
+        const caption = document.createElement('span');
+        caption.className = 'wl-source-caption';
+        caption.textContent = label;
+        quote.append(caption);
+      }
+      quote.append(document.createTextNode(text));
+      panel.append(quote);
+    }
+    if (note.code) {
+      const code = document.createElement('pre'), where = document.createElement('span');
+      code.className = 'wl-source-code';
+      where.className = 'wl-source-where';
+      where.textContent = `${note.source === 'model' ? this.t('模型源码') : note.source + '.wgt'}${note.line ? ' · L' + note.line : ''}`;
+      code.append(where, document.createTextNode(note.code));
+      panel.append(code);
+    }
+    return panel;
+  }
+  /** Model-level notes: header comment and commented interface declarations. */
+  showModelNotes() {
+    const model = this.sourceNotes?.model, info = this.q('.wl-node-info');
+    this.querySelectorAll('.wl-selected').forEach((n) => n.classList.remove('wl-selected'));
+    this.markSelection(null);
+    info.replaceChildren();
+    const heading = document.createElement('h2');
+    heading.textContent = this.data.model || this.data.title || this.t('Neural network');
+    info.append(heading);
+    if (model) {
+      info.append(this.sourcePanel({comment: model.comment, code: model.code, source: 'model', line: model.line}));
+      for (const declaration of [...model.interface.input, ...model.interface.output])
+        info.append(this.sourcePanel({comment: declaration.comment, code: declaration.code, source: 'model', line: declaration.line}));
+    } else {
+      const empty = document.createElement('p');
+      empty.className = 'wl-note';
+      empty.textContent = this.t('此图没有附带源码注释。');
+      info.append(empty);
+    }
+    for (const selector of ['.wl-plot', '.wl-controls', '.wl-fixed', '.wl-presets', '.wl-legend']) this.q(selector).hidden = true;
+    this.openPopup();
+  }
+  drawRegions() {
+    const layer = this.regionLayer;
+    if (!layer) return;
+    layer.replaceChildren();
+    if (!this.expanded) return;
+    for (const region of graphRegions(this.visible.nodes, this.visible.edges, this.layout.positions)) {
+      const group = svg('g', {class: 'wl-region', 'data-kind': region.kind});
+      group.append(svg('rect', {x: region.x, y: region.y, width: region.width, height: region.height, rx: 22}));
+      const label = region.kind === 'loop' ? `↻  ${nodeTitle(region.node, this.language)} · ${this.t('各步共享权重')}`
+        : `⑂  ${this.t('路由')} · ${this.t('只执行被选中的分支')}`;
+      group.append(svg('text', {x: region.x + 14, y: region.y + 21, class: 'wl-region-label'}, label));
+      layer.append(group);
+    }
+  }
+  /** Discard dragged node positions and re-fit the automatic layout. */
+  resetLayout() {
+    this.movedNodes = null;
+    this.pendingFit = true;
+    if (this.ready && this.data) this.renderGraph();
+    return this;
+  }
+  /** Move a node in layout units; its edges, labels and regions follow. */
+  moveNode(id, x, y) {
+    const position = this.layout?.positions.get(id);
+    if (!position) return this;
+    Object.assign(position, {x, y});
+    this.movedNodes?.positions.set(id, {x, y});
+    this.q('.wl-reset-layout').hidden = false;
+    this.nodeElement(id)?.setAttribute('transform', `translate(${x} ${y})`);
+    const {routes} = routeEdges(this.visible.edges, this.layout.positions, this.options.direction);
+    routes.forEach((route, i) => {
+      this.edgeElements[i]?.setAttribute('d', route.d);
+      const label = this.labelElements[i];
+      if (label && route.label) { label.setAttribute('x', route.label[0] + 6); label.setAttribute('y', route.label[1] + 4); }
+    });
+    this.drawRegions();
+    return this;
+  }
   /** Emphasize the edges connected to the selected node. */
   markSelection(id) {
     this.q('.wl-flow').classList.toggle('wl-has-selection', id != null);
@@ -1636,18 +1872,25 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
       .sort((a, b) => Math.abs(positions.get(a)[cross] - p[cross]) - Math.abs(positions.get(b)[cross] - p[cross]))[0];
     if (target) this.selectNode(target);
   }
+  /** Top-left of the diagram in the canvas scroll space (SVG has no offsetLeft). */
+  diagramOffset(flow, diagram) {
+    const a = diagram.getBoundingClientRect(), b = flow.getBoundingClientRect();
+    return {left: a.left - b.left + flow.scrollLeft, top: a.top - b.top + flow.scrollTop};
+  }
   setZoom(zoom, anchor) {
     const flow = this.q('.wl-flow'), diagram = flow?.querySelector(':scope > svg');
     const next = Math.min(3, Math.max(0.1, Number.isFinite(zoom) ? zoom : 1));
     if (!diagram || !this.canvasSize) { this.zoom = next; return this; }
     const previous = parseFloat(diagram.getAttribute('width')) / this.canvasSize.width || next;
     const ax = anchor?.x ?? flow.clientWidth / 2, ay = anchor?.y ?? flow.clientHeight / 2;
-    const cx = (flow.scrollLeft + ax - diagram.offsetLeft) / previous, cy = (flow.scrollTop + ay - diagram.offsetTop) / previous;
+    const before = this.diagramOffset(flow, diagram);
+    const cx = (flow.scrollLeft + ax - before.left) / previous, cy = (flow.scrollTop + ay - before.top) / previous;
     this.zoom = next;
     diagram.setAttribute('width', this.canvasSize.width * next);
     diagram.setAttribute('height', this.canvasSize.height * next);
-    flow.scrollLeft = cx * next + diagram.offsetLeft - ax;
-    flow.scrollTop = cy * next + diagram.offsetTop - ay;
+    const after = this.diagramOffset(flow, diagram);
+    flow.scrollLeft = cx * next + after.left - ax;
+    flow.scrollTop = cy * next + after.top - ay;
     this.q('.wl-zoom-level').textContent = Math.round(next * 100) + '%';
     return this;
   }
@@ -1656,12 +1899,16 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
     this.pendingFit = false;
     const flow = this.q('.wl-flow');
     if (!this.canvasSize || !flow?.clientWidth) return this.setZoom(1);
-    const width = (flow.clientWidth - 24) / this.canvasSize.width, height = (flow.clientHeight - 190) / this.canvasSize.height;
+    const top = parseFloat(getComputedStyle(this).getPropertyValue('--stage-top')) || 112, bottom = 64;
+    const width = (flow.clientWidth - 48) / this.canvasSize.width, height = (flow.clientHeight - top - bottom) / this.canvasSize.height;
     const whole = Math.min(width, height), across = this.options.direction === 'LR' ? height : width;
     // Below 75% node labels become hard to read; fit the cross axis and scroll along the flow instead.
     this.setZoom(Math.min(1, whole >= 0.75 ? whole : across));
-    flow.scrollTop = 0;
-    flow.scrollLeft = 0;
+    const diagram = flow.querySelector(':scope > svg'), w = this.canvasSize.width * this.zoom, h = this.canvasSize.height * this.zoom;
+    const room = flow.clientHeight - top - bottom;
+    const offset = this.diagramOffset(flow, diagram);
+    flow.scrollLeft = offset.left + w / 2 - flow.clientWidth / 2;
+    flow.scrollTop = offset.top - top - Math.max(0, (room - h) / 2);
     return this;
   }
   applySearch() {
@@ -1680,7 +1927,8 @@ export class WeightLangViewer extends (globalThis.HTMLElement || class {}) {
       const tensors = (this.data.tensor_data || []).filter((t) => this.expanded
         ? t.owner === path || (!t.owner && t.name.startsWith(prefix))
         : t.owner === path || t.owner?.startsWith(prefix) || t.name.startsWith(prefix)).map((t) => t.name);
-      const text = [...members.flatMap((n) => [n.id, n.path, n.op, n.block, nodeTitle(n, this.language), n.input_shape, n.output_shape]), ...tensors].join(' ').toLowerCase();
+      const text = [...members.flatMap((n) => [n.id, n.path, n.op, n.block, nodeTitle(n, this.language), n.input_shape, n.output_shape,
+        this.sourceNotes?.notes.get(n.id)?.comment]), ...tensors].join(' ').toLowerCase();
       const match = terms.length > 0 && terms.every((term) => text.includes(term));
       element.classList.toggle('wl-match', match);
       element.classList.toggle('wl-current-match', match && this.searchMatches.length === this.searchIndex);

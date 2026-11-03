@@ -231,3 +231,55 @@ test('loop and route regions enclose their bodies; entry state ranks under its l
   const {positions:q} = layoutGraph(nodes, edges, 100, 50, 20);
   assert.ok(q.get('st').y > q.get('s').y && q.get('st').y < q.get('c').y);
 });
+
+test('source comments attach to declarations, blocks and nested block layers', async () => {
+  const {parseSourceComments,sourceNotes} = await import('../viewer.js');
+  const model = [
+    'wgt 0.5',
+    '# Tiny model header.',
+    'use std/blocks as b',
+    '',
+    'model demo',
+    '# Token ids.',
+    'input tokens: i64[4]',
+    'output logits: f32[4] # raw scores',
+    '# Shared trunk.',
+    'layer trunk: b.wrapper(dim=4)',
+    'layer head: linear(in=4, out=4)  # no softmax',
+  ].join('\n');
+  const library = [
+    'wgt 0.5',
+    '# Library header.',
+    '',
+    '# Inner MLP.',
+    'block inner(dim):',
+    '  # First projection.',
+    '  layer fc: linear(in=dim, out=dim)',
+    '  layer act: gelu # keeps positives smooth',
+    '',
+    '# Residual wrapper.',
+    'block wrapper(dim):',
+    '  layer body: residual(inner(dim=dim))',
+  ].join('\n');
+  const parsed = parseSourceComments(model);
+  assert.equal(parsed.header, 'Tiny model header.');
+  assert.equal(parsed.layers.head.comment, 'no softmax');
+  assert.equal(parsed.interface.output[0].comment, 'raw scores');
+  assert.equal(parseSourceComments('layer x: f("a # b")').layers.x.comment, '');
+  const graph = {sources: {model, 'std/blocks': library}, nodes: [
+    {id: 'i', path: 'input', op: 'input', parent: ''},
+    {id: 't', path: 'trunk', op: 'seq'}, {id: 'tb', path: 'trunk.body', op: 'residual'},
+    {id: 'fc', path: 'trunk.body.fc', op: 'linear'}, {id: 'act', path: 'trunk.body.act', op: 'gelu'},
+    {id: 'h', path: 'head', op: 'linear'}, {id: 'o', path: 'output', op: 'output', parent: ''}], edges: []};
+  const {notes, model: summary} = sourceNotes(graph);
+  assert.equal(summary.comment, 'Tiny model header.');
+  assert.deepEqual([notes.get('t').comment, notes.get('t').block, notes.get('t').blockComment], ['Shared trunk.', 'std/blocks.wrapper', 'Residual wrapper.']);
+  assert.equal(notes.get('tb').block, 'std/blocks.inner');
+  assert.equal(notes.get('fc').comment, 'First projection.');
+  assert.deepEqual([notes.get('act').comment, notes.get('act').parentComment], ['keeps positives smooth', 'Inner MLP.']);
+  assert.equal(notes.get('act').code, 'layer act: gelu');
+  assert.equal(notes.get('act').line, 8);
+  assert.equal(notes.get('i').comment, 'Token ids.');
+  assert.equal(notes.get('o').comment, 'raw scores');
+  assert.equal(sourceNotes({nodes: [], edges: []}).notes.size, 0);
+});
