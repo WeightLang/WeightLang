@@ -330,6 +330,10 @@ weightc --offline --locked compile demo.wgt -o demo
 `logsumexp`、`l2_normalize`、`mse`、`mae`、`cross_entropy`。
 这些函数接受非空一维 f64 列表，返回标量或同形列表；不连接训练梯度。
 完整签名、必填参数及预算见[向量算法](standard-library.md#向量算法)。
+WGT 0.5 也支持 `values.mean`，与 `mean(values)` 等价；列表只接受非空一维有限数值。
+在 forward/loss 内，`square(prediction-target).mean` 则使用可微张量平均，返回 f32[1]。
+解释与 AOT 共用此语义；完整优先级与限制见[后缀平均](reference.zh-CN.md#后缀平均-expressionmean)，
+可运行训练例子见 [postfix_mean/model.wgt](../examples/native_training/postfix_mean/model.wgt)。
 
 数据分析与监控另可使用 `min/max`、`variance/stddev`、`median/quantile`、
 `sort/argsort`、`argmin/argmax`、`cumsum`、`clip` 和 `cosine_similarity`。

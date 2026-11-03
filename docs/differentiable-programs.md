@@ -131,3 +131,13 @@ N 是必填十进制整数字面量，范围 1..1000000；index 在运行时求�
 分配前按 N 扣除操作预算；不对离散索引求导，仅普通函数可用，forward/loss 不支持。
 结果可显式作为模型输入或 MSE/自定义损失的目标；cross_entropy/reinforce 的类别参数仍为索引。
 示例见 [sample_branch.wgt](../examples/native_training/sample_branch.wgt)，解释与 AOT 使用相同检查。
+
+## 后缀平均
+
+WGT 0.5 的 forward/loss 支持 `x.mean` 和 `square(prediction-target).mean`，
+与 `mean(x)`、`mean(square(prediction-target))` 使用相同的张量指令和反向传播。
+f32[N] 沿唯一特征轴归约为 f32[1]，N>0；每项梯度为上游梯度除以 N。
+损失中的平均针对单样本输出轴，训练接口另对样本轴平均；保存/重载没有新增制品格式。
+普通函数中的列表平均返回 f64 标量，不自动建立梯度图。无多轴、隐式展平或广播。
+完整[语法契约](reference.zh-CN.md#后缀平均-expressionmean)及
+[训练例子](../examples/native_training/postfix_mean/model.wgt)。

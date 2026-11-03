@@ -104,7 +104,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
         } else if ch.is_ascii_alphabetic() || ch == '_' {
             let mut end = start + ch.len_utf8();
             while let Some(&(i, c)) = chars.peek() {
-                if !(c.is_ascii_alphanumeric() || c == '_' || c == '.') {
+                if !(c.is_ascii_alphanumeric() || c == '_') {
                     break;
                 }
                 chars.next();
@@ -115,6 +115,10 @@ pub fn parse_functions(source: &str) -> Result<Program> {
             let mut end = start + 1;
             let mut previous = ch;
             while let Some(&(i, c)) = chars.peek() {
+                // A dot before a name starts a postfix operation, not a decimal.
+                if c == '.' && text[i + 1..].starts_with(|c: char| c.is_ascii_alphabetic() && c != 'e' && c != 'E' || c == '_') {
+                    break;
+                }
                 if !(c.is_ascii_digit()
                     || c == '.'
                     || c == 'e'
@@ -140,7 +144,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
                 }
             }
             ensure!(
-                "(){}[];,+-*/%<>=!&|".contains(ch),
+                "(){}[];,.+-*/%<>=!&|".contains(ch),
                 "line {line}: unexpected character {ch}"
             );
             (token, false)
@@ -405,10 +409,26 @@ impl Parser {
                             t.line
                         );
                         ensure!(!t.text.starts_with("__"), "reserved compiler identifier");
-                        if self.take("(") {
-                            Expr::Call(t.text, self.arguments(")")?)
+                        // Qualified calls retain their existing meaning (including pkg.mean()).
+                        // Without call parentheses, dots belong to the postfix expression below.
+                        let mut end = self.pos;
+                        let mut name = t.text;
+                        while self.tokens.get(end).is_some_and(|t| !t.quoted && t.text == ".") {
+                            let Some(part) = self.tokens.get(end + 1) else { break; };
+                            if part.quoted || !part.text.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') { break; }
+                            name.push('.');
+                            name.push_str(&part.text);
+                            end += 2;
+                        }
+                        if self.tokens.get(end).is_some_and(|t| !t.quoted && t.text == "(") {
+                            self.pos = end;
                         } else {
-                            Expr::Name(t.text)
+                            name.truncate(name.find('.').unwrap_or(name.len()));
+                        }
+                        if self.take("(") {
+                            Expr::Call(name, self.arguments(")")?)
+                        } else {
+                            Expr::Name(name)
                         }
                     }
                 }
@@ -416,6 +436,13 @@ impl Parser {
         };
         loop {
             ensure!(left.height() <= 128, "expression tree depth exceeds 128");
+            if self.take(".") {
+                let operation = self.next()?;
+                ensure!(!operation.quoted && operation.text == "mean",
+                    "line {}: expected postfix mean", operation.line);
+                left = Expr::Call("mean".into(), vec![left]);
+                continue;
+            }
             if self.take("[") {
                 let index = self.expr(0)?;
                 self.expect("]")?;

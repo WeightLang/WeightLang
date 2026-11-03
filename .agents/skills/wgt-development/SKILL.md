@@ -12,6 +12,9 @@ description: 编写和验证本仓库当前原生 WGT 0.5 模型、训练与概�
   与 route 相同，推理在精确端点短路内联分支；训练/VJP 保留完整梯度。提前 let 的计算不会省略。
 - fn loss(prediction,target) 是无模型参数的张量损失，返回 f32[1]；fit(m,x,y,lr,"loss") 才训练。
   支持 mean、square、减法与已有张量算子；不是任意宿主函数自动微分。
+  平均可写 `x.mean`、`square(prediction-target).mean`，等价 `mean(x)`；后缀优先于一元/二元运算。
+  普通函数接受非空一维有限 f64 列表并返回标量；forward/loss 的 f32[N] 归约为可微 f32[1]。
+  不支持其他归约后缀或 axis 参数；完整例子 examples/native_training/postfix_mean/model.wgt。
 - sample p { then { a } else { b } } 仅用于普通函数，概率为 [0,1] 标量，仅执行一边。
   seed 控制 RNG，精确端点不抽随机数；forward/loss 中拒绝，既有 sample(model,observation) 保留。
 - mix/sample 分支可嵌套、可选尾随分号，不支持块内 let/return；普通 if 仍要求 bool。

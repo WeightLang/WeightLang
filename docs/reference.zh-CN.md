@@ -183,6 +183,32 @@ WGT 0.5 新增 `rsqrt(x)`、`fma(x,y,z)`、`hypot(x,y)`、`expm1(x)`、
 双向量必须等长，eps>0，target 为合法零起始整数类别。参数无默认值。
 返回形状、数值与预算边界及完整示例见[向量算法](standard-library.md#向量算法)。
 
+### 后缀平均 `expression.mean`
+
+WGT 0.5 本地实现支持 `x.mean`，等价于 `mean(x)`；原函数形式继续支持。
+没有参数、默认参数或隐式轴选择：普通函数接受非空一维有限 f64 列表，返回 f64 标量；
+forward/loss 接受 f32[N]（N>0），沿唯一向量轴归约为 f32[1]，梯度为上游梯度除以 N。
+空列表、非数值列表、嵌套列表和标量不接受；不隐式展平或广播。
+
+后缀与索引从左到右结合，优先于一元负号和全部二元运算：`-x.mean` 是 `-(x.mean)`，
+`(a-b).mean` 先做张量减法再平均，`rows[0].mean` 先取第一行再平均。
+操作数只求值一次，解释、AOT、预算计费、自动求导及制品使用与 `mean(x)` 相同的实现。
+`pkg.mean(x)` 仍是限定名称函数调用；`.mean` 不提供方法调用或通用对象属性机制。
+当前只实现 `.mean`，不支持 `.sum`、`.min`、`.max` 或 `.mean[axis=1]`。
+
+```wgt
+wgt 0.5
+fn main() {
+    # 一维样本列表归约为一个标量；没有训练或模型初始化。
+    let scores = [2, 4, 6];
+    assert(scores.mean == 4, "mean");
+    return scores.mean;
+}
+```
+
+可微前向与显式训练的完整例子见
+[`postfix_mean/model.wgt`](../examples/native_training/postfix_mean/model.wgt)。这是本地语言能力，不表示已发布版本。
+
 统计与排序新增 `min(x)`、`max(x)`、`variance(x,ddof)`、`stddev(x,ddof)`、
 `median(x)`、`quantile(x,q)`、`sort(x)`、`argsort(x)`、`argmin(x)`、`argmax(x)`、
 `cumsum(x)`、`clip(x,lower,upper)`、`cosine_similarity(x,y)`。

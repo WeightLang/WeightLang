@@ -41,7 +41,7 @@
 | --- | --- | --- |
 | linalg | `dot(x,y)` | 标量内积；长度相同，顺序 FMA 累加 |
 | linalg | `norm(x)` | 标量 L2 长度；逐步 hypot 避免直接平方溢出 |
-| reduction | `mean(x)` | 标量均值；先除 N 再求和以减少求和溢出 |
+| reduction | `mean(x)` 或 `x.mean` | 标量均值；先除 N 再求和以减少求和溢出；后缀无参数，语义及预算相同 |
 | probability | `softmax(x)` | `[N]` 概率；减最大值后指数归一化 |
 | probability | `log_softmax(x)` | `[N]` 对数概率；直接在对数域计算，避免概率下溢后取 log |
 | probability | `logsumexp(x)` | 标量 log(sum(exp(x)))；减最大值稳定计算 |
