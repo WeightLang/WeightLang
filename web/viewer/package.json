@@ -1,0 +1,28 @@
+{
+  "name": "weightlang-viewer",
+  "version": "0.1.0",
+  "description": "CSS-themeable, dependency-free neural graph and tensor explorer",
+  "type": "module",
+  "exports": {
+    ".": "./viewer.js",
+    "./viewer.css": "./viewer.css"
+  },
+  "files": [
+    "viewer.js",
+    "viewer.css",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WeightLang/WeightLang.git",
+    "directory": "web/viewer"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
