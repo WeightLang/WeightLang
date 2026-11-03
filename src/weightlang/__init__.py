@@ -46,3 +46,6 @@ __all__ += ['model_config', 'package_model']
 
 from .adapters import merge_adapter, unmerge_adapter, save_adapter, load_adapter  # noqa: E402
 __all__ += ['merge_adapter', 'unmerge_adapter', 'save_adapter', 'load_adapter']
+
+from .parameter_ops import read_parameters, call_with_parameters, write_parameters  # noqa: E402
+__all__ += ['read_parameters', 'call_with_parameters', 'write_parameters']

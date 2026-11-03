@@ -278,3 +278,20 @@ Rust validates the contract and weight layout, not tensor execution.
 完整签名、默认值、约束、限制和可运行例子见 [adaptive-compute.md](adaptive-compute.md)。
 
 原生适配器还支持 `dora/pissa/qlora`；完整方法语义、NF4 存储边界及训练例子见 [适配器](adapters.md)。
+
+
+## 可编程参数更新（0.3 本地实现，尚未发布）
+
+WGT 使用既有具名张量输入/输出与算子表达更新计算，不新增专用优化器语法。
+Python 显式调用更新程序并决定应用结果；加载和普通前向不隐式训练。
+Torch 模块接口为 `read_parameters(module, names=None)`、
+`call_with_parameters(module, parameters, *args, **kwargs)`、
+`write_parameters(module, parameters)`；参数绑定保留梯度，写回不依赖自动求导。
+原生 `NativeSession` 支持 `parameter_info()`、
+`read_parameter(name, *, start=0, length=None)` 和 `write_parameters(writes)`，
+可更新常驻权重及其共享连续视图，下一次 CPU/GPU 前向观察到新值。
+完整签名、形状/dtype、冻结、别名、版本、错误与存储限制见
+[参数更新](parameter-updates.md)；运行示例见
+[更新程序](../examples/parameter_updates/updater.wgt) 和
+[原生控制器脚本](../examples/parameter_updates/native.py)。
+示例控制器为显式给定系数，未训练；原生后端没有因此获得通用多输入计算图。

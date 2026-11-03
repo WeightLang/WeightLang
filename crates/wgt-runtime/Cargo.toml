@@ -1,0 +1,22 @@
+[package]
+name = "weightlang-runtime"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Native CPU and cross-platform GPU execution for WeightLang"
+
+[features]
+default = ["gpu"]
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+
+[[bin]]
+name = "wgt-native"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wgpu = { version = "30.0.1", optional = true, default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "dx12", "wgsl"] }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1", optional = true }

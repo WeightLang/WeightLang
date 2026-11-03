@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "input": 2,
+  "parameters": [
+    {"name": "base", "shape": [2, 2], "kind": "resident", "data": [1, 2, 3, 4]},
+    {"name": "delta", "shape": [2, 2], "kind": "resident", "data": [0.1, 0, 0, -0.1]},
+    {"name": "projection.weight", "shape": [2, 2], "kind": "add", "base": "base", "delta": "delta"}
+  ],
+  "layers": [
+    {"op": "linear", "weight": "projection.weight", "bias": null},
+    {"op": "tanh"}
+  ]
+}

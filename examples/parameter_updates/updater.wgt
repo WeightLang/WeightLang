@@ -1,0 +1,17 @@
+wgt 0.3
+model update_program
+input weights: f32[1,2]
+input feedback: f32[1,2]
+input memory: f32[1,2]
+output next_weights: f32[1,2] from candidate
+output next_memory: f32[1,2] from accumulated
+# 每行对应目标模型的一个输出，每列对应一个输入连接。
+# feedback 是应用提供的观测，不是语言隐式计算的梯度。
+# direction 是可替换的更新模型；本示例脚本显式赋值，未训练。
+layer direction: linear(in=2,out=2,bias=0) from feedback
+# 保留一半历史更新；状态由调用方保存，不隐藏在模型内部。
+# 每次调用复用 direction 的同一组参数，不创建新的更新器权重。
+layer retained: scale(factor=0.5) from memory
+layer accumulated: add(retained,direction)
+layer candidate: add(weights,accumulated)
+init seed=7
