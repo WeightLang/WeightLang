@@ -2,27 +2,137 @@
 
 **A programming language for building neural networks.**
 
-WeightLang is a concept for describing neural networks and producing runnable weights using the PyTorch ecosystem. AI coding models are expected to be the primary way people create WeightLang programs, while the language and its tools should remain understandable and usable by humans.
+WeightLang describes neural networks in `.wgt` files and compiles them with
+`weightc`, using PyTorch, into runnable artifacts: network structure, weights,
+input/output contract, provenance and version information. AI coding models are
+expected to be the main authors of WeightLang programs, so the syntax is small,
+line-oriented and strict; it should still be easy for a person to review.
 
-> Early concept: there is no compiler, language specification, package manager, or runnable artifact yet.
+> **Status: 0.1 prototype.** A minimal sequential subset (linear layers and
+> activations) compiles, trains on inline data, saves, reloads and reuses
+> weights locally. There is no package manager yet; see [Limitations](#limitations).
 
-## Direction
+## Install
 
-- **Source files:** `.wgt`
-- **Compiler:** `weightc` (planned)
-- **Backend:** PyTorch
-- **Output:** weights and the information needed to load and run the associated network
-- **Reuse:** compose and reuse compatible pretrained weights
-- **Distribution:** identify packages by GitHub repository paths, inspired by Go
+Requires Python ≥ 3.10, PyTorch ≥ 2.2 and safetensors ≥ 0.4.
 
-A repository path can identify a package, but large weight files may need separate artifact storage. Versioning, integrity checks, licensing, compatibility and safe loading all need explicit design before distribution is implemented.
+```sh
+git clone https://github.com/WeightLang/WeightLang
+cd WeightLang
+python -m venv .venv
+.venv/bin/pip install -e '.[test]'      # pulls torch if not already installed
+```
 
-## Proposed first milestone
+If PyTorch is already installed system-wide, reuse it instead of downloading it again:
 
-1. Define a minimal `.wgt` example and explain its meaning, including how weights are obtained: initialization, training, or importing existing weights.
-2. Specify a small runnable artifact: model structure, tensor values, input/output contract, and metadata.
-3. Build a minimal `weightc` prototype targeting PyTorch and demonstrate saving, loading, and running a tiny network.
-4. Add one reproducible example that reuses weights, with tests comparing outputs before and after serialization.
-5. Design GitHub-based package references, immutable versions, hashes, and a lockfile; prototype dependency fetching after the local workflow works.
+```sh
+python -m venv --system-site-packages .venv
+.venv/bin/pip install --no-build-isolation --no-deps -e .
+```
 
-These are proposals, not implemented features. Syntax, artifact format, package protocol and implementation language remain open decisions.
+## Quick start
+
+```sh
+# Type-check without building
+weightc check examples/xor.wgt
+
+# Build: init from seed, train, write build/xor_mlp/
+weightc build examples/xor.wgt -o build
+
+# Run inference (JSON in, JSON out)
+weightc run build/xor_mlp --input '[[0,0],[0,1],[1,0],[1,1]]'
+
+# Show the I/O contract and where every tensor came from
+weightc inspect build/xor_mlp
+
+# Re-check hashes, shapes and loadability
+weightc verify build/xor_mlp
+```
+
+From Python:
+
+```python
+from weightlang import load_artifact
+model = load_artifact("build/xor_mlp")
+model.predict([[0, 1], [1, 1]])
+```
+
+## What a program looks like
+
+```wgt
+wgt 0.1
+model xor_mlp
+
+input  bits: f32[2]
+output prob: f32[1]
+
+layer hidden: linear(in=2, out=8)
+layer act:    tanh
+layer head:   linear(in=8, out=1)
+layer out:    sigmoid
+
+data xor:
+  [0, 0] -> [0]
+  [0, 1] -> [1]
+  [1, 0] -> [1]
+  [1, 1] -> [0]
+
+init  seed=42
+train data=xor loss=bce optimizer=adam lr=0.05 epochs=1000
+```
+
+Every tensor in the artifact is labelled `random-init`, `trained`, `imported`
+or `imported+trained`. A program without `train` builds, but the compiler,
+`run`, `inspect` and the Python loader all say its outputs are not meaningful.
+
+## Weight reuse
+
+[`examples/xnor_reuse.wgt`](examples/xnor_reuse.wgt) imports the trained
+`hidden` layer of `xor_mlp`, freezes it and trains only a new `head` for XNOR:
+
+```wgt
+init   seed=7
+import hidden from "../build/xor_mlp" layer=hidden freeze
+train  data=xnor loss=bce optimizer=adam lr=0.05 epochs=300
+```
+
+```sh
+weightc build examples/xor.wgt -o build          # must exist first
+weightc build examples/xnor_reuse.wgt -o build
+weightc inspect build/xnor_reuse
+```
+
+The tests check that the imported tensors are bit-identical to the source,
+that they stayed frozen, that the source hash is recorded (and enforced when
+pinned with `sha256=`), and that incompatible layer sizes are rejected. This
+demonstrates the reuse *mechanism*. With four training rows it does not show
+that reuse improves learning; a fresh network would also fit XNOR.
+
+## Tests
+
+```sh
+.venv/bin/python -m pytest
+```
+
+The suite covers parsing and line-numbered errors, a full XOR build, bit-exact
+output equality after save/reload, byte-stable rebuilds, tamper detection,
+loading with plain PyTorch, untrained labelling, and the reuse cases above.
+
+## Documentation
+
+- [Language 0.1](docs/language.md) — syntax, checks, weight sources and origins
+- [Artifact format](docs/artifact.md) — files, manifest fields, verification, loading without WeightLang
+- [Package distribution](docs/packages.md) — design for GitHub paths, versions, `wgt.sum`, large files (not implemented)
+
+## Limitations
+
+- Sequential networks only: `linear`, `relu`, `tanh`, `sigmoid`; one 1-D `f32`
+  input and output.
+- Training data is inline in the source; full-batch training only; `mse`/`bce`
+  losses, `sgd`/`adam` optimisers. Metrics are on training rows only.
+- Imports copy whole `linear` layers from local artifact directories. Import paths
+  are relative to the `.wgt` file. No package paths, version resolution or downloads.
+- Rebuilds are byte-identical on the same PyTorch version and CPU; across
+  versions or hardware the weights may differ, and the hashes will show it.
+- Artifacts run through PyTorch only; no ONNX or other exports.
+- No language server, formatter or stable language guarantee: 0.x syntax may change.
