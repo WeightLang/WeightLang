@@ -24,13 +24,17 @@ wgt run model.wgt
 ```
 
 源码应声明显式 `fn main()` 作为执行入口。检查/编译不训练、不读取训练数据、不输出模型权重。
-训练在 main 中显式调用 `fit` 或 `reinforce`；推理模型用 `save_model` 保存，
+训练在 main 中显式调用 `fit` 或 `reinforce`；带 `fn loss` 的 forward 模型也可使用
+`train model on (inputs,targets) rate lr clip max_norm;` 执行带全局梯度裁剪的更新，
+目标形状和限制见 `docs/reinforcement-learning.md`。推理模型用 `save_model` 保存，
 含优化器的断点用 `save` 保存并用 `restore` 恢复，两种文件不能混用。
 路径按当前命令帮助和项目配置核对；保留产物写入 `weights/<model>/`，不得覆盖已有产物。
 
 ## 验收
 
 运行完整源码，验证前向输出、最小优化步骤、保存重载和原项目实际入口。
+项目提供 `tests/*.wgt` 或兼容的 JSON 测试夹具时，在项目根目录执行 `wgt test`；
+测试发现、过滤和独立运行规则见 `docs/native-testing.md`。测试不会替代原项目的实际入口验收。
 检查模型参数更新是否符合冻结/共享约定，给出数值误差与尚未实现的能力。
 只迁初始化架构时明确说明未经训练；只有组件转换时不能称整个项目迁移完成。
 使用本仓库 `examples/native_training/` 和 `examples/self_modifying/` 的当前示例，
