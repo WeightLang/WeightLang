@@ -343,6 +343,11 @@ wgt graph build/tiny_cnn --open
 不代表真实任务或验证集效果。当前没有 tokenizer、预训练模型导入、KV cache、
 padding mask 或交叉注意力。形状及算子规则见 [语言文档](docs/language.md)。
 
+main 已支持直接编辑权重：weightc patch-template 生成绑定基线哈希的 JSON，
+weightc patch 写出独立候选制品，记录 edited 来源并清除失效指标。
+运行 [完整示例](examples/weight_space/README.md)，即可体验不训练、直接写入
+y = 2x + 1 的参数，再比较和评估结果。详见 [补丁指南](docs/weight-space.md)。
+
 ## 许可证
 
 代码采用 [MIT](LICENSE) 许可证。Iris 数据和训练权重的 CC BY 4.0 许可及署名要求，

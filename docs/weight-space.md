@@ -52,7 +52,8 @@ BCE and MSE data use target matrices:
 ```
 
 Cross-entropy data use a flat class-index array, e.g. `"targets": [0, 1, 2]`,
-with one integer per input row. The model must emit logits. BCE requires binary
+with one integer per input row. Sequence logits [N,L,V] use targets [N,L];
+inputs and other targets use nested arrays matching their sample shapes. The model must emit logits. BCE requires binary
 targets and probability outputs. Invalid shapes, non-finite values, out-of-range
 labels and incompatible comparison models are errors.
 
@@ -61,10 +62,69 @@ they are also its training data. Calling a file “evaluation” does not make i
 independent holdout set. Keep training, development and held-out tests separate
 when assessing generalization.
 
-## Next boundary
+## Direct edits (main, unreleased)
 
-These tools enable readable, measurable weight experiments. They do not yet
-provide a direct-edit statement, automatic LLM optimizer, or signed edit history.
-A future patch format must bind edits to the baseline hash and tensor indices,
-record authorship and edit provenance separately from training, reject stale or
-non-finite patches, and retain independent before/after evaluations.
+The patch-template and patch commands complete the read → edit → compare →
+evaluate loop. Neither command trains the model or contacts an LLM.
+
+~~~sh
+weightc patch-template build/baseline --author "Your name" > patch.json
+# Fill reason and edits in patch.json, retaining the two baseline hashes.
+weightc patch build/baseline --patch patch.json -o build/candidate
+weightc diff build/baseline build/candidate
+weightc evaluate build/candidate --data evaluation.json --loss mse --compare build/baseline
+wgt graph build/candidate --open
+~~~
+
+The template has format "weightlang.patch", format_version 1,
+baseline_weights_sha256, baseline_manifest_sha256, author, reason, and
+edits. All fields are required; unknown fields and duplicate JSON keys fail.
+Fill the initially empty edits array, for example:
+
+~~~json
+[
+  {"tensor": "fc.weight", "index": 0, "expected": 0.25, "value": 2.0},
+  {"tensor": "fc.bias", "index": 0, "value": 1.0}
+]
+~~~
+
+Indices are zero-based into each tensor's flattened row-major values.
+The optional expected field checks the prior float32 value. Every edit sets a
+single scalar; there are no executable expressions. The baseline hashes bind
+both weights and metadata, rejecting stale patches even if only the baseline
+manifest changed. Names, indices, duplicate positions, booleans, NaN/Infinity,
+float32 overflow, and patches that change no float32 values are rejected.
+
+Output must be a **new directory outside the baseline**. The baseline is
+unchanged; failed writes remove the incomplete candidate. Applying the same
+patch to the same baseline under the same runtime produces byte-identical
+candidate files.
+
+Changed tensors receive origin "edited"; untouched tensors retain provenance.
+The v3 manifest embeds the complete patch, its hash, actual before/after
+values, prior tensor metadata, and prior training metrics in edit_history.
+Current training is cleared: baseline loss/accuracy does not describe the
+edited candidate. Evaluate the candidate again. Two-hop imports preserve edited
+provenance, and audit/package checks treat directly edited values as lacking
+training provenance, even when imported from a previously trained model.
+The standard trained-package admission rules therefore still reject them by
+default. This does not imply the edit is useless: report behavior independently.
+
+The original source.wgt remains the architecture/baseline source, not a complete
+recipe for the edited weights. Rebuilding it alone will not replay edits.
+Reproduction requires the exact baseline artifact and recorded patches.
+Authorship and history are **self-reported, not signed or authenticated**.
+
+Run the [affine demo](../examples/weight_space/README.md) for a complete example:
+it sets a weight to 2 and a bias to 1, implementing y = 2x + 1 without training,
+then measures baseline/candidate MSE. This proves the direct-edit workflow,
+not general model-editing ability or LLM-generated weight programming.
+
+Transformer tensor names are also editable, for example
+body.attention.attention.qkv.weight in the bundled tiny Transformer.
+Use weightc weights with --layer to inspect the actual names and shapes.
+Changing a Transformer parameter is mechanically supported; useful behavioral
+editing remains an experimental task requiring target and regression tests.
+
+There is no automatic LLM optimizer, rollback-to-history command, or signed edit
+history yet. Evaluation is read-only and does not automatically grant admission.

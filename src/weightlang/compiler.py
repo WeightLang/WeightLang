@@ -114,7 +114,10 @@ def _apply_imports(
                     continue
                 src_name = imp.source_layer + name[len(imp.target) :]
                 tensor.copy_(src_state[src_name])
-                upstream[name] = src_tensors[src_name].get("upstream_origin", src_tensors[src_name]["origin"])
+                meta = src_tensors[src_name]
+                upstream[name] = (
+                    meta.get("upstream_origin", "imported") if meta["origin"] == "imported" else meta["origin"]
+                )
         if imp.freeze:
             for param in module.get_submodule(imp.target).parameters():
                 param.requires_grad_(False)
@@ -300,7 +303,9 @@ def compile_program(program: Program, out_dir: str | Path) -> BuildResult:
         shutil.copyfile(source_path, tmp / SOURCE_FILE)
         manifest: dict[str, Any] = {
             "format": ARTIFACT_FORMAT,
-            "format_version": 3 if program.version == "0.3" else ARTIFACT_FORMAT_VERSION,
+            "format_version": 3
+            if program.version == "0.3" or "edited" in upstream.values()
+            else ARTIFACT_FORMAT_VERSION,
             "language_version": program.version,
             "model": program.model,
             "compiler": {"name": "weightc", "version": __version__},

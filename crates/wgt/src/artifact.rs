@@ -117,7 +117,7 @@ impl Artifact {
             ensure!(
                 matches!(
                     metadata["origin"].as_str(),
-                    Some("trained" | "random-init" | "imported" | "imported+trained")
+                    Some("trained" | "random-init" | "imported" | "imported+trained" | "edited")
                 ),
                 "unknown origin"
             );
@@ -158,8 +158,12 @@ impl Artifact {
             .unwrap()
             .iter()
             .filter(|(_, t)| {
-                t["origin"] == "random-init"
-                    || (t["origin"] == "imported" && t["upstream_origin"] == "random-init")
+                matches!(t["origin"].as_str(), Some("random-init" | "edited"))
+                    || (t["origin"] == "imported"
+                        && matches!(
+                            t["upstream_origin"].as_str(),
+                            Some("random-init" | "edited")
+                        ))
             })
             .map(|(n, _)| n.clone())
             .collect()

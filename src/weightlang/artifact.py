@@ -34,7 +34,8 @@ ORIGIN_RANDOM = "random-init"
 ORIGIN_TRAINED = "trained"
 ORIGIN_IMPORTED = "imported"
 ORIGIN_IMPORTED_TRAINED = "imported+trained"
-ORIGINS = {ORIGIN_RANDOM, ORIGIN_TRAINED, ORIGIN_IMPORTED, ORIGIN_IMPORTED_TRAINED}
+ORIGIN_EDITED = "edited"
+ORIGINS = {ORIGIN_RANDOM, ORIGIN_TRAINED, ORIGIN_IMPORTED, ORIGIN_IMPORTED_TRAINED, ORIGIN_EDITED}
 
 
 class UntrainedWeightsWarning(UserWarning):
@@ -176,12 +177,12 @@ class Artifact:
 
     @property
     def untrained_tensors(self) -> list[str]:
-        """Tensors whose values were never trained anywhere upstream."""
+        """Tensors whose current values lack training provenance (random or directly edited)."""
 
         result = []
         for name, meta in self.manifest["weights"]["tensors"].items():
-            if meta["origin"] == ORIGIN_RANDOM or (
-                meta["origin"] == ORIGIN_IMPORTED and meta.get("upstream_origin") == ORIGIN_RANDOM
+            if meta["origin"] in (ORIGIN_RANDOM, ORIGIN_EDITED) or (
+                meta["origin"] == ORIGIN_IMPORTED and meta.get("upstream_origin") in (ORIGIN_RANDOM, ORIGIN_EDITED)
             ):
                 result.append(name)
         return result
@@ -325,8 +326,8 @@ def load_artifact(path: str | Path, *, warn_untrained: bool = True) -> Artifact:
     artifact = Artifact(root, manifest, module)
     if warn_untrained and artifact.untrained_tensors:
         warnings.warn(
-            f"artifact {artifact.name!r} contains randomly initialised, untrained tensors "
-            f"({', '.join(artifact.untrained_tensors)}); its outputs are not meaningful",
+            f"artifact {artifact.name!r} contains untrained or directly edited tensors "
+            f"({', '.join(artifact.untrained_tensors)}); evaluate its current weights before relying on outputs",
             UntrainedWeightsWarning,
             stacklevel=2,
         )

@@ -54,11 +54,11 @@ def _cmd_build(args: argparse.Namespace) -> int:
             print(f"  validation loss {v['loss']:.4f}" + (f", accuracy {v['accuracy']:.4f}" if "accuracy" in v else ""))
 
     elif any(
-        meta["origin"] == "random-init"
-        or (meta["origin"] == "imported" and meta.get("upstream_origin") == "random-init")
+        meta["origin"] in ("random-init", "edited")
+        or (meta["origin"] == "imported" and meta.get("upstream_origin") in ("random-init", "edited"))
         for meta in m["weights"]["tensors"].values()
     ):
-        print("  WARNING: contains untrained weights; outputs are not meaningful")
+        print("  WARNING: contains random or directly edited weights; evaluate before relying on outputs")
     else:
         print("  no local training; retained imported trained weights")
     return 0
@@ -90,13 +90,18 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     print(
         f"model {m['model']}  (format v{m['format_version']}, wgt {m['language_version']}, weightc {m['compiler']['version']})"
     )
-    print(f"input  {io['input']['name']}: f32{io['input']['shape']}")
-    print(f"output {io['output']['name']}: f32{io['output']['shape']}")
+    print(f"input  {io['input']['name']}: {io['input']['dtype']}{io['input']['shape']}")
+    print(f"output {io['output']['name']}: {io['output']['dtype']}{io['output']['shape']}")
     print("layers " + " -> ".join(describe_layer(layer) for layer in m["layers"]))
     for name, record in m.get("libraries", {}).items():
         print(f"library {name}: {record}")
     if (m.get("training") or {}).get("validation"):
         print("validation " + json.dumps(m["training"]["validation"]))
+    for number, edit in enumerate(m.get("edit_history", []), start=1):
+        print(
+            f"edit {number}: {edit['patch']['author']} (self-reported), "
+            f"{len(edit['changes'])} scalar changes, patch sha256={edit['patch_sha256']}"
+        )
     print("tensors:")
     for name, meta in m["weights"]["tensors"].items():
         extra = f" (upstream: {meta['upstream_origin']})" if "upstream_origin" in meta else ""
@@ -196,6 +201,20 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_patch_template(args: argparse.Namespace) -> int:
+    from .patches import patch_template
+
+    print(json.dumps(patch_template(args.artifact, args.author), indent=2, allow_nan=False))
+    return 0
+
+
+def _cmd_patch(args: argparse.Namespace) -> int:
+    from .patches import apply_patch
+
+    print(json.dumps(apply_patch(args.artifact, args.patch, args.output), indent=2, allow_nan=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="weightc", description="WeightLang compiler (prototype)")
     parser.add_argument("--version", action="version", version=f"weightc {__version__}")
@@ -240,6 +259,17 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("audit", help="check standard weight admission requirements")
     p.add_argument("artifact")
     p.set_defaults(func=_cmd_audit)
+
+    p = sub.add_parser("patch-template", help="emit a hash-bound weight patch template (no edits)")
+    p.add_argument("artifact")
+    p.add_argument("--author", required=True, help="self-reported author; not a verified signature")
+    p.set_defaults(func=_cmd_patch_template)
+
+    p = sub.add_parser("patch", help="apply explicit weight edits to a NEW artifact; never train")
+    p.add_argument("artifact")
+    p.add_argument("--patch", required=True, help="weightlang.patch JSON file")
+    p.add_argument("-o", "--output", required=True, help="new artifact directory, must not exist")
+    p.set_defaults(func=_cmd_patch)
 
     p = sub.add_parser("weights", help="export verified raw weights and provenance as JSON")
     p.add_argument("artifact")

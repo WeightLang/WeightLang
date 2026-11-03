@@ -339,6 +339,12 @@ Both examples reach 100% **training** accuracy on four synthetic rows. They are
 smoke tests, not validation benchmarks. See [language rules](docs/language.md)
 for shape conventions and current attention/CNN limitations.
 
+Direct weight edits are available on main: weightc patch-template generates
+a hash-bound JSON template, and weightc patch writes a separate candidate with
+edited provenance and cleared stale metrics. Try
+[the affine demo](examples/weight_space/README.md) for a complete y = 2x + 1
+edit, diff and evaluation without training. See [the patch guide](docs/weight-space.md).
+
 ## License
 
 [MIT](LICENSE)

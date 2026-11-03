@@ -140,3 +140,13 @@ The standalone PyTorch loading recipe above covers v1/v2. V3 also needs the
 small modules in [modern.py](../src/weightlang/modern.py), which depend only on
 PyTorch; copy their definitions alongside that recipe and route the new op
 names through `build_modern`. No Python objects are serialized in artifacts.
+
+## Directly edited artifacts (main)
+
+A weight patch writes artifact v3 and marks changed tensors with origin "edited".
+The edit_history field embeds patches bound to baseline weight and manifest SHA-256,
+the hash of each supplied patch, numeric changes and previous metadata/metrics.
+Current training metrics are cleared. Untouched tensors retain origins; imported
+edited tensors retain upstream_origin "edited" and require v3 even with a
+vector-only wgt 0.2 source. History is not a signature. See
+[the patch workflow](weight-space.md#direct-edits-main-unreleased).

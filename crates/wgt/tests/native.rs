@@ -478,3 +478,26 @@ fn multidimensional_contracts_infer_attention_and_cnn_weights() {
     )
     .is_err());
 }
+
+#[test]
+fn edited_weights_remain_untrained_and_visible_in_graphs() {
+    let temp = tempfile::tempdir().unwrap();
+    artifact(temp.path(), false);
+    let path = temp.path().join("manifest.json");
+    let mut m: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    m["format_version"] = json!(3);
+    m["weights"]["tensors"]["fc.weight"]["origin"] = json!("edited");
+    m["weights"]["tensors"]["fc.bias"]["origin"] = json!("trained");
+    fs::write(&path, serde_json::to_vec(&m).unwrap()).unwrap();
+    let a = Artifact::read(temp.path()).unwrap();
+    assert_eq!(a.untrained(), vec!["fc.weight"]);
+    let graph = Graph::read(temp.path()).unwrap().render("json").unwrap();
+    assert!(graph.contains("edited"));
+    m["weights"]["tensors"]["fc.weight"]["origin"] = json!("imported");
+    m["weights"]["tensors"]["fc.weight"]["upstream_origin"] = json!("edited");
+    fs::write(&path, serde_json::to_vec(&m).unwrap()).unwrap();
+    assert_eq!(
+        Artifact::read(temp.path()).unwrap().untrained(),
+        vec!["fc.weight"]
+    );
+}
