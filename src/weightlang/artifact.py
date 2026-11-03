@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import struct
+import sys
 import warnings
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -60,6 +61,8 @@ def write_safetensors(path: Path, tensors: dict[str, torch.Tensor], metadata: di
     The result is read back with the official safetensors loader.
     """
 
+    if sys.byteorder != "little":
+        raise WgtError("writing safetensors on big-endian hosts is not supported")
     header: dict[str, Any] = {"__metadata__": dict(sorted(metadata.items()))}
     blobs: list[bytes] = []
     offset = 0
@@ -67,7 +70,8 @@ def write_safetensors(path: Path, tensors: dict[str, torch.Tensor], metadata: di
         t = tensors[name].detach().to("cpu").contiguous()
         if t.dtype != torch.float32:
             raise WgtError(f"tensor {name} must be float32, got {t.dtype}")
-        data = t.numpy().astype("<f4", copy=False).tobytes()
+        # clone() gives a storage holding exactly this tensor; no numpy needed (torch does not depend on it)
+        data = bytes(t.clone().untyped_storage())
         header[name] = {"dtype": "F32", "shape": list(t.shape), "data_offsets": [offset, offset + len(data)]}
         blobs.append(data)
         offset += len(data)

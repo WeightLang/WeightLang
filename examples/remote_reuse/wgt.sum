@@ -1,0 +1,5 @@
+github.com/WeightLang/WeightLang/packages/gates v0.1.0 commit c5503623f0734bfa74f4a46e96b1a85dedabed29
+github.com/WeightLang/WeightLang/packages/gates v0.1.0 wgt.index.json sha256:4172e57a5569baa137f4a900671744d4990b065d7c8c058b7a9e6e082c741d5a
+github.com/WeightLang/WeightLang/packages/gates v0.1.0 xor_mlp/manifest.json sha256:de2c480fea4fec1e9bc5867602a3e7188cecf45d53f75d8b6b80fba120b14ab6
+github.com/WeightLang/WeightLang/packages/gates v0.1.0 xor_mlp/source.wgt sha256:1827fb55703c832d6da9b361c6521426495ce4471841abf5a6a8d54eff758069
+github.com/WeightLang/WeightLang/packages/gates v0.1.0 xor_mlp/weights.safetensors sha256:7969227a9c0e3528317e1cd22b8da766e5b1a7a705e0ba96078a86cde8296ba2

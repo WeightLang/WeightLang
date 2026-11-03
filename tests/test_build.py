@@ -128,3 +128,24 @@ def test_cli_build_run_inspect_verify(workspace, capsys):
     assert main(["verify", f"{out}/xor_mlp"]) == 0
     assert main(["run", f"{out}/missing", "--input", "[0, 1]"]) == 1
     assert "not a WeightLang artifact" in capsys.readouterr().err
+
+
+def test_version_matches_package_metadata():
+    import tomllib
+    from pathlib import Path
+
+    import weightlang
+
+    meta = tomllib.loads((Path(__file__).resolve().parent.parent / "pyproject.toml").read_text())
+    assert meta["project"]["version"] == weightlang.__version__
+
+
+def test_build_does_not_need_numpy(workspace, xor_build, monkeypatch):
+    """torch does not depend on numpy; clean installs (uv tool, pip) may not have it."""
+
+    def no_numpy(self, *a, **k):
+        raise RuntimeError("Numpy is not available")
+
+    monkeypatch.setattr(torch.Tensor, "numpy", no_numpy)
+    again = compile_file(workspace / "examples" / "xor.wgt", workspace / "nonumpy")
+    assert again.manifest["weights"]["sha256"] == xor_build.manifest["weights"]["sha256"]

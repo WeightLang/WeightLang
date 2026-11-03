@@ -9,7 +9,13 @@ license-files = ["LICENSE"]
 dependencies = [
     "torch>=2.2",
     "safetensors>=0.4",
+    "numpy",  # not used directly; avoids torch warning "Failed to initialize NumPy" on every run
 ]
+
+[project.urls]
+Homepage = "https://github.com/WeightLang/WeightLang"
+Documentation = "https://github.com/WeightLang/WeightLang/tree/main/docs"
+Releases = "https://github.com/WeightLang/WeightLang/releases"
 
 [project.optional-dependencies]
 test = ["pytest>=8"]

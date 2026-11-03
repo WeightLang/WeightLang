@@ -1,64 +1,135 @@
-# WeightLang
+<p align="center">
+  <img src="https://raw.githubusercontent.com/WeightLang/WeightLang/main/assets/logo.png" alt="WeightLang" width="148">
+</p>
 
-**A programming language for building neural networks.**
+<h1 align="center">WeightLang</h1>
 
-WeightLang describes neural networks in `.wgt` files and compiles them with
-`weightc`, using PyTorch, into runnable artifacts: network structure, weights,
-input/output contract, provenance and version information. AI coding models are
-expected to be the main authors of WeightLang programs, so the syntax is small,
-line-oriented and strict; it should still be easy for a person to review.
+<p align="center">
+  <b>A programming language for building neural networks — and shipping their weights.</b>
+</p>
 
-> **Status: 0.1 prototype.** A minimal sequential subset (linear layers and
-> activations) compiles, trains on inline data, saves, reloads and reuses
-> weights, locally or from a package published as a GitHub release.
-> See [Limitations](#limitations).
+<p align="center">
+  <a href="https://github.com/WeightLang/WeightLang/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/WeightLang/WeightLang?label=weightc"></a>
+  <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue">
+  <img alt="backend" src="https://img.shields.io/badge/backend-PyTorch-ee4c2c">
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <img alt="status" src="https://img.shields.io/badge/status-0.1%20prototype-orange">
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#the-language">Language</a> ·
+  <a href="#reusing-weights">Reuse</a> ·
+  <a href="#packages">Packages</a> ·
+  <a href="#documentation">Docs</a> ·
+  <a href="#limitations">Limitations</a>
+</p>
+
+---
+
+You write a network in a `.wgt` file. `weightc` uses PyTorch to build it,
+initialise it, train it or import weights into it, and writes an **artifact**: a
+directory holding the weights plus everything needed to load and run them —
+architecture, input/output contract, versions, hashes, and where every tensor
+came from. Artifacts can be published as packages addressed by GitHub path,
+Go-style, and their weights reused by other programs.
+
+WeightLang is meant to be written mostly by AI coding models, so the syntax is
+small, line-oriented and strict. It should still be easy for a person to review.
+
+```text
+ xor.wgt ──weightc build──▶ build/xor_mlp/ ──weightc run──▶ {"prob": [[0.00003], [0.9999], ...]}
+                              ├─ manifest.json        structure · I/O · provenance · hashes
+                              ├─ weights.safetensors  float32 tensors, no pickle
+                              └─ source.wgt           the exact source
+```
 
 ## Install
 
-Requires Python ≥ 3.10, PyTorch ≥ 2.2 and safetensors ≥ 0.4.
+**Linux / macOS**
 
 ```sh
-git clone https://github.com/WeightLang/WeightLang
-cd WeightLang
-python -m venv .venv
-.venv/bin/pip install -e '.[test]'      # pulls torch if not already installed
+curl -fsSL https://github.com/WeightLang/WeightLang/releases/latest/download/install.sh | sh
 ```
 
-If PyTorch is already installed system-wide, reuse it instead of downloading it again:
+**Windows (PowerShell)**
+
+```powershell
+irm https://github.com/WeightLang/WeightLang/releases/latest/download/install.ps1 | iex
+```
+
+Both scripts download the `weightlang` wheel from the GitHub release, check its
+sha256 against the release's `SHA256SUMS`, and install it with
+[`uv tool`](https://docs.astral.sh/uv/) if uv is available, otherwise into a
+private virtual environment (no sudo / admin needed). On Linux they install the
+CPU build of PyTorch by default (`WEIGHTLANG_TORCH=default` for PyPI's CUDA
+build). Pin a version with `WEIGHTLANG_VERSION=v0.1.0`. Read the scripts before
+piping them to a shell: [install.sh](install.sh), [install.ps1](install.ps1).
+
+<details>
+<summary><b>Other ways to install</b></summary>
 
 ```sh
-python -m venv --system-site-packages .venv
-.venv/bin/pip install --no-build-isolation --no-deps -e .
+# With uv, straight from the release wheel
+uv tool install https://github.com/WeightLang/WeightLang/releases/download/v0.1.0/weightlang-0.1.0-py3-none-any.whl
+
+# From PyPI (once published there; see "Release status" below)
+uv tool install weightlang        # or: pipx install weightlang
+
+# From source, for development
+git clone https://github.com/WeightLang/WeightLang && cd WeightLang
+python -m venv .venv && .venv/bin/pip install -e '.[test]'
 ```
+
+If PyTorch is already installed system-wide, reuse it:
+`python -m venv --system-site-packages .venv && .venv/bin/pip install --no-build-isolation --no-deps -e .`
+
+</details>
+
+Requirements: Python ≥ 3.10, PyTorch ≥ 2.2, safetensors ≥ 0.4.
 
 ## Quick start
 
 ```sh
-# Type-check without building
-weightc check examples/xor.wgt
+weightc check   examples/xor.wgt               # parse and type-check, no build
+weightc build   examples/xor.wgt -o build      # init → train → build/xor_mlp/
+weightc run     build/xor_mlp --input '[[0,0],[0,1],[1,0],[1,1]]'
+weightc inspect build/xor_mlp                  # I/O contract + where each tensor came from
+weightc verify  build/xor_mlp                  # re-check hashes, shapes, loadability
+```
 
-# Build: init from seed, train, write build/xor_mlp/
-weightc build examples/xor.wgt -o build
-
-# Run inference (JSON in, JSON out)
-weightc run build/xor_mlp --input '[[0,0],[0,1],[1,0],[1,1]]'
-
-# Show the I/O contract and where every tensor came from
-weightc inspect build/xor_mlp
-
-# Re-check hashes, shapes and loadability
-weightc verify build/xor_mlp
+```text
+built build/xor_mlp
+  weights sha256 7969227a9c0e3528317e1cd22b8da766e5b1a7a705e0ba96078a86cde8296ba2
+  tensors trained=4
+  training loss 0.7066 -> 0.0001 on 4 rows (xor), train accuracy 1.00
 ```
 
 From Python:
 
 ```python
 from weightlang import load_artifact
-model = load_artifact("build/xor_mlp")
-model.predict([[0, 1], [1, 1]])
+
+model = load_artifact("build/xor_mlp")      # verifies hashes and shapes
+model.predict([[0, 1], [1, 1]])             # tensor([[0.9999], [0.0001]])
+model.module                                # a plain torch.nn.Sequential
 ```
 
-## What a program looks like
+Artifacts can also be loaded with only `torch` + `safetensors` — see
+[docs/artifact.md](docs/artifact.md).
+
+| Command | What it does |
+|---|---|
+| `weightc check FILE` | Parse and type-check a `.wgt` file |
+| `weightc build FILE -o DIR` | Build an artifact into `DIR/<model>/` |
+| `weightc run ARTIFACT --input JSON` | Run inference; JSON in, JSON out |
+| `weightc inspect ARTIFACT [--json]` | Show interface, layers and tensor provenance |
+| `weightc verify ARTIFACT` | Check hashes, tensor shapes and loadability |
+| `weightc get [DIR]` | Download, verify and lock the packages in `wgt.mod` |
+| `weightc publish PKG --version vX.Y.Z` | Build a package's release assets |
+
+## The language
 
 ```wgt
 wgt 0.1
@@ -82,14 +153,26 @@ init  seed=42
 train data=xor loss=bce optimizer=adam lr=0.05 epochs=1000
 ```
 
-Every tensor in the artifact is labelled `random-init`, `trained`, `imported`
-or `imported+trained`. A program without `train` builds, but the compiler,
-`run`, `inspect` and the Python loader all say its outputs are not meaningful.
+- One statement per line, keyword first, `key=value` options. No expression language.
+- Shapes are checked before anything runs; errors read `xor.wgt:9: shape mismatch: ...`.
+- **Every tensor has an honest origin**, recorded in the manifest:
 
-## Weight reuse
+| origin | meaning |
+|---|---|
+| `random-init` | seeded random values, never trained — outputs are **not meaningful** |
+| `trained` | initialised, then trained by this program |
+| `imported` | copied unchanged from another artifact (`upstream_origin` says what it was there) |
+| `imported+trained` | copied, then fine-tuned |
 
-[`examples/xnor_reuse.wgt`](examples/xnor_reuse.wgt) imports the trained
-`hidden` layer of `xor_mlp`, freezes it and trains only a new `head` for XNOR:
+A program without `train` still builds, but `build`, `run`, `inspect` and the
+Python loader all flag it, and importing an untrained tensor does not make it
+trained. Training metrics are reported on the training rows only.
+
+Full reference: [docs/language.md](docs/language.md).
+
+## Reusing weights
+
+Import a layer from another artifact, optionally pin its hash and freeze it:
 
 ```wgt
 init   seed=7
@@ -97,65 +180,88 @@ import hidden from "../build/xor_mlp" layer=hidden freeze
 train  data=xnor loss=bce optimizer=adam lr=0.05 epochs=300
 ```
 
-```sh
-weightc build examples/xor.wgt -o build          # must exist first
-weightc build examples/xnor_reuse.wgt -o build
-weightc inspect build/xnor_reuse
-```
-
-The tests check that the imported tensors are bit-identical to the source,
-that they stayed frozen, that the source hash is recorded (and enforced when
-pinned with `sha256=`), and that incompatible layer sizes are rejected. This
-demonstrates the reuse *mechanism*. With four training rows it does not show
-that reuse improves learning; a fresh network would also fit XNOR.
+[`examples/xnor_reuse.wgt`](examples/xnor_reuse.wgt) takes the trained hidden
+layer of `xor_mlp`, freezes it and trains only a new head for XNOR. The tests
+check that the imported tensors are bit-identical to the source and stayed
+frozen, that the source hash is recorded (and enforced with `sha256=`), and that
+mismatched layer sizes are rejected. This shows the reuse *mechanism*; with four
+training rows it does not show that reuse helps learning — a fresh network fits
+XNOR too.
 
 ## Packages
 
-Packages are addressed by GitHub path and fixed by version in `wgt.mod`; weights
-are GitHub release assets, checked against `wgt.sum`. The first published
-package is `packages/gates` (`github.com/WeightLang/WeightLang/packages/gates@v0.1.0`).
+Packages are identified by GitHub path, versions are Git tags, and weights are
+GitHub release assets — not files in Git history.
 
-```sh
-weightc get examples/remote_reuse                      # download, verify, write wgt.sum
-weightc build examples/remote_reuse/xnor.wgt -o build  # offline; imports gates/xor_mlp
-weightc publish packages/gates --version v0.1.0 -o dist # build release assets (maintainers)
+```text
+wgt.mod   require github.com/WeightLang/WeightLang/packages/gates v0.1.0
+xnor.wgt  import hidden from "github.com/WeightLang/WeightLang/packages/gates/xor_mlp" layer=hidden freeze
+wgt.sum   commit + sha256 of the index, manifest, weights and source — commit this file
 ```
 
-Details, lock-file format and known gaps: [docs/packages.md](docs/packages.md).
-
-## Tests
-
 ```sh
-.venv/bin/python -m pytest
-WEIGHTLANG_NETWORK_TESTS=1 .venv/bin/python -m pytest   # also fetch the real release from GitHub
+weightc get   examples/remote_reuse                  # network: fetch, verify, write wgt.sum
+weightc build examples/remote_reuse/xnor.wgt -o build # offline: cache checked against wgt.sum
 ```
 
-The suite covers parsing and line-numbered errors, a full XOR build, bit-exact
-output equality after save/reload, byte-stable rebuilds, tamper detection,
-loading with plain PyTorch, untrained labelling, the reuse cases above, and the
-package flow (publish, get, offline build, tampered assets, moved tags, mismatched
-source) against an in-memory fake of GitHub.
+`weightc get` resolves the tag to a commit, checks every asset's size and sha256
+against the release's `wgt.index.json`, requires the shipped `source.wgt` to equal
+the file in the repository **at that commit**, and verifies the artifact. A later
+moved tag or replaced asset no longer matches `wgt.sum` and is an error.
+
+The first published package is
+[`packages/gates`](packages/gates) → release
+[`packages/gates/v0.1.0`](https://github.com/WeightLang/WeightLang/releases/tag/packages/gates/v0.1.0).
+Publishing your own:
+
+```sh
+weightc publish path/to/pkg --version v0.1.0 -o dist   # prints the git tag + gh release commands
+```
+
+Design, lock-file format and known gaps: [docs/packages.md](docs/packages.md).
 
 ## Documentation
 
-- [Language 0.1](docs/language.md) — syntax, checks, weight sources and origins
-- [Artifact format](docs/artifact.md) — files, manifest fields, verification, loading without WeightLang
-- [Packages](docs/packages.md) — GitHub paths, versions, `wgt.sum`, release assets; implemented subset and open design
+| | |
+|---|---|
+| [docs/language.md](docs/language.md) | Syntax, checks, weight sources and origins |
+| [docs/artifact.md](docs/artifact.md) | Artifact files, manifest fields, verification, loading without WeightLang |
+| [docs/packages.md](docs/packages.md) | Module paths, `wgt.mod`, `wgt.sum`, publishing, fetching, open design |
+
+## Development
+
+```sh
+.venv/bin/python -m pytest                                # no network
+WEIGHTLANG_NETWORK_TESTS=1 .venv/bin/python -m pytest     # + fetch the real gates release
+ruff check src tests && ruff format --check src tests
+```
+
+The suite covers parsing and line-numbered errors, a full XOR build, bit-exact
+outputs after save/reload, byte-stable rebuilds, tamper detection, loading with
+plain PyTorch, untrained labelling, weight reuse, and the package flow (publish,
+get, offline build, tampered assets, moved tags, mismatched source) against an
+in-memory fake of GitHub.
+
+### Release status
+
+| Channel | Status |
+|---|---|
+| GitHub release `v0.1.0` (wheel, sdist, `SHA256SUMS`, install scripts) | published |
+| PyPI `weightlang` | not yet — needs a PyPI trusted publisher, then the manual [`publish-pypi`](.github/workflows/publish-pypi.yml) workflow uploads the same files as the GitHub release |
 
 ## Limitations
 
-- Sequential networks only: `linear`, `relu`, `tanh`, `sigmoid`; one 1-D `f32`
-  input and output.
-- Training data is inline in the source; full-batch training only; `mse`/`bce`
-  losses, `sgd`/`adam` optimisers. Metrics are on training rows only.
-- Imports copy whole `linear` layers. Local import paths are relative to the
-  `.wgt` file. Packages support direct requirements only (no transitive
-  dependencies), GitHub releases only, and trust-on-first-use hashes without
-  signatures; consumers use the publisher's prebuilt weights.
-- Rebuilds are byte-identical on the same PyTorch version and CPU; across
-  versions or hardware the weights may differ, and the hashes will show it.
-- Artifacts run through PyTorch only; no ONNX or other exports.
-- No language server, formatter or stable language guarantee: 0.x syntax may change.
+- **Small language:** sequential networks only (`linear`, `relu`, `tanh`,
+  `sigmoid`), one 1-D `f32` input and output, inline training data, full-batch
+  training, `mse`/`bce`, `sgd`/`adam`.
+- **Imports** copy whole `linear` layers. Packages support direct requirements
+  only, GitHub releases only, and trust-on-first-use hashes without signatures;
+  consumers use the publisher's prebuilt weights.
+- **Reproducibility:** rebuilds are byte-identical on the same PyTorch version and
+  CPU; across versions or hardware weights may differ, and the hashes will show it.
+- **Runtime:** PyTorch only; no ONNX or other exports.
+- **Stability:** 0.x — syntax and formats may change. The Windows installer has
+  not been run on Windows yet.
 
 ## License
 

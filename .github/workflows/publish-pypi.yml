@@ -1,0 +1,40 @@
+# Publish an existing GitHub release of weightc to PyPI.
+#
+# Manual only. It uploads the exact wheel and sdist already attached to the
+# GitHub release (checked against the release's SHA256SUMS), so PyPI and the
+# install scripts serve identical bytes.
+#
+# One-time setup on pypi.org: add a (pending) trusted publisher for project
+# "weightlang": owner WeightLang, repository WeightLang, workflow
+# publish-pypi.yml, environment pypi.
+name: publish-pypi
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, e.g. v0.1.0"
+        required: true
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download release files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          mkdir dist
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D dist \
+            -p 'weightlang-*.whl' -p 'weightlang-*.tar.gz' -p SHA256SUMS
+          cd dist
+          grep -E ' weightlang-' SHA256SUMS | sha256sum -c -
+          rm SHA256SUMS
+          ls -l
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
