@@ -24,7 +24,7 @@ wgt run model.wgt
 ```
 
 源码应声明显式 `fn main()` 作为执行入口。检查/编译不训练、不读取训练数据、不输出模型权重。
-训练在 main 中显式调用 `fit`/`train`；完整模型用 `save_model` 保存，
+训练在 main 中显式调用 `fit` 或 `reinforce`；推理模型用 `save_model` 保存，
 含优化器的断点用 `save` 保存并用 `restore` 恢复，两种文件不能混用。
 路径按当前命令帮助和项目配置核对；保留产物写入 `weights/<model>/`，不得覆盖已有产物。
 
