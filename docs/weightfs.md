@@ -6,7 +6,7 @@ weightfs 是 Linux FUSE 内存文件系统，直接连接 Rust 进程里的模�
 ## 自动挂载与生命周期
 
 `wgt run`、`wgt run --compiled`、编译后的独立程序、`wgt-native script` 在模型构造或恢复后
-自动挂载；`wgt-native MODEL.json ...` 和 `wgt-native adaptive ...` 在开始接收推理请求前挂载。
+默认尝试挂载；`wgt-native MODEL.json ...` 和 `wgt-native adaptive ...` 在开始接收推理请求前尝试挂载。
 同一脚本中的多个模型各有独立目录，句柄副本共享同一个目录。
 `weightc legacy-build` 的显式执行阶段同样挂载，返回模型进行导出前卸载。
 纯检查、只编译和设备枚举不挂载、不初始化模型、不执行训练。
