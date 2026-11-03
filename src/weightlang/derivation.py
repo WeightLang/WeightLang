@@ -424,6 +424,7 @@ def apply(program, module):
     return {
         "format": "weightlang.derivation",
         "format_version": 1,
+        "stage": "before_training",
         "baseline": {
             "path": spec.source,
             "manifest_sha256": spec.sha256,

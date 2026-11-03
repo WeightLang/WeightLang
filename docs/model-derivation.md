@@ -117,7 +117,9 @@ executes after derivation and respects normal freeze rules.
 
 The compiler records `manifest.derivation`: pinned ancestor identity, replaced,
 removed and inserted layers, weight rules, per-tensor source/action, changed
-scalar counts where shapes are comparable, and dropped tensor names. It applies
+scalar counts where shapes are comparable, and dropped tensor names. These
+counts describe the derived state **before subsequent training**, as identified
+by `stage: "before_training"`; final training changes require a separate diff. It applies
 slices in bulk; it does not expand a large slice into millions of JSON edits.
 
 Inherited tensors retain upstream provenance. Initialized tensors remain

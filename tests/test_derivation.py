@@ -56,6 +56,7 @@ def test_expand_head_and_reload(tmp_path, baseline):
     assert result.manifest["weights"]["tensors"]["head.weight"]["origin"] == "edited"
     assert result.manifest["weights"]["tensors"]["trunk.weight"]["upstream_origin"] == "random-init"
     report = result.manifest["derivation"]
+    assert report["stage"] == "before_training"
     assert report["structure"]["replaced"] == ["head"]
     assert report["tensors"]["trunk.weight"]["changed_elements"] == 0
     assert (result.path / "source.wgt").read_text() == path.read_text()
