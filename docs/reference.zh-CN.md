@@ -129,3 +129,10 @@ fn main() {
   `crates/wgt/tests/script_compiler.rs` 验证解释/AOT 的结果和操作数一致。
 
 保留模型和实验在 `weights/`，不因升级版本头自动迁移或覆盖。详见[存储规范](storage.md)。
+
+## 运行中权重的文件系统视图
+
+Linux 训练、推理 CLI 及独立编译程序支持 [weightfs v1](weightfs.md)，在模型初始化后自动挂载
+内存权重视图。它是运行时能力，不增加语法或内置函数；检查和编译阶段不挂载。
+环境变量 `WGT_WEIGHTFS=auto|on|off` 默认 auto。文件编辑校验形状和有限 f32，遵守冻结/共享
+存储约束，在执行之间提交；冲突报错。持久化仍使用显式 save/save_model，详见协议文档。

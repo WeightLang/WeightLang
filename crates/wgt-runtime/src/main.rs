@@ -103,7 +103,7 @@ fn main() -> Result<()> {
         } else {
             weightlang_runtime::adaptive::parse(&source)?
         };
-        let mut session = weightlang_runtime::adaptive::AdaptiveSession::prepare(program, budget)?;
+        let session = weightlang_runtime::adaptive::AdaptiveSession::prepare(program, budget)?;
         let mut commands = weightlang_runtime::adaptive::transport::Commands::default();
         let mut output = io::BufWriter::new(io::stdout().lock());
         writeln!(
@@ -115,9 +115,11 @@ fn main() -> Result<()> {
         if option.is_some() {
             return Ok(());
         }
+        let session = weightlang_runtime::weightfs::Mounted::auto(session)?;
         for line in io::stdin().lock().lines() {
             let response = (|| -> Result<serde_json::Value> {
                 let line = line?;
+                let mut session = session.lock()?;
                 if line.trim_start().starts_with('{') {
                     return commands.execute(&mut session, &line, steps, budget);
                 }
@@ -170,7 +172,7 @@ fn main() -> Result<()> {
         }
     }
     let model: Model = serde_json::from_reader(std::fs::File::open(&path)?)?;
-    let mut session = ExecutionSession::prepare(
+    let session = ExecutionSession::prepare(
         model,
         Path::new(&path).parent().unwrap_or(Path::new(".")),
         budget,
@@ -184,6 +186,7 @@ fn main() -> Result<()> {
     if check {
         return Ok(());
     }
+    let session = weightlang_runtime::weightfs::Mounted::auto(session)?;
     let mut input_stream = io::stdin().lock();
     let mut line = String::new();
     loop {
@@ -193,7 +196,7 @@ fn main() -> Result<()> {
         }
         if let Ok(Command::RunBinary { length }) = serde_json::from_str(&line) {
             anyhow::ensure!(
-                length == session.report().memory.input,
+                length == session.lock()?.report().memory.input,
                 "binary input length mismatch"
             );
             let count = length
@@ -207,6 +210,7 @@ fn main() -> Result<()> {
                 .iter()
                 .map(|v| f32::from_le_bytes(*v))
                 .collect();
+            let mut session = session.lock()?;
             let result = if input.iter().all(|v| v.is_finite()) {
                 session.run(&input)
             } else {
@@ -233,6 +237,7 @@ fn main() -> Result<()> {
             output.flush()?;
             continue;
         }
+        let mut session = session.lock()?;
         if line.trim_start().starts_with('{') {
             let response = command(&mut session, &line)
                 .unwrap_or_else(|error| serde_json::json!({"error": error.to_string()}));

@@ -300,3 +300,11 @@ weightc --offline --locked compile demo.wgt -o demo
 编译模式会把已解析目录映射写入程序；数据/包文件不嵌入可执行文件，移动缓存后需重新编译。
 独立可执行程序不自动联网解析或重新校验包，--root 仅影响脚本相对路径，不改变依赖缓存路径。
 底层 wgt-native script 与 Rust run/run_file 不负责包管理；需要自动依赖时使用 wgt 入口。
+
+## weightfs 自动挂载
+
+当前 Linux CLI 和解释/AOT 脚本在构造、加载或恢复模型后，默认尝试将模型挂载到
+`$XDG_RUNTIME_DIR/weightlang/weightfs/<pid>-<session>/`，stderr 报告实际路径。
+可像文件一样读取和修改参数 JSON；单文件提交与训练/预测互斥，旧版本编辑返回冲突。
+手工编辑保留优化器历史，不自动保存。`WGT_WEIGHTFS=on|auto|off` 控制挂载要求（默认 auto）；
+纯检查与编译不挂载。完整文件协议、环境要求、错误及预算见 [weightfs v1](weightfs.md)。

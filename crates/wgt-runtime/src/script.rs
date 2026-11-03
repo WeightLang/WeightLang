@@ -228,7 +228,7 @@ pub fn build(source: &str, root: &Path, max_operations: u64) -> Result<(Trainer,
     let index = value
         .model()
         .context("build main() must return a model handle")?;
-    let trainer = runtime.models.swap_remove(index);
+    let trainer = runtime.models.swap_remove(index).into_inner()?;
     let report = Report {
         result: serde_json::Value::Null,
         metrics: runtime.metrics,
@@ -268,8 +268,8 @@ pub struct Runtime {
     root: PathBuf,
     remaining: u64,
     depth: usize,
-    models: Vec<Trainer>,
-    adaptive: Vec<crate::adaptive::AdaptiveSession>,
+    models: Vec<crate::weightfs::Mounted<Trainer>>,
+    adaptive: Vec<crate::weightfs::Mounted<crate::adaptive::AdaptiveSession>>,
     readers: Vec<Option<dataset::Reader>>,
     rng: u64,
     metrics: BTreeMap<String, serde_json::Value>,
@@ -526,7 +526,7 @@ impl Runtime {
                 let model = mlp(&widths, a[1].text()?, a[2].integer()? as u64)?;
                 let trainer = Trainer::new(model, &self.root, 256 * 1024 * 1024, optimizer)?;
                 let index = self.models.len();
-                self.models.push(trainer);
+                self.models.push(crate::weightfs::Mounted::auto(trainer)?);
                 Ok(Value::Model(index))
             }
             "__graph" => {
@@ -534,14 +534,14 @@ impl Runtime {
                 let graph: crate::source::Graph = serde_json::from_str(a[0].text()?)?;
                 let optimizer = match a[1].text()? { "sgd" => Optimizer::Sgd, "adam" => Optimizer::Adam, _ => bail!("optimizer must be sgd or adam") };
                 let trainer = Trainer::new(graph.instantiate()?, &self.root, 256*1024*1024, optimizer)?;
-                let index = self.models.len(); self.models.push(trainer); Ok(Value::Model(index))
+                let index = self.models.len(); self.models.push(crate::weightfs::Mounted::auto(trainer)?); Ok(Value::Model(index))
             }
             "__adaptive" => {
                 ensure!(a[1].text()? == "none", "forward model constructor requires optimizer none; use explicit parameter updates");
                 ensure!(self.adaptive.len() < 64, "model handle limit exceeded");
                 let program = serde_json::from_str(a[0].text()?)?;
                 let session = crate::adaptive::AdaptiveSession::prepare(program, 64*1024*1024)?;
-                let index = self.adaptive.len(); self.adaptive.push(session); Ok(Value::Adaptive(index))
+                let index = self.adaptive.len(); self.adaptive.push(crate::weightfs::Mounted::auto(session)?); Ok(Value::Adaptive(index))
             }
             "model" => {
                 ensure!(self.models.len() < 64, "model handle limit exceeded");
@@ -559,35 +559,35 @@ impl Runtime {
                     optimizer,
                 )?;
                 let index = self.models.len();
-                self.models.push(trainer);
+                self.models.push(crate::weightfs::Mounted::auto(trainer)?);
                 Ok(Value::Model(index))
             }
             "save_model" => {
-                self.models[a[0].model()?].export(&self.root.join(a[1].text()?))?;
+                self.models[a[0].model()?].lock()?.export(&self.root.join(a[1].text()?))?;
                 Ok(Value::Null)
             }
             "predict" => {
                 if let Value::Adaptive(index) = a[0] {
-                    let result = self.adaptive[index].run(&a[1].vector()?, self.remaining)?.to_vec();
-                    self.remaining = self.remaining.checked_sub(self.adaptive[index].steps()).context("operation budget exceeded")?;
+                    let result = self.adaptive[index].lock()?.run(&a[1].vector()?, self.remaining)?.to_vec();
+                    self.remaining = self.remaining.checked_sub(self.adaptive[index].lock()?.steps()).context("operation budget exceeded")?;
                     return Ok(vector(result));
                 }
                 let model = a[0].model()?;
-                Ok(vector(self.models[model].predict(&a[1].vector()?)?))
+                Ok(vector(self.models[model].lock()?.predict(&a[1].vector()?)?))
             }
             "fit" => {
                 let model = a[0].model()?;
                 let x = a[1].matrix()?;
                 let rate = a[3].float()?;
                 let loss = match a[4].text()? {
-                    "mse" => self.models[model].step(&x, Objective::Mse(&a[2].matrix()?), rate)?,
+                    "mse" => self.models[model].lock()?.step(&x, Objective::Mse(&a[2].matrix()?), rate)?,
                     "cross_entropy" => {
                         let actions = a[2]
                             .list()?
                             .iter()
                             .map(Value::integer)
                             .collect::<Result<Vec<_>>>()?;
-                        self.models[model].step(
+                        self.models[model].lock()?.step(
                             &x,
                             Objective::Policy {
                                 actions: &actions,
@@ -609,7 +609,7 @@ impl Runtime {
                     .map(Value::integer)
                     .collect::<Result<Vec<_>>>()?;
                 let advantages = a[3].vector()?;
-                number(self.models[model].step(
+                number(self.models[model].lock()?.step(
                     &x,
                     Objective::Policy {
                         actions: &actions,
@@ -619,7 +619,7 @@ impl Runtime {
                 )? as f64)
             }
             "sample" => {
-                let logits = self.models[a[0].model()?].predict(&a[1].vector()?)?;
+                let logits = self.models[a[0].model()?].lock()?.predict(&a[1].vector()?)?;
                 let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 let probabilities: Vec<f64> =
                     logits.iter().map(|n| ((*n - max) as f64).exp()).collect();
@@ -699,14 +699,14 @@ impl Runtime {
             }
             "save" => {
                 let path = self.root.join(a[1].text()?);
-                self.models[a[0].model()?].save(&path)?;
+                self.models[a[0].model()?].lock()?.save(&path)?;
                 Ok(Value::Null)
             }
             "restore" => {
                 ensure!(self.models.len() < 64, "model handle limit exceeded");
                 let trainer = Trainer::restore(&self.root.join(a[0].text()?), 256 * 1024 * 1024)?;
                 let index = self.models.len();
-                self.models.push(trainer);
+                self.models.push(crate::weightfs::Mounted::auto(trainer)?);
                 Ok(Value::Model(index))
             }
             "benchmark" => {
@@ -718,11 +718,11 @@ impl Runtime {
                     warmup <= 10000 && repeats > 0 && repeats <= 100000,
                     "invalid benchmark iterations"
                 );
-                self.models[model].predict(&x)?; // validate outside timing
+                self.models[model].lock()?.predict(&x)?; // validate outside timing
                 for _ in 0..warmup {
                     self.tick()?;
                     std::hint::black_box(
-                        self.models[model]
+                        self.models[model].lock()?
                             .session
                             .run(&x)
                             .map_err(anyhow::Error::msg)?,
@@ -733,7 +733,7 @@ impl Runtime {
                     self.tick()?;
                     let start = Instant::now();
                     std::hint::black_box(
-                        self.models[model]
+                        self.models[model].lock()?
                             .session
                             .run(&x)
                             .map_err(anyhow::Error::msg)?,

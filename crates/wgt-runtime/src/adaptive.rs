@@ -365,6 +365,19 @@ impl AdaptiveSession {
             .data)
     }
 
+    /// Replace one live parameter between executions; existing tapes remain snapshots.
+    pub fn replace_parameter(&mut self, name: &str, values: &[f32]) -> Result<()> {
+        let p = self.program.parameters.iter_mut().find(|p| p.name == name)
+            .context("unknown parameter")?;
+        ensure!(!p.frozen, "frozen parameter");
+        ensure!(values.len() == p.data.len(), "parameter length mismatch");
+        ensure!(values.iter().all(|v| v.is_finite()), "nonfinite parameter");
+        let revision = self.revision.checked_add(1).context("revision overflow")?;
+        p.data.copy_from_slice(values);
+        self.revision = revision;
+        Ok(())
+    }
+
     fn ready(&self, index: usize) -> Result<()> {
         ensure!(
             self.initialized[index],

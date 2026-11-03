@@ -87,3 +87,5 @@ Packaging verifies matching versions and creates both platform assets plus
 checksums in a new directory. Publishing is a separate operation.
 
 [MIT license](LICENSE).
+
+Linux training and inference support [weightfs](docs/weightfs.md): an automatically mounted, in-memory view of live weights as editable JSON files. Persistence still requires an explicit model or checkpoint save.

@@ -78,3 +78,5 @@ sh scripts/package_wgt.sh --binary target/release/wgt --output dist/native-relea
 打包检查两个程序版本一致，在全新目录写入平台文件与校验和；不会自动发布。
 
 [MIT 许可证](LICENSE)。
+
+Linux 训练和推理支持 [weightfs](docs/weightfs.md)：自动挂载运行中的内存权重，按 JSON 文件浏览和编辑；显式保存后才持久化。

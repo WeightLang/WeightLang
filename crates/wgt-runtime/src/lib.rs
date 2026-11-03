@@ -1,5 +1,6 @@
 //! Native f32 inference with checked parameter expressions and reusable CPU storage.
 //! `Session::run` allocates no heap memory. Preparation and transport may allocate.
+pub mod weightfs;
 pub mod source;
 pub mod execution;
 pub mod adaptive;

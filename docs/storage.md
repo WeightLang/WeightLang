@@ -16,3 +16,10 @@
 原生编译的 Cargo 中间文件使用当前目录下的 `.cache/weightlang/aot/`；编译不执行训练或生成权重。单文件脚本的依赖锁位于包缓存中的 `scripts/<脚本规范路径的 SHA256>/wgt.sum`；项目脚本使用项目的 `wgt.sum`。完整路径及依赖规则见[原生训练](native-training.md#单文件依赖注释与直接执行)。
 
 其他项目使用 `/tmp/<project>/` 保存小型临时文件，并使用各自的磁盘缓存。
+
+## 运行中的权重视图
+
+[weightfs](weightfs.md) 自动挂载于 `$XDG_RUNTIME_DIR/weightlang/weightfs/<pid>-<session>/`
+（未设置时基于 `/run/user/<euid>`）。这是直接访问进程内权重的 FUSE 内存文件系统，
+是本规范明确允许的易失权重视图，不是完整模型制品、下载或大型临时文件。
+编辑只改变运行中的模型；退出不自动持久化，仍须显式保存至 `weights/` 的新目标。
