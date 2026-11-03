@@ -1,5 +1,5 @@
-# 量化
+# 原生推理的打包权重
 
-原生 IR 支持打包权重存储；当前 WGT 0.5 模型构造器不支持 precision 声明或自动量化。
+原生 IR v1 的 `packed` 和 `packed_file` 参数存储支持 `int4`、`int8`、`f16` 和 `bf16`，用于二维权重矩阵；执行接口与内存预算见[原生执行后端](native-backend.md#原生-ir-v1)。这些是 IR 存储格式，端口、激活和累加仍使用 f32。
 
-当前已实现的语法和边界见 [WGT 0.5 语言参考](reference.zh-CN.md)、[原生训练](native-training.md)和[原生执行后端](native-backend.md)。完整模型和实验应遵循[存储规范](storage.md)。
+当前 WGT 0.5 模型构造器不支持 `precision` 声明，原生脚本没有自动校准或量化搜索入口。打包存储能力不代表存在量化训练、自动转换、任务质量保证或所有设备上的性能提升。

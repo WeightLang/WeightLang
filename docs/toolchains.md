@@ -1,17 +1,14 @@
-> **历史接口说明 / Historical interfaces:** 当前源码已清退全部 Python 实现和测试。本文中的 Python API、`.py` 脚本和旧 CLI 示例已停用；仅 Rust 实现部分继续有效。参见[原生入口与迁移边界](weightc-migration.md)。
-
 # Project wgt versions
 
 `.wgt-version` pins the native **wgt executable version**, independently of the
-language edition in `wgt.toml`, the Python compiler version, and dependencies in
-`wgt.lock`. It contains one exact stable version, for example:
+language version and project model dependencies. It contains one exact stable version, for example:
 
 ```text
 0.1.0
 ```
 
 `wgt new` and `wgt init` write the running wgt version automatically. Commit the
-file alongside `wgt.toml`, `wgt.sum` and `wgt.lock`.
+file alongside `wgt.toml` and `wgt.sum`.
 
 ```sh
 wgt version             # show the effective pin and its location
@@ -85,39 +82,22 @@ The native installer uses GitHub release tag `wgt-vX.Y.Z` in
 `WeightLang/WeightLang`, separate from Python `weightc` releases. Each release
 contains `SHA256SUMS` plus raw executables:
 
-- `wgt-linux-x86_64`, `wgt-linux-aarch64`
-- `wgt-macos-x86_64`, `wgt-macos-aarch64`
-- `wgt-windows-x86_64.exe`, `wgt-windows-aarch64.exe`
+- `wgt-<os>-<arch>` and `weightc-<os>-<arch>` for each supported platform;
+- Windows executables additionally use the `.exe` suffix.
 
 Build and package **on each target platform**:
 
 ```sh
 cargo build --release -p weightlang-wgt
-python scripts/package_wgt.py --binary target/release/wgt --output dist/native-linux-x86_64
+sh scripts/package_wgt.sh --binary target/release/wgt --output dist/native-linux-x86_64
 ```
 
-On Windows use `target/release/wgt.exe`. Combine each platform's `SHA256SUMS`
+On Windows use `scripts/package_wgt.ps1 -Binary target/release/wgt.exe -Output dist/native-release`. Combine each platform's `SHA256SUMS`
 entries into a single release file and upload it with the executables. The
 packager refuses to overwrite an output directory. Missing releases/assets fail
 explicitly; older binaries are never manufactured.
 
-[Native wgt 0.5.2](https://github.com/WeightLang/WeightLang/releases/tag/wgt-v0.1.2)
-provides a static Linux x86_64 executable and SHA256SUMS. Other target assets are
-not published in this release; build from source or import a trusted local binary
-on those systems. Native package management works independently of Python; this
-release uses external weightc for model compilation.
-
-Older installations that require a module and `--version` for `wgt update`
-predate toolchain management. Bootstrap once from the release executable or:
-
-```sh
-cargo install --git https://github.com/WeightLang/WeightLang --tag wgt-v0.1.2 --locked --force weightlang-wgt
-```
-
-Then use `wgt self update` for subsequent toolchain updates.
-
-Local imports work before releases exist. Linux switching is tested locally;
-Windows/macOS naming is tested, but native execution needs those systems.
+Availability of complete native releases depends on the published assets. A release must contain both `wgt` and `weightc` for the target platform and their SHA256 checksums; older single-executable releases are not complete native toolchains. Local imports also require a matching `weightc` beside `wgt`.
 
 ## Upgrade all package dependencies
 

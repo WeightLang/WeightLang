@@ -4,8 +4,9 @@
 
 ```sh
 cargo build -p weightlang-runtime --bin wgt-native
-target/debug/wgt-native examples/native_backend/model.json 1048576 --device cpu --check
-printf '[0.1,0.2]\n' | target/debug/wgt-native examples/native_backend/model.json 1048576 --device cpu
+# 使用通过 save_model 导出的 model.json：
+target/debug/wgt-native weights/native_training/model.json 1048576 --device cpu --check
+printf '[0.25]\n' | target/debug/wgt-native weights/native_training/model.json 1048576 --device cpu
 ```
 
 ## 原生 IR v1
@@ -31,8 +32,7 @@ WGT 0.5 模型构造器当前不支持 share 声明。
 linear 节点字段为 `op=linear, weight=NAME, bias=NAME|null`；bias 可以省略，表示无偏置。
 权重必须为 `[out,current_width]`，bias 必须为 `[out]`。
 其余节点只有 op。严格拒绝未知算子和字段。
-完整例子见 [model.json](../examples/native_backend/model.json) 和
-[WGT 模型](../examples/native_backend/model.wgt)。
+完整的模型及断点保存流程见 [checkpoint.wgt](../examples/native_training/checkpoint.wgt)；须显式执行脚本后才会创建 model.json。
 
 ## 内存与生命周期契约
 
