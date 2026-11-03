@@ -14,6 +14,10 @@ path = "src/main.rs"
 name = "weightc"
 path = "src/weightc.rs"
 
+[features]
+default = []
+gpu = ["weightlang-runtime/gpu"]
+
 [dependencies]
 weightlang-runtime = { path = "../wgt-runtime", default-features = false }
 anyhow = "1"
