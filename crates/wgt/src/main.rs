@@ -556,6 +556,7 @@ fn build(project: &Path, source: &Path, output: &Path, force: bool) -> Result<Pa
     let name = model_name(source)?.context("cannot build a library; select a model source")?;
     let mut args = vec![
         "build".into(),
+        "--no-store".into(),
         source.as_os_str().into(),
         "-o".into(),
         output.as_os_str().into(),

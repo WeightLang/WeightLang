@@ -1,6 +1,6 @@
 # Artifact format (version 2)
 
-`weightc build model.wgt -o weights` writes `weights/<model>/`:
+`weightc build --no-store model.wgt -o weights` writes `weights/<model>/`:
 
 ```
 weights/xor_mlp/

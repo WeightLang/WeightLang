@@ -118,7 +118,7 @@ def test_cli_build_run_inspect_verify(workspace, capsys):
     src = str(workspace / "examples" / "xor.wgt")
     out = str(workspace / "weights")
     assert main(["check", src]) == 0
-    assert main(["build", src, "-o", out]) == 0
+    assert main(["build", "--no-store", src, "-o", out]) == 0
     capsys.readouterr()
     assert main(["run", f"{out}/xor_mlp", "--input", json.dumps(XOR_X)]) == 0
     probs = json.loads(capsys.readouterr().out)["prob"]

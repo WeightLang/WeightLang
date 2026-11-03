@@ -25,7 +25,7 @@ botanical measurements, distribution shifts or other species.
 Build and audit:
 
 ```sh
-weightc build packages/iris/iris.wgt -o weights
+weightc build --no-store packages/iris/iris.wgt -o weights
 weightc audit weights/iris
 ```
 

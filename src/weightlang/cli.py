@@ -36,15 +36,17 @@ def _cmd_build(args: argparse.Namespace) -> int:
     from .compiler import compile_file  # imports torch training code lazily
 
     if args.message and not args.store:
-        raise WgtError("--message requires --store")
+        raise WgtError("--message cannot be used with --no-store")
     if args.parent and not args.store:
-        raise WgtError("--parent requires --store")
+        raise WgtError("--parent cannot be used with --no-store")
     if args.store:
         import tempfile
         from .repository import WeightRepository
 
         if args.force or args.out != "weights":
-            raise WgtError("--store cannot be combined with --force or a custom -o")
+            raise WgtError(
+                "--force and custom -o require --no-store; versioned builds use checkout for standalone output"
+            )
         repository = WeightRepository(args.store)
         expected = repository.prepare(args.parent)
         with tempfile.TemporaryDirectory(prefix=".build-", dir=repository.root) as tmp:
@@ -293,18 +295,27 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("source")
     p.set_defaults(func=_cmd_check)
 
-    p = sub.add_parser("build", help="compile a .wgt file into an artifact directory")
+    p = sub.add_parser("build", help="build and record a weight version; --no-store writes a standalone artifact")
     p.add_argument("source")
     p.add_argument("-o", "--out", default="weights", help="output root; writes <root>/<model>/ (default: weights)")
     p.add_argument("--force", action="store_true", help="replace an existing WeightLang model directory")
-    p.add_argument(
+    storage = p.add_mutually_exclusive_group()
+    storage.add_argument(
         "--store",
         nargs="?",
         const="weights/.revisions",
-        help="commit to a weight repository (default: weights/.revisions)",
+        help="override the default weight repository (weights/.revisions)",
     )
+    storage.add_argument(
+        "--no-store",
+        dest="store",
+        action="store_const",
+        const=None,
+        help="build a standalone artifact without recording a version",
+    )
+    p.set_defaults(store="weights/.revisions")
     p.add_argument("--parent", help="optional expected HEAD; normally inferred automatically")
-    p.add_argument("-m", "--message", default="", help="weight version commit message (with --store)")
+    p.add_argument("-m", "--message", default="", help="weight version commit message")
     p.set_defaults(func=_cmd_build)
 
     p = sub.add_parser("run", help="run inference with an artifact")

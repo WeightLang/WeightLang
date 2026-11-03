@@ -18,7 +18,7 @@ These commands are **on main, not in the published weightc 0.2.0 wheel**.
 Install this checkout with `pip install -e .`.
 
 ```sh
-weightc build examples/xor.wgt -o weights
+weightc build --no-store examples/xor.wgt -o weights
 weightc weights weights/xor_mlp --limit 0 > xor.weights.json
 weightc weights weights/xor_mlp --layer hidden --limit 16
 weightc diff weights/baseline weights/candidate

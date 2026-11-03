@@ -6,16 +6,16 @@ source and is not a claim about the published 0.2 wheel.
 
 ```sh
 # Build and commit; first invocation automatically initializes main.
-weightc build model.wgt --store -m "baseline"
+weightc build model.wgt -m "baseline"
 # Edit model.wgt, or use a different program for your next training run.
-weightc build next.wgt --store -m "train only the output layer"
+weightc build next.wgt -m "train only the output layer"
 weightc revision log
 weightc revision status
 weightc revision stats
 
 # Branches share the same objects. Future builds commit to experiment.
 weightc revision switch -c experiment
-weightc build experiment.wgt --store -m "try a different learning rate"
+weightc build experiment.wgt -m "try a different learning rate"
 weightc revision switch main
 
 # Export last main version, or the previous one, without copying IDs.
@@ -25,7 +25,9 @@ weightc revision diff HEAD~1 HEAD
 ```
 
 The default repository is `weights/.revisions`. Every command accepts
-`--store PATH`; `build --store` without a path selects that default. Use one
+`--store PATH` to override it. `build` records versions by default; `--no-store`
+builds only a standalone artifact at `weights/<model>/` (or a custom `-o ROOT`).
+`--no-store` cannot be combined with `--store`, `-m` or `--parent`. Use one
 repository per model lineage; intentionally distinct experiments can be branches.
 The parent records history; it does not change the training program, automatically
 reuse prior weights or restore optimizer state. Continue weights using `inherit`

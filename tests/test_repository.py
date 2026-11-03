@@ -142,10 +142,10 @@ def test_cli_auto_build_history_and_switch(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     source = Path("model.wgt")
     source.write_text(model_source(0))
-    assert main(["build", str(source), "--store", "-m", "first"]) == 0
+    assert main(["build", str(source), "-m", "first"]) == 0
     a = json.loads(capsys.readouterr().out)
     source.write_text(model_source(1))
-    assert main(["build", str(source), "--store", "-m", "second"]) == 0
+    assert main(["build", str(source), "-m", "second"]) == 0
     b = json.loads(capsys.readouterr().out)
     assert b["parent"] == a["revision"]
     assert main(["revision", "log"]) == 0
@@ -216,3 +216,23 @@ def test_build_conflict_exports_recoverable_result(tmp_path, models, monkeypatch
     assert repo.resolve() != saved
     assert repo.store.verify(saved)["verified"]
     assert not list(root.glob(".build-*"))
+
+
+def test_explicit_no_store_and_flag_conflicts(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    Path("model.wgt").write_text(model_source(0))
+    assert main(["build", "model.wgt", "--no-store"]) == 0
+    assert Path("weights/demo/weights.safetensors").is_file()
+    assert not Path("weights/.revisions").exists()
+    assert main(["build", "model.wgt", "--no-store", "-m", "unused"]) == 1
+    assert main(["build", "model.wgt", "--no-store", "--parent", "0" * 64]) == 1
+    assert not Path("weights/.revisions").exists()
+    with pytest.raises(SystemExit) as error:
+        main(["build", "model.wgt", "--store", "--no-store"])
+    assert error.value.code == 2
+    assert main(["build", "model.wgt", "-o", "custom"]) == 1
+    assert not Path("custom").exists()
+    assert main(["build", "model.wgt", "-m", "tracked"]) == 0
+    assert Path("weights/.revisions/refs.json").is_file()
+    # The default build must not overwrite an independently retained model.
+    assert Path("weights/demo/weights.safetensors").is_file()

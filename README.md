@@ -44,7 +44,7 @@ WeightLang is meant to be written mostly by AI coding models, so the syntax is
 small, line-oriented and strict. It should still be easy for a person to review.
 
 ```text
- xor.wgt ──weightc build──▶ weights/xor_mlp/ ──weightc run──▶ {"prob": [[0.00003], [0.9999], ...]}
+ xor.wgt ──weightc build --no-store──▶ weights/xor_mlp/ ──weightc run──▶ {"prob": [[0.00003], [0.9999], ...]}
                               ├─ manifest.json        structure · I/O · provenance · hashes
                               ├─ weights.safetensors  float32 tensors, no pickle
                               └─ source.wgt           the exact source
@@ -98,9 +98,13 @@ Requirements: Python ≥ 3.10, PyTorch ≥ 2.2, safetensors ≥ 0.4.
 
 ## Quick start
 
+Source builds record weight versions by default: `weightc build model.wgt -m "message"`.
+The standalone examples below use `--no-store` to retain their output paths; see
+[weight version control](docs/weight-version-control.md).
+
 ```sh
 weightc check   examples/xor.wgt               # parse and type-check, no build
-weightc build   examples/xor.wgt -o weights      # init → train → weights/xor_mlp/
+weightc build --no-store   examples/xor.wgt -o weights      # init → train → weights/xor_mlp/
 weightc run     weights/xor_mlp --input '[[0,0],[0,1],[1,0],[1,1]]'
 weightc inspect weights/xor_mlp                  # I/O contract + where each tensor came from
 weightc verify  weights/xor_mlp                  # re-check hashes, shapes, loadability
@@ -129,7 +133,7 @@ Artifacts can also be loaded with only `torch` + `safetensors` — see
 | Command | What it does |
 |---|---|
 | `weightc check FILE` | Parse and type-check a `.wgt` file |
-| `weightc build FILE -o DIR` | Build an artifact into `DIR/<model>/` |
+| `weightc build --no-store FILE -o DIR` | Build an artifact into `DIR/<model>/` |
 | `weightc run ARTIFACT --input JSON` | Run inference; JSON in, JSON out |
 | `weightc inspect ARTIFACT [--json]` | Show interface, layers and tensor provenance |
 | `weightc std` | List bundled block signatures |
@@ -213,7 +217,7 @@ wgt.sum   commit + sha256 of the index, manifest, weights and source — commit 
 
 ```sh
 weightc get   examples/remote_reuse                  # network: fetch, verify, write wgt.sum
-weightc build examples/remote_reuse/xnor.wgt -o weights # offline: cache checked against wgt.sum
+weightc build --no-store examples/remote_reuse/xnor.wgt -o weights # offline: cache checked against wgt.sum
 ```
 
 `weightc get` resolves the tag to a commit, checks every asset's size and sha256
@@ -329,9 +333,9 @@ convolution and pooling. `std/transformer` and `std/vision` bring the total to
 ```sh
 # Install compiler source too; the released 0.2.0 wheel cannot build these examples.
 python -m pip install -e .
-weightc build examples/transformer.wgt -o weights
+weightc build --no-store examples/transformer.wgt -o weights
 wgt graph weights/tiny_transformer --open
-weightc build examples/cnn.wgt -o weights
+weightc build --no-store examples/cnn.wgt -o weights
 wgt graph weights/tiny_cnn --open
 ```
 

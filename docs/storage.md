@@ -1,3 +1,13 @@
+# Default weight version history
+
+`weightc build model.wgt` commits to `weights/.revisions`, automatically maintaining
+HEAD and sharing weight blocks. `--store PATH` overrides the repository location.
+`weightc build --no-store model.wgt` explicitly selects standalone output; the
+standalone directory and overwrite rules below apply to that mode. `-m` and
+`--parent` cannot be used with `--no-store`. Use `revision checkout HEAD -o DIR`
+to export a version. The Rust tool's artifact-based build/run/test wrapper explicitly
+selects standalone output to keep its existing path contracts.
+
 # Storage layout
 
 Model outputs are durable project data, not compiler caches.
@@ -12,7 +22,7 @@ Model outputs are durable project data, not compiler caches.
 | Release archives | dist/ | Explicit publishing outputs |
 | Rust compiler output | target/ | Rust's own cache, never the default model output |
 
-weightc build model.wgt writes `weights/<model>/` relative to the current directory.
+weightc build --no-store model.wgt writes `weights/<model>/` relative to the current directory.
 wgt build resolves it relative to the discovered project root. The name comes
 from the source's model declaration, not the source filename.
 

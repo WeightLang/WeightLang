@@ -51,7 +51,7 @@ use explicit imports for partial or remote package reuse.
 
 ```sh
 weightc revision commit weights/base -m "baseline"
-weightc build next.wgt --store -m "next iteration"
+weightc build next.wgt -m "next iteration"
 weightc revision log
 weightc revision switch -c experiment
 weightc revision inspect HEAD
@@ -73,9 +73,10 @@ checkout the selected revision and use that artifact's weights hash. A revision
 ID hashes the revision record; a weights hash hashes the safetensors file. These
 are deliberately different identities.
 
-`build --store` writes a temporary full artifact **inside the disk-backed store**,
+Default `build` writes a temporary full artifact **inside the disk-backed store**,
 saves the revision, and removes that temporary directory on success or failure.
-It cannot be combined with `--force` or a custom `-o`. Saving an existing artifact
+Use `build --no-store` for standalone output with `-o` and explicit replacement
+via `--force`; these options are not available for versioned builds. Saving an existing artifact
 never deletes it. Both paths still need memory for the model and temporary disk
 space for a full artifact; this feature saves retained iteration storage, not
 peak training memory or scratch space. `new_bytes` counts newly published object

@@ -301,7 +301,7 @@ def test_cli_trained_import_does_not_claim_random(tmp_path, capsys):
     text = source("layer fc: linear(in=2, out=3)", suffix=f'import fc from "{original.path}"\n', width=3)
     path = tmp_path / "reuse.wgt"
     path.write_text(text)
-    assert main(["build", str(path), "-o", str(tmp_path / "reuse")]) == 0
+    assert main(["build", "--no-store", str(path), "-o", str(tmp_path / "reuse")]) == 0
     output = capsys.readouterr().out
     assert "retained imported trained weights" in output
     assert "WARNING" not in output

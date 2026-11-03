@@ -20,7 +20,7 @@ def main():
     def weightc(*arguments):
         return subprocess.check_output([sys.executable, "-m", "weightlang", *map(str, arguments)], text=True)
 
-    print(weightc("build", here / "affine.wgt", "-o", root / "baseline"), end="")
+    print(weightc("build", "--no-store", here / "affine.wgt", "-o", root / "baseline"), end="")
     baseline = root / "baseline" / "affine"
     patch = json.loads(weightc("patch-template", baseline, "--author", "WeightLang affine demo"))
     patch["reason"] = "Explicitly implement y = 2*x + 1; no training or automated weight search"
