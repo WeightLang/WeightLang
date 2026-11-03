@@ -243,7 +243,7 @@ fn cli_works_without_python_or_weightc_and_preserves_files() {
     assert!(run(&["new", "demo"]).status.success());
     assert!(run(&["-C", "demo", "metadata"]).status.success());
     assert!(run(&["-C", "demo", "fetch", "--offline"]).status.success());
-    let manifest_before = fs::read(t.path().join("demo/wgt.mod")).unwrap();
+    let manifest_before = fs::read(t.path().join("demo/wgt.toml")).unwrap();
     assert!(!run(&[
         "-C",
         "demo",
@@ -256,10 +256,12 @@ fn cli_works_without_python_or_weightc_and_preserves_files() {
     .status
     .success());
     assert_eq!(
-        fs::read(t.path().join("demo/wgt.mod")).unwrap(),
+        fs::read(t.path().join("demo/wgt.toml")).unwrap(),
         manifest_before
     );
-    assert!(!t.path().join("demo/wgt.sum").exists());
+    assert!(fs::read_to_string(t.path().join("demo/wgt.sum"))
+        .unwrap()
+        .is_empty());
     let before = fs::read(t.path().join("demo/main.wgt")).unwrap();
     assert!(!run(&["-C", "demo", "init"]).status.success());
     assert_eq!(fs::read(t.path().join("demo/main.wgt")).unwrap(), before);

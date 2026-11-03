@@ -326,7 +326,7 @@ pub fn package(
     allow_untrained: bool,
 ) -> Result<Value> {
     manifest::version(version)?;
-    let m = Manifest::read(&project.join("wgt.mod"))?;
+    let m = Manifest::read(&manifest::manifest_path(project)?)?;
     let parts = manifest::module_parts(&m.module)?;
     ensure!(
         m.dependencies.is_empty(),

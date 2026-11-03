@@ -12,12 +12,14 @@ from pathlib import Path
 from .artifact import load_artifact, sha256_file
 from .revisions import FILES, RevisionStore, _canonical, _id
 from .syntax import WgtError
+from .retention import DEFAULT_MAX_VERSIONS, validate
 
 
 class WeightRepository:
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, *, max_versions=DEFAULT_MAX_VERSIONS):
         self.store = RevisionStore(root)
         self.root = self.store.root
+        self.max_versions = validate(max_versions)
 
     @staticmethod
     def _branch(name):
@@ -83,14 +85,14 @@ class WeightRepository:
         except (ValueError, KeyError, TypeError) as exc:
             raise WgtError(f"invalid refs.json: {exc}") from None
 
-    def _write(self, state):
+    def _write(self, state, filename="refs.json"):
         fd, name = tempfile.mkstemp(prefix=".refs-", dir=self.root)
         try:
             with os.fdopen(fd, "wb") as stream:
                 stream.write(_canonical(state))
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(name, self.root / "refs.json")
+            os.replace(name, self.root / filename)
         finally:
             Path(name).unlink(missing_ok=True)
 
@@ -197,6 +199,7 @@ class WeightRepository:
                         "unchanged": True,
                         "new_bytes": 0,
                         "artifact_bytes": sum(f["size"] for f in previous["files"].values()),
+                        "retention": self._prune(state),
                     }
             result = self.store.save(artifact, parent=tip, message=message)
             if branch is None:
@@ -204,7 +207,66 @@ class WeightRepository:
             else:
                 state["branches"][branch] = result["revision"]
             self._write(state)
-            return {**result, "branch": branch, "unchanged": False}
+            retention = self._prune(state)
+            return {**result, "branch": branch, "unchanged": False, "retention": retention}
+
+    def checkout(self, ref, output):
+        with self._lock():
+            return self.store.checkout(self.resolve(ref), output)
+
+    def prune(self):
+        with self._lock():
+            return self._prune(self._state())
+
+    def _prune(self, state):
+        result = {"max_versions": self.max_versions, "pruned_versions": 0, "freed_bytes": 0}
+        # Builds capture HEAD before loading it. Do not invalidate that baseline
+        # or conflict-recovery ancestry while any managed build is in progress.
+        if self.max_versions == 0:
+            return result
+        if any(self.root.glob(".build-*")):
+            return {**result, "deferred": "build in progress"}
+        tips = set(state["branches"].values()) | {self._tip(state)}
+        reachable, keep = set(), set()
+        for tip in tips - {None}:
+            revision, depth = tip, 0
+            while revision is not None:
+                if depth < self.max_versions:
+                    keep.add(revision)
+                reachable.add(revision)
+                revision = self.store.read(revision)["parent"]
+                depth += 1
+        pruned = self.store.pruned()
+        expired = reachable - keep
+        records = {
+            path.name: self.store.read(path.name)
+            for path in (self.root / "revisions").glob("*")
+            if re.fullmatch(r"[0-9a-f]{64}", path.name)
+        }
+        # Unreferenced results may be the sole recovery copy after a conflicting
+        # build; retain their objects, along with every retained branch snapshot.
+        remove, protected = set(), set()
+        for revision, record in records.items():
+            objects = {obj["sha256"] for f in record["files"].values() for obj in f["objects"]}
+            if revision in expired | pruned:
+                remove.update(objects)
+            else:
+                protected.update(objects)
+        paths = [self.root / "objects" / digest for digest in remove - protected]
+        for path in paths:
+            if path.is_symlink():
+                raise WgtError(f"symlink is not a store object: {path}")
+        # Mark first: an interrupted deletion is safely retried on the next pass.
+        # Immutable revision metadata and IDs remain valid for history inspection.
+        if expired - pruned:
+            self._write(sorted(pruned | expired), "pruned.json")
+        for path in paths:
+            if path.exists():
+                size = path.stat().st_size
+                path.unlink()
+                result["freed_bytes"] += size
+        result["pruned_versions"] = len(expired - pruned)
+        return result
 
     def status(self, artifact=None):
         state = self._state(required=False)
@@ -235,6 +297,8 @@ class WeightRepository:
             if name in state["branches"]:
                 raise WgtError(f"branch {name!r} already exists")
             revision = None if start == "HEAD" and self._tip(state) is None else self._resolve(start, state)
+            if revision is not None:
+                self.store.require_available(revision)
             state["branches"][name] = revision
             if switch:
                 state["head"] = {"branch": name}
@@ -245,7 +309,9 @@ class WeightRepository:
         with self._lock():
             state = self._state()
             if detach:
-                state["head"] = {"revision": self._resolve(ref, state)}
+                revision = self._resolve(ref, state)
+                self.store.require_available(revision)
+                state["head"] = {"revision": revision}
             elif ref in state["branches"]:
                 if state["branches"][ref] is not None:
                     self.store.read(state["branches"][ref])
@@ -263,9 +329,10 @@ class WeightRepository:
             return []
         revision = self._resolve(ref, state)
         entries = []
+        pruned = self.store.pruned()
         while revision is not None and len(entries) < limit:
             record = self.store.read(revision)
-            entries.append({"revision": revision, "parent": record["parent"], "message": record.get("message", "")})
+            entries.append({"revision": revision, "parent": record["parent"], "message": record.get("message", ""), "weights_available": revision not in pruned})
             revision = record["parent"]
         return entries
 
@@ -307,13 +374,18 @@ class WeightRepository:
         refs = self.root / "refs.json"
         self._state(required=False)
         refs_bytes = refs.stat().st_size if refs.exists() else 0
-        stored = sum(sizes.values()) + refs_bytes
+        retention_path = self.root / "pruned.json"
+        retention_bytes = retention_path.stat().st_size if retention_path.exists() else 0
+        stored = sum(sizes.values()) + refs_bytes + retention_bytes
         return {
+            "available_revision_count": counts["revisions"] - len(self.store.pruned()),
+            "pruned_revision_count": len(self.store.pruned()),
             "object_count": counts["objects"],
             "revision_count": counts["revisions"],
             "object_bytes": sizes["objects"],
             "revision_bytes": sizes["revisions"],
             "refs_bytes": refs_bytes,
+            "retention_bytes": retention_bytes,
             "stored_payload_bytes": stored,
             "full_snapshot_bytes": full,
             "saved_payload_bytes": full - stored,

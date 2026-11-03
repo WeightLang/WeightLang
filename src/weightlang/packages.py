@@ -92,7 +92,38 @@ class ModFile:
     path: Path | None = None
 
 
+def manifest_path(directory: Path) -> Path:
+    toml, legacy = directory / "wgt.toml", directory / MOD_FILE
+    if toml.exists() and legacy.exists():
+        raise WgtError("both wgt.toml and wgt.mod exist; keep one authoritative manifest")
+    return toml if toml.exists() else legacy
+
+
 def parse_mod(path: Path) -> ModFile:
+    path = manifest_path(path.parent)
+    if path.name == "wgt.toml":
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        try:
+            document = tomllib.loads(path.read_text(encoding="utf-8"))
+            project = document["project"]
+            module = project["module"]
+            edition = project["edition"]
+            requires = document.get("dependencies", {})
+            if not isinstance(module, str) or not module or any(c.isspace() for c in module) or "#" in module:
+                raise ValueError("invalid project.module")
+            if edition not in ("0.1", "0.2", "0.3") or not isinstance(requires, dict):
+                raise ValueError("invalid edition or dependencies")
+            for name, version in requires.items():
+                if not isinstance(version, str):
+                    raise ValueError("dependency versions must be strings")
+                ModulePath.parse(name)
+                check_version(version)
+            return ModFile(module, requires, path)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise WgtError(f"invalid wgt.toml: {exc}", path=str(path)) from None
     module: str | None = None
     requires: dict[str, str] = {}
     for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -128,8 +159,8 @@ def parse_mod(path: Path) -> ModFile:
 
 def find_mod(start: Path) -> Path | None:
     for d in [start, *start.parents]:
-        if (d / MOD_FILE).is_file():
-            return d / MOD_FILE
+        if (d / MOD_FILE).is_file() or (d / "wgt.toml").is_file():
+            return manifest_path(d)
     return None
 
 
@@ -389,7 +420,7 @@ def fetch_module(
 def get(project_dir: Path, fetcher: Fetcher | None = None, cache: Path | None = None) -> list[str]:
     """Fetch every requirement of the wgt.mod in ``project_dir`` and update wgt.sum."""
 
-    mod_path = project_dir / MOD_FILE
+    mod_path = manifest_path(project_dir)
     if not mod_path.is_file():
         raise WgtError(f"no {MOD_FILE} in {project_dir}")
     mod = parse_mod(mod_path)

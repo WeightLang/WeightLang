@@ -221,3 +221,12 @@ See [storage conventions](storage.md). wgt build [-o ROOT] [--force] writes weig
 `wgt update --version X.Y.Z` switches to an exact version;
 `wgt download X.Y.Z` downloads without switching.
 See [toolchain versions](toolchains.md) for pins, offline use and local imports.
+
+## Default revision retention
+
+New projects use `wgt.toml`, including `[revisions] max_versions = 5`.
+Versioned `weightc build` and `revision commit/save` retain five recoverable
+weight snapshots per branch by default; set 0 to retain all. Legacy projects
+and omitted settings use the same default. The Rust `wgt build` standalone
+output is not subject to revision cleanup. See
+[retention details](weight-version-control.md#default-retention).

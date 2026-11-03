@@ -1,7 +1,11 @@
 # Default weight version history
 
 `weightc build model.wgt` commits to `weights/.revisions`, automatically maintaining
-HEAD and sharing weight blocks. `--store PATH` overrides the repository location.
+HEAD and sharing weight blocks. By default it retains the latest 5 recoverable
+weight snapshots per branch, reclaiming expired unshared payloads after successful
+commits. Configure `[revisions] max_versions` in `wgt.toml` (0 disables retention).
+Immutable historical metadata and exported model directories remain; see
+[retention details](weight-version-control.md#default-retention). `--store PATH` overrides the repository location.
 `weightc build --no-store model.wgt` explicitly selects standalone output; the
 standalone directory and overwrite rules below apply to that mode. `-m` and
 `--parent` cannot be used with `--no-store`. Use `revision checkout HEAD -o DIR`

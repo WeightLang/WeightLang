@@ -55,11 +55,14 @@ def _cmd_build(args: argparse.Namespace) -> int:
             raise WgtError(
                 "--force and custom -o require --no-store; versioned builds use checkout for standalone output"
             )
-        repository = WeightRepository(args.store)
+        from .retention import project_limit
+
+        repository = WeightRepository(args.store, max_versions=project_limit())
         expected = repository.prepare(args.parent)
         with tempfile.TemporaryDirectory(prefix=".build-", dir=repository.root) as tmp:
             result = build_with_reuse(compile_file, args, tmp, repository=repository, expected=expected, trainers=trainers)
             report = repository.commit(result.path, message=args.message, parent=args.parent, expected=expected)
+        report["retention"] = repository.prune()
         report["reuse"] = result.manifest["reuse"]
         print(json.dumps(report, indent=2))
         return 0
@@ -256,7 +259,9 @@ def _cmd_ablate(args: argparse.Namespace) -> int:
 def _cmd_revision(args: argparse.Namespace) -> int:
     from .repository import WeightRepository
 
-    repository = WeightRepository(args.store)
+    from .retention import project_limit
+
+    repository = WeightRepository(args.store, max_versions=project_limit())
     store = repository.store
     try:
         if args.action in ("save", "commit"):
@@ -282,11 +287,12 @@ def _cmd_revision(args: argparse.Namespace) -> int:
         elif args.action == "diff":
             result = repository.diff(args.before, args.after)
         elif args.action == "checkout":
-            result = store.checkout(repository.resolve(args.revision), args.output)
+            result = repository.checkout(args.revision, args.output)
         elif args.action == "inspect":
             result = store.read(repository.resolve(args.revision))
         else:
-            result = store.verify(repository.resolve(args.revision))
+            with repository._lock():
+                result = store.verify(repository.resolve(args.revision))
     except OSError as exc:
         raise WgtError(f"revision store: {exc}") from None
     print(json.dumps(result, indent=2))

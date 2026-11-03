@@ -83,7 +83,7 @@ def _baseline(args, repository=None, expected=None):
             with tempfile.TemporaryDirectory(prefix=".reuse-", dir=repository.root) as tmp:
                 baseline = Path(tmp) / "baseline"
                 try:
-                    repository.store.checkout(revision, baseline)
+                    repository.checkout(revision, baseline)
                 except (WgtError, OSError) as exc:
                     raise baseline_error(str(exc), args.reuse) from None
                 yield baseline, revision

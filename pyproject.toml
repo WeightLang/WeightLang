@@ -9,6 +9,7 @@ license-files = ["LICENSE"]
 dependencies = [
     "torch>=2.2",
     "safetensors>=0.4",
+    "tomli>=2; python_version < '3.11'",
     "numpy",  # not used directly; avoids torch warning "Failed to initialize NumPy" on every run
 ]
 

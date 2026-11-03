@@ -27,6 +27,7 @@ STORE/
   revisions/<sha256>
   refs.json
   refs.lock             present only while a writer owns the lock
+  pruned.json           optional retention marker: sorted revision-ID array
 ```
 
 Example:
@@ -66,7 +67,8 @@ is not guaranteed in this implementation.
 
 The parent MUST be the selected HEAD at the time of commit. Successful commits
 advance only the selected branch, or detached HEAD if no branch is selected.
-A byte-identical artifact (all three file hashes unchanged) MUST be a no-op;
+A byte-identical artifact (all three file hashes unchanged) MUST create no revision;
+retention may still reclaim expired payloads;
 message changes alone do not make a new commit. Concurrent builds MUST compare
 both selected branch and tip with their pre-training token. On mismatch, preserve
 the result as a revision with the original tip as parent, report its ID, and do
@@ -80,6 +82,20 @@ choose based on filesystem times or iteration order. Initialization is idempoten
 without a requested starting point and MUST NOT reset an existing repository.
 
 Switching a branch changes refs only; checkout exports to a new directory without
-changing refs. Branch creation shares objects. No automatic pruning, resetting,
-merging, remote synchronization, implicit training resumption or mutation of
-exported model directories is part of this contract.
+changing refs. Branch creation shares objects. Resetting, merging, remote
+synchronization, implicit training resumption and mutation of exported model
+directories are not part of this contract.
+
+## Retention extension
+
+The default policy keeps five recoverable snapshots per branch and detached HEAD;
+0 disables pruning. Unreferenced revision payloads are protected for recovery.
+Expired revision records and ancestry MUST remain immutable. Writers atomically
+publish a sorted array of expired revision IDs in `pruned.json` under `refs.lock`
+before unlinking objects unused by any retained revision. A partially completed
+cleanup MUST be safe to retry. Readers MUST reject symlinked/invalid markers and
+report marked revisions as pruned rather than promising recoverable snapshots.
+Selecting a marked revision as HEAD or a new branch MUST fail. Existing older
+readers can inspect metadata, but cannot necessarily reconstruct expired weights.
+Concurrent payload readers must hold the repository lock against reclamation.
+See [configuration and limits](../weight-version-control.md#default-retention).

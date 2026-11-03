@@ -1,5 +1,5 @@
 use anyhow::{bail, ensure, Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fs,
@@ -15,6 +15,94 @@ pub struct Manifest {
     pub dependencies: BTreeMap<String, String>,
     #[serde(skip)]
     pub text: String,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectConfig {
+    pub project: ProjectInfo,
+    #[serde(default)]
+    pub model: ModelConfig,
+    #[serde(default)]
+    pub revisions: RevisionsConfig,
+    #[serde(default)]
+    pub runtime: RuntimeConfig,
+    #[serde(default)]
+    pub dependencies: BTreeMap<String, String>,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RevisionsConfig {
+    pub max_versions: u64,
+}
+impl Default for RevisionsConfig {
+    fn default() -> Self {
+        Self { max_versions: 5 }
+    }
+}
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectInfo {
+    pub module: String,
+    pub edition: String,
+    pub description: Option<String>,
+}
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelConfig {
+    pub source: Option<PathBuf>,
+    pub output: Option<PathBuf>,
+    pub description: Option<String>,
+}
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeConfig {
+    pub device: Option<String>,
+    #[serde(default)]
+    pub placements: BTreeMap<String, String>,
+}
+impl ProjectConfig {
+    pub fn parse(text: &str) -> Result<Self> {
+        let config: Self = toml_edit::de::from_str(text).context("invalid wgt.toml")?;
+        ensure!(
+            !config.project.module.is_empty()
+                && !config.project.module.chars().any(char::is_whitespace)
+                && !config.project.module.contains('#'),
+            "invalid project.module"
+        );
+        ensure!(
+            ["0.1", "0.2", "0.3"].contains(&config.project.edition.as_str()),
+            "unsupported edition"
+        );
+        for (module, v) in &config.dependencies {
+            module_parts(module)?;
+            version(v)?;
+        }
+        if let Some(source) = &config.model.source {
+            relative_file(source.to_str().context("invalid model.source")?)?;
+        }
+        if let Some(output) = &config.model.output {
+            relative_file(output.to_str().context("invalid model.output")?)?;
+        }
+        Ok(config)
+    }
+    pub fn read(project: &Path) -> Result<Option<Self>> {
+        let path = project.join("wgt.toml");
+        if path.is_file() {
+            Ok(Some(Self::parse(&fs::read_to_string(path)?)?))
+        } else {
+            Ok(None)
+        }
+    }
+}
+pub fn manifest_path(project: &Path) -> Result<PathBuf> {
+    let toml = project.join("wgt.toml");
+    let legacy = project.join("wgt.mod");
+    ensure!(
+        !(toml.exists() && legacy.exists()),
+        "both wgt.toml and wgt.mod exist; keep one authoritative manifest"
+    );
+    Ok(if toml.exists() { toml } else { legacy })
 }
 
 pub fn module_parts(module: &str) -> Result<Vec<&str>> {
@@ -68,6 +156,15 @@ impl Manifest {
         Self::parse(&fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?)
     }
     pub fn parse(text: &str) -> Result<Self> {
+        if text.parse::<toml_edit::DocumentMut>().is_ok() {
+            let config = ProjectConfig::parse(text)?;
+            return Ok(Self {
+                module: config.project.module,
+                edition: config.project.edition,
+                dependencies: config.dependencies,
+                text: text.into(),
+            });
+        }
         let mut module = None;
         let mut edition = None;
         let mut dependencies = BTreeMap::new();
@@ -116,6 +213,20 @@ impl Manifest {
         })
     }
     pub fn edited(&self, module: &str, version: Option<&str>) -> String {
+        if let Ok(mut document) = self.text.parse::<toml_edit::DocumentMut>() {
+            if document.get("dependencies").is_none() {
+                document["dependencies"] = toml_edit::Item::Table(toml_edit::Table::new());
+            }
+            let dependencies = document["dependencies"]
+                .as_table_like_mut()
+                .expect("validated dependencies");
+            if let Some(v) = version {
+                dependencies.insert(module, toml_edit::value(v));
+            } else {
+                dependencies.remove(module);
+            }
+            return document.to_string();
+        }
         let mut found = false;
         let mut result = Vec::new();
         for line in self.text.lines() {
@@ -154,11 +265,11 @@ pub fn project(start: &Path) -> Result<PathBuf> {
         &start
     };
     for p in directory.ancestors() {
-        if p.join("wgt.mod").is_file() {
+        if p.join("wgt.mod").is_file() || p.join("wgt.toml").is_file() {
             return Ok(p.to_path_buf());
         }
     }
-    bail!("no wgt.mod found; run wgt init");
+    bail!("no wgt.toml or wgt.mod found; run wgt init");
 }
 pub fn read_lock(path: &Path) -> Result<Lock> {
     let text = match fs::read_to_string(path) {

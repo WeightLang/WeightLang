@@ -37,6 +37,24 @@ class RevisionStore:
     def __init__(self, root: str | Path):
         self.root = Path(root)
 
+    def pruned(self):
+        path = self.root / "pruned.json"
+        if path.is_symlink():
+            raise WgtError("pruned.json must not be a symlink")
+        if not path.exists():
+            return set()
+        try:
+            values = json.loads(path.read_bytes())
+            if not isinstance(values, list):
+                raise ValueError("expected revision list")
+            return {_id(value) for value in values}
+        except (ValueError, TypeError) as exc:
+            raise WgtError(f"invalid pruned.json: {exc}") from None
+
+    def require_available(self, revision):
+        if revision in self.pruned():
+            raise WgtError(f"revision weights were pruned by retention: {revision}; only history metadata remains")
+
     def _path(self, kind, digest):
         return self.root / kind / _id(digest)
 
@@ -199,6 +217,7 @@ class RevisionStore:
                 raise WgtError(f"reconstructed {name} sha256 mismatch")
 
     def checkout(self, revision, output):
+        self.require_available(revision)
         record = self.read(revision)
         output = Path(output)
         if output.exists() or output.is_symlink():

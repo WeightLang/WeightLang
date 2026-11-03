@@ -355,7 +355,7 @@ fn execute(cli: Cli) -> Result<u8> {
                 .truncate(false)
                 .open(cache.join(".wgt-lock"))?;
             guard.lock_exclusive()?;
-            let manifest = Manifest::read(&project.join("wgt.mod"))?;
+            let manifest = Manifest::read(&manifest::manifest_path(&project)?)?;
             let update = matches!(command, Cmd::Update { .. });
             match command {
                 Cmd::Add { module, version }
@@ -391,7 +391,7 @@ fn execute(cli: Cli) -> Result<u8> {
                         &project.join("wgt.sum"),
                         manifest::lock_text(&lock).as_bytes(),
                     )?;
-                    manifest::atomic_write(&project.join("wgt.mod"), text.as_bytes())?;
+                    manifest::atomic_write(&manifest::manifest_path(&project)?, text.as_bytes())?;
                     println!("locked {module}@{version}");
                 }
                 Cmd::Remove { module } => {
@@ -412,7 +412,7 @@ fn execute(cli: Cli) -> Result<u8> {
                         manifest::lock_text(&lock).as_bytes(),
                     )?;
                     manifest::atomic_write(
-                        &project.join("wgt.mod"),
+                        &manifest::manifest_path(&project)?,
                         manifest.edited(&module, None).as_bytes(),
                     )?;
                     println!("removed {module}; source imports are unchanged");
@@ -546,7 +546,7 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
         !module.chars().any(char::is_whitespace) && !module.contains('#') && !module.is_empty(),
         "invalid module name"
     );
-    for file in ["wgt.mod", "main.wgt", "tests/main.json", toolchain::PIN] {
+    for file in ["wgt.mod", "wgt.toml", "wgt.sum", "main.wgt", "tests/main.json", toolchain::PIN] {
         ensure!(!path.join(file).exists(), "refusing to overwrite {file}");
     }
     fs::create_dir_all(path.join("tests"))?;
@@ -554,7 +554,14 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
         path.join(toolchain::PIN),
         format!("{}\n", toolchain::CURRENT),
     )?;
-    fs::write(path.join("wgt.mod"), format!("module {module}\nwgt 0.2\n"))?;
+    fs::write(
+        path.join("wgt.toml"),
+        format!(
+            "[project]\nmodule = {}\nedition = \"0.2\"\n\n[model]\nsource = \"main.wgt\"\noutput = \"weights\"\n\n[revisions]\nmax_versions = 5\n\n[dependencies]\n",
+            serde_json::to_string(&module)?
+        ),
+    )?;
+    fs::write(path.join("wgt.sum"), "")?;
     fs::write(path.join("main.wgt"),format!("wgt 0.2\n# Learn a tiny identity map on four explicit training rows.\nmodel {name}\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ndata identity:\n  [0, 0] -> [0, 0]\n  [0, 1] -> [0, 1]\n  [1, 0] -> [1, 0]\n  [1, 1] -> [1, 1]\ninit seed=42\ntrain data=identity loss=mse optimizer=adam lr=0.05 epochs=400\n"))?;
     fs::write(
         path.join("tests/main.json"),

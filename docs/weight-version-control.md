@@ -67,10 +67,52 @@ change HEAD. To record a revert while keeping history, checkout the old version
 to a new directory and commit that directory on the current branch.
 
 A commit in detached HEAD advances only detached HEAD. Create a branch at that
-point to name it before switching away. All objects remain present; there is no
-automatic garbage collection or destructive reset/branch deletion in this release.
+point to name it before switching away. Unreferenced recovery results are retained. Automatic retention reclaims expired
+weight payloads as described below; destructive reset/branch deletion is not implemented.
 Weight merging, mutable working trees, remote push/pull and Git-compatible object
 formats are not implemented. Existing package publishing accepts exported artifacts.
+
+## Default retention
+
+`wgt new` and `wgt init` write this default to `wgt.toml`:
+
+```toml
+[revisions]
+max_versions = 5
+```
+
+The versioned `weightc build` and `weightc revision commit/save` commands read the
+nearest project manifest from the current working directory. An omitted section
+or key (including legacy projects) defaults to 5. Set 0 for unlimited retention;
+negative numbers, booleans, strings and fractional values are rejected.
+`WeightRepository(..., max_versions=5)` exposes the same policy to Python callers.
+Standalone builds, including the Rust `wgt build` wrapper, do not use revision
+retention. Existing exported `weights/<model>/` directories are never cleaned.
+
+After a successful commit, retain the most recent N weight snapshots **per branch**
+and detached HEAD. Unreferenced recovery revisions are also protected, so N is
+not a repository-wide count or byte quota. Active managed builds defer cleanup;
+`weightc build` retries after removing its temporary build directory. Merely
+reading a repository or editing configuration does not delete anything. Increasing
+the limit or selecting 0 cannot restore payloads already reclaimed.
+
+Expired snapshots retain their immutable revision metadata, IDs and ancestry.
+`revision log` reports `weights_available: false` for these snapshots; checkout,
+verify, reuse and selecting them as a new branch/HEAD fail with an explicit
+retention error. This preserves provenance without rewriting history or moving
+weight values. Only objects unused by every retained snapshot are unlinked.
+The atomic `pruned.json` marker precedes deletion, allowing an interrupted cleanup
+to be retried. A marker may therefore exist before every expired byte is removed.
+
+Commit output includes `retention.max_versions`, `pruned_versions` and
+`freed_bytes`. `revision stats` distinguishes `available_revision_count` from
+`pruned_revision_count`; `revision_count` includes historical metadata. The
+full-snapshot comparison includes expired history, so its savings include
+retention as well as deduplication. Small history records are not size-bounded.
+
+CLI checkout/verify and baseline export share the repository writer lock with
+cleanup. Low-level `RevisionStore` callers must coordinate their own concurrent
+access; use `WeightRepository.checkout` for a locked export.
 
 ## Storage and concurrency
 
@@ -99,7 +141,8 @@ weightc revision branch recovered --from REVISION_PRINTED_IN_ERROR
 
 The lock is not silently stolen. If a process crashes leaving `refs.lock`, inspect
 whether its recorded process is still active before removing the stale lock. A
-failed write can leave valid unreferenced objects; these are retained. Ref updates
+failed write can leave valid unreferenced objects; these are retained unless
+they also belong to an expired snapshot and no retained revision needs them. Ref updates
 use file fsync and atomic replacement, without a full power-loss durability promise
 for directory entries. Hashes check integrity, not author identity.
 

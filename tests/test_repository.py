@@ -236,3 +236,67 @@ def test_explicit_no_store_and_flag_conflicts(tmp_path, monkeypatch, capsys):
     assert Path("weights/.revisions/refs.json").is_file()
     # The default build must not overwrite an independently retained model.
     assert Path("weights/demo/weights.safetensors").is_file()
+
+
+def test_retention_default_bounds_recoverable_weights(tmp_path, models):
+    repo = WeightRepository(tmp_path / "repo")
+    revisions = [repo.commit(models[i % 3])["revision"] for i in range(7)]
+    assert len(repo.log()) == 7  # provenance survives payload reclamation
+    assert repo.store.pruned() == set(revisions[:2])
+    assert repo.stats()["available_revision_count"] == 5
+    for revision in revisions[2:]:
+        assert repo.store.verify(revision)["verified"]
+    with pytest.raises(WgtError, match="pruned"):
+        repo.checkout(revisions[0], tmp_path / "old")
+    with pytest.raises(WgtError, match="pruned"):
+        repo.switch(revisions[0], detach=True)
+
+
+def test_retention_frees_only_unshared_objects_and_protects_branch(tmp_path, models):
+    repo = WeightRepository(tmp_path / "repo", max_versions=1)
+    a = repo.commit(models[0])["revision"]
+    repo.branch("baseline")
+    b = repo.commit(models[1])["revision"]
+    result = repo.commit(models[2])
+    assert repo.store.pruned() == {b}
+    assert result["retention"]["freed_bytes"] > 0
+    assert repo.store.verify(a)["verified"]
+    assert repo.store.verify(result["revision"])["verified"]
+    assert repo.prune()["freed_bytes"] == 0
+
+
+def test_retention_preserves_conflict_recovery_and_defers_build(tmp_path, models):
+    repo = WeightRepository(tmp_path / "repo", max_versions=1)
+    a = repo.commit(models[0])["revision"]
+    recovery = repo.store.save(models[1], parent=a, message="recover me")["revision"]
+    scratch = repo.root / ".build-active"
+    scratch.mkdir()
+    result = repo.commit(models[2])
+    assert result["retention"]["deferred"]
+    assert repo.store.pruned() == set()
+    scratch.rmdir()
+    repo.prune()
+    assert repo.store.verify(recovery)["verified"]
+    assert repo.store.verify(result["revision"])["verified"]
+
+
+def test_retention_unlimited(tmp_path, models):
+    repo = WeightRepository(tmp_path / "repo", max_versions=0)
+    for i in range(7):
+        repo.commit(models[i % 3])
+    assert repo.stats()["available_revision_count"] == 7
+    assert repo.store.pruned() == set()
+
+
+def test_cli_build_reads_retention_config(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wgt.toml").write_text("[revisions]\nmax_versions = 1\n")
+    source = tmp_path / "model.wgt"
+    for seed in range(2):
+        source.write_text(model_source(seed))
+        assert main(["build", str(source), "--reuse", "none"]) == 0
+        report = json.loads(capsys.readouterr().out)
+        assert report["retention"]["max_versions"] == 1
+    assert report["retention"]["pruned_versions"] == 1
+    assert report["retention"]["freed_bytes"] > 0
+    assert WeightRepository(tmp_path / "weights/.revisions").stats()["available_revision_count"] == 1
