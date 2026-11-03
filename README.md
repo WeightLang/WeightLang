@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/WeightLang/WeightLang/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/WeightLang/WeightLang?label=weightc"></a>
+  <a href="https://pypi.org/project/weightlang/"><img alt="PyPI" src="https://img.shields.io/pypi/v/weightlang"></a>
   <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue">
   <img alt="backend" src="https://img.shields.io/badge/backend-PyTorch-ee4c2c">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
@@ -74,8 +75,10 @@ piping them to a shell: [install.sh](install.sh), [install.ps1](install.ps1).
 # With uv, straight from the release wheel
 uv tool install https://github.com/WeightLang/WeightLang/releases/download/v0.1.0/weightlang-0.1.0-py3-none-any.whl
 
-# From PyPI (once published there; see "Release status" below)
+# From PyPI
 uv tool install weightlang        # or: pipx install weightlang
+# CPU-only PyTorch on Linux (much smaller download):
+uv tool install --index https://download.pytorch.org/whl/cpu weightlang
 
 # From source, for development
 git clone https://github.com/WeightLang/WeightLang && cd WeightLang
@@ -247,7 +250,7 @@ in-memory fake of GitHub.
 | Channel | Status |
 |---|---|
 | GitHub release `v0.1.0` (wheel, sdist, `SHA256SUMS`, install scripts) | published |
-| PyPI `weightlang` | not yet — needs a PyPI trusted publisher, then the manual [`publish-pypi`](.github/workflows/publish-pypi.yml) workflow uploads the same files as the GitHub release |
+| [PyPI `weightlang`](https://pypi.org/project/weightlang/) | published by the manual [`publish-pypi`](.github/workflows/publish-pypi.yml) workflow (trusted publishing); identical files to the GitHub release |
 
 ## Limitations
 
