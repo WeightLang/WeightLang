@@ -18,6 +18,10 @@
 </p>
 
 <p align="center">
+  <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <a href="#install">Install</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#the-language">Language</a> ·
