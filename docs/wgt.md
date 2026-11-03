@@ -1,5 +1,9 @@
 # wgt: native project and package tooling
 
+> 当前 `build` 只生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
+> 旧构建示例改用 `weightc legacy-build`；参见[分发包与迁移规范](bundles.md)。
+
+
 `weightc` is the compiler. **`wgt` is a separate Rust executable**, inspired by
 Cargo's project workflow and external subcommands. This implementation is on
 main; it is not part of the published weightc 0.2.0 Python wheel or a published
@@ -14,11 +18,11 @@ wgt --list
 wgt doctor
 ```
 
-The installed executable does not embed, import, or invoke Python for package
+The installed executable does not embed, import, or invoke Python for dependency
 management, artifact verification or graph rendering. HTTPS uses Rust's reqwest
 and rustls. Remote tag resolution uses `git`; uploading releases uses `gh`.
 
-`build`, `run`, `check` and `test` invoke the existing **weightc** compiler.
+`build`, `package`, `install`, `train`, `export`, `run`, `check` and `test` invoke the existing **weightc** compiler.
 That compiler currently depends on Python/PyTorch. Install it separately, or set
 `WEIGHTC=/absolute/path/to/weightc`. A missing compiler produces a clear error;
 `wgt` never silently installs a Python environment.
@@ -33,9 +37,11 @@ and the [project layout convention](project-layout.md).
 wgt new demo                   # creates demo/wgt.mod, main.wgt and tests/main.json
 cd demo
 wgt check                      # parse/type-check every root .wgt, including libraries
-wgt build                      # compile model files into weights/; executes training directives
-wgt run --input '[[0,1]]'       # builds main.wgt, then infers
+wgt build                     # package sources into dist/model.wgtpkg
+wgt train --fresh             # first training run; later use wgt train to continue HEAD
+wgt run --input '[[0,1]]'       # infer with current weight HEAD
 wgt test                       # runs tests/*.json behavior assertions
+weightc revision checkout HEAD -o weights/demo
 wgt graph weights/demo --open
 ```
 
@@ -46,9 +52,8 @@ This is a toolchain example, not a held-out generalization benchmark.
 
 `-C DIR` selects a directory; project commands search upward for `wgt.mod`.
 Source paths for weights/check/run are relative to the discovered project root.
-Use `wgt build model.wgt` or `wgt run --source model.wgt --input '[1,2]'`
-to select a source. Building always calls the compiler; there is no incremental
-training cache yet.
+Use `wgt export model.wgt` or `wgt run --source model.wgt --input '[1,2]'`
+to select a source. Source bundling never trains. Run/test read the current weight revision and reject a mismatching source.
 
 ## Dependencies
 
@@ -59,7 +64,7 @@ wgt tree
 wgt metadata
 wgt fetch
 wgt fetch --locked
-wgt build --offline --locked
+wgt export --offline --locked
 wgt update github.com/WeightLang/WeightLang/packages/gates --version v0.2.0
 wgt remove github.com/WeightLang/WeightLang/packages/gates
 ```
@@ -129,8 +134,8 @@ From a committed, clean package directory whose module path matches its Git
 location:
 
 ```sh
-wgt build -o weights
-wgt package --version v0.1.0 --artifacts weights -o dist
+wgt export -o weights
+wgt release-assets --version v0.1.0 --artifacts weights -o dist
 wgt publish --index dist/wgt.index.json --license MIT --dry-run
 # Push the exact commit and annotated package tag shown in the index, then:
 wgt publish --index dist/wgt.index.json --license MIT
@@ -155,6 +160,7 @@ Ignore weights/ and dist/ in the package's Git configuration.
 One command renders HTML and opens the default browser:
 
 ```sh
+weightc revision checkout HEAD -o weights/demo
 wgt graph weights/demo --open
 ```
 
@@ -235,7 +241,7 @@ Attention parameter counts include its QKV and output projections.
 
 ## Storage and replacement
 
-See [storage conventions](storage.md). wgt build [-o ROOT] [--force] writes weights/<model>/ by default and refuses an existing model unless --force is supplied. run and test rebuild only disposable copies under .cache/weightlang/. Package defaults also use weights/.
+See [storage conventions](storage.md). wgt export [-o ROOT] [--force] writes weights/<model>/ by default and refuses an existing model unless --force is supplied. run and test rebuild only disposable copies under .cache/weightlang/. Package defaults also use weights/.
 
 ## Native tool versions
 
@@ -247,9 +253,9 @@ See [toolchain versions](toolchains.md) for pins, offline use and local imports.
 ## Default revision retention
 
 New projects use `wgt.toml`, including `[revisions] max_versions = 5`.
-Versioned `weightc build` and `revision commit/save` retain five recoverable
+Versioned `weightc legacy-build` and `revision commit/save` retain five recoverable
 weight snapshots per branch by default; set 0 to retain all. Legacy projects
-and omitted settings use the same default. The Rust `wgt build` standalone
+and omitted settings use the same default. The Rust `wgt export` standalone
 output is not subject to revision cleanup. See
 [retention details](weight-version-control.md#default-retention).
 

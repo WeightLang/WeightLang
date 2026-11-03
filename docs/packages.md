@@ -1,5 +1,9 @@
 # Packages
 
+> 当前 `build` 只生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
+> 旧构建示例改用 `weightc legacy-build`；参见[分发包与迁移规范](bundles.md)。
+
+
 The native Rust **wgt** CLI now offers Cargo-like project and package commands.
 See [wgt](wgt.md). It uses the formats below and keeps existing weightc consumers
 compatible. The new executable is on main, not in the published 0.2.0 wheel.
@@ -116,7 +120,7 @@ Commit `wgt.sum`. If it already exists, every value fetched later must equal it:
 a moved tag or a replaced release asset is a hard error, not an update. The first
 fetch is trust-on-first-use.
 
-`weightc build` never uses the network. A package import is resolved through
+`weightc legacy-build` never uses the network. A package import is resolved through
 `wgt.mod`, must have entries in `wgt.sum`, and every cached file is re-hashed
 against `wgt.sum` before loading. The built artifact's manifest records the
 module, version and commit in `imports[].package`.

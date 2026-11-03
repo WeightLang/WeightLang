@@ -1,21 +1,25 @@
 # Model weight version control
 
+> 当前 `build` 只生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
+> 旧构建示例改用 `weightc legacy-build`；参见[分发包与迁移规范](bundles.md)。
+
+
 The repository now tracks **HEAD and branches**, not just a collection of blobs.
 You do not manually specify a parent during normal use. This functionality is in
 source and is not a claim about the published 0.2 wheel.
 
 ```sh
 # Build and commit; first invocation automatically initializes main.
-weightc build model.wgt -m "baseline"
+weightc legacy-build model.wgt -m "baseline"
 # Edit model.wgt, or use a different program for your next training run.
-weightc build next.wgt -m "train only the output layer"
+weightc legacy-build next.wgt -m "train only the output layer"
 weightc revision log
 weightc revision status
 weightc revision stats
 
 # Branches share the same objects. Future builds commit to experiment.
 weightc revision switch -c experiment
-weightc build experiment.wgt -m "try a different learning rate"
+weightc legacy-build experiment.wgt -m "try a different learning rate"
 weightc revision switch main
 
 # Export last main version, or the previous one, without copying IDs.
@@ -81,18 +85,18 @@ formats are not implemented. Existing package publishing accepts exported artifa
 max_versions = 5
 ```
 
-The versioned `weightc build` and `weightc revision commit/save` commands read the
+The versioned `weightc legacy-build` and `weightc revision commit/save` commands read the
 nearest project manifest from the current working directory. An omitted section
 or key (including legacy projects) defaults to 5. Set 0 for unlimited retention;
 negative numbers, booleans, strings and fractional values are rejected.
 `WeightRepository(..., max_versions=5)` exposes the same policy to Python callers.
-Standalone builds, including the Rust `wgt build` wrapper, do not use revision
+Standalone builds, including the Rust `wgt export` wrapper, do not use revision
 retention. Existing exported `weights/<model>/` directories are never cleaned.
 
 After a successful commit, retain the most recent N weight snapshots **per branch**
 and detached HEAD. Unreferenced recovery revisions are also protected, so N is
 not a repository-wide count or byte quota. Active managed builds defer cleanup;
-`weightc build` retries after removing its temporary build directory. Merely
+`weightc legacy-build` retries after removing its temporary build directory. Merely
 reading a repository or editing configuration does not delete anything. Increasing
 the limit or selecting 0 cannot restore payloads already reclaimed.
 

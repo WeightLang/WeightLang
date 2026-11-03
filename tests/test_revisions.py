@@ -105,7 +105,7 @@ def test_inherit_and_direct_build_store(tmp_path, capsys):
     file = tmp_path / "next.wgt"
     file.write_text(code)
     store = tmp_path / "store"
-    assert main(["build", str(file), "--store", str(store)]) == 0
+    assert main(["legacy-build", str(file), "--store", str(store)]) == 0
     report = json.loads(capsys.readouterr().out)
     assert not list(store.glob(".build-*"))
     out = tmp_path / "export"

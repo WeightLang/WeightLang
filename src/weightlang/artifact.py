@@ -244,7 +244,7 @@ def _check(cond: bool, message: str, path: Path) -> None:
         raise WgtError(message, None, str(path))
 
 
-def load_artifact(path: str | Path, *, warn_untrained: bool = True) -> Artifact:
+def load_artifact(path: str | Path, *, warn_untrained: bool = True, device="cpu", placements=None) -> Artifact:
     """Load and verify an artifact directory.
 
     Verifies the format version, sha256 of the weights and source files, and
@@ -354,6 +354,8 @@ def load_artifact(path: str | Path, *, warn_untrained: bool = True) -> Artifact:
                 module.get_submodule(imported["layer"]).requires_grad_(False)
     for name in policy.get("frozen", []):
         module.get_parameter(name).requires_grad_(False)
+    from .devices import apply_placement, placement_plan
+    apply_placement(module, placement_plan(module, device, placements))
     module.eval()
 
     artifact = Artifact(root, manifest, module)

@@ -1,16 +1,18 @@
 # Default weight version history
 
-`weightc build model.wgt` commits to `weights/.revisions`, automatically maintaining
-HEAD and sharing weight blocks. By default it retains the latest 5 recoverable
-weight snapshots per branch, reclaiming expired unshared payloads after successful
-commits. Configure `[revisions] max_versions` in `wgt.toml` (0 disables retention).
-Immutable historical metadata and exported model directories remain; see
-[retention details](weight-version-control.md#default-retention). `--store PATH` overrides the repository location.
-`weightc build --no-store model.wgt` explicitly selects standalone output; the
-standalone directory and overwrite rules below apply to that mode. `-m` and
-`--parent` cannot be used with `--no-store`. Use `revision checkout HEAD -o DIR`
-to export a version. The Rust tool's artifact-based build/run/test wrapper explicitly
-selects standalone output to keep its existing path contracts.
+`weightc train` continues `weights/.revisions` HEAD and commits a new revision.
+`--fresh` explicitly initializes; it does not erase existing history.
+`weightc export model.wgt` explicitly initializes/migrates without training and
+records a revision; `--no-store` exports a standalone model instead.
+`--store PATH` selects another repository. Retention still defaults to the latest
+5 recoverable snapshots; `[revisions] max_versions = 0` disables pruning.
+Immutable metadata and exported model directories remain.
+See [version control](weight-version-control.md) and [command migration](bundles.md).
+
+`wgt build` / `weightc build` create a source-only ZIP at `dist/model.wgtpkg`.
+They never write model weights or train. `package --weights SOURCE=DIR` explicitly
+includes a complete artifact; `--reference SOURCE=DIR` records hashes only.
+Installing an embedded bundle requires space for its uncompressed contents.
 
 # Storage layout
 
@@ -26,20 +28,21 @@ Model outputs are durable project data, not compiler caches.
 | Release archives | dist/ | Explicit publishing outputs |
 | Rust compiler output | target/ | Rust's own cache, never the default model output |
 
-weightc build --no-store model.wgt writes `weights/<model>/` relative to the current directory.
-wgt build resolves it relative to the discovered project root. The name comes
+weightc export --no-store model.wgt writes `weights/<model>/` relative to the current directory.
+wgt export resolves it relative to the discovered project root. The name comes
 from the source's model declaration, not the source filename.
 
-Both build commands accept -o ROOT and write `ROOT/<model>/`.
+Both standalone export commands accept -o ROOT and write `ROOT/<model>/`.
 An existing model is protected by default. --force explicitly permits replacement
 of a WeightLang model directory; unrelated directories and symlinks are refused
 even with --force. Keep baselines in separate directories before rebuilding.
 This is a default-path change; existing artifact paths still work.
 
-wgt run and wgt test rebuild in .cache/weightlang/run/ and
+wgt run and wgt test check out the current weight HEAD in .cache/weightlang/run/ and
 .cache/weightlang/test/ respectively. These are disposable working copies;
 they never replace the models kept in weights/.
-wgt package reads weights/ by default; --artifacts ROOT overrides it.
+wgt package never scans weights/ automatically. Explicit --weights/--reference selects artifacts.
+The legacy wgt release-assets command reads weights/; --artifacts ROOT overrides it.
 Package publishing stages intermediate models in .cache/weightlang/publish/
 inside the package and removes its temporary staging directory afterward.
 

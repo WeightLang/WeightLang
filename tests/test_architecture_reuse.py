@@ -132,20 +132,20 @@ def test_cli_automatic_head_and_failure_report(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     source = tmp_path / "model.wgt"
     source.write_text(program())
-    assert main(["build", str(source)]) == 0
+    assert main(["legacy-build", str(source)]) == 0
     baseline = json.loads(capsys.readouterr().out)
     assert baseline["reuse"]["status"] == "no_baseline"
     source.write_text(program("next", width=6))
-    assert main(["build", str(source), "--dry-run", "--reuse-report", "plan.json"]) == 0
+    assert main(["legacy-build", str(source), "--dry-run", "--reuse-report", "plan.json"]) == 0
     plan = json.loads(capsys.readouterr().out)
     repo = WeightRepository("weights/.revisions")
     assert repo.resolve() == baseline["revision"]
     assert plan["summary"]["copied_values"] == 1
-    assert main(["build", str(source), "--reuse-strict", "--reuse-report", "failure.json"]) == 1
+    assert main(["legacy-build", str(source), "--reuse-strict", "--reuse-report", "failure.json"]) == 1
     assert json.loads((tmp_path / "failure.json").read_text())["status"] == "failed"
     assert "strict_requires_exact_reuse" in capsys.readouterr().err
     assert repo.resolve() == baseline["revision"]
-    assert main(["build", str(source), "--reuse", "overlap"]) == 0
+    assert main(["legacy-build", str(source), "--reuse", "overlap"]) == 0
     candidate = json.loads(capsys.readouterr().out)
     assert candidate["reuse"]["source"]["revision"] == baseline["revision"]
     assert candidate["parent"] == baseline["revision"]
@@ -179,11 +179,11 @@ def test_missing_baseline_ref_writes_failure_report(tmp_path, monkeypatch, capsy
     monkeypatch.chdir(tmp_path)
     source = tmp_path / "model.wgt"
     source.write_text(program())
-    assert main(["build", str(source)]) == 0
+    assert main(["legacy-build", str(source)]) == 0
     capsys.readouterr()
     repository = WeightRepository("weights/.revisions")
     before = repository.status()["revision"]
-    assert main(["build", str(source), "--from", "missing-branch", "--reuse-report", "failure.json"]) != 0
+    assert main(["legacy-build", str(source), "--from", "missing-branch", "--reuse-report", "failure.json"]) != 0
     report = json.loads((tmp_path / "failure.json").read_text())
     assert report["failure"] == "baseline_validation_failed"
     assert repository.status()["revision"] == before
@@ -206,7 +206,7 @@ def test_build_dry_run_does_not_initialize_store_or_train(tmp_path, monkeypatch,
     monkeypatch.setattr("weightlang.compiler.compile_file", forbidden)
     monkeypatch.setattr("weightlang.trainers.load_trainers", forbidden)
     monkeypatch.setattr(WeightRepository, "prepare", forbidden)
-    args = ["build", str(source), "--dry-run"]
+    args = ["legacy-build", str(source), "--dry-run"]
     if standalone:
         args += ["--no-store"]
     assert main(args) == 0

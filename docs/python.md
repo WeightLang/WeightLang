@@ -1,5 +1,9 @@
 # Python interoperability
 
+> 当前 `build` 只生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
+> 旧构建示例改用 `weightc legacy-build`；参见[分发包与迁移规范](bundles.md)。
+
+
 WeightLang's compiler and runtime use PyTorch. The public Python entry points are
 `compile_file`, `compile_program`, `parse`, `parse_file`, `load_artifact`,
 `save_artifact`, `Artifact`, `BuildResult`, `Trainer`, and `TrainingContext`.

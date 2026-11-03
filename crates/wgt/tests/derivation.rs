@@ -26,11 +26,11 @@ fn discovers_derived_model_for_build() {
         .current_dir(temp.path())
         .env("WEIGHTC", compiler)
         .env("WEIGHTLANG_CACHE", temp.path().join("cache"))
-        .args(["build", "child.wgt", "--offline"])
+        .args(["export", "child.wgt", "--offline"])
         .output()
         .unwrap();
     assert!(!output.status.success());
     let args = fs::read_to_string(temp.path().join("args.txt")).unwrap();
-    assert!(args.starts_with("build\n"));
+    assert!(args.starts_with("export\n"));
     assert!(args.contains("child.wgt\n"));
 }

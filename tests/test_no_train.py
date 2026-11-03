@@ -59,7 +59,7 @@ def test_no_data_or_trainer_plugin_loaded(tmp_path, monkeypatch, capsys):
     assert (
         main(
             [
-                "build",
+                "legacy-build",
                 str(source),
                 "--no-train",
                 "--no-store",
@@ -76,7 +76,7 @@ def test_no_data_or_trainer_plugin_loaded(tmp_path, monkeypatch, capsys):
     with pytest.raises(WgtError, match="cannot read data file"):
         parse_file(source)
     # A dry-run uses the same construction-only checks and writes no model.
-    assert main(["build", str(source), "--no-train", "--dry-run", "--no-store", "-o", str(tmp_path / "preview")]) == 0
+    assert main(["legacy-build", str(source), "--no-train", "--dry-run", "--no-store", "-o", str(tmp_path / "preview")]) == 0
     assert not (tmp_path / "preview").exists()
 
 
@@ -109,14 +109,14 @@ def test_head_migration_without_updates_and_overlap(tmp_path, monkeypatch, capsy
     monkeypatch.chdir(tmp_path)
     source = tmp_path / "model.wgt"
     source.write_text(model())
-    assert main(["build", str(source)]) == 0
+    assert main(["legacy-build", str(source)]) == 0
     repository = WeightRepository("weights/.revisions")
     original = repository.status()["revision"]
     repository.checkout(original, tmp_path / "baseline")
     baseline = load_artifact(tmp_path / "baseline", warn_untrained=False)
     monkeypatch.setattr(compiler, "_train", forbid_training)
     source.write_text(model(extra="layer calibration: linear(in=1,out=1)\n"))
-    assert main(["build", str(source), "--no-train"]) == 0
+    assert main(["legacy-build", str(source), "--no-train"]) == 0
     assert '"training_skipped": true' in capsys.readouterr().out
     migrated = repository.status()["revision"]
     assert migrated != original
@@ -130,7 +130,7 @@ def test_head_migration_without_updates_and_overlap(tmp_path, monkeypatch, capsy
     assert result.manifest["weights"]["tensors"]["calibration.weight"]["origin"] == "random-init"
     # Widening uses explicitly requested leading-coordinate migration.
     source.write_text(model(width=6))
-    assert main(["build", str(source), "--no-train", "--reuse", "overlap"]) == 0
+    assert main(["legacy-build", str(source), "--no-train", "--reuse", "overlap"]) == 0
     repository.checkout("HEAD", tmp_path / "wide")
     wide = load_artifact(tmp_path / "wide", warn_untrained=False)
     assert torch.equal(wide.module.body.weight[:4], baseline.module.body.weight)
@@ -143,7 +143,7 @@ def test_head_migration_without_updates_and_overlap(tmp_path, monkeypatch, capsy
     )
     before = repository.status()["revision"]
     source.write_text(model(width=7))
-    assert main(["build", str(source), "--no-train", "--reuse-strict"]) == 1
+    assert main(["legacy-build", str(source), "--no-train", "--reuse-strict"]) == 1
     assert repository.status()["revision"] == before
 
 
@@ -192,4 +192,4 @@ def test_derived_no_train_skips_external_data(tmp_path, monkeypatch):
     assert not any(p.requires_grad for p in result.module.parameters())
     for name, value in baseline.module.state_dict().items():
         assert torch.equal(value, result.module.state_dict()[name])
-    assert main(["build", str(derived), "--no-train", "--dry-run", "--no-store"]) == 0
+    assert main(["legacy-build", str(derived), "--no-train", "--dry-run", "--no-store"]) == 0

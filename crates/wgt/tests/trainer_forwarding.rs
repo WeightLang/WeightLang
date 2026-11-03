@@ -3,7 +3,7 @@
 use std::{fs, os::unix::fs::PermissionsExt, process::Command};
 
 #[test]
-fn build_forwards_explicit_trainer_bindings() {
+fn train_forwards_explicit_trainer_bindings() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(
         temp.path().join("wgt.mod"),
@@ -23,7 +23,7 @@ fn build_forwards_explicit_trainer_bindings() {
         .env("WEIGHTC", &compiler)
         .env("WEIGHTLANG_CACHE", temp.path().join("cache"))
         .args([
-            "build",
+            "train",
             "model.wgt",
             "--trainer",
             "search=local.py:train",

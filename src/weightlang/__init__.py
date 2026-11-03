@@ -10,7 +10,10 @@ from .trainers import Trainer, TrainingContext  # noqa: E402
 
 from .python_export import export_python  # noqa: E402
 
+from .loading import load
+
 __all__ = [
+    "load",
     "export_python",
     "Artifact",
     "BuildResult",

@@ -1,5 +1,9 @@
 # Custom training algorithms (wgt 0.3)
 
+> 当前 `build` 只生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
+> 旧构建示例改用 `weightc legacy-build`；参见[分发包与迁移规范](bundles.md)。
+
+
 Training is replaceable. The default `backprop` trainer retains SGD/Adam/AdamW
 and the existing full-batch/minibatch behavior. A custom trainer can update
 weights without calling autograd or constructing an optimizer.
@@ -10,12 +14,12 @@ From the repository root, with weightc installed:
 
 ```sh
 weightc check examples/custom_trainer/model.wgt
-weightc build examples/custom_trainer/model.wgt --no-store \
+weightc legacy-build examples/custom_trainer/model.wgt --no-store \
   --trainer search=examples/custom_trainer/search.py:train
 weightc run weights/forward_search --input '[[0], [1]]'
 ```
 
-`wgt build` accepts the same repeatable `--trainer NAME=FILE.py:FUNCTION`
+`wgt export` accepts the same repeatable `--trainer NAME=FILE.py:FUNCTION`
 argument and forwards it to weightc. Paths are relative to the compiler's working
 directory (the project directory for `wgt -C PROJECT build`). Normal overwrite
 rules still apply: existing model directories require explicit `--force`.

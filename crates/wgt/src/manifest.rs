@@ -26,6 +26,10 @@ pub struct ProjectConfig {
     #[serde(default)]
     pub revisions: RevisionsConfig,
     #[serde(default)]
+    pub train: Option<serde_json::Value>,
+    #[serde(default)]
+    pub package: Option<serde_json::Value>,
+    #[serde(default)]
     pub runtime: RuntimeConfig,
     #[serde(default)]
     pub dependencies: BTreeMap<String, String>,

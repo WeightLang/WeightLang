@@ -1,5 +1,9 @@
 # WeightLang language
 
+> 当前 `build` 只生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
+> 旧构建示例改用 `weightc legacy-build`；参见[分发包与迁移规范](bundles.md)。
+
+
 One model per file, explicit initialization and tensor origins. Released 0.2
 uses one-dimensional f32 feature vectors. Main additionally accepts **wgt 0.3**
 (unreleased) for fixed-size sequences, i64 tokens and CHW images. Using new
@@ -208,7 +212,7 @@ See [the annotated dimensions guide](dimensions.md) for complete examples.
 
 ## Construction-only builds
 
-`weightc build SOURCE --no-train` keeps the `train` declaration in the source but
+`weightc legacy-build SOURCE --no-train` keeps the `train` declaration in the source but
 skips its execution and training-data reads/checks for this build. Initialization,
 imports, freezing and automatic compatible HEAD weight migration still run.
 See [build/migrate without training](architecture-reuse.md#buildmigrate-without-training)

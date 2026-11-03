@@ -107,8 +107,41 @@ enum Cmd {
         #[arg(long)]
         shapes: bool,
     },
-    /// Build model sources using weightc (training directives execute)
+    /// Build a source ZIP bundle; never initialize weights or train
     Build {
+        #[arg(long)]
+        entry: Option<PathBuf>,
+        #[arg(short, long, default_value = "dist/model.wgtpkg")]
+        output: PathBuf,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Bundle sources and explicitly selected embedded or external weights
+    Package {
+        #[arg(long)]
+        entry: Option<PathBuf>,
+        #[arg(short, long, default_value = "dist/model.wgtpkg")]
+        output: PathBuf,
+        #[arg(long)]
+        weights: Vec<String>,
+        #[arg(long)]
+        reference: Vec<String>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Continue the current weight revision; use --fresh to explicitly initialize
+    Train {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<OsString>,
+    },
+    /// Verify and unpack a ZIP bundle into a new directory
+    Install {
+        archive: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Explicitly initialize weights without training
+    Export {
         source: Option<PathBuf>,
         /// Output root; writes <root>/<model>/
         #[arg(short, long, default_value = "weights")]
@@ -146,7 +179,7 @@ enum Cmd {
         stdout: bool,
     },
     /// Package prebuilt artifacts; no compiler or Python required
-    Package {
+    ReleaseAssets {
         #[arg(long)]
         version: String,
         #[arg(long, default_value = "weights")]
@@ -338,6 +371,9 @@ fn execute(cli: Cli) -> Result<u8> {
                 a.manifest["model"],
                 a.shapes.len()
             );
+        }
+        Cmd::Install { archive, output } => {
+            compiler(&base, &["install".into(), archive.into_os_string(), "-o".into(), output.into_os_string()])?;
         }
         Cmd::Cache => println!("{}", registry::cache_root()?.display()),
         Cmd::Doctor => {
@@ -583,7 +619,26 @@ fn execute(cli: Cli) -> Result<u8> {
                         compiler(&project, &args)?;
                     }
                 }
-                Cmd::Build {
+                Cmd::Build { entry, output, force } => {
+                    let mut args: Vec<OsString> = vec!["build".into(), ".".into(), "-o".into(), output.into_os_string()];
+                    if let Some(entry) = entry { args.extend(["--entry".into(), entry.into_os_string()]); }
+                    if force { args.push("--force".into()); }
+                    compiler(&project, &args)?;
+                }
+                Cmd::Package { entry, output, force, weights, reference } => {
+                    let mut args: Vec<OsString> = vec!["package".into(), ".".into(), "-o".into(), output.into_os_string()];
+                    if let Some(entry) = entry { args.extend(["--entry".into(), entry.into_os_string()]); }
+                    if force { args.push("--force".into()); }
+                    for value in weights { args.extend(["--weights".into(), value.into()]); }
+                    for value in reference { args.extend(["--reference".into(), value.into()]); }
+                    compiler(&project, &args)?;
+                }
+                Cmd::Train { args } => {
+                    let mut forwarded = vec![OsString::from("train")];
+                    forwarded.extend(args);
+                    compiler(&project, &forwarded)?;
+                }
+                Cmd::Export {
                     source,
                     output,
                     force,
@@ -614,7 +669,7 @@ fn execute(cli: Cli) -> Result<u8> {
                         &project,
                         &[
                             "run".into(),
-                            artifact.into_os_string(),
+                            artifact.path().join("model").into_os_string(),
                             "--input".into(),
                             input.into(),
                         ],
@@ -624,7 +679,7 @@ fn execute(cli: Cli) -> Result<u8> {
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
                     test_project(&project)?;
                 }
-                Cmd::Package {
+                Cmd::ReleaseAssets {
                     version,
                     artifacts,
                     output,
@@ -693,7 +748,7 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
         )?;
     }
     println!(
-        "created {} (wgt check; wgt build; wgt test)",
+        "created {} (wgt check; wgt build; wgt train --fresh; wgt test)",
         path.display()
     );
     Ok(())
@@ -739,8 +794,25 @@ fn compiler(project: &Path, args: &[OsString]) -> Result<()> {
     ensure!(status.success(), "weightc failed: {status}");
     Ok(())
 }
-fn build(project: &Path, source: &Path, output: &Path, force: bool) -> Result<PathBuf> {
-    build_with_trainers(project, source, output, force, &[])
+fn build(
+    project: &Path,
+    source: &Path,
+    output: &Path,
+    _force: bool,
+) -> Result<tempfile::TempDir> {
+    fs::create_dir_all(output)?;
+    let scratch = tempfile::tempdir_in(output)?;
+    let artifact = scratch.path().join("model");
+    compiler(project, &[
+        "revision".into(), "checkout".into(), "HEAD".into(),
+        "-o".into(), artifact.as_os_str().into(),
+    ])?;
+    let current = Artifact::read(&artifact)?;
+    ensure!(current.manifest["model"].as_str() == model_name(source)?.as_deref(),
+        "current weight revision belongs to another model");
+    ensure!(current.manifest["source"]["sha256"].as_str() == Some(&weightlang_wgt::artifact::hash_file(source)?),
+        "source differs from current weight revision; explicitly train or migrate first");
+    Ok(scratch)
 }
 fn build_with_trainers(
     project: &Path,
@@ -751,7 +823,7 @@ fn build_with_trainers(
 ) -> Result<PathBuf> {
     let name = model_name(source)?.context("cannot build a library; select a model source")?;
     let mut args = vec![
-        "build".into(),
+        "export".into(),
         "--no-store".into(),
         source.as_os_str().into(),
         "-o".into(),
@@ -798,12 +870,12 @@ fn test_project(project: &Path) -> Result<()> {
                     )?,
                 );
             }
-            let artifact = &built[source];
-            let a = Artifact::read(artifact)?;
+            let artifact = built[source].path().join("model");
+            let a = Artifact::read(&artifact)?;
             let output = Command::new(compiler_path()?)
                 .current_dir(project)
                 .arg("run")
-                .arg(artifact)
+                .arg(&artifact)
                 .arg("--input")
                 .arg(serde_json::to_string(
                     fixture.get("input").context("missing input")?,
@@ -895,7 +967,7 @@ fn executable(path: &Path) -> bool {
     }
 }
 fn list_commands() {
-    println!("Built-in: version toolchain self-update download sync new init add remove update fetch tree metadata check build run test verify graph package publish register cache doctor");
+    println!("Built-in: version toolchain self-update download sync new init add remove update fetch tree metadata check build run test verify graph package install train export release-assets publish register cache doctor");
     let mut names = std::collections::BTreeSet::new();
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {

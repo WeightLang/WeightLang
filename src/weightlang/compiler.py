@@ -270,23 +270,9 @@ def _library_records(program: Program) -> dict[str, Any]:
     return records
 
 
-def compile_program(program: Program, out_dir: str | Path, *, force: bool = False, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False) -> BuildResult:
-    """Build ``program`` and write its artifact to ``out_dir/<model>``."""
-
-    if program.path is None:
-        raise WgtError("compile_program needs a program parsed from a file")
-    out_root = Path(out_dir)
-    dest = out_root / program.model
-    if program.derivation is not None:
-        from .derivation import protect_output
-
-        protect_output(program, dest)
-    if dest.is_symlink() or (dest.exists() and not (dest / MANIFEST_FILE).is_file()):
-        raise WgtError(f"refusing to overwrite {dest}: not a regular WeightLang artifact directory")
-    if dest.exists() and not force:
-        raise WgtError(f"refusing to overwrite {dest}: choose another output or pass --force")
-    source_path = Path(program.path)
-    base = source_path.parent
+def _prepare_program(program, *, device="cpu", placements=None, trainers=None, reuse_source=None,
+                     reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False):
+    base = Path(program.path).parent
     layers = _layer_dicts(program)
 
     # Initialisation uses a private RNG stream so builds do not disturb caller state.
@@ -328,7 +314,34 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
         import_records, upstream = _apply_imports(program, module, layers, base)
         upstream = {**reused_upstream, **upstream}
         apply_freezing(program, module, require_trainable=not no_train)
+        from .devices import apply_placement, placement_plan
+        plan = placement_plan(module, device, placements)
+        apply_placement(module, plan)
         training = _train(program, module, trainers) if program.train is not None and not no_train else None
+
+    return module, layers, plan, import_records, upstream, reused_upstream, reuse_report, derivation_record, training
+
+
+def compile_program(program: Program, out_dir: str | Path, *, force: bool = False, device="cpu", placements=None, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False) -> BuildResult:
+    """Build ``program`` and write its artifact to ``out_dir/<model>``."""
+
+    if program.path is None:
+        raise WgtError("compile_program needs a program parsed from a file")
+    out_root = Path(out_dir)
+    dest = out_root / program.model
+    if program.derivation is not None:
+        from .derivation import protect_output
+
+        protect_output(program, dest)
+    if dest.is_symlink() or (dest.exists() and not (dest / MANIFEST_FILE).is_file()):
+        raise WgtError(f"refusing to overwrite {dest}: not a regular WeightLang artifact directory")
+    if dest.exists() and not force:
+        raise WgtError(f"refusing to overwrite {dest}: choose another output or pass --force")
+    source_path = Path(program.path)
+    module, layers, plan, import_records, upstream, reused_upstream, reuse_report, derivation_record, training = _prepare_program(
+        program, device=device, placements=placements, trainers=trainers, reuse_source=reuse_source,
+        reuse_policy=reuse_policy, reuse_mapping=reuse_mapping, reuse_strict=reuse_strict,
+        reuse_revision=reuse_revision, no_train=no_train)
 
     imported = [r["layer"] for r in import_records]
     trainable = {name for name, param in module.named_parameters() if param.requires_grad}
@@ -416,5 +429,5 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
     return BuildResult(dest, manifest, module)
 
 
-def compile_file(source: str | Path, out_dir: str | Path = "weights", *, force: bool = False, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False) -> BuildResult:
-    return compile_program(parse_file(source, check_training=not no_train), out_dir, no_train=no_train, force=force, trainers=trainers, reuse_source=reuse_source, reuse_policy=reuse_policy, reuse_mapping=reuse_mapping, reuse_strict=reuse_strict, reuse_revision=reuse_revision)
+def compile_file(source: str | Path, out_dir: str | Path = "weights", *, force: bool = False, device="cpu", placements=None, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False) -> BuildResult:
+    return compile_program(parse_file(source, check_training=not no_train), out_dir, no_train=no_train, force=force, device=device, placements=placements, trainers=trainers, reuse_source=reuse_source, reuse_policy=reuse_policy, reuse_mapping=reuse_mapping, reuse_strict=reuse_strict, reuse_revision=reuse_revision)

@@ -161,7 +161,7 @@ def test_pin_checked_again_at_build_and_force_preserves_output(tmp_path, baselin
 def test_cli_check_and_build(tmp_path, baseline, capsys):
     path = source(tmp_path, baseline, EXPAND)
     assert main(["check", str(path)]) == 0
-    assert main(["build", str(path), "--no-store", "-o", str(tmp_path / "weights")]) == 0
+    assert main(["legacy-build", str(path), "--no-store", "-o", str(tmp_path / "weights")]) == 0
     assert "built" in capsys.readouterr().out
 
 
@@ -288,8 +288,8 @@ def test_version_store_accepts_derived_model(tmp_path, baseline, capsys):
 
     path = source(tmp_path, baseline, EXPAND)
     store = tmp_path / "store"
-    assert main(["build", str(path), "--store", str(store)]) == 0
-    assert main(["build", str(path), "--store", str(store)]) == 0
+    assert main(["legacy-build", str(path), "--store", str(store)]) == 0
+    assert main(["legacy-build", str(path), "--store", str(store)]) == 0
     repo = WeightRepository(store)
     restored = tmp_path / "restored"
     repo.store.checkout(repo.resolve("HEAD"), restored)
@@ -312,7 +312,7 @@ def test_preview_does_not_train_or_publish(tmp_path, baseline, capsys, monkeypat
 """
     path = source(tmp_path, baseline, body)
     store = tmp_path / "uncreated-store"
-    assert main(["build", str(path), "--dry-run", "--store", str(store)]) == 0
+    assert main(["legacy-build", str(path), "--dry-run", "--store", str(store)]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["format"] == "weightlang.derivation"
     assert report["execution"] == "planned"

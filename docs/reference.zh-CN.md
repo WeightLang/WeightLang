@@ -1,5 +1,9 @@
 # WeightLang 语言与标准库参考
 
+> 当前 `build` 只生成源码 ZIP，`train` 默认从权重库续训，`export` 显式生成模型权重。
+> 旧构建示例改用 `weightc legacy-build`；参见[分发包与迁移规范](bundles.md)。
+
+
 本文集中维护 `.wgt` 的关键字、内置算子和标准库 block（可复用网络模块）。
 依据当前仓库源码；**0.3 功能尚未发布，不代表已发布的 0.2 工具支持它们**。
 这里的“函数”指算子或 block 调用，不是可执行任意代码的通用函数。
@@ -370,7 +374,7 @@ Python API 为 `export_python(source, output)`，拒绝覆盖现有文件。
 
 ## 只构建或迁移，不训练
 
-`weightc build model.wgt --no-train`：保留源文件中的 train 声明，但此次只初始化、
+`weightc legacy-build model.wgt --no-train`：保留源文件中的 train 声明，但此次只初始化、
 导入/继承或迁移权重，并保存模型；不读取训练/验证 CSV、不加载训练器、不更新参数。
 结构、形状和冻结选择器仍检查，训练数据与损失相关的检查跳过；可以冻结全部参数。
 默认从权重版本库 HEAD 自动复用同名且兼容的参数，新参数保持初始化。

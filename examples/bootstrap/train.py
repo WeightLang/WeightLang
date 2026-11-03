@@ -34,7 +34,7 @@ def dataset():
             for width in [2, 4, 8, 16]:
                 for out in [2, 4, 8]:
                     source = (f"wgt 0.3\nmodel demo\ninput x: f32[{width}]\noutput y: f32[{out}]\n"
-                              f"layer h: linear(out={out}) -> {op}\ninit seed=42\n")
+                              f"layer h: linear(in={width}, out={out})\nlayer activation: {op}\ninit seed=42\n")
                     parse(source)
                     rows.append({"family": op, "kind": "code",
                                  "prompt": f"Write WGT 0.3: model demo, input x f32[{width}], output y f32[{out}], linear then {op}, seed 42. Code only.",

@@ -47,7 +47,7 @@ WeightLang 主要面向 AI 编程模型，因此语法小而严格，以行为�
 首个[本地训练与文本接口实验](examples/bootstrap/README.md) 已跑通，但尚未通过语言能力验收。
 
 ```text
- xor.wgt ──weightc build --no-store──▶ weights/xor_mlp/ ──weightc run──▶ {"prob": [[0.00003], [0.9999], ...]}
+ xor.wgt ──weightc legacy-build --no-store──▶ weights/xor_mlp/ ──weightc run──▶ {"prob": [[0.00003], [0.9999], ...]}
                               ├─ manifest.json        结构、输入输出、来源、哈希
                               ├─ weights.safetensors  float32 张量，不使用 pickle
                               └─ source.wgt           构建时的原始源码
@@ -104,14 +104,14 @@ python -m venv --system-site-packages .venv
 
 ## 快速开始
 
-源码版默认记录权重版本：`weightc build model.wgt -m "说明"`。下列独立模型示例使用
+源码版默认记录权重版本：`weightc legacy-build model.wgt -m "说明"`。下列独立模型示例使用
 `--no-store` 保留原有输出目录；详见 [权重版本控制](docs/weight-version-control.md)。
 
 以下命令在仓库根目录执行：
 
 ```sh
 weightc check   examples/xor.wgt               # 解析和类型检查，不构建
-weightc build --no-store   examples/xor.wgt -o weights      # 初始化 → 训练 → weights/xor_mlp/
+weightc legacy-build --no-store   examples/xor.wgt -o weights      # 初始化 → 训练 → weights/xor_mlp/
 weightc run     weights/xor_mlp --input '[[0,0],[0,1],[1,0],[1,1]]'
 weightc inspect weights/xor_mlp                  # 查看输入输出和每个张量的来源
 weightc verify  weights/xor_mlp                  # 重新校验哈希、形状和可加载性
@@ -147,7 +147,7 @@ model.module                               # 普通的 torch.nn.Sequential
 | 命令 | 用途 |
 |---|---|
 | `weightc check FILE` | 解析并检查模型或库文件 |
-| `weightc build --no-store FILE -o DIR` | 构建制品，输出到 `DIR/<model>/` |
+| `weightc legacy-build --no-store FILE -o DIR` | 构建制品，输出到 `DIR/<model>/` |
 | `weightc run ARTIFACT --input JSON` | 运行推理，输入输出均为 JSON |
 | `weightc inspect ARTIFACT [--json]` | 查看接口、网络层和张量来源 |
 | `weightc std` | 列出内置标准库的 block 名称和参数 |
@@ -236,7 +236,7 @@ wgt.sum   提交号，以及索引、manifest、权重和源码的 SHA256；应�
 
 ```sh
 weightc get   examples/remote_reuse                  # 联网下载、校验并写入 wgt.sum
-weightc build --no-store examples/remote_reuse/xnor.wgt -o weights # 离线构建，根据 wgt.sum 校验缓存
+weightc legacy-build --no-store examples/remote_reuse/xnor.wgt -o weights # 离线构建，根据 wgt.sum 校验缓存
 ```
 
 `weightc get` 将 tag 解析为提交号，根据 Release 的 `wgt.index.json` 检查各文件大小
@@ -330,7 +330,9 @@ cargo install --path crates/wgt --locked
 wgt new demo
 wgt -C demo check
 wgt -C demo build
+wgt -C demo train --fresh
 wgt -C demo test
+(cd demo && weightc revision checkout HEAD -o weights/demo)
 wgt -C demo graph weights/demo --open
 ```
 
@@ -353,9 +355,9 @@ wgt -C demo graph weights/demo --open
 ```sh
 # 需要安装源码版编译器；已发布的 0.2.0 wheel 尚不支持这些示例
 python -m pip install -e .
-weightc build --no-store examples/transformer.wgt -o weights
+weightc legacy-build --no-store examples/transformer.wgt -o weights
 wgt graph weights/tiny_transformer --open
-weightc build --no-store examples/cnn.wgt -o weights
+weightc legacy-build --no-store examples/cnn.wgt -o weights
 wgt graph weights/tiny_cnn --open
 ```
 
@@ -396,6 +398,15 @@ wgt add weightlang/gates
 `import std/nn`（wgt 0.3），无需 add。发布者运行
 `wgt publish --index dist/wgt.index.json --license MIT --edition 0.3`，上传制品后
 自动向注册表提交 PR；维护者审核后才可被其他用户发现。详见[注册表文档](docs/registry-design.md)。
+
+## Source bundles and explicit training (current source)
+
+`wgt build` creates one `.wgtpkg` ZIP without training or initializing weights.
+`wgt train` continues the current weight revision; `--fresh` explicitly starts from initialization.
+`wgt package --weights model.wgt=DIR` embeds selected weights; `--reference` records hashes only.
+Metadata lives in `[package]` in `wgt.toml`. See [bundle and migration specification](docs/bundles.md).
+Older build examples below/above use the explicit compatibility command `weightc legacy-build`;
+standalone initialization is `wgt export`. These changes are not yet released.
 
 ### 一键升级
 

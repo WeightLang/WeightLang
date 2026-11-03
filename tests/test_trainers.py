@@ -64,7 +64,7 @@ def test_cli_explicit_plugin_and_check_without_execution(tmp_path, capsys):
     assert main(["check", str(source)]) == 0
     assert (
         main(
-            ["build", "--no-store", str(source), "-o", str(tmp_path / "weights"), "--trainer", f"search={PLUGIN}:train"]
+            ["legacy-build", "--no-store", str(source), "-o", str(tmp_path / "weights"), "--trainer", f"search={PLUGIN}:train"]
         )
         == 0
     )

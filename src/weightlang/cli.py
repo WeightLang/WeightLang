@@ -13,6 +13,39 @@ from .artifact import UntrainedWeightsWarning, build_module, describe_layer, loa
 from .syntax import STD_DIR, WgtError, is_library_source, parse_file, parse_library
 
 
+def _device_options(parser):
+    parser.add_argument("--device", default="cpu", help="default execution device: cpu, cuda, cuda:N, mps")
+    parser.add_argument(
+        "--place",
+        action="append",
+        default=[],
+        metavar="TARGET=DEVICE",
+        help="override a layer or parameter device; repeatable, most specific target wins",
+    )
+    parser.add_argument("--device-map", help="JSON object mapping exact layer/parameter names to devices")
+
+
+def _placements(args):
+    rules = {}
+    if args.device_map:
+        from .patches import _unique_object
+
+        try:
+            rules = json.loads(Path(args.device_map).read_text(), object_pairs_hook=_unique_object)
+        except (OSError, ValueError) as exc:
+            raise WgtError(f"cannot read device map: {exc}") from None
+        if not isinstance(rules, dict):
+            raise WgtError("device map must be a JSON object")
+    seen = set()
+    for item in args.place:
+        name, separator, device = item.partition("=")
+        if not separator or not name or not device or name in seen:
+            raise WgtError(f"invalid or duplicate --place {item!r}; expected TARGET=DEVICE")
+        seen.add(name)
+        rules[name] = device
+    return rules
+
+
 def _cmd_check(args: argparse.Namespace) -> int:
     path = Path(args.source)
     try:
@@ -46,6 +79,10 @@ def _cmd_check(args: argparse.Namespace) -> int:
 
 
 def _cmd_build(args: argparse.Namespace) -> int:
+    if args.command == "export" and args.trainer:
+        raise WgtError("export never trains; use train --trainer for explicit training")
+    if args.command == "legacy-build":
+        print("deprecated: legacy-build may train; migrate to build / export / train", file=sys.stderr)
     from .compiler import compile_file  # imports torch training code lazily
     from .reuse_cli import build_with_reuse
     from .trainers import load_trainers
@@ -349,33 +386,53 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--shapes", action="store_true", help="show each layer input/output shape and named axes")
     p.set_defaults(func=_cmd_check)
 
-    p = sub.add_parser("build", help="build and record a weight version; --no-store writes a standalone artifact")
-    p.add_argument("--no-train", action="store_true", help="build/migrate weights without loading training data or running training")
-    p.add_argument("source")
-    p.add_argument("-o", "--out", default="weights", help="output root; writes <root>/<model>/ (default: weights)")
-    p.add_argument("--force", action="store_true", help="replace an existing WeightLang model directory")
-    storage = p.add_mutually_exclusive_group()
-    storage.add_argument(
-        "--store",
-        nargs="?",
-        const="weights/.revisions",
-        help="override the default weight repository (weights/.revisions)",
-    )
-    storage.add_argument(
-        "--no-store",
-        dest="store",
-        action="store_const",
-        const=None,
-        help="build a standalone artifact without recording a version",
-    )
-    p.set_defaults(store="weights/.revisions")
-    p.add_argument("--trainer", action="append", default=[], metavar="NAME=FILE.py:FUNCTION",
-                   help="load a trusted local Python training algorithm (repeatable)")
-    p.add_argument("--parent", help="optional expected HEAD; normally inferred automatically")
-    p.add_argument("-m", "--message", default="", help="weight version commit message")
-    p.add_argument("--dry-run", action="store_true", help="preview weight reuse without training or recording a version")
-    add_reuse_options(p)
-    p.set_defaults(func=_cmd_build)
+    for operation in ("export", "train", "legacy-build"):
+        descriptions = {"train": "continue training a weight revision", "export": "explicitly initialize/migrate weights without training", "legacy-build": "deprecated old build behavior (may execute training)"}
+        p = sub.add_parser(operation, help=descriptions[operation])
+        p.add_argument("--no-train", action="store_true", help="build/migrate weights without loading training data or running training")
+        p.add_argument("source", nargs="?" if operation == "train" else None)
+        p.add_argument("-o", "--out", default="weights", help="output root; writes <root>/<model>/ (default: weights)")
+        p.add_argument("--force", action="store_true", help="replace an existing WeightLang model directory")
+        storage = p.add_mutually_exclusive_group()
+        storage.add_argument(
+            "--store",
+            nargs="?",
+            const="weights/.revisions",
+            help="override the default weight repository (weights/.revisions)",
+        )
+        storage.add_argument("--no-store", dest="store", action="store_const", const=None,
+                             help="build a standalone artifact without recording a version")
+        p.set_defaults(store="weights/.revisions")
+        p.add_argument("--trainer", action="append", default=[], metavar="NAME=FILE.py:FUNCTION",
+                       help="load a trusted local Python training algorithm (repeatable)")
+        p.add_argument("--parent", help="optional expected HEAD; normally inferred automatically")
+        p.add_argument("-m", "--message", default="", help="weight version commit message")
+        _device_options(p)
+        p.add_argument("--dry-run", action="store_true", help="preview weight reuse without training or recording a version")
+        add_reuse_options(p)
+        if operation == "train":
+            from .training_task import train
+            p.add_argument("--fresh", action="store_true", help="explicitly initialize instead of continuing current weights")
+            p.set_defaults(func=train)
+        elif operation == "export":
+            p.set_defaults(func=_cmd_build, no_train=True)
+        else:
+            p.set_defaults(func=_cmd_build)
+
+    from .bundle import command as bundle_command
+    for operation in ("build", "package"):
+        p = sub.add_parser(operation, help="create one ZIP bundle; no training or weight initialization")
+        p.add_argument("project", nargs="?", default=".")
+        p.add_argument("--entry", help="model source relative to project root")
+        p.add_argument("-o", "--out", default="dist/model.wgtpkg")
+        p.add_argument("--weights", action="append", default=[], metavar="SOURCE.wgt=ARTIFACT_DIR")
+        p.add_argument("--reference", action="append", default=[], metavar="SOURCE.wgt=ARTIFACT_DIR")
+        p.add_argument("--force", action="store_true")
+        p.set_defaults(func=bundle_command)
+    p = sub.add_parser("install", help="verify and unpack a bundle without executing code")
+    p.add_argument("archive")
+    p.add_argument("-o", "--out", required=True, help="new installation directory")
+    p.set_defaults(func=bundle_command)
 
     p = sub.add_parser("run", help="run inference with an artifact")
     p.add_argument("artifact")
