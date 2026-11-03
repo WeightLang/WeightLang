@@ -104,3 +104,23 @@ training provenance. A complete executable example is in
 Pass a built artifact directory instead to copy its weights and generate `load_model()`.
 The output runs without WeightLang; see [Python export](python-export.md) for dependencies,
 examples, batch conventions and limitations. The Python API is `export_python(source, output)`.
+
+## Construct or migrate without training
+
+Pass `no_train=True` to `compile_file` / `compile_program` to initialize and reuse
+weights without executing the source's training declaration. `compile_file`
+also skips loading and validating training data; source syntax and architecture
+contracts remain checked. It does not load or invoke a trainer. For example:
+
+```python
+result = compile_file(
+    "next.wgt", "weights/candidate", no_train=True,
+    reuse_source="weights/baseline", reuse_policy="exact",
+)
+```
+
+For a pre-parsed Program without training-data access, use
+`parse_file("next.wgt", check_training=False)` and compile with `no_train=True`.
+The compiler does not mutate the Program's training declaration. Imported origins
+and freeze flags are retained; new parameters are not labeled as trained.
+Direct Python calls still need an explicit reuse_source to select old weights.

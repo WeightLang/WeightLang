@@ -89,7 +89,7 @@ def _siblings(layers, target, line, path):
     return layer.children, leaf
 
 
-def parse(source, path=None):
+def parse(source, path=None, *, check_training=True):
     physical = source.splitlines()
     lines = list(syn.logical_lines(source, syn._strip_comment, lambda message, line: _error(message, line, path)))
     header = next(((n, text) for n, text, _ in lines if text.strip().startswith("model ")), None)
@@ -226,9 +226,9 @@ def parse(source, path=None):
         derivation=spec,
     )
     for ds in program.datasets.values():
-        if ds.file:
+        if ds.file and check_training:
             syn._load_csv(ds, math.prod(program.input.shape), path)
-    syn.check(program)
+    syn.check(program, check_training=check_training)
     _plan(program, ancestor)
     return program
 

@@ -49,7 +49,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         from .reuse_cli import preview_build
 
         return preview_build(args)
-    trainers = load_trainers(args.trainer)
+    trainers = {} if args.no_train else load_trainers(args.trainer)
 
     if args.store:
         import tempfile
@@ -64,15 +64,19 @@ def _cmd_build(args: argparse.Namespace) -> int:
         repository = WeightRepository(args.store, max_versions=project_limit())
         expected = repository.prepare(args.parent)
         with tempfile.TemporaryDirectory(prefix=".build-", dir=repository.root) as tmp:
-            result = build_with_reuse(compile_file, args, tmp, repository=repository, expected=expected, trainers=trainers)
+            result = build_with_reuse(compile_file, args, tmp, repository=repository, expected=expected, trainers=trainers, no_train=args.no_train)
             report = repository.commit(result.path, message=args.message, parent=args.parent, expected=expected)
         report["retention"] = repository.prune()
         report["reuse"] = result.manifest["reuse"]
+        if args.no_train:
+            report["training_skipped"] = True
         print(json.dumps(report, indent=2))
         return 0
-    result = build_with_reuse(compile_file, args, args.out, force=args.force, trainers=trainers)
+    result = build_with_reuse(compile_file, args, args.out, force=args.force, trainers=trainers, no_train=args.no_train)
     m = result.manifest
     print(f"built {result.path}")
+    if args.no_train:
+        print("  training skipped (--no-train)")
     print("  reuse " + json.dumps(m["reuse"], sort_keys=True))
     print(f"  weights sha256 {m['weights']['sha256']}")
     origins: dict[str, int] = {}
@@ -337,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=_cmd_check)
 
     p = sub.add_parser("build", help="build and record a weight version; --no-store writes a standalone artifact")
+    p.add_argument("--no-train", action="store_true", help="build/migrate weights without loading training data or running training")
     p.add_argument("source")
     p.add_argument("-o", "--out", default="weights", help="output root; writes <root>/<model>/ (default: weights)")
     p.add_argument("--force", action="store_true", help="replace an existing WeightLang model directory")

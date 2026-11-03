@@ -212,8 +212,8 @@ def apply(program, module, source=None, **options):
     return report, upstream
 
 
-def preview(source_file, baseline=None, **options):
-    program = parse_file(source_file)
+def preview(source_file, baseline=None, *, no_train=False, **options):
+    program = parse_file(source_file, check_training=not no_train)
     with torch.device("meta"):
         module = build_module([layer.to_dict() for layer in program.layers])
     return plan(program, module, baseline, **options)[0]

@@ -354,3 +354,15 @@ SOURCE 为已构建模型目录时，导出独立 PyTorch 类和同名 `.safeten
 输入必须显式带 batch 维；不会导出训练算法、优化器状态或设备分片。
 Python API 为 `export_python(source, output)`，拒绝覆盖现有文件。
 完整用法及支持范围见[Python 导出](python-export.md)。
+
+## 只构建或迁移，不训练
+
+`weightc build model.wgt --no-train`：保留源文件中的 train 声明，但此次只初始化、
+导入/继承或迁移权重，并保存模型；不读取训练/验证 CSV、不加载训练器、不更新参数。
+结构、形状和冻结选择器仍检查，训练数据与损失相关的检查跳过；可以冻结全部参数。
+默认从权重版本库 HEAD 自动复用同名且兼容的参数，新参数保持初始化。
+扩大 linear/embedding 等受支持层时，用 `--reuse overlap` 明确允许复制重叠部分；
+重命名用 `--reuse-map 新名=旧名`。架构迁移不保证预测效果保持不变。
+`--no-store` 没有自动 HEAD，需要 `--reuse-artifact 路径` 指定基线；仍不允许隐式覆盖。
+Python 编译接口对应 `no_train=True`。输出记录 `training: null` 和 `build.no_train: true`，
+区分本次未训练、上游训练权重和新增随机参数。详见[架构迁移](architecture-reuse.md#buildmigrate-without-training)。

@@ -194,3 +194,12 @@ Batch axes are implicit and never rearranged or reduced. No new axes, implicit
 broadcasting, ellipsis or dynamic shapes are supported. Run
 `weightc check examples/dimensions.wgt --shapes` to see all expanded layer contracts.
 See [the annotated dimensions guide](dimensions.md) for complete examples.
+
+## Construction-only builds
+
+`weightc build SOURCE --no-train` keeps the `train` declaration in the source but
+skips its execution and training-data reads/checks for this build. Initialization,
+imports, freezing and automatic compatible HEAD weight migration still run.
+See [build/migrate without training](architecture-reuse.md#buildmigrate-without-training)
+for migration rules, provenance and standalone output behavior. Without the flag,
+`build` continues to execute declared training.

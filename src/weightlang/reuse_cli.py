@@ -128,7 +128,7 @@ def preview_build(args):
         raise WgtError("--parent does not match HEAD")
     from .syntax import parse_file
 
-    program = parse_file(args.source)
+    program = parse_file(args.source, check_training=not args.no_train)
     if program.derivation is not None:
         from .derivation import preview as preview_derivation
 
@@ -140,7 +140,7 @@ def preview_build(args):
         return 0
     try:
         with _baseline(args, repository) as (source, revision):
-            report = preview(args.source, source, revision=revision, **options)
+            report = preview(args.source, source, revision=revision, no_train=args.no_train, **options)
         _write_report(args, report)
         print(json.dumps(report, indent=2, allow_nan=False))
         return 0

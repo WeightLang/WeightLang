@@ -116,3 +116,46 @@ print(result.manifest["reuse"])
 
 Direct Python compilation keeps its existing fresh-init behavior unless reuse
 options are supplied. It does not infer a repository implicitly.
+
+## Build/migrate without training
+
+```sh
+# Construct the model and automatically reuse compatible weights from HEAD.
+# Even if model.wgt declares train, no optimizer or trainer runs.
+weightc build model.wgt --no-train
+
+# Preview a resized model, then explicitly allow leading-coordinate reuse.
+weightc build model.wgt --no-train --dry-run --reuse overlap
+weightc build model.wgt --no-train --reuse overlap
+
+# A standalone build has no HEAD: select its baseline explicitly.
+weightc build next.wgt --no-train --no-store \
+  --reuse-artifact weights/baseline -o weights/candidate
+```
+
+`--no-train` leaves initialization, explicit imports/inheritance/derivation,
+weight migration, placement and freezing enabled. Network shape and import/freeze
+selectors are still validated. Source syntax is still parsed, but training-only
+checks (dataset existence/content, loss/output compatibility, nonempty trainable
+set) are skipped. External training/validation CSV files are not read, and
+`--trainer` Python files are not loaded or executed. Inline rows must still be
+syntactically valid. The original source, including its train declaration, is
+saved unchanged, so rebuilding it later without this flag can train normally.
+
+The new artifact has `training: null` and
+`build: {"no_train": true, "training_declared": true|false}`. CLI output explicitly
+reports skipped training. Copied tensors retain upstream origins; new values
+remain initialized, not trained. A successful migration does not imply accuracy
+is preserved after an architecture change. No optimizer state is resumed.
+
+Default versioned builds use the captured HEAD and record a new result under the
+existing retention policy. `--no-store` still requires `--force` to replace an
+existing model directory; `--no-train` does not grant overwrite permission.
+Default exact reuse and explicit overlap/mapping rules above are unchanged.
+
+Python callers can pass `no_train=True` to `compile_file` or `compile_program`.
+`compile_file` skips training-data reads before compilation. To construct a
+Program without loading/checking training data, use
+`parse_file(path, check_training=False)` or `parse(text, check_training=False)`,
+then compile it with `no_train=True`. Parsing with this option is not a validation
+of a future training run; parse normally before training.

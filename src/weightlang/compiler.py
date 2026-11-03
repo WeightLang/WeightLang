@@ -262,7 +262,7 @@ def _library_records(program: Program) -> dict[str, Any]:
     return records
 
 
-def compile_program(program: Program, out_dir: str | Path, *, force: bool = False, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None) -> BuildResult:
+def compile_program(program: Program, out_dir: str | Path, *, force: bool = False, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False) -> BuildResult:
     """Build ``program`` and write its artifact to ``out_dir/<model>``."""
 
     if program.path is None:
@@ -319,8 +319,8 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
             derivation_record = apply_derivation(program, module)
         import_records, upstream = _apply_imports(program, module, layers, base)
         upstream = {**reused_upstream, **upstream}
-        apply_freezing(program, module)
-        training = _train(program, module, trainers) if program.train is not None else None
+        apply_freezing(program, module, require_trainable=not no_train)
+        training = _train(program, module, trainers) if program.train is not None and not no_train else None
 
     imported = [r["layer"] for r in import_records]
     trainable = {name for name, param in module.named_parameters() if param.requires_grad}
@@ -377,6 +377,8 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
         for direction, port in (("input", program.input), ("output", program.output)):
             if port.axes:
                 manifest["interface"][direction]["axes"] = list(port.axes)
+        if no_train:
+            manifest["build"] = {"no_train": True, "training_declared": program.train is not None}
         if reuse_report is not None:
             manifest["reuse"] = reuse_report
         if derivation_record is not None:
@@ -406,5 +408,5 @@ def compile_program(program: Program, out_dir: str | Path, *, force: bool = Fals
     return BuildResult(dest, manifest, module)
 
 
-def compile_file(source: str | Path, out_dir: str | Path = "weights", *, force: bool = False, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None) -> BuildResult:
-    return compile_program(parse_file(source), out_dir, force=force, trainers=trainers, reuse_source=reuse_source, reuse_policy=reuse_policy, reuse_mapping=reuse_mapping, reuse_strict=reuse_strict, reuse_revision=reuse_revision)
+def compile_file(source: str | Path, out_dir: str | Path = "weights", *, force: bool = False, trainers=None, reuse_source=None, reuse_policy=None, reuse_mapping=None, reuse_strict=False, reuse_revision=None, no_train=False) -> BuildResult:
+    return compile_program(parse_file(source, check_training=not no_train), out_dir, no_train=no_train, force=force, trainers=trainers, reuse_source=reuse_source, reuse_policy=reuse_policy, reuse_mapping=reuse_mapping, reuse_strict=reuse_strict, reuse_revision=reuse_revision)

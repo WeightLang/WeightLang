@@ -952,13 +952,13 @@ def _last_leaf(layers: list[Layer]) -> Layer:
 # ---------------------------------------------------------------- entry points
 
 
-def parse(source: str, path: str | None = None) -> Program:
+def parse(source: str, path: str | None = None, *, check_training: bool = True) -> Program:
     """Parse and statically check a model file."""
 
     from .derivation import is_derived, parse as parse_derived
 
     if is_derived(source):
-        return parse_derived(source, path)
+        return parse_derived(source, path, check_training=check_training)
     fp = _FileParser(source, path, _Loader(), library=False)
     fp.run()
     if fp.model is None:
@@ -986,7 +986,7 @@ def parse(source: str, path: str | None = None) -> Program:
         layers.append(resolved)
 
     for ds in fp.datasets.values():
-        if ds.file:
+        if ds.file and check_training:
             _load_csv(ds, math.prod(fp.ports["input"].shape), path)
 
     if fp.inherit:
@@ -1015,7 +1015,7 @@ def parse(source: str, path: str | None = None) -> Program:
         freezing=fp.freezing,
         inherit=fp.inherit,
     )
-    check(program)
+    check(program, check_training=check_training)
     return program
 
 
@@ -1052,7 +1052,7 @@ def _load_csv(ds: Dataset, input_width: int, path: str | None) -> None:
         ds.targets.append(values[input_width:])
 
 
-def check(program: Program) -> None:
+def check(program: Program, *, check_training: bool = True) -> None:
     """Shape and reference checks that do not need weights."""
 
     path = program.path
@@ -1084,7 +1084,7 @@ def check(program: Program) -> None:
     input_size = math.prod(program.input.shape)
     output_size = math.prod(program.output.shape)
 
-    for ds in program.datasets.values():
+    for ds in program.datasets.values() if check_training else ():
         if not ds.inputs:
             raise WgtError(f"dataset {ds.name!r} has no rows", ds.line, path)
         twidth = len(ds.targets[0])
@@ -1130,7 +1130,10 @@ def check(program: Program) -> None:
 
         with torch.random.fork_rng(devices=[]):
             module = build_module([layer.to_dict() for layer in program.layers])
-        apply_freezing(program, module)
+        apply_freezing(program, module, require_trainable=check_training)
+
+    if not check_training:
+        return
 
     train = program.train
     if train is None:
@@ -1188,13 +1191,13 @@ def _check_targets(program: Program, ds: Dataset, train: TrainStmt) -> None:
         )
 
 
-def parse_file(path: str | Path) -> Program:
+def parse_file(path: str | Path, *, check_training: bool = True) -> Program:
     p = Path(path)
     try:
         text = p.read_text(encoding="utf-8")
     except OSError as exc:
         raise WgtError(f"cannot read source: {exc.strerror}", None, str(p)) from None
-    return parse(text, str(p))
+    return parse(text, str(p), check_training=check_training)
 
 
 def is_library_source(text: str) -> bool:
@@ -1304,7 +1307,7 @@ def output_contract(layers: list[Layer], dtype: str, shape: tuple[int, ...], axe
     return dtype, shape
 
 
-def apply_freezing(program: Program, module) -> None:
+def apply_freezing(program: Program, module, *, require_trainable: bool = True) -> None:
     """Imports establish defaults; ordered explicit rules override them."""
     parameters = dict(module.named_parameters())
     for imp in program.imports:
@@ -1322,5 +1325,5 @@ def apply_freezing(program: Program, module) -> None:
             raise WgtError(f"freeze selector {rule.target!r} matches no parameters", rule.line, program.path)
         for param in matches:
             param.requires_grad_(not rule.frozen)
-    if program.train and not any(p.requires_grad for p in parameters.values()):
+    if require_trainable and program.train and not any(p.requires_grad for p in parameters.values()):
         raise WgtError("train has nothing to update: every parameter is frozen", program.train.line, program.path)
