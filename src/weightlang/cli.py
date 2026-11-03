@@ -174,6 +174,28 @@ def _cmd_audit(args: argparse.Namespace) -> int:
     return 0 if all(checks.values()) else 1
 
 
+def _cmd_weights(args: argparse.Namespace) -> int:
+    from .weights import export_weights
+
+    print(json.dumps(export_weights(args.artifact, layer=args.layer, limit=args.limit), indent=2, allow_nan=False))
+    return 0
+
+
+def _cmd_diff(args: argparse.Namespace) -> int:
+    from .weights import diff_weights
+
+    print(json.dumps(diff_weights(args.before, args.after), indent=2, allow_nan=False))
+    return 0
+
+
+def _cmd_evaluate(args: argparse.Namespace) -> int:
+    from .weights import evaluate_artifact
+
+    report = evaluate_artifact(args.artifact, args.data, args.loss, compare=args.compare)
+    print(json.dumps(report, indent=2, allow_nan=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="weightc", description="WeightLang compiler (prototype)")
     parser.add_argument("--version", action="version", version=f"weightc {__version__}")
@@ -218,6 +240,24 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("audit", help="check standard weight admission requirements")
     p.add_argument("artifact")
     p.set_defaults(func=_cmd_audit)
+
+    p = sub.add_parser("weights", help="export verified raw weights and provenance as JSON")
+    p.add_argument("artifact")
+    p.add_argument("--layer", help="exact dotted layer prefix")
+    p.add_argument("--limit", type=int, default=256, help="total scalar values to emit; 0 means all")
+    p.set_defaults(func=_cmd_weights)
+
+    p = sub.add_parser("diff", help="compare weights of compatible artifacts without running them")
+    p.add_argument("before")
+    p.add_argument("after")
+    p.set_defaults(func=_cmd_diff)
+
+    p = sub.add_parser("evaluate", help="evaluate fixed JSON data without training")
+    p.add_argument("artifact")
+    p.add_argument("--data", required=True, help="JSON file with inputs and targets")
+    p.add_argument("--loss", required=True, choices=["mse", "bce", "cross_entropy"])
+    p.add_argument("--compare", help="optional baseline artifact, evaluated on the same data")
+    p.set_defaults(func=_cmd_evaluate)
 
     args = parser.parse_args(argv)
     try:

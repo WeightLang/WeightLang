@@ -1,0 +1,369 @@
+use anyhow::{bail, Result};
+use serde_json::{json, Value};
+use std::{collections::BTreeMap, fs, path::Path, process::Command};
+use weightlang_wgt::{
+    artifact::{hash, Artifact, FILES},
+    graph::Graph,
+    manifest::{self, Lock, Manifest},
+    registry::{self, Remote},
+};
+const MODULE: &str = "github.com/example/models/gates";
+const VERSION: &str = "v0.2.0";
+const COMMIT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+fn artifact(root: &Path, residual: bool) {
+    fs::create_dir_all(root).unwrap();
+    let layers = if residual {
+        json!([{"name":"body","op":"residual","block":"std/blocks.demo","layers":[{"name":"fc","op":"linear","args":{"in":2,"out":2}}]}])
+    } else {
+        json!([{"name":"fc","op":"linear","args":{"in":2,"out":2}}])
+    };
+    let prefix = if residual { "body.fc" } else { "fc" };
+    let weight = format!("{prefix}.weight");
+    let bias = format!("{prefix}.bias");
+    let header = json!({&bias:{"dtype":"F32","shape":[2],"data_offsets":[0,8]},
+        &weight:{"dtype":"F32","shape":[2,2],"data_offsets":[8,24]}});
+    let mut header = serde_json::to_vec(&header).unwrap();
+    while !header.len().is_multiple_of(8) {
+        header.push(b' ');
+    }
+    let mut bytes = (header.len() as u64).to_le_bytes().to_vec();
+    bytes.extend(header);
+    bytes.extend([0u8; 24]);
+    let source=b"wgt 0.2\nmodel demo\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ninit seed=42\n";
+    let m = json!({"format":"weightlang.artifact","format_version":2,"model":"demo",
+        "source":{"file":"source.wgt","sha256":hash(source)},
+        "weights":{"file":"weights.safetensors","sha256":hash(&bytes),"tensors":{
+            &weight:{"shape":[2,2],"dtype":"float32","origin":"random-init"},
+            &bias:{"shape":[2],"dtype":"float32","origin":"random-init"}}},
+        "interface":{"input":{"name":"x","dtype":"f32","shape":[2]},"output":{"name":"y","dtype":"f32","shape":[2]}},
+        "layers":layers});
+    fs::write(root.join("manifest.json"), serde_json::to_vec(&m).unwrap()).unwrap();
+    fs::write(root.join("weights.safetensors"), bytes).unwrap();
+    fs::write(root.join("source.wgt"), source).unwrap();
+}
+struct Fake {
+    commit: String,
+    files: BTreeMap<String, Vec<u8>>,
+}
+impl Fake {
+    fn new(root: &Path) -> Self {
+        artifact(root, false);
+        let mut f = Self {
+            commit: COMMIT.into(),
+            files: BTreeMap::new(),
+        };
+        let mut records = serde_json::Map::new();
+        let base = format!("https://github.com/example/models/releases/download/gates/{VERSION}");
+        for file in FILES {
+            let bytes = fs::read(root.join(file)).unwrap();
+            let asset = format!("demo.{file}");
+            records.insert(
+                file.into(),
+                json!({"asset":asset,"sha256":hash(&bytes),"size":bytes.len()}),
+            );
+            f.files.insert(format!("{base}/{asset}"), bytes);
+        }
+        let index = json!({"format":"weightlang.package-index","format_version":1,"module":MODULE,"version":VERSION,
+            "tag":format!("gates/{VERSION}"),"commit":COMMIT,"artifacts":{"demo":{"source_path":"main.wgt","files":records}}});
+        f.files.insert(
+            format!("{base}/wgt.index.json"),
+            serde_json::to_vec(&index).unwrap(),
+        );
+        f.files.insert(
+            format!("https://raw.githubusercontent.com/example/models/{COMMIT}/gates/main.wgt"),
+            fs::read(root.join("source.wgt")).unwrap(),
+        );
+        f
+    }
+}
+impl Remote for Fake {
+    fn resolve(&self, _: &str, _: &str) -> Result<String> {
+        Ok(self.commit.clone())
+    }
+    fn download(&self, url: &str, max: u64) -> Result<Vec<u8>> {
+        let bytes = self
+            .files
+            .get(url)
+            .ok_or_else(|| anyhow::anyhow!("missing {url}"))?;
+        if bytes.len() as u64 > max {
+            bail!("oversize");
+        }
+        Ok(bytes.clone())
+    }
+}
+fn manifest() -> Manifest {
+    Manifest::parse(&format!(
+        "module local/demo\nwgt 0.2\nrequire {MODULE} {VERSION}\n"
+    ))
+    .unwrap()
+}
+
+#[test]
+fn malicious_paths_and_duplicate_declarations_are_rejected() {
+    for m in [
+        "github.com/a/b/../escape",
+        "github.com/./b",
+        "github.com/a/b//c",
+        "github.com/a/b/",
+        "github.com/a/b?token",
+    ] {
+        assert!(manifest::module_parts(m).is_err(), "{m}");
+    }
+    for v in ["latest", "v01.2.3", "v1.2", "v1.2.3/../x", "1.2.3"] {
+        assert!(manifest::version(v).is_err());
+    }
+    assert!(Manifest::parse("module a\nmodule b").is_err());
+    assert!(Manifest::parse("module a\nwgt 0.2\nwgt 0.2").is_err());
+    assert!(Manifest::parse(&format!(
+        "module a\nrequire {MODULE} {VERSION}\nrequire {MODULE} {VERSION}"
+    ))
+    .is_err());
+}
+#[test]
+fn manifest_edits_preserve_comments() {
+    let m = Manifest::parse(&format!(
+        "# hello\nmodule local/a\nwgt 0.2\nrequire {MODULE} v0.1.0 # pinned\n"
+    ))
+    .unwrap();
+    let text = m.edited(MODULE, Some(VERSION));
+    assert!(text.starts_with("# hello\n"));
+    assert!(text.ends_with("v0.2.0 # pinned\n"));
+    assert!(!m.edited(MODULE, None).contains("require"));
+}
+#[test]
+fn native_fetch_lock_offline_and_tamper() {
+    let t = tempfile::tempdir().unwrap();
+    let cache = t.path().join("cache");
+    let fake = Fake::new(&t.path().join("artifact"));
+    let lock = registry::fetch(&manifest(), &Lock::new(), &cache, false, &fake).unwrap();
+    assert_eq!(lock.len(), 5);
+    assert_eq!(
+        registry::verify(&manifest(), &lock, &cache).unwrap().len(),
+        1
+    );
+    assert_eq!(
+        registry::fetch(&manifest(), &lock, &cache, true, &fake).unwrap(),
+        lock
+    );
+    let p = registry::module_dir(&cache, MODULE, VERSION).join("demo/source.wgt");
+    fs::write(p, "tampered").unwrap();
+    assert!(registry::verify(&manifest(), &lock, &cache).is_err());
+}
+#[test]
+fn failed_fetch_preserves_verified_cache_and_rejects_moved_tag() {
+    let t = tempfile::tempdir().unwrap();
+    let cache = t.path().join("cache");
+    let mut fake = Fake::new(&t.path().join("artifact"));
+    let lock = registry::fetch(&manifest(), &Lock::new(), &cache, false, &fake).unwrap();
+    fake.commit = "b".repeat(40);
+    assert!(registry::fetch(&manifest(), &lock, &cache, false, &fake).is_err());
+    fake.commit = COMMIT.into();
+    let asset = fake
+        .files
+        .keys()
+        .find(|s| s.ends_with("demo.weights.safetensors"))
+        .unwrap()
+        .clone();
+    fake.files.get_mut(&asset).unwrap()[10] ^= 1;
+    assert!(registry::fetch(&manifest(), &lock, &cache, false, &fake).is_err());
+    assert!(registry::verify(&manifest(), &lock, &cache).is_ok());
+}
+#[test]
+fn lock_prevents_first_use_and_tagged_source_is_checked() {
+    let t = tempfile::tempdir().unwrap();
+    let mut fake = Fake::new(&t.path().join("artifact"));
+    let cache = t.path().join("cache");
+    assert!(registry::fetch(&manifest(), &Lock::new(), &cache, true, &fake).is_err());
+    assert!(!registry::module_dir(&cache, MODULE, VERSION).exists());
+    let source = fake
+        .files
+        .keys()
+        .find(|s| s.contains("raw.githubusercontent"))
+        .unwrap()
+        .clone();
+    fake.files.insert(source, b"wrong source".to_vec());
+    assert!(registry::fetch(&manifest(), &Lock::new(), &cache, false, &fake).is_err());
+}
+#[test]
+fn graph_residual_edges_shapes_counts_and_formats() {
+    let t = tempfile::tempdir().unwrap();
+    artifact(t.path(), true);
+    let g = Graph::read(t.path()).unwrap();
+    assert_eq!(g.parameters, 6);
+    assert_eq!(g.nodes.iter().map(|n| n.parameters).sum::<u64>(), 6);
+    assert_eq!(g.edges.iter().filter(|e| e.kind == "skip").count(), 1);
+    assert!(g
+        .nodes
+        .iter()
+        .any(|n| n.path == "body.fc" && n.input == 2 && n.output == 2 && n.parent == "body"));
+    for format in ["md", "json", "toon", "html", "svg", "mermaid", "dot"] {
+        assert!(!g.render(format).unwrap().is_empty());
+    }
+    let value: Value = serde_json::from_str(&g.render("json").unwrap()).unwrap();
+    assert_eq!(value["format"], "weightlang.graph");
+    assert!(g.render("toon").unwrap().contains("nodes[5]{"));
+    assert!(g.render("mermaid").unwrap().contains("-. skip .->"));
+    assert!(g.render("html").unwrap().contains("<details>"));
+    assert!(!g.render("html").unwrap().contains("<script"));
+}
+#[test]
+fn graph_rejects_corruption_and_bad_safetensors() {
+    let t = tempfile::tempdir().unwrap();
+    artifact(t.path(), false);
+    let mut m: Value =
+        serde_json::from_slice(&fs::read(t.path().join("manifest.json")).unwrap()).unwrap();
+    let file = t.path().join("weights.safetensors");
+    let mut bytes = fs::read(&file).unwrap();
+    bytes.extend([0u8; 4]);
+    fs::write(&file, &bytes).unwrap();
+    assert!(Graph::read(t.path()).is_err());
+    m["weights"]["sha256"] = json!(hash(&bytes));
+    fs::write(
+        t.path().join("manifest.json"),
+        serde_json::to_vec(&m).unwrap(),
+    )
+    .unwrap();
+    assert!(Artifact::read(t.path()).is_err()); // hashed, but malformed tensor layout
+}
+#[test]
+fn cli_works_without_python_or_weightc_and_preserves_files() {
+    let t = tempfile::tempdir().unwrap();
+    let bin = env!("CARGO_BIN_EXE_wgt");
+    let run = |args: &[&str]| {
+        Command::new(bin)
+            .args(args)
+            .env_clear()
+            .env("PATH", "")
+            .env("WEIGHTLANG_CACHE", t.path().join("cache"))
+            .current_dir(t.path())
+            .output()
+            .unwrap()
+    };
+    assert!(run(&["new", "demo"]).status.success());
+    assert!(run(&["-C", "demo", "metadata"]).status.success());
+    assert!(run(&["-C", "demo", "fetch", "--offline"]).status.success());
+    let manifest_before = fs::read(t.path().join("demo/wgt.mod")).unwrap();
+    assert!(!run(&[
+        "-C",
+        "demo",
+        "--offline",
+        "add",
+        MODULE,
+        "--version",
+        VERSION
+    ])
+    .status
+    .success());
+    assert_eq!(
+        fs::read(t.path().join("demo/wgt.mod")).unwrap(),
+        manifest_before
+    );
+    assert!(!t.path().join("demo/wgt.sum").exists());
+    let before = fs::read(t.path().join("demo/main.wgt")).unwrap();
+    assert!(!run(&["-C", "demo", "init"]).status.success());
+    assert_eq!(fs::read(t.path().join("demo/main.wgt")).unwrap(), before);
+    let check = run(&["-C", "demo", "check"]);
+    assert!(!check.status.success());
+    assert!(String::from_utf8_lossy(&check.stderr).contains("weightc"));
+    artifact(&t.path().join("artifact"), true);
+    assert!(run(&[
+        "graph",
+        "artifact",
+        "--format",
+        "json",
+        "-o",
+        "diagram.json"
+    ])
+    .status
+    .success());
+    let before = fs::read(t.path().join("diagram.json")).unwrap();
+    assert!(!run(&["graph", "artifact", "-o", "diagram.json"])
+        .status
+        .success());
+    assert_eq!(fs::read(t.path().join("diagram.json")).unwrap(), before);
+}
+#[cfg(unix)]
+#[test]
+fn extension_forwards_arguments_workdir_and_exit_code() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = tempfile::tempdir().unwrap();
+    let plugin = t.path().join("wgt-hello");
+    fs::write(
+        &plugin,
+        "#!/bin/sh\nprintf '%s|%s|%s' \"$1\" \"$WGT_OFFLINE\" \"$PWD\"\nexit 7\n",
+    )
+    .unwrap();
+    fs::set_permissions(&plugin, fs::Permissions::from_mode(0o755)).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_wgt"))
+        .args(["--offline", "hello", "a b"])
+        .env("PATH", t.path())
+        .current_dir(t.path())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(7));
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        format!("a b|1|{}", t.path().display())
+    );
+}
+
+#[test]
+fn native_package_pins_committed_sources_and_refuses_partial_or_untrained() {
+    let t = tempfile::tempdir().unwrap();
+    let repo = t.path().join("repo");
+    let pkg = repo.join("gates");
+    fs::create_dir_all(&pkg).unwrap();
+    let arts = t.path().join("artifacts");
+    let art = arts.join("demo");
+    artifact(&art, false);
+    fs::copy(art.join("source.wgt"), pkg.join("main.wgt")).unwrap();
+    fs::write(pkg.join("wgt.mod"), format!("module {MODULE}\nwgt 0.2\n")).unwrap();
+    registry::git(&repo, &["init", "-q"]).unwrap();
+    registry::git(&repo, &["add", "."]).unwrap();
+    registry::git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+    )
+    .unwrap();
+    let output = t.path().join("dist");
+    assert!(registry::package(&pkg, &arts, VERSION, &output, false).is_err());
+    assert!(!output.exists());
+    let index = registry::package(&pkg, &arts, VERSION, &output, true).unwrap();
+    assert_eq!(index["artifacts"]["demo"]["source_path"], "main.wgt");
+    assert_eq!(
+        index["artifacts"]["demo"]["untrained_tensors"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(output.join("wgt.index.json").exists());
+    assert!(registry::package(&pkg, &arts, VERSION, &output, true).is_err());
+    fs::write(pkg.join("missing.wgt"), "wgt 0.2\nmodel missing\n").unwrap();
+    registry::git(&repo, &["add", "."]).unwrap();
+    registry::git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "missing model",
+        ],
+    )
+    .unwrap();
+    assert!(registry::package(&pkg, &arts, VERSION, &t.path().join("dist2"), true).is_err());
+    fs::write(pkg.join("main.wgt"), "dirty").unwrap();
+    assert!(registry::package(&pkg, &arts, VERSION, &t.path().join("dist3"), true).is_err());
+}

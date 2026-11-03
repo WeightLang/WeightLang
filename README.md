@@ -281,6 +281,42 @@ in-memory fake of GitHub.
 - **Stability:** 0.x — syntax and formats may change. The Windows installer has
   not been run on Windows yet.
 
+## Acknowledgments
+
+Thank you to **Rikiya Takehi, Jayden Teoh, Alex Zhang and Omar Khattab** for
+[Sparks of Weight-Space Programming: LLMs can natively read & write neural network weights](https://rikiyat.github.io/blog/weight-space-programming/).
+We explicitly cite this article as inspiration for WeightLang's weight inspection
+and comparison workflow. WeightLang is an independent project; the current gates
+and Iris examples use gradient training. We have not reproduced the article's
+LLM weight-editing experiments.
+
+## New on main: native project tools and weight inspection
+
+**Not yet included in the published weightc 0.2.0 wheel.** The Rust `wgt`
+executable provides Cargo-like project/package commands and external plugins:
+`new/init`, `add/remove/update`, `fetch`, `tree/metadata`, `build/run/test/check`,
+`verify`, `package/publish`, `graph`, `cache` and `doctor`.
+
+```sh
+cargo install --path crates/wgt --locked
+wgt new demo
+wgt -C demo check
+wgt -C demo build
+wgt -C demo test
+wgt -C demo graph build/demo --format html -o architecture.html
+```
+
+Package management and architecture rendering run natively without Python.
+Build/run/test/check use the existing `weightc` compiler. Graph output supports
+HTML, SVG, Markdown, JSON, TOON, Mermaid and DOT, including nested blocks,
+residual skips, shapes, parameter counts and weight origins.
+See [the wgt guide](docs/wgt.md) for installation, dependencies and plugins.
+
+The compiler also gains `weightc weights`, `weightc diff` and
+`weightc evaluate --compare` for readable tensors, exact parameter-change
+counts, and baseline/candidate evaluation on the same hashed data.
+See [the weight-space workflow and attribution](docs/weight-space.md).
+
 ## License
 
 [MIT](LICENSE)

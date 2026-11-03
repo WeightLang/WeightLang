@@ -288,6 +288,40 @@ ruff check src tests && ruff format --check src tests
 - **运行时**：目前仅支持 PyTorch，没有 ONNX 等导出格式。
 - **稳定性**：仍处于 0.x 阶段，语法和格式可能变化。Windows 安装脚本尚未在 Windows 上实测。
 
+## 致谢与引用
+
+感谢 **Rikiya Takehi、Jayden Teoh、Alex Zhang 和 Omar Khattab** 的文章
+[Sparks of Weight-Space Programming: LLMs can natively read & write neural network weights](https://rikiyat.github.io/blog/weight-space-programming/)。
+WeightLang 明确引用这篇文章，作为权重读取、差异比较和评估工作流的灵感来源。
+本项目独立开发；目前 gates 和 Iris 示例仍使用梯度训练，尚未复现文章中的 LLM 直接编辑权重实验。
+
+## main 分支新增：Rust 工具与权重检查
+
+**以下功能尚未包含在已发布的 weightc 0.2.0 wheel 中。**
+独立 Rust 工具 `wgt` 提供类似 Cargo 的项目和包管理流程：
+`new/init`、`add/remove/update`、`fetch`、`tree/metadata`、
+`build/run/test/check`、`verify`、`package/publish`、
+`graph`、`cache`、`doctor`，并支持 PATH 中的 `wgt-子命令` 插件。
+
+```sh
+cargo install --path crates/wgt --locked
+wgt new demo
+wgt -C demo check
+wgt -C demo build
+wgt -C demo test
+wgt -C demo graph build/demo --format html -o architecture.html
+```
+
+包管理、制品校验和架构渲染用 Rust 实现，不依赖 Python。
+`build/run/test/check` 调用现有的 `weightc`，编译与推理仍需要 Python/PyTorch。
+架构图支持 HTML、SVG、Markdown、JSON、TOON、Mermaid、DOT，
+保留嵌套 block、残差跳连、尺寸、参数量和权重来源。
+安装、依赖管理和扩展方式见 [wgt 文档](docs/wgt.md)。
+
+此外新增 `weightc weights`、`weightc diff` 和 `weightc evaluate --compare`：
+导出可读权重、精确统计改动的参数，在同一份有哈希的数据上比较候选与基线。
+详见 [权重实验流程及引用说明](docs/weight-space.md)。
+
 ## 许可证
 
 代码采用 [MIT](LICENSE) 许可证。Iris 数据和训练权重的 CC BY 4.0 许可及署名要求，

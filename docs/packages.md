@@ -1,5 +1,9 @@
 # Packages
 
+The native Rust **wgt** CLI now offers Cargo-like project and package commands.
+See [wgt](wgt.md). It uses the formats below and keeps existing weightc consumers
+compatible. The new executable is on main, not in the published 0.2.0 wheel.
+
 Status: a first, deliberately small version works end to end — publishing a
 package as a GitHub release, fetching it with hash checks, and building
 offline against it. Items under [Not implemented yet](#not-implemented-yet) are
