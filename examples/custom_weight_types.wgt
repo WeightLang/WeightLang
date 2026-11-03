@@ -3,9 +3,9 @@ model custom_weight_types
 
 # 类型描述前向实际使用的值；浮点主权重仍由 Python 优化器更新。
 # 这些是初始化的结构，不是已训练模型，也没有低位压缩存储。
-weighttype ternary = [-1, 0, 1]
-weighttype asymmetric = [-2, -0.25, 0.5, 3]
-weighttype binary = [-1, 1]
+wtype ternary = [-1, 0, 1]
+wtype asymmetric = [-2, -0.25, 0.5, 3]
+wtype binary = [-1, 1]
 
 input x: f32[4]
 output y: f32[2]

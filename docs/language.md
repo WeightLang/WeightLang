@@ -330,7 +330,7 @@ numerical, gradient and artifact checks. Unification is not yet complete.
 
 ## Custom and mixed weight domains (0.3, local)
 
-`weighttype ternary = [-1, 0, 1]` declares a finite f32 codebook.
+`wtype ternary = [-1, 0, 1]` declares a finite f32 codebook.
 `weight head.weight: ternary` applies it to a parameter; optional
 `axis=0 start=0 stop=2` applies it only to a half-open slice. Disjoint slices along
 one axis can mix different codebooks and untouched floating-point values.

@@ -460,7 +460,7 @@ def source_from_manifest(manifest, *, path=Path("."), references=False):
 
     layers = [layer_line(layer) for layer in manifest["layers"]]
     layers += [f"parameter {name} = {path}" for name,path in manifest['interface'].get('parameter_ids',{}).items()]
-    layers += [f"weighttype {name} = {values!r}" for name, values in manifest['interface'].get('weight_types', {}).items()]
+    layers += [f"wtype {name} = {values!r}" for name, values in manifest['interface'].get('weight_types', {}).items()]
     layers += [f"weight {spec['target']}: {spec['type']}" + ''.join(f" {key}={spec[key]}" for key in ('axis','start','stop') if key in spec) for spec in manifest['interface'].get('weight_assignments', [])]
     layers += [f"share {path} = {name}" for path,name in manifest['interface'].get('parameter_shares',{}).items()]
     layers += [f"adapter {name}: {spec.get('method', 'lora')} " + ' '.join(f'{k}={v}' for k,v in spec.items() if k != 'method') for name,spec in manifest['interface'].get('adapters',{}).items()]

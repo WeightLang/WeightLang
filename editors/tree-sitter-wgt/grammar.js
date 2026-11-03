@@ -20,7 +20,7 @@ module.exports = grammar({
     constant_declaration: $ => seq('const', field('name', $.identifier), '=', repeat1($._item)),
     dimension_declaration: $ => seq('dim', field('name', $.identifier), repeat($._item)),
     directive: $ => seq(field('keyword', choice('wgt', 'require', 'use', 'import', 'inherit',
-      'freeze', 'unfreeze', 'data', 'init', 'train', 'config', 'parameter', 'share', 'adapter', 'weighttype', 'weight', 'return')), repeat1($._item)),
+      'freeze', 'unfreeze', 'data', 'init', 'train', 'config', 'parameter', 'share', 'adapter', 'wtype', 'weight', 'return')), repeat1($._item)),
     data_row: $ => seq($.array, '->', $.array),
     _item: $ => choice($.call, $.parameter, $.qualified_name, $.number, $.string,
       $.array, $.arguments, $.operator, $.punctuation, $.clause),

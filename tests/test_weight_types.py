@@ -8,8 +8,8 @@ from test_primitives import variants
 
 CODE = '''wgt 0.3
 model typed
-weighttype ternary = [-1, 0, 1]
-weighttype custom = [-2, -0.25, 0.5, 3]
+wtype ternary = [-1, 0, 1]
+wtype custom = [-2, -0.25, 0.5, 3]
 input x: f32[3]
 output y: f32[3]
 layer projection: linear(in=3,out=3,bias=0)
@@ -55,9 +55,9 @@ def test_saved_updated_master_and_manifest_validation(tmp_path):
 
 
 @pytest.mark.parametrize('declaration',[
-    'weighttype bad = [0, 0]',
-    'weighttype bad = [1e100]',
-    'weighttype bad = [1, 1.000000001]',
+    'wtype bad = [0, 0]',
+    'wtype bad = [1e100]',
+    'wtype bad = [1, 1.000000001]',
     'weight projection.weight: missing',
     'weight missing.weight: ternary',
     'weight projection.weight: ternary',
@@ -73,7 +73,7 @@ def test_invalid_declarations(declaration):
 def test_shared_alias_domain_and_gradients(tmp_path):
     code = '''wgt 0.3
 model shared
-weighttype binary = [-1, 1]
+wtype binary = [-1, 1]
 input x: f32[2]
 output y: f32[2]
 layer a: linear(in=2,out=2,bias=0)
@@ -118,7 +118,7 @@ def test_parent_direct_parameter_read_and_frozen_master():
 def test_tied_embedding_noncontiguous_and_cuda(tmp_path):
     code = '''wgt 0.3
 model tokens
-weighttype binary = [-1, 1]
+wtype binary = [-1, 1]
 input x: i64[2]
 output y: f32[2,3]
 layer embed: embedding(vocab=3,dim=2)
@@ -144,7 +144,7 @@ init seed=7
 def test_attention_projection_matches_explicit_quantized_model(tmp_path):
     code = '''wgt 0.3
 model attention
-weighttype custom = [-0.5, 0, 0.25]
+wtype custom = [-0.5, 0, 0.25]
 input x: f32[2,4]
 output y: f32[2,4]
 layer attn: self_attention(dim=4,heads=2)
@@ -179,8 +179,8 @@ def test_save_rejects_runtime_domain_edits(tmp_path):
 
 
 def test_constant_expressions_and_explicit_plus():
-    program = parse(CODE.replace('weighttype ternary = [-1, 0, 1]',
-        'const S = 2\nweighttype ternary = [-S, 0, +S / 2]'), check_training=False)
+    program = parse(CODE.replace('wtype ternary = [-1, 0, 1]',
+        'const S = 2\nwtype ternary = [-S, 0, +S / 2]'), check_training=False)
     assert program.weight_types['ternary'] == [-2.,0.,1.]
 
 

@@ -362,7 +362,15 @@
             "named": false
           },
           {
+            "type": "weight",
+            "named": false
+          },
+          {
             "type": "wgt",
+            "named": false
+          },
+          {
+            "type": "wtype",
             "named": false
           }
         ]
@@ -884,7 +892,15 @@
     "named": false
   },
   {
+    "type": "weight",
+    "named": false
+  },
+  {
     "type": "wgt",
+    "named": false
+  },
+  {
+    "type": "wtype",
     "named": false
   }
 ]

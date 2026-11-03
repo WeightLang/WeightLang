@@ -6,8 +6,8 @@
 ```wgt
 wgt 0.3
 model mixed_weights
-weighttype ternary = [-1, 0, 1]
-weighttype asymmetric = [-2, -0.25, 0.5, 3]
+wtype ternary = [-1, 0, 1]
+wtype asymmetric = [-2, -0.25, 0.5, 3]
 input x: f32[4]
 output y: f32[6]
 layer projection: linear(in=4,out=6)
@@ -20,7 +20,7 @@ init seed=7
 
 ## 完整声明与约束
 
-- `weighttype NAME = [VALUE, ...]`：模型文件顶层声明。至少一个有限、可表示为
+- `wtype NAME = [VALUE, ...]`：模型文件顶层声明。至少一个有限、可表示为
   f32 的数（允许常量表达式和显式 `+1`）；可以只有一个值，也可以不含零。内部按数值排序。
   类型名不可重复，转换为 f32 后重复的值也拒绝（含正负零）。
 - `weight PARAMETER_PATH: TYPE`：整块参数使用指定类型，例如

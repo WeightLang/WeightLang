@@ -541,3 +541,27 @@ fn missing_graph_artifact_reports_resolved_path_and_directory_hint() {
         .unwrap();
     assert!(output.status.success());
 }
+
+#[test]
+fn weight_domain_v7_artifact_validation() {
+    let root = tempfile::tempdir().unwrap();
+    artifact(root.path(), false);
+    let path = root.path().join("manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    manifest["format_version"] = json!(7);
+    manifest["interface"]["inputs"] = json!([{"name":"x","dtype":"f32","shape":[2]}]);
+    manifest["interface"]["outputs"] = json!([{"name":"y","dtype":"f32","shape":[2],"from":"fc"}]);
+    manifest["interface"]["parameter_ids"] = json!({});
+    manifest["interface"]["parameter_shares"] = json!({});
+    manifest["interface"]["weight_types"] = json!({"tri":[-1,0,1]});
+    manifest["interface"]["weight_assignments"] = json!([{"target":"fc.weight","type":"tri","axis":0,"start":0,"stop":1}]);
+    fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    Artifact::read(root.path()).unwrap();
+    manifest["interface"]["weight_assignments"][0]["stop"] = json!(3);
+    fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    assert!(Artifact::read(root.path()).is_err());
+    manifest["format_version"] = json!(6);
+    manifest["interface"]["weight_assignments"][0]["stop"] = json!(1);
+    fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    assert!(Artifact::read(root.path()).is_err());
+}

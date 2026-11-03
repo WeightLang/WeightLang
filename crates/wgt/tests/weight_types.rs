@@ -20,3 +20,19 @@ fn finite_types_mixtures_and_alias_conflicts() {
         assert!(validate(&bad,&shapes,&aliases).is_err());
     }
 }
+
+#[test]
+fn implicit_embedding_ties_share_one_domain() {
+    use weightlang_wgt::weight_types::parameter_aliases;
+    let shapes = BTreeMap::from([("embed.weight".into(),vec![3,4]),("head.weight".into(),vec![3,4])]);
+    let layers = json!([
+        {"name":"embed","op":"embedding","args":{"vocab":3,"dim":4}},
+        {"name":"head","op":"linear","args":{"in":4,"out":3,"bias":0,"tie_embedding":1}}
+    ]);
+    let aliases = parameter_aliases(&layers,&shapes,&[]).unwrap();
+    assert_eq!(aliases,vec![("head.weight".into(),"embed.weight".into())]);
+    let bad = json!({"weight_types":{"tri":[-1,0,1]},"weight_assignments":[
+        {"target":"head.weight","type":"tri"}, {"target":"embed.weight","type":"tri"}
+    ]});
+    assert!(validate(&bad,&shapes,&aliases).is_err());
+}

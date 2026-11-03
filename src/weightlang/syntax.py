@@ -808,9 +808,9 @@ class _FileParser:
             raise cur.error("library files require 'wgt 0.2'")
         self.version = version
 
-    def _stmt_weighttype(self, cur: _Cursor, line: int) -> None:
+    def _stmt_wtype(self, cur: _Cursor, line: int) -> None:
         if self.version != "0.3":
-            raise cur.error("weighttype requires wgt 0.3")
+            raise cur.error("wtype requires wgt 0.3")
         name = cur.ident("weight type name")
         cur.expect("punct", "=")
         cur.expect("punct", "[")
@@ -821,10 +821,10 @@ class _FileParser:
             if token == ("punct", "]"):
                 break
             if token != ("punct", ","):
-                raise cur.error("weighttype values must be separated by commas")
+                raise cur.error("wtype values must be separated by commas")
         cur.done()
         if name in self.weight_types:
-            raise cur.error("duplicate weighttype")
+            raise cur.error("duplicate wtype")
         from .weight_types import validate_types
         try:
             self.weight_types.update(validate_types({name: values}))

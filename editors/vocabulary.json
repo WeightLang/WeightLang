@@ -24,8 +24,8 @@
     "unfreeze",
     "use",
     "weight",
-    "weighttype",
-    "wgt"
+    "wgt",
+    "wtype"
   ],
   "builtins": [
     "adam",

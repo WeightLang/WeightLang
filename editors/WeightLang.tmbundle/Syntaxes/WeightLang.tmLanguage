@@ -26,7 +26,7 @@
 		</dict>
 		<dict>
 			<key>match</key>
-			<string>\b(?:adapter|as|block|config|const|data|dim|freeze|from|import|inherit|init|input|layer|model|output|parameter|require|return|share|train|unfreeze|use|weight|weighttype|wgt)\b</string>
+			<string>\b(?:adapter|as|block|config|const|data|dim|freeze|from|import|inherit|init|input|layer|model|output|parameter|require|return|share|train|unfreeze|use|weight|wgt|wtype)\b</string>
 			<key>name</key>
 			<string>keyword.control.wgt</string>
 		</dict>

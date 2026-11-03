@@ -9,15 +9,15 @@ def validate_types(types):
         raise ValueError('weight types must be a dictionary')
     result = {}
     for name, values in types.items():
-        if not isinstance(name, str) or not name.isidentifier() or not isinstance(values, list) or not values:
-            raise ValueError('weighttype requires a name and a nonempty list')
+        if not isinstance(name, str) or not name.isascii() or not name.isidentifier() or not isinstance(values, list) or not values:
+            raise ValueError('wtype requires a name and a nonempty list')
         if any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) > 3.4028234663852886e38 for v in values):
-            raise ValueError('weighttype values must be finite f32 numbers')
+            raise ValueError('wtype values must be finite f32 numbers')
         # Validate in the storage dtype, including underflow and rounding collisions.
         import struct
         values = sorted(struct.unpack('f', struct.pack('f', v))[0] for v in values)
         if len(set(values)) != len(values):
-            raise ValueError('weighttype values must be distinct in f32')
+            raise ValueError('wtype values must be distinct in f32')
         result[name] = values
     return result
 
@@ -87,7 +87,7 @@ def attach_weight_types(module, types, assignments):
             raise ValueError('weight requires target/type and optionally axis/start/stop')
         target, kind = spec['target'], spec['type']
         if not isinstance(target,str) or target not in parameters or not isinstance(kind,str) or kind not in types:
-            raise ValueError('weight refers to an unknown parameter or weighttype')
+            raise ValueError('weight refers to an unknown parameter or wtype')
         parameter = parameters[target]
         rule = {'values': types[kind]}
         if 'axis' in spec:

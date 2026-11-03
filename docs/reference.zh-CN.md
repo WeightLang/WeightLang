@@ -929,7 +929,7 @@ paged optimizer 或 CUDA 专用内核；不能宣称完整论文训练栈或大�
 
 ## 自定义权重类型（0.3，本地实现）
 
-`weighttype NAME = [VALUE, ...]` 定义非空有限 f32 码本（无默认值，名称和
+`wtype NAME = [VALUE, ...]` 定义非空有限 f32 码本（无默认值，名称和
 f32 取值不可重复）；`weight PARAMETER_PATH: TYPE` 约束整块参数。
 `weight PARAMETER_PATH: TYPE axis=A start=S stop=E` 只约束指定轴的半开切片，
 三个整数选项必须同时提供，轴非负且切片不得越界。同一参数可声明沿同一轴的

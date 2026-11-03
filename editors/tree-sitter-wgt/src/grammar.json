@@ -323,6 +323,14 @@
               },
               {
                 "type": "STRING",
+                "value": "wtype"
+              },
+              {
+                "type": "STRING",
+                "value": "weight"
+              },
+              {
+                "type": "STRING",
                 "value": "return"
               }
             ]

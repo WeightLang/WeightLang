@@ -10,7 +10,7 @@
     table))
 (defvar wgt-font-lock-keywords
   (list
-    (cons (regexp-opt '("adapter" "as" "block" "config" "const" "data" "dim" "freeze" "from" "import" "inherit" "init" "input" "layer" "model" "output" "parameter" "require" "return" "share" "train" "unfreeze" "use" "weight" "weighttype" "wgt") 'symbols) 'font-lock-keyword-face)
+    (cons (regexp-opt '("adapter" "as" "block" "config" "const" "data" "dim" "freeze" "from" "import" "inherit" "init" "input" "layer" "model" "output" "parameter" "require" "return" "share" "train" "unfreeze" "use" "weight" "wgt" "wtype") 'symbols) 'font-lock-keyword-face)
     (cons (regexp-opt '("adam" "adamw" "add" "avgpool2d" "bce" "broadcast" "cat" "concat" "conv1d" "conv2d" "cos" "cross_entropy" "cumsum" "dropout" "embedding" "eq" "exp" "flatten" "gather" "gelu" "globalavgpool2d" "identity" "last" "layernorm" "linear" "log" "lt" "masked_softmax" "matmul" "maxpool2d" "mean" "meanpool" "mix" "mse" "mul" "pad2d" "ponder" "position_embedding" "rearrange" "recur" "reduce" "reduce_max" "reduce_mean" "reduce_sum" "relu" "repeat" "residual" "resize2d" "rmsnorm" "rope_attention" "route" "rsqrt" "scale" "scan" "scan_state" "scatter_add" "self_attention" "seq" "sgd" "shift" "sigmoid" "silu" "sin" "slice" "softmax" "softplus" "sparse_moe" "square" "stack" "sum" "tanh" "transpose" "transpose_axes" "where") 'symbols) 'font-lock-builtin-face)
     (cons (regexp-opt '("bool" "f32" "i64") 'symbols) 'font-lock-type-face)
     (cons "\\_<[0-9]+\\(?:\\.[0-9]*\\)?\\(?:[eE][-+]?[0-9]+\\)?\\_>" 'font-lock-constant-face)))
