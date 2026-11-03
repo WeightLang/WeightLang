@@ -10,7 +10,6 @@ A *model file* declares one model. A *library file* (e.g. the bundled
 
 from __future__ import annotations
 
-import hashlib
 import math
 import re
 from dataclasses import dataclass, field
@@ -187,6 +186,12 @@ class Dataset:
     skip: int = 0
     license: str | None = None
     source: str | None = None
+    format: str | None = None
+    dataset: str | None = None
+    python: str | None = None
+    entrypoint: str | None = None
+    loaded: bool = False
+    loader_record: dict | None = None
 
 
 @dataclass
@@ -218,6 +223,8 @@ class TrainStmt:
     validate: str | None = None
     weight_decay: float = 0.0
     trainer: str = "backprop"
+    python: str | None = None
+    entrypoint: str | None = None
 
 
 @dataclass
@@ -522,13 +529,15 @@ class _FileParser:
             keyword = cur.ident("statement keyword")
             if self.version is None and keyword != "wgt":
                 raise cur.error("file must start with a version header: wgt 0.2")
+            if getattr(self, "data_only", False) and keyword not in ("wgt", "data"):
+                raise cur.error("data files only allow wgt and data statements")
             handler = getattr(self, f"_stmt_{keyword}", None)
             if handler is None:
                 raise cur.error(f"unknown statement {keyword!r}")
             if self.library and keyword not in ("wgt", "use", "block", "const"):
                 raise cur.error(f"{keyword!r} is not allowed in a library file (only use, block and const)")
             result = handler(cur, lineno)
-            if isinstance(result, Dataset) and not result.file:
+            if isinstance(result, Dataset) and not (result.file or result.python or result.entrypoint):
                 open_data = result
             elif isinstance(result, Block):
                 open_block = result
@@ -654,12 +663,29 @@ class _FileParser:
         kv = _parse_kv(cur)
         if name in self.datasets:
             raise cur.error(f"duplicate dataset {name!r}")
-        unknown = set(kv) - {"file", "sha256", "skip", "license", "source"}
+        unknown = set(kv) - {"file", "sha256", "skip", "license", "source", "format", "dataset", "python", "entrypoint"}
         if unknown:
             raise cur.error(f"unknown data option(s): {', '.join(sorted(unknown))}")
         if kv:
             self.need_v02("data options", line)
         ds = Dataset(name, [], [], line, license=kv.get("license"), source=kv.get("source"))
+        new_options = {"format", "dataset", "python", "entrypoint"} & set(kv)
+        if new_options and self.version != "0.3":
+            raise cur.error("external data options require 'wgt 0.3'")
+        if sum(key in kv for key in ("file", "python", "entrypoint")) > 1:
+            raise cur.error("choose only one of file, python or entrypoint")
+        if ("format" in kv or "dataset" in kv) and "file" not in kv:
+            raise cur.error("format and dataset require file")
+        ds.format, ds.dataset = kv.get("format"), kv.get("dataset")
+        ds.python, ds.entrypoint = kv.get("python"), kv.get("entrypoint")
+        if getattr(self, "data_only", False) and (ds.python or ds.entrypoint):
+            raise cur.error("declare Python loaders in the model file")
+        if any(key in kv and not kv[key] for key in ("file", "python", "entrypoint", "format", "dataset")):
+            raise cur.error("data source options must not be empty")
+        if self.version != "0.3" and "file" in kv:
+            ds.format = "csv"
+        if ds.format and ds.format not in {"csv", "tsv", "json", "jsonl", "npz", "wgt"}:
+            raise cur.error("unsupported data format")
         if "file" in kv:
             if "sha256" not in kv:
                 raise cur.error("data files need sha256=<hex> so the training data is pinned")
@@ -737,7 +763,15 @@ class _FileParser:
         if self.train is not None:
             raise cur.error("only one train statement is supported")
         kv = _parse_kv(cur)
-        trainer = kv.get("trainer", "backprop")
+        if "python" in kv and "entrypoint" in kv:
+            raise cur.error("choose python or entrypoint")
+        if ("python" in kv or "entrypoint" in kv) and "trainer" in kv:
+            raise cur.error("python/entrypoint cannot be combined with trainer")
+        if ("python" in kv or "entrypoint" in kv) and self.version != "0.3":
+            raise cur.error("Python training requires 'wgt 0.3'")
+        if any(key in kv and not kv[key] for key in ("python", "entrypoint")):
+            raise cur.error("Python training source must not be empty")
+        trainer = kv.get("trainer", "python" if "python" in kv or "entrypoint" in kv else "backprop")
         if "trainer" in kv and self.version != "0.3":
             raise cur.error("trainer selection requires 'wgt 0.3'")
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", trainer):
@@ -745,6 +779,7 @@ class _FileParser:
         custom = trainer != "backprop"
         required = {"data", "loss", "epochs"} if custom else {"data", "loss", "optimizer", "lr", "epochs"}
         optional = {"batch", "validate", "trainer", "lr"} if custom else {"batch", "validate", "weight_decay", "trainer"}
+        optional |= {"python", "entrypoint"}
         missing = required - set(kv)
         if missing:
             raise cur.error(f"train is missing: {', '.join(sorted(missing))}")
@@ -778,7 +813,7 @@ class _FileParser:
                 raise cur.error("batch must be a positive integer")
             batch = int(kv["batch"])
         self.train = TrainStmt(
-            kv["data"], kv["loss"], kv.get("optimizer"), lr, int(kv["epochs"]), line, batch, kv.get("validate"), wd, trainer
+            kv["data"], kv["loss"], kv.get("optimizer"), lr, int(kv["epochs"]), line, batch, kv.get("validate"), wd, trainer, kv.get("python"), kv.get("entrypoint")
         )
 
 
@@ -987,7 +1022,8 @@ def parse(source: str, path: str | None = None, *, check_training: bool = True) 
 
     for ds in fp.datasets.values():
         if ds.file and check_training:
-            _load_csv(ds, math.prod(fp.ports["input"].shape), path)
+            from .datasets import load_file
+            load_file(ds, math.prod(fp.ports["input"].shape), path)
 
     if fp.inherit:
         if fp.imports:
@@ -1028,28 +1064,8 @@ def parse_library(source: str, path: str | None = None) -> Scope:
 
 
 def _load_csv(ds: Dataset, input_width: int, path: str | None) -> None:
-    base = Path(path).parent if path else Path(".")
-    file = base / (ds.file or "")
-    try:
-        raw = file.read_bytes()
-    except OSError as exc:
-        raise WgtError(f"cannot read data file {ds.file}: {exc.strerror}", ds.line, path) from None
-    actual = hashlib.sha256(raw).hexdigest()
-    if actual != ds.sha256:
-        raise WgtError(f"data file {ds.file} has sha256 {actual}, source pins {ds.sha256}", ds.line, path)
-    lines = raw.decode("utf-8").splitlines()
-    for n, row in enumerate(lines[ds.skip :], start=ds.skip + 1):
-        row = row.strip()
-        if not row or row.startswith("#"):
-            continue
-        try:
-            values = [float(v) for v in row.split(",")]
-        except ValueError:
-            raise WgtError(f"{ds.file}:{n}: data files must contain only numbers", ds.line, path) from None
-        if len(values) <= input_width:
-            raise WgtError(f"{ds.file}:{n}: expected {input_width} inputs followed by targets", ds.line, path)
-        ds.inputs.append(values[:input_width])
-        ds.targets.append(values[input_width:])
+    from .datasets import load_file
+    load_file(ds, input_width, path)
 
 
 def check(program: Program, *, check_training: bool = True) -> None:
@@ -1085,6 +1101,10 @@ def check(program: Program, *, check_training: bool = True) -> None:
     output_size = math.prod(program.output.shape)
 
     for ds in program.datasets.values() if check_training else ():
+        if (ds.python or ds.entrypoint) and not ds.loaded:
+            continue
+        if len(ds.inputs) != len(ds.targets):
+            raise WgtError("inputs and targets must have equal row counts", ds.line, path)
         if not ds.inputs:
             raise WgtError(f"dataset {ds.name!r} has no rows", ds.line, path)
         twidth = len(ds.targets[0])
@@ -1173,6 +1193,8 @@ def check(program: Program, *, check_training: bool = True) -> None:
 
 
 def _check_targets(program: Program, ds: Dataset, train: TrainStmt) -> None:
+    if (ds.python or ds.entrypoint) and not ds.loaded:
+        return
     out = math.prod(program.output.shape)
     width = len(ds.targets[0])
     if train.loss == "cross_entropy":

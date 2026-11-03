@@ -19,6 +19,15 @@ def _cmd_check(args: argparse.Namespace) -> int:
         source = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise WgtError(f"cannot read source: {exc}", path=str(path)) from None
+    if is_library_source(source) and any(line.startswith("data ") for line in source.splitlines()):
+        from .syntax import _FileParser, _Loader
+        parser = _FileParser(source, str(path), _Loader(), library=False)
+        parser.data_only = True
+        parser.run()
+        if parser.version != "0.3":
+            raise WgtError("standalone data files require wgt 0.3", path=str(path))
+        print(f"ok: data file {path}, datasets: {', '.join(parser.datasets)}; model shapes and payloads not checked")
+        return 0
     if is_library_source(source):
         scope = parse_library(source, str(path))
         print(f"ok: library {path}, blocks: {', '.join(scope.blocks)}")

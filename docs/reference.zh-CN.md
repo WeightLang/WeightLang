@@ -251,13 +251,17 @@ gru_cell 需要 scan 提供 state，不能当普通顶层层独立使用。
 ## 数据与训练参数
 
 行格式为 `[输入数值] -> [目标数值]`；多维输入按 C/H/W 等声明顺序展开，最后一维变化最快。
-CSV 前若干列为输入，其余为目标；不支持带引号的 CSV 字段。
+CSV/TSV 前若干列为输入，其余为目标；支持带引号的数字字段。
+0.3 支持独立 `.wgt`、JSON/JSONL、NPZ 和 Python 数据加载，完整格式与回调契约见[数据加载](datasets.md)。
 
 | 参数 | 解释 |
 | --- | --- |
 | `file="train.csv"` | 相对源文件的数据路径；必须同时提供 sha256 |
 | `sha256=...` | 数据文件原始字节的 64 位小写十六进制 SHA256，含被跳过的表头 |
-| `skip=0` | 跳过开头若干行，非负整数，仅用于文件数据 |
+| `skip=0` | 跳过开头若干原始文本行，非负整数，仅 CSV/TSV/JSONL |
+| `format=csv/tsv/json/jsonl/npz/wgt` | 0.3；默认按文件扩展名推断；数据全部载入内存 |
+| `dataset=name` | 0.3；仅用于 `.wgt`，选择内部数据集；默认与当前 data 名相同 |
+| `python="file.py:load"` / `entrypoint="name"` | 0.3 数据加载器；与 file 互斥；函数名默认 load；入口点组为 weightlang.data_loaders |
 | `license="..."` / `source="..."` | 数据许可证与来源标注；内联数据也可用 |
 | `data=name` | 训练数据集名，必填 |
 | `loss=mse` | 均方误差；目标形状与输出一致 |
@@ -273,6 +277,14 @@ CSV 前若干列为输入，其余为目标；不支持带引号的 CSV 字段�
 
 自定义 trainer 必填 data/loss/epochs，可选 batch/validate/lr（lr 默认 0.01），
 不接受 optimizer/weight_decay；名字能解析不代表训练器已注册，见[训练器接口](trainers.md)。
+0.3 还可用 `python="file.py:train"` 或 `entrypoint="name"` 替代 trainer，函数名默认 train，
+入口点组为 weightlang.trainers；其他参数沿用自定义训练器规则。脚本路径相对模型文件。
+数据加载器 `load(DataContext)` 返回二维 inputs/targets 字典；训练器 `train(TrainingContext)`
+原地更新参数，返回有限数值指标字典或 None。完整签名、上下文属性和限制见[数据加载](datasets.md)。
+check 不执行 Python；实际训练前加载并校验数据，`--no-train` 跳过加载器和训练器。
+可运行的分离数据例子见 [model.wgt](../examples/external_data/model.wgt) 与
+[data_x.wgt](../examples/external_data/data_x.wgt)，脚本例子见
+[python.wgt](../examples/external_data/python.wgt)。这些是当前本地实现的合成训练演示，尚未发布。
 序列交叉熵 f32[L,V] 每行需要 L 个类别目标。seed 不保证跨硬件或跨 PyTorch 版本结果一致。
 
 ## 完整示例

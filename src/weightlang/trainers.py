@@ -53,6 +53,7 @@ class Trainer:
     run: TrainerFunction
     source: str | None = None
     sha256: str | None = None
+    provenance: dict | None = None
 
 
 def backprop(context: TrainingContext) -> None:
@@ -141,6 +142,8 @@ def run_custom(trainer: Trainer, context: TrainingContext) -> dict:
         record["source"] = trainer.source
     if trainer.sha256:
         record["sha256"] = trainer.sha256
+    if trainer.provenance:
+        record["entrypoint"] = trainer.provenance
     if metrics is not None:
         record["metrics"] = metrics
     return record

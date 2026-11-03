@@ -1,0 +1,10 @@
+wgt 0.3
+model external_data
+# 每个样本一个输入、一个输出；linear 仅拟合 y=a*x+b，不包含预训练权重。
+input x: f32[1]
+output y: f32[1]
+layer fit: linear(out=1)
+init seed=42
+# 数据独立保存；SHA256 固定文件内容，路径相对本文件。
+data samples: file="data_x.wgt" sha256=58ab1e7ef20eec8dc31276932ecc5bd91a9c4497888cc1ce27c92fadca62e8cb
+train data=samples loss=mse optimizer=sgd lr=0.1 epochs=20

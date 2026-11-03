@@ -29,7 +29,7 @@ train data=samples loss=mse trainer=search lr=0.1 epochs=400
 ```
 
 `trainer` is an identifier, not an import path. Parsing/checking does not load
-Python. The build command explicitly supplies trusted local Python code, which
+Python. The CLI binding supplies trusted local Python code, which
 runs with the build process's permissions; this is not a sandbox. Loading an
 already-built artifact never needs the plugin.
 
@@ -107,3 +107,16 @@ compiler. Plugins using Python `random`, NumPy, external state or additional
 CUDA devices must manage those themselves. A source hash identifies the plugin
 file, not all dependencies or a complete reproducible environment. The compiler
 does not bundle plugin source into artifacts.
+
+## Source-declared Python and installed entry points
+
+With wgt 0.3, replace `trainer=NAME` with `python="hooks.py:train"` (the function
+name defaults to `train`) or `entrypoint="NAME"` in the train statement. The
+source declaration supplies the callback without a separate CLI binding.
+Paths are relative to the model file. Installed entry points use the
+`weightlang.trainers` group, must resolve uniquely, and follow the same
+TrainingContext and result contracts. These options are mutually exclusive
+with `trainer=`. Data callbacks use `weightlang.data_loaders` and a separate
+DataContext. See [data and Python loading](datasets.md) for signatures,
+metadata registration, limits and runnable examples. Check and --no-train
+never import these callbacks; trained artifacts remain independent of them.

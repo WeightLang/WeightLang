@@ -79,8 +79,15 @@ data train: file="train.csv" sha256=<64 lowercase hex digits> skip=1 license="CC
 Paths are relative to the source. Hashes cover the original file bytes, including
 any header. `skip=N` skips initial lines (default 0). Remaining nonempty lines
 must contain comma-separated numbers: the first input-width columns are
-features, all remaining columns are targets. Quoted CSV fields are unsupported.
+features, all remaining columns are targets. Quoted numeric CSV fields are supported.
 A file without a hash, a hash mismatch or malformed row fails before training.
+
+In 0.3, `format=` defaults to the file extension and supports CSV, TSV, JSON,
+JSONL, NPZ and standalone WGT datasets. Use `dataset=` to select a dataset in a
+WGT file (default: the current dataset name). All file sources remain hash-pinned.
+`data samples: python="hooks.py:load"` or `entrypoint="name"` defers a Python
+loader until training. `train ... python="hooks.py:train"` or `entrypoint="name"`
+selects a source-declared trainer. See [data formats and callback contracts](datasets.md).
 
 ## Training
 

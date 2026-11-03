@@ -173,6 +173,8 @@ def _dataset_record(program: Program, name: str, data_sha: str, rows: int) -> di
     if ds.file:
         record["file"] = ds.file
         record["file_sha256"] = ds.sha256
+    if ds.loader_record:
+        record["loader"] = ds.loader_record
     if ds.license:
         record["license"] = ds.license
     if ds.source:
@@ -183,6 +185,8 @@ def _dataset_record(program: Program, name: str, data_sha: str, rows: int) -> di
 def _train(program: Program, module: nn.Sequential, trainers=None) -> dict[str, Any]:
     assert program.train is not None
     spec = program.train
+    from .datasets import materialize
+    materialize(program)
     x, y, data_sha = _dataset_tensors(program, spec.data)
     if spec.loss == "bce" and not torch.all((y == 0) | (y == 1)):
         raise WgtError("loss=bce requires targets of 0 or 1", spec.line, program.path)
@@ -203,6 +207,10 @@ def _train(program: Program, module: nn.Sequential, trainers=None) -> dict[str, 
         backprop(context)
     else:
         supplied = (trainers or {}).get(spec.trainer)
+        if spec.python or spec.entrypoint:
+            from .plugins import load_callback
+            callback, provenance = load_callback(spec.python, spec.entrypoint, "weightlang.trainers", program.path, "train")
+            supplied = Trainer(callback, provenance["source"], provenance.get("sha256"), provenance if spec.entrypoint else None)
         if supplied is None:
             raise WgtError(f"trainer {spec.trainer!r} is not registered; supply trainers= or --trainer", spec.line, program.path)
         trainer = supplied if isinstance(supplied, Trainer) else Trainer(supplied)
