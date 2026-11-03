@@ -31,7 +31,7 @@ module.exports = grammar({
       $.array, $.arguments, $.literal, $.operator, $.punctuation, $.clause),
     clause: _ => choice('from', 'as', 'extends'),
     call: $ => prec(2, seq(field('function', $.qualified_name), $.arguments)),
-    qualified_name: $ => seq($.identifier, repeat(seq('.', $.identifier))),
+    qualified_name: $ => prec.right(seq($.identifier, repeat(seq('.', $.identifier)))),
     parameter: $ => prec(1, seq(field('name', $.identifier), '=')),
     arguments: $ => seq('(', repeat(choice($._item, $._newline)), ')'),
     array: $ => seq('[', repeat(choice($._item, $._newline)), ']'),
@@ -39,6 +39,6 @@ module.exports = grammar({
     number: _ => /(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?/,
     string: _ => /"([^"\\\n]|\\[^\n])*"/,
     operator: _ => choice('->', '==', '!=', '<=', '>=', '//', '&&', '||', '!', '=', '+', '-', '*', '/', '%', '<', '>'),
-    punctuation: _ => choice(',', ':'),
+    punctuation: _ => choice(',', ':', '.'),
   },
 });
