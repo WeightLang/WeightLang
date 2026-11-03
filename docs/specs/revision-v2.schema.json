@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WeightLang revision v2",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "weightlang.revision"
+    },
+    "format_version": {
+      "const": 2
+    },
+    "precision": {
+      "const": "lossless"
+    },
+    "parent": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "files": {
+      "type": "object",
+      "properties": {
+        "manifest.json": {
+          "type": "object",
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "objects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65536
+                  }
+                },
+                "required": [
+                  "sha256",
+                  "size"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "sha256",
+            "size",
+            "objects"
+          ],
+          "additionalProperties": false
+        },
+        "source.wgt": {
+          "type": "object",
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "objects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65536
+                  }
+                },
+                "required": [
+                  "sha256",
+                  "size"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "sha256",
+            "size",
+            "objects"
+          ],
+          "additionalProperties": false
+        },
+        "weights.safetensors": {
+          "type": "object",
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "objects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65536
+                  }
+                },
+                "required": [
+                  "sha256",
+                  "size"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "sha256",
+            "size",
+            "objects"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "manifest.json",
+        "source.wgt",
+        "weights.safetensors"
+      ],
+      "additionalProperties": false
+    },
+    "message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "format",
+    "format_version",
+    "precision",
+    "parent",
+    "files",
+    "message"
+  ],
+  "additionalProperties": false
+}

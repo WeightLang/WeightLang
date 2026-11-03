@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WeightLang references v1",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "weightlang.refs"
+    },
+    "format_version": {
+      "const": 1
+    },
+    "head": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "branch": {
+              "type": "string",
+              "pattern": "^(?!HEAD$)[A-Za-z][A-Za-z0-9_-]*(/[A-Za-z][A-Za-z0-9_-]*)*$"
+            }
+          },
+          "required": [
+            "branch"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "branches": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^(?!HEAD$)[A-Za-z][A-Za-z0-9_-]*(/[A-Za-z][A-Za-z0-9_-]*)*$"
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "format",
+    "format_version",
+    "head",
+    "branches"
+  ],
+  "additionalProperties": false
+}

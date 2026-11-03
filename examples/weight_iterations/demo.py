@@ -9,7 +9,7 @@ import torch
 
 from weightlang.artifact import load_artifact
 from weightlang.compiler import compile_file
-from weightlang.revisions import RevisionStore
+from weightlang.repository import WeightRepository
 
 
 def main():
@@ -17,7 +17,7 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("weights/weight_iterations"))
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
-    store = RevisionStore(args.output / "store")
+    repository = WeightRepository(args.output / "store")
     skeleton = (
         "wgt 0.3\nmodel {name}\ninput x: f32[2]\noutput y: f32[1]\n"
         "layer body: linear(in=2, out=512)\nlayer act: tanh\n"
@@ -30,7 +30,8 @@ def main():
         base_source = scratch / "base.wgt"
         base_source.write_text(skeleton.format(name="base", rules=""))
         base = compile_file(base_source, scratch / "weights")
-        parent = store.save(base.path)
+        parent = repository.commit(base.path, message="baseline")
+        repository.branch("bias-only", switch=True)
         rules = (
             f'inherit from "{base.path.resolve()}" sha256={base.manifest["weights"]["sha256"]}\n'
             "freeze all\nunfreeze head.bias\n"
@@ -41,15 +42,17 @@ def main():
         for name, tensor in base.module.state_dict().items():
             if name != "head.bias":
                 assert torch.equal(tensor, child.module.state_dict()[name]), name
-        revision = store.save(child.path, parent=parent["revision"])
+        revision = repository.commit(child.path, message="train only head.bias")
         exported = scratch / "exported"
-        store.checkout(revision["revision"], exported)
+        repository.store.checkout(repository.resolve("HEAD"), exported)
         for name in ("manifest.json", "weights.safetensors", "source.wgt"):
             assert (exported / name).read_bytes() == (child.path / name).read_bytes()
         loaded = load_artifact(exported, warn_untrained=False)
         assert torch.equal(loaded.predict([[0, 1]]), child.module(torch.tensor([[0.0, 1.0]])))
         report = {
             "parent": parent,
+            "branches": repository.status()["branches"],
+            "storage": repository.stats(),
             "child": revision,
             "frozen_bitwise_equal": True,
             "export_byte_identical": True,

@@ -1,7 +1,9 @@
 # Weight iterations and selective training
 
 Implemented in this checkout; not a claim about the published 0.2 wheel.
-The normative storage contract is [revision v1](specs/revision-v1.md).
+See [weight version control](weight-version-control.md) for automatic parents and branches.
+The normative contracts are [object storage v1](specs/revision-v1.md) and
+[repository references and revision v2](specs/repository-v1.md).
 
 ## Freeze independently of imports (wgt 0.3)
 
@@ -48,17 +50,24 @@ use explicit imports for partial or remote package reuse.
 ## Durable version store
 
 ```sh
-weightc revision save weights/base --store weights/history
-# Copy the returned revision ID into PARENT.
-weightc build next.wgt --store weights/history --parent "$PARENT"
-# Copy the new revision ID into CHILD.
-weightc revision inspect "$CHILD" --store weights/history
-weightc revision verify "$CHILD" --store weights/history
-weightc revision checkout "$CHILD" --store weights/history -o weights/next
-weightc run weights/next --input '[[1, 2]]'
+weightc revision commit weights/base -m "baseline"
+weightc build next.wgt --store -m "next iteration"
+weightc revision log
+weightc revision switch -c experiment
+weightc revision inspect HEAD
+weightc revision verify HEAD
+weightc revision checkout HEAD~1 -o weights/previous
+weightc run weights/previous --input '[[1, 2]]'
 ```
 
-`parent` records ancestry; it does **not** initialize the model. Use `inherit`
+The default repository is `weights/.revisions`. `--store PATH` selects another.
+The first commit creates `main`; subsequent commits automatically parent to HEAD
+and advance the selected branch. There is no need to copy IDs. Identical artifacts
+are no-ops. `save` is an alias for `commit`. Branch switching selects where future
+commits go; it does not replace existing artifact directories. Use checkout to
+materialize a branch or revision in a new directory.
+
+The automatically recorded parent represents ancestry; it does **not** initialize the model. Use `inherit`
 or `import` in the source to reuse weights. To inherit a stored revision, first
 checkout the selected revision and use that artifact's weights hash. A revision
 ID hashes the revision record; a weights hash hashes the safetensors file. These
@@ -70,7 +79,8 @@ It cannot be combined with `--force` or a custom `-o`. Saving an existing artifa
 never deletes it. Both paths still need memory for the model and temporary disk
 space for a full artifact; this feature saves retained iteration storage, not
 peak training memory or scratch space. `new_bytes` counts newly published object
-and revision payload bytes, not filesystem allocation, peak space, or compression.
+and revision payload bytes, excluding mutable refs, filesystem allocation and peak space.
+`revision stats` reports total stored payload including refs.
 
 Checkout refuses any existing destination, reconstructs and verifies all three
 original files, and loads the result with the normal artifact validator before

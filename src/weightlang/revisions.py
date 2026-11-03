@@ -80,19 +80,18 @@ class RevisionStore:
         try:
             raw = self._read("revisions", revision)
             record = json.loads(raw)
-            if not isinstance(record, dict) or set(record) != {
-                "format",
-                "format_version",
-                "precision",
-                "parent",
-                "files",
-            }:
+            fields = {"format", "format_version", "precision", "parent", "files"}
+            if isinstance(record, dict) and record.get("format_version") == 2:
+                fields.add("message")
+                if not isinstance(record.get("message"), str):
+                    raise ValueError("message must be a string")
+            if not isinstance(record, dict) or set(record) != fields:
                 raise ValueError("unexpected revision fields")
             if type(record["format_version"]) is not int:
                 raise ValueError("invalid format version")
             if (
                 record["format"] != FORMAT
-                or record["format_version"] != 1
+                or record["format_version"] not in (1, 2)
                 or record["precision"] != "lossless"
                 or raw != _canonical(record)
             ):
@@ -123,7 +122,9 @@ class RevisionStore:
         except (KeyError, TypeError, ValueError) as exc:
             raise WgtError(f"invalid revision: {exc}") from None
 
-    def save(self, artifact, *, parent=None):
+    def save(self, artifact, *, parent=None, message=None):
+        if message is not None and not isinstance(message, str):
+            raise WgtError("commit message must be a string")
         if parent is not None:
             self.read(parent)
         root = Path(artifact)
@@ -167,6 +168,8 @@ class RevisionStore:
         if any(sha256_file(root / name) != before[name] for name in FILES):
             raise WgtError("artifact changed while saving")
         record = {"format": FORMAT, "format_version": 1, "precision": "lossless", "parent": parent, "files": files}
+        if message is not None:
+            record.update(format_version=2, message=message)
         # Verify the bytes actually captured, not only the current source files.
         self._verify_objects(record)
         revision, count = self._put("revisions", _canonical(record))

@@ -35,21 +35,21 @@ def _cmd_check(args: argparse.Namespace) -> int:
 def _cmd_build(args: argparse.Namespace) -> int:
     from .compiler import compile_file  # imports torch training code lazily
 
+    if args.message and not args.store:
+        raise WgtError("--message requires --store")
     if args.parent and not args.store:
         raise WgtError("--parent requires --store")
     if args.store:
         import tempfile
-        from .revisions import RevisionStore
+        from .repository import WeightRepository
 
         if args.force or args.out != "weights":
             raise WgtError("--store cannot be combined with --force or a custom -o")
-        store = RevisionStore(args.store)
-        if args.parent:
-            store.read(args.parent)
-        store.root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix=".build-", dir=store.root) as tmp:
+        repository = WeightRepository(args.store)
+        expected = repository.prepare(args.parent)
+        with tempfile.TemporaryDirectory(prefix=".build-", dir=repository.root) as tmp:
             result = compile_file(args.source, tmp)
-            report = store.save(result.path, parent=args.parent)
+            report = repository.commit(result.path, message=args.message, parent=args.parent, expected=expected)
         print(json.dumps(report, indent=2))
         return 0
     result = compile_file(args.source, args.out, force=args.force)
@@ -240,18 +240,39 @@ def _cmd_ablate(args: argparse.Namespace) -> int:
 
 
 def _cmd_revision(args: argparse.Namespace) -> int:
-    from .revisions import RevisionStore
+    from .repository import WeightRepository
 
-    store = RevisionStore(args.store)
+    repository = WeightRepository(args.store)
+    store = repository.store
     try:
-        if args.action == "save":
-            result = store.save(args.artifact, parent=args.parent)
+        if args.action in ("save", "commit"):
+            result = repository.commit(args.artifact, parent=args.parent, message=args.message)
+        elif args.action == "init":
+            result = repository.init(start=args.start)
+        elif args.action == "stats":
+            result = repository.stats()
+        elif args.action == "status":
+            result = repository.status(args.artifact)
+        elif args.action == "branch":
+            result = repository.branch(args.name, start=args.start) if args.name else repository.status()
+        elif args.action == "switch":
+            if args.create and args.detach:
+                raise WgtError("--create and --detach cannot be combined")
+            result = (
+                repository.branch(args.revision, switch=True)
+                if args.create
+                else repository.switch(args.revision, detach=args.detach)
+            )
+        elif args.action == "log":
+            result = repository.log(args.revision, limit=args.limit)
+        elif args.action == "diff":
+            result = repository.diff(args.before, args.after)
         elif args.action == "checkout":
-            result = store.checkout(args.revision, args.output)
+            result = store.checkout(repository.resolve(args.revision), args.output)
         elif args.action == "inspect":
-            result = store.read(args.revision)
+            result = store.read(repository.resolve(args.revision))
         else:
-            result = store.verify(args.revision)
+            result = store.verify(repository.resolve(args.revision))
     except OSError as exc:
         raise WgtError(f"revision store: {exc}") from None
     print(json.dumps(result, indent=2))
@@ -276,8 +297,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("source")
     p.add_argument("-o", "--out", default="weights", help="output root; writes <root>/<model>/ (default: weights)")
     p.add_argument("--force", action="store_true", help="replace an existing WeightLang model directory")
-    p.add_argument("--store", help="save directly to a revision store; remove temporary full artifact")
-    p.add_argument("--parent", help="parent revision SHA256 (requires --store)")
+    p.add_argument(
+        "--store",
+        nargs="?",
+        const="weights/.revisions",
+        help="commit to a weight repository (default: weights/.revisions)",
+    )
+    p.add_argument("--parent", help="optional expected HEAD; normally inferred automatically")
+    p.add_argument("-m", "--message", default="", help="weight version commit message (with --store)")
     p.set_defaults(func=_cmd_build)
 
     p = sub.add_parser("run", help="run inference with an artifact")
@@ -340,16 +367,49 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--compare", help="optional baseline artifact, evaluated on the same data")
     p.set_defaults(func=_cmd_evaluate)
 
-    p = sub.add_parser("revision", help="lossless content-addressed weight versions")
+    p = sub.add_parser("revision", help="version control for model weights")
     actions = p.add_subparsers(dest="action", required=True)
-    for action in ("save", "checkout", "verify", "inspect"):
+    for action in (
+        "init",
+        "save",
+        "commit",
+        "status",
+        "stats",
+        "branch",
+        "switch",
+        "log",
+        "diff",
+        "checkout",
+        "verify",
+        "inspect",
+    ):
         command = actions.add_parser(action)
-        command.add_argument("--store", default="weights/.revisions", help="durable object store")
-        if action == "save":
+        command.add_argument("--store", default="weights/.revisions", help="durable repository")
+        if action in ("save", "commit"):
             command.add_argument("artifact")
-            command.add_argument("--parent", help="full parent revision SHA256")
+            command.add_argument("--parent", help="optional expected HEAD; normally automatic")
+            command.add_argument("-m", "--message", default="")
+        elif action == "init":
+            command.add_argument("--start", help="adopt an existing revision as main")
+        elif action == "stats":
+            pass
+        elif action == "status":
+            command.add_argument("artifact", nargs="?", help="optional working artifact to compare with HEAD")
+        elif action == "branch":
+            command.add_argument("name", nargs="?", help="omit to list branches")
+            command.add_argument("--from", dest="start", default="HEAD")
+        elif action == "diff":
+            command.add_argument("before")
+            command.add_argument("after", nargs="?", default="HEAD")
         else:
-            command.add_argument("revision", help="full revision SHA256")
+            command.add_argument(
+                "revision", nargs="?", default="HEAD", help="HEAD, branch, revision ID/prefix or REF~N"
+            )
+        if action == "switch":
+            command.add_argument("-c", "--create", action="store_true")
+            command.add_argument("--detach", action="store_true")
+        if action == "log":
+            command.add_argument("--limit", type=int, default=20)
         if action == "checkout":
             command.add_argument("-o", "--output", required=True, help="NEW artifact directory")
         command.set_defaults(func=_cmd_revision)
