@@ -1,0 +1,4 @@
+interface:
+  display_name: "migrate-to-weightlang"
+  short_description: "将现有模型或项目迁移到 WeightLang，迁移权重并验证行为一致性"
+  default_prompt: "使用 $migrate-to-weightlang 将当前模型或项目迁移到 WeightLang，保留原始权重并验证输出一致性。"
