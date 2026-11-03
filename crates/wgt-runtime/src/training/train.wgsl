@@ -104,6 +104,53 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         case 15u: { value = add(arena[cfg.destination + j], arena[cfg.a + j]); }
         case 16u: { value = 0.0; } // Frozen expression: stop the owner gradient chain.
         case 17u: { value = add(arena[cfg.a + j], -mul(cfg.rate, arena[cfg.b + j])); }
+        case 18u: { // One lane per sample, disjoint row of logits/gradient and loss.
+            // Max subtraction keeps exp <= 1. Advantages are constants (reward minus
+            // baseline supplied by caller); CE uses one. Loss is averaged by case 7.
+            let row = cfg.a + j * cfg.output_width;
+            var maximum = arena[row];
+            for (var k = 1u; k < cfg.output_width; k++) {
+                maximum = max(maximum, arena[row + k]);
+            }
+            var total = 0.0;
+            var chosen = 0.0;
+            for (var k = 0u; k < cfg.output_width; k++) {
+                let shifted = add(arena[row + k], -maximum);
+                total = add(total, exp(shifted));
+                if arena[cfg.b + j * cfg.output_width + k] != 0.0 { chosen = shifted; }
+            }
+            let advantage = arena[cfg.c + j];
+            value = mul(advantage, add(log(total), -chosen));
+            for (var k = 0u; k < cfg.output_width; k++) {
+                let probability = exp(add(arena[row + k], -maximum)) / total;
+                arena[cfg.input_width + j * cfg.output_width + k] =
+                    mul(advantage, probability - arena[cfg.b + j * cfg.output_width + k]) / f32(cfg.batch);
+            }
+        }
+        case 19u: { // One lane per owner element, with disjoint candidate m/v ranges.
+            // Match CPU order (0.001*g)*g, not 0.001*(g*g). Bias corrections
+            // are CPU powf values passed as bits, including the u64-step to f32 cast.
+            let g = arena[cfg.b + j];
+            let m = add(mul(0.9, arena[cfg.c + j]), mul(0.1, g));
+            let v = add(mul(0.999, arena[cfg.extra + j]), mul(mul(0.001, g), g));
+            let correction_m = bitcast<f32>(cfg.input_width);
+            let correction_v = bitcast<f32>(cfg.output_width);
+            // Division can overflow even when the uncorrected moment is finite.
+            let limit = 3.4028234663852886e38;
+            if abs(m) > limit * correction_m || v > limit * correction_v {
+                atomicOr(&status, 1u);
+            } else {
+                let numerator = m / correction_m;
+                let denominator = sqrt(v / correction_v) + 1e-8;
+                if denominator < 1.0 && abs(numerator) > limit * denominator {
+                    atomicOr(&status, 1u);
+                } else {
+                    value = add(arena[cfg.a + j], -mul(cfg.rate, numerator / denominator));
+                }
+            }
+            arena[cfg.batch + j] = m;
+            arena[cfg.padding + j] = v;
+        }
         default: { atomicOr(&status, 2u); }
     }
     arena[cfg.destination + j] = value;

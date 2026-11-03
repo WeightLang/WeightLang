@@ -91,11 +91,8 @@ impl Trainer {
     }
 
     /// Select an experimental Rust training backend. WGT bindings are not connected.
-    /// GPU requires SGD; changing backend preserves weights, steps and checkpoint state.
+    /// Changing backend preserves weights, steps and checkpoint state.
     pub fn set_backend(&mut self, backend: TrainingBackend) -> Result<()> {
-        if !matches!(backend, TrainingBackend::Cpu) && self.optimizer != Optimizer::Sgd {
-            return Err(TrainingError::Unsupported("GPU training supports SGD only").into());
-        }
         self.backend = backend;
         Ok(())
     }
@@ -126,11 +123,24 @@ impl Trainer {
             .context("revision overflow")?;
         #[cfg(feature = "gpu")]
         if let TrainingBackend::Gpu(gpu) = &mut self.backend {
-            let updates = gpu.stage_sgd(&self.session, &gradients, rate)?;
+            let rule = match self.optimizer {
+                Optimizer::Sgd => gpu::UpdateRule::Sgd,
+                Optimizer::Adam => gpu::UpdateRule::Adam {
+                    first: &self.first,
+                    second: &self.second,
+                    step,
+                },
+            };
+            let updates = gpu.stage_update(&self.session, &gradients, rate, rule)?;
             // No fallible operation remains after staging every owner. The CPU copy
             // is the committed state, including after device loss or external edits.
-            for (i, values) in updates {
-                self.session.parameters[i].storage = Storage::Resident(values.into_boxed_slice());
+            for candidate in updates {
+                self.session.parameters[candidate.index].storage =
+                    Storage::Resident(candidate.values.into_boxed_slice());
+                if let Some((first, second)) = candidate.moments {
+                    self.first[candidate.index] = first;
+                    self.second[candidate.index] = second;
+                }
             }
             self.steps = step;
             self.session.revision = revision;

@@ -136,7 +136,7 @@ p50/p95 为排序后 floor((N-1)*q) 项，无插值。没有跨模型速度结�
 `weights/<experiment>/`，见[存储约定](storage.md)。
 原生训练断点不是传统 WeightLang manifest 制品，不可交给 weightlang.load 或权重版本库直接使用。
 模型初始化代码/脚本、数据源与加载位置、脚本局部变量/RNG、环境状态和训练进度不自动写入断点；
-恢复的是模型与优化器，调用者需显式恢复数据/环境/采样进度。相同后续批次可逐位续接 Adam 更新。
+恢复的是模型与优化器，调用者需显式恢复数据/环境/采样进度。相同后续批次在同一后端可逐位续接 Adam 更新；跨 CPU/GPU 以数值容差比较。
 `save_model` 导出结构和实际权重，保留 view/add 关系，冻结文件权重被物化，不依赖原始参数文件。
 
 当前同一编译单元可声明原生向量模型并在 main 中调用 `模型名("adam")` 构造。支持固定 f32 向量、linear/relu/tanh/sigmoid/identity；复杂图算子及 std block 尚未迁入原生构造器。也可构造 MLP 或读写原生 IR；
@@ -356,8 +356,8 @@ WGT 0.5 也支持 `values.mean`，与 `mean(values)` 等价；列表只接受非
 **Rust API 实验性，WGT 绑定尚未接入**。`training::Trainer::new` 与 `restore` 默认 CPU，
 CPU 的运算顺序、SGD/Adam 和 `weightlang.native-training.v1` 断点格式保持不变。
 开启 runtime 的 `gpu` feature 后，可显式选择 `TrainingBackend::Gpu`；不增加脚本语法或 CLI 参数，
-不依赖设备池。这里只支持顺序 IR 的 linear/relu/tanh/sigmoid/identity、f32、MSE 和无动量 SGD。
-不支持 GPU Adam、交叉熵、REINFORCE、任意 forward 程序或多 GPU，也不自动回退 CPU。
+不依赖设备池。支持顺序 IR 的 linear/relu/tanh/sigmoid/identity、f32、MSE、交叉熵与 REINFORCE，
+优化器支持无动量 SGD 和 Adam。不支持任意 forward 程序或多 GPU，也不自动回退 CPU。
 
 ```rust,no_run
 use std::path::Path;
@@ -384,25 +384,37 @@ trainer.export(Path::new("weights/my-experiment/model.json"))?;
   device 必须是当前硬件枚举的精确 ID，不接受 cpu/auto/gpu；不选择软件 Vulkan。
   max_batch 在 `1..=u32::MAX`，budget_bytes 正数；模型尺寸还须满足设备 buffer、u32 索引和 dispatch 上限。
   构造仅准备设备及内核，不训练。`device_info()` 返回实际 ID、名称与后端信息。
-- `Trainer::set_backend(TrainingBackend) -> Result<()>`：GPU 只允许 SGD；切换保留权重、步数、revision、
+- `Trainer::set_backend(TrainingBackend) -> Result<()>`：GPU 支持 SGD/Adam；切换保留权重、步数、revision、
   优化器历史。`backend()` 返回当前后端。设备选择不写入断点，恢复后显式重选 GPU。
 - `gradients(inputs, Objective::Mse(targets))`：输入 `[B,I]`、目标 `[B,O]`，B 非零且不超过上限；
   返回 batch/output 双重平均损失及按参数声明顺序排列的梯度。view/add 梯度在 GPU 上逆序汇总到 owner，
   冻结链截断；重复 owner 只更新一次。此调用不改变权重、步数或 revision。
-- `step(inputs, objective, rate)`：rate 正有限，返回更新前损失。前向 tape、MSE、反传和候选 SGD
-  更新在 GPU 执行；全部阶段、回读与有限性检查成功后才一次性提交 CPU 权重、步数和 revision。
+- `gradients(inputs, Objective::Policy { actions, advantages })`：输入 `[B,I]`，模型输出未经 softmax 的
+  logits `[B,O]`；actions 是 B 个 `usize` 类别索引，范围 `0..O`；advantages 是 B 个有限 f32 常量。
+  交叉熵传全 1；REINFORCE 传调用者计算的奖励减基线（或其他优势估计），可为负或零，不对奖励/基线求导。
+  每样本先减最大 logit，再计算 log-sum-exp；返回 `mean(-advantage * log pi(action))`，
+  logit 梯度为 `advantage * (softmax - onehot(action)) / B`。不隐式采样、不内置环境或 baseline 拟合。
+- `step(inputs, objective, rate)`：rate 正有限，返回更新前损失。前向 tape、损失、反传和候选 SGD/Adam
+  更新在 GPU 执行；全部阶段、回读与有限性检查成功后才一次性提交 CPU 权重、矩状态、步数和 revision。
+  Adam 固定 beta1=0.9、beta2=0.999、eps=1e-8，与 CPU 相同：
+  `m=0.9*m+0.1*g; v=0.999*v+(0.001*g)*g`，方向为 `m_hat/(sqrt(v_hat)+eps)`。
+  偏差校正使用 CPU 同一 `powf(step as f32)` 结果；冻结参数保留原矩，共享 owner 只更新一次。
   溢出检测在 WGSL 算术前执行，回读再检查有限性；不依赖 GPU 对 NaN/Inf 的传播约定。
-  设备错误、非法输入、超预算或非有限数值均不提交任何候选权重。
+  设备错误、非法输入、超预算或非有限数值均不提交任何候选权重或矩状态。
 - 训练 GPU 错误保留为 `TrainingError::{Unavailable,Unsupported,InvalidInput,OutOfBudget,NonFinite,Device}`，
   可从既有 anyhow 错误链 downcast；原有 CPU、学习率和步数检查保留原错误契约。
 
-第一阶段 CPU Session 是已提交权重的权威副本：每次 GPU 事务上传当前参数，设备内保留整个批次的 tape，
+CPU Session 与 Trainer 是已提交权重及优化器矩的权威副本：每次 GPU 事务上传当前参数/矩，
+设备内保留整个批次的 tape 和候选更新，
 事务结束回读并释放临时设备 arena；没有跨步常驻权重或吞吐量提升承诺。`predict` 仍用 CPU，
 `export`/`save` 使用已提交 CPU 副本，设备丢失后仍可保存；后续 GPU 调用报错，可显式切回 CPU。
-外部 Session 参数写入会被下一次训练读取，保留现有 weightfs/优化器语义。
+外部 Session/weightfs 参数写入会被下一次训练读取，保留已有矩和步数；weightfs 仍通过同一模型锁串行访问。
+`save` 保存完整 `first`/`second`/`steps`，格式仍是 `weightlang.native-training.v1`；CPU 断点可恢复后显式
+选择 GPU 续训，GPU 断点可直接由默认 CPU 恢复，跨后端允许 f32 误差，不承诺逐位相同。
 冻结 file/packed 参数可物化用于计算，可训练 file 仍拒绝。
 
-GPU budget 是每次调用的保守数值 payload 上界：Session managed bytes、两个既有优化器数组，
+GPU budget 是每次调用的保守数值 payload 上界：Session managed bytes、两个既有优化器数组、
+更新阶段保留的完整梯度（包括冻结参数），
 以及 host/device arena、回读、返回梯度/候选、物化暂存和操作 uniform 的预留。
 不包括调用者 inputs/targets、对象元数据、allocator 多余容量、驱动与命令分配，不能当进程内存硬隔离。
 默认 CPU 训练的预算范围不变。
@@ -414,7 +426,7 @@ ReLU 测试避开零点。真实硬件测试默认 ignored；显式运行，缺�
 `WGT_REQUIRE_GPU=1` 则缺硬件失败：
 
 ```sh
-WGT_REQUIRE_GPU=1 cargo test -p weightlang-runtime --features gpu --test gpu_training -- --ignored --nocapture
+WGT_REQUIRE_GPU=1 cargo test -p weightlang-runtime --features gpu --test gpu_training -- --include-ignored --nocapture
 WGT_REQUIRE_GPU=1 cargo test -p weightlang-runtime --features gpu --lib training::gpu::tests::device_loss_preserves_last_committed_model -- --ignored --nocapture
 ```
 

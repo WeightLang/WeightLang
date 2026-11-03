@@ -13,10 +13,12 @@ wgt-native --devices
 Rust API 另有实验性顺序 IR GPU 训练：**Rust API 实验性，WGT 绑定尚未接入**。
 启用 runtime `gpu` feature，以 `GpuTraining::new(device,max_batch,budget_bytes)` 指定当前枚举的精确
 硬件 ID，再调用 `Trainer::set_backend(TrainingBackend::Gpu(...))`。不自动测速、选卡或回退 CPU。
-支持 f32 batch linear/relu/tanh/sigmoid/identity、MSE 反传与原子 SGD 更新；不支持 GPU Adam、
-交叉熵、REINFORCE、多 GPU 或任意 WGT forward 程序。完整签名、预算、容差和实机命令见
+支持 f32 batch linear/relu/tanh/sigmoid/identity、MSE/交叉熵/REINFORCE 反传与原子 SGD/Adam 更新；
+不支持多 GPU 或任意 WGT forward 程序。完整签名、预算、容差和实机命令见
 [实验性 Rust GPU 训练 API](native-training.md#实验性-rust-gpu-训练-api)。
 
-每次事务从已提交 CPU 权重上传，GPU 保留完整 tape 并计算候选；所有计算和回读校验通过后才提交。
-CPU 副本使设备错误后仍可导出最后成功权重，恢复断点默认 CPU。当前实现同步回读、逐步分配，
+每次事务从已提交 CPU 权重和优化器矩上传，GPU 保留完整 tape 并计算候选；所有计算和回读校验
+通过后才一起提交权重、矩、步数及 revision。Adam 偏差校正与 CPU 相同，冻结/共享保持 owner 语义。
+CPU 副本使设备错误后仍可导出最后成功权重与优化器状态；v1 断点支持 CPU/GPU 双向续训，
+恢复默认 CPU，使用 GPU 须显式重选，跨后端不保证逐位一致。当前实现同步回读、逐步分配，
 不承诺训练加速或显存常驻；`predict` 仍是 CPU。原 WGT fit/reinforce 和 CLI 设备参数保持原行为。

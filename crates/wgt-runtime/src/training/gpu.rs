@@ -11,9 +11,23 @@ use std::{
     time::Duration,
 };
 
-type Updates = Vec<(usize, Vec<f32>)>;
+/// Borrow committed history; candidate state never aliases it.
+pub(super) enum UpdateRule<'a> {
+    Sgd,
+    Adam {
+        first: &'a [Vec<f32>],
+        second: &'a [Vec<f32>],
+        step: u64,
+    },
+}
+#[derive(Debug)]
+pub(super) struct Candidate {
+    pub index: usize,
+    pub values: Vec<f32>,
+    pub moments: Option<(Vec<f32>, Vec<f32>)>,
+}
 
-/// Experimental Rust-only MSE/SGD backend. No WGT binding or CPU fallback.
+/// Experimental Rust-only MSE/policy and SGD/Adam backend. No WGT binding or CPU fallback.
 /// Uses bounded per-call device arenas, including a complete batch tape. The
 /// committed CPU weights survive device loss; this is not a throughput API.
 #[derive(Debug)]
@@ -67,8 +81,9 @@ struct Arena {
 }
 impl Arena {
     fn new(gpu: &GpuTraining, session: &Session) -> Result<Self> {
-        // Upper bound on managed numeric payloads: Session plus its two existing
-        // optimizer arrays, six arena equivalents (host upload/readback/results,
+        // Upper bound on managed numeric payloads: Session, its two optimizer
+        // arrays and the full gradient retained during staging (even for frozen
+        // owners), six arena equivalents (host upload/readback/results,
         // device storage/staging and materialization), and uniform buffers.
         // Caller data, metadata, allocator capacity and driver allocations excluded.
         let params = session
@@ -77,7 +92,7 @@ impl Arena {
             .try_fold(0usize, |n, p| n.checked_add(p.len))
             .ok_or(TrainingError::OutOfBudget)?;
         let base = params
-            .checked_mul(8)
+            .checked_mul(12)
             .and_then(|n| n.checked_add(session.report.managed_bytes))
             .and_then(|n| n.checked_add(8))
             .ok_or(TrainingError::OutOfBudget)?;
@@ -194,7 +209,7 @@ impl GpuTraining {
         }));
         let pipeline = scoped(&device, &failed, || {
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("batch MSE and SGD"),
+                label: Some("batch losses and optimizers"),
                 source: wgpu::ShaderSource::Wgsl(include_str!("train.wgsl").into()),
             });
             Ok(
@@ -229,25 +244,41 @@ impl GpuTraining {
         inputs: &[Vec<f32>],
         objective: Objective<'_>,
     ) -> Result<(f32, Vec<Vec<f32>>)> {
-        let Objective::Mse(targets) = objective else {
-            return Err(TrainingError::Unsupported("GPU supports MSE only").into());
-        };
         let batch = inputs.len();
         if batch == 0
             || batch > self.max_batch
-            || targets.len() != batch
             || inputs.iter().any(|x| x.len() != session.report.input)
-            || targets.iter().any(|x| x.len() != session.report.output)
         {
             return Err(TrainingError::InvalidInput("batch or row shape").into());
         }
-        if !inputs
-            .iter()
-            .chain(targets)
-            .flatten()
-            .all(|v| v.is_finite())
-        {
-            return Err(TrainingError::NonFinite("input or target").into());
+        if !inputs.iter().flatten().all(|v| v.is_finite()) {
+            return Err(TrainingError::NonFinite("input").into());
+        }
+        match &objective {
+            Objective::Mse(targets) => {
+                if targets.len() != batch
+                    || targets.iter().any(|x| x.len() != session.report.output)
+                {
+                    return Err(TrainingError::InvalidInput("target shape").into());
+                }
+                if !targets.iter().flatten().all(|v| v.is_finite()) {
+                    return Err(TrainingError::NonFinite("target").into());
+                }
+            }
+            Objective::Policy {
+                actions,
+                advantages,
+            } => {
+                if actions.len() != batch
+                    || advantages.len() != batch
+                    || actions.iter().any(|&a| a >= session.report.output)
+                {
+                    return Err(TrainingError::InvalidInput("policy batch or action").into());
+                }
+                if !advantages.iter().all(|a| a.is_finite()) {
+                    return Err(TrainingError::NonFinite("advantage").into());
+                }
+            }
         }
         let mut arena = Arena::new(self, session)?;
         let mut weights = Vec::new();
@@ -269,13 +300,6 @@ impl GpuTraining {
         for (dst, row) in arena.data[x..]
             .chunks_exact_mut(session.report.input)
             .zip(inputs)
-        {
-            dst.copy_from_slice(row);
-        }
-        let target = arena.zeros(count(batch, session.report.output)?)?;
-        for (dst, row) in arena.data[target..]
-            .chunks_exact_mut(session.report.output)
-            .zip(targets)
         {
             dst.copy_from_slice(row);
         }
@@ -308,20 +332,47 @@ impl GpuTraining {
         }
         let (prediction, output) = tape[tape.len() - 1];
         let n = count(batch, output)?;
-        let losses = arena.zeros(n)?;
-        arena.job(
-            Job::new(5, n, prediction, losses)
-                .shape(0, output, batch)
-                .sources(target, 0, 0),
-        )?;
+        let mut upstream = arena.zeros(n)?;
+        let (losses, loss_count) = match objective {
+            Objective::Mse(targets) => {
+                let target = arena.zeros(n)?;
+                for (dst, row) in arena.data[target..].chunks_exact_mut(output).zip(targets) {
+                    dst.copy_from_slice(row);
+                }
+                let losses = arena.zeros(n)?;
+                arena.job(
+                    Job::new(5, n, prediction, losses)
+                        .shape(0, output, batch)
+                        .sources(target, 0, 0),
+                )?;
+                arena.job(Job::new(6, n, prediction, upstream).sources(target, 0, 0))?;
+                (losses, n)
+            }
+            Objective::Policy {
+                actions,
+                advantages,
+            } => {
+                // One-hot avoids rounding large class indices through f32 storage.
+                let selected = arena.zeros(n)?;
+                for (sample, &action) in actions.iter().enumerate() {
+                    arena.data[selected + sample * output + action] = 1.;
+                }
+                let advantages = arena.values(advantages)?;
+                let losses = arena.zeros(batch)?;
+                arena.job(
+                    Job::new(18, batch, prediction, losses)
+                        .shape(upstream, output, batch)
+                        .sources(selected, advantages, 0),
+                )?;
+                (losses, batch)
+            }
+        };
         let loss = arena.zeros(1)?;
         arena.job(
             Job::new(7, 1, losses, loss)
                 .shape(0, output, batch)
-                .sources(0, 0, n),
+                .sources(0, 0, loss_count),
         )?;
-        let mut upstream = arena.zeros(n)?;
-        arena.job(Job::new(6, n, prediction, upstream).sources(target, 0, 0))?;
         for (index, op) in session.ops.iter().enumerate().rev() {
             let (x, input) = tape[index];
             let (y, output) = tape[index + 1];
@@ -384,12 +435,13 @@ impl GpuTraining {
         Ok((data[loss], gradients))
     }
 
-    pub(super) fn stage_sgd(
+    pub(super) fn stage_update(
         &mut self,
         session: &Session,
         gradients: &[Vec<f32>],
         rate: f32,
-    ) -> Result<Updates> {
+        rule: UpdateRule<'_>,
+    ) -> Result<Vec<Candidate>> {
         let mut arena = Arena::new(self, session)?;
         let mut outputs = Vec::new();
         for (i, p) in session.parameters.iter().enumerate() {
@@ -401,9 +453,29 @@ impl GpuTraining {
                 let g = arena.values(&gradients[i])?;
                 let candidate = arena.zeros(p.len)?;
                 let mut job = Job::new(17, p.len, w, candidate).sources(g, 0, 0);
+                let moments = match &rule {
+                    UpdateRule::Sgd => None,
+                    UpdateRule::Adam {
+                        first,
+                        second,
+                        step,
+                    } => {
+                        let m = arena.values(&first[i])?;
+                        let v = arena.values(&second[i])?;
+                        let next_m = arena.zeros(p.len)?;
+                        let next_v = arena.zeros(p.len)?;
+                        job = Job::new(19, p.len, w, candidate).sources(g, m, v);
+                        // CPU computes the exact same powf correction once per step.
+                        job.0[2] = (1. - 0.9f32.powf(*step as f32)).to_bits();
+                        job.0[3] = (1. - 0.999f32.powf(*step as f32)).to_bits();
+                        job.0[4] = next_m as u32;
+                        job.0[11] = next_v as u32;
+                        Some((next_m, next_v))
+                    }
+                };
                 job.0[10] = rate.to_bits();
                 arena.job(job)?;
-                outputs.push((i, candidate, p.len));
+                outputs.push((i, candidate, p.len, moments));
             }
         }
         if outputs.is_empty() {
@@ -414,7 +486,11 @@ impl GpuTraining {
         let data = self.execute(&arena)?;
         Ok(outputs
             .into_iter()
-            .map(|(i, start, n)| (i, data[start..start + n].to_vec()))
+            .map(|(index, start, n, moments)| Candidate {
+                index,
+                values: data[start..start + n].to_vec(),
+                moments: moments.map(|(m, v)| (data[m..m + n].to_vec(), data[v..v + n].to_vec())),
+            })
             .collect())
     }
 
@@ -575,6 +651,12 @@ mod tests {
     #[test]
     #[ignore = "requires hardware GPU; WGT_REQUIRE_GPU=1 requires availability"]
     fn device_loss_preserves_last_committed_model() {
+        for optimizer in [Optimizer::Sgd, Optimizer::Adam] {
+            check_device_loss(optimizer);
+        }
+    }
+
+    fn check_device_loss(optimizer: Optimizer) {
         let adapters = crate::gpu::adapters();
         let Some(adapter) = adapters
             .iter()
@@ -596,7 +678,7 @@ mod tests {
             mlp(&[1, 2, 1], "tanh", 7).unwrap(),
             Path::new("."),
             1_000_000,
-            Optimizer::Sgd,
+            optimizer,
         )
         .unwrap();
         trainer
@@ -609,6 +691,8 @@ mod tests {
         trainer.step(&x, Objective::Mse(&y), 0.01).unwrap();
         let before = serde_json::to_vec(&trainer.snapshot().unwrap()).unwrap();
         let revision = trainer.session.revision;
+        let first = trainer.first.clone();
+        let second = trainer.second.clone();
         let (_, gradients) = trainer.gradients(&x, Objective::Mse(&y)).unwrap();
         let TrainingBackend::Gpu(gpu) = &mut trainer.backend else {
             panic!("GPU selected")
@@ -616,8 +700,16 @@ mod tests {
         // Actual wgpu device destruction between backprop and candidate update,
         // not a synthetic error return. The last CPU commit must remain readable.
         gpu.device.destroy();
+        let rule = match optimizer {
+            Optimizer::Sgd => UpdateRule::Sgd,
+            Optimizer::Adam => UpdateRule::Adam {
+                first: &trainer.first,
+                second: &trainer.second,
+                step: trainer.steps + 1,
+            },
+        };
         let error = gpu
-            .stage_sgd(&trainer.session, &gradients, 0.01)
+            .stage_update(&trainer.session, &gradients, 0.01, rule)
             .unwrap_err();
         assert!(
             matches!(
@@ -631,6 +723,8 @@ mod tests {
             serde_json::to_vec(&trainer.snapshot().unwrap()).unwrap(),
             before
         );
+        assert_eq!(trainer.first, first);
+        assert_eq!(trainer.second, second);
         assert_eq!(trainer.steps(), 1);
         assert_eq!(trainer.session.revision, revision);
         // Recovery is explicit and continues from the last good commit.
