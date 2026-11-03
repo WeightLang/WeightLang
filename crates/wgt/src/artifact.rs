@@ -49,7 +49,15 @@ impl Artifact {
         } else {
             path
         };
-        let m: Value = serde_json::from_slice(&fs::read(root.join("manifest.json"))?)?;
+        let manifest_path = root.join("manifest.json");
+        let bytes = fs::read(&manifest_path).with_context(|| {
+            format!(
+                "cannot read artifact manifest {}; artifact paths are relative to the current directory (or -C). Check the path or build the model first",
+                manifest_path.display()
+            )
+        })?;
+        let m: Value = serde_json::from_slice(&bytes)
+            .with_context(|| format!("invalid artifact manifest {}", manifest_path.display()))?;
         ensure!(
             m["format"] == "weightlang.artifact"
                 && matches!(m["format_version"].as_u64(), Some(1..=3)),

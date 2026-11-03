@@ -501,3 +501,38 @@ fn edited_weights_remain_untrained_and_visible_in_graphs() {
         vec!["fc.weight"]
     );
 }
+
+#[test]
+fn missing_graph_artifact_reports_resolved_path_and_directory_hint() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_wgt"))
+        .current_dir(temp.path())
+        .args(["graph", "build/missing", "--open"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains(
+        temp.path()
+            .join("build/missing/manifest.json")
+            .to_str()
+            .unwrap()
+    ));
+    assert!(error.contains("-C"));
+    assert!(error.contains("build the model first"));
+    artifact(&temp.path().join("nested/build/demo"), false);
+    let output = Command::new(env!("CARGO_BIN_EXE_wgt"))
+        .current_dir(temp.path())
+        .args([
+            "-C",
+            "nested",
+            "graph",
+            "build/demo",
+            "--format",
+            "json",
+            "--stdout",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
