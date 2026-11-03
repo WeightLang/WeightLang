@@ -1,0 +1,50 @@
+{
+  "name": "WeightLang",
+  "scopeName": "source.wgt",
+  "fileTypes": [
+    "wgt"
+  ],
+  "patterns": [
+    {
+      "name": "comment.line.number-sign.wgt",
+      "match": "#.*$"
+    },
+    {
+      "name": "string.quoted.double.wgt",
+      "begin": "\"",
+      "end": "\"|$"
+    },
+    {
+      "name": "keyword.control.wgt",
+      "match": "\\b(?:as|block|const|data|dim|freeze|from|import|inherit|init|input|layer|model|output|require|train|unfreeze|use|wgt)\\b"
+    },
+    {
+      "name": "storage.type.wgt",
+      "match": "\\b(?:bool|f32|i64)\\b"
+    },
+    {
+      "name": "variable.parameter.wgt",
+      "match": "\\b[A-Za-z_]\\w*(?=\\s*=)"
+    },
+    {
+      "name": "support.function.wgt",
+      "match": "(?<![\\w.])(?:adam|adamw|add|bce|concat|conv2d|cross_entropy|dropout|embedding|flatten|gelu|globalavgpool2d|identity|last|layernorm|linear|maxpool2d|mean|meanpool|mix|mse|mul|position_embedding|rearrange|recur|reduce|relu|repeat|residual|rmsnorm|rope_attention|scale|scan|self_attention|sgd|sigmoid|silu|softmax|sparse_moe|sum|tanh|transpose|where)\\b"
+    },
+    {
+      "name": "constant.numeric.wgt",
+      "match": "(?<![\\w.])-?(?:\\d+\\.\\d*|\\.\\d+|\\d+)(?:[eE][-+]?\\d+)?(?![\\w.])"
+    },
+    {
+      "name": "entity.name.function.wgt",
+      "match": "\\b[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)?(?=\\s*\\()"
+    },
+    {
+      "name": "keyword.operator.wgt",
+      "match": "->|//|[=+*/%\\-]"
+    },
+    {
+      "name": "punctuation.wgt",
+      "match": "[\\[\\](),.:]"
+    }
+  ]
+}

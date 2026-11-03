@@ -1,0 +1,9 @@
+node_modules/**
+package-lock.json
+test.cjs
+*.vsix
+.cache/**
+.gitignore
+render-preview.cjs
+media/*.svg
+media/*.wgt

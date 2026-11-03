@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE language SYSTEM "language.dtd">
+<language name="WeightLang" version="1" kateversion="5.0" section="Sources" extensions="*.wgt" mimetype="text/x-wgt" author="WeightLang contributors" license="MIT">
+<highlighting>
+<list name="keywords"><item>as</item><item>block</item><item>const</item><item>data</item><item>dim</item><item>freeze</item><item>from</item><item>import</item><item>inherit</item><item>init</item><item>input</item><item>layer</item><item>model</item><item>output</item><item>require</item><item>train</item><item>unfreeze</item><item>use</item><item>wgt</item></list>
+<list name="builtins"><item>adam</item><item>adamw</item><item>add</item><item>bce</item><item>concat</item><item>conv2d</item><item>cross_entropy</item><item>dropout</item><item>embedding</item><item>flatten</item><item>gelu</item><item>globalavgpool2d</item><item>identity</item><item>last</item><item>layernorm</item><item>linear</item><item>maxpool2d</item><item>mean</item><item>meanpool</item><item>mix</item><item>mse</item><item>mul</item><item>position_embedding</item><item>rearrange</item><item>recur</item><item>reduce</item><item>relu</item><item>repeat</item><item>residual</item><item>rmsnorm</item><item>rope_attention</item><item>scale</item><item>scan</item><item>self_attention</item><item>sgd</item><item>sigmoid</item><item>silu</item><item>softmax</item><item>sparse_moe</item><item>sum</item><item>tanh</item><item>transpose</item><item>where</item></list>
+<list name="types"><item>bool</item><item>f32</item><item>i64</item></list>
+<contexts><context name="Normal" attribute="Normal" lineEndContext="#stay">
+<DetectChar char="#" attribute="Comment" context="Comment"/>
+<DetectChar char="&quot;" attribute="String" context="String"/>
+<keyword String="keywords" attribute="keywords" context="#stay"/>
+<keyword String="builtins" attribute="builtins" context="#stay"/>
+<keyword String="types" attribute="types" context="#stay"/>
+<RegExpr String="(?&lt;![\w.])-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?(?![\w.])" attribute="Number" context="#stay"/>
+</context>
+<context name="Comment" attribute="Comment" lineEndContext="#pop"/>
+<context name="String" attribute="String" lineEndContext="#pop"><DetectChar char="&quot;" attribute="String" context="#pop"/></context>
+</contexts><itemDatas>
+<itemData name="Normal" defStyleNum="dsNormal"/>
+<itemData name="keywords" defStyleNum="dsKeyword"/>
+<itemData name="builtins" defStyleNum="dsFunction"/>
+<itemData name="types" defStyleNum="dsDataType"/>
+<itemData name="Number" defStyleNum="dsDecVal"/>
+<itemData name="String" defStyleNum="dsString"/>
+<itemData name="Comment" defStyleNum="dsComment"/>
+</itemDatas></highlighting><general><comments><comment name="singleLine" start="#"/></comments><keywords casesensitive="1"/></general></language>

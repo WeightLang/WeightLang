@@ -1,0 +1,16 @@
+wgt 0.3
+model gated_projection
+
+# Each input has four features; the batch axis is implicit.
+input x: f32[feature=4]
+output y: f32[feature=4]
+
+# Independent projections learn values and a gate in (0, 1).
+layer gate: linear(4) -> sigmoid from input
+layer value: linear(4) from input
+
+# Elementwise gating preserves the four-feature shape.
+layer selected: gate * value
+
+# Initializes parameters only; no training has occurred.
+init seed=42

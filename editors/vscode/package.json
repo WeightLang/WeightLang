@@ -1,0 +1,66 @@
+{
+  "name": "weightlang",
+  "displayName": "WeightLang",
+  "description": "Syntax highlighting and basic editing support for WeightLang (.wgt)",
+  "version": "0.1.0",
+  "publisher": "WeightLang",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WeightLang/WeightLang.git"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "wgt",
+        "aliases": [
+          "WeightLang",
+          "wgt"
+        ],
+        "extensions": [
+          ".wgt"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "wgt",
+        "scopeName": "source.wgt",
+        "path": "./syntaxes/wgt.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "test": "node test.cjs",
+    "preview": "node render-preview.cjs",
+    "package": "vsce package --no-dependencies --baseContentUrl https://github.com/WeightLang/WeightLang/blob/main/editors/vscode --baseImagesUrl https://raw.githubusercontent.com/WeightLang/WeightLang/main/editors/vscode"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "4.1.0",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.2.0"
+  },
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0c1018",
+    "theme": "dark"
+  },
+  "keywords": [
+    "wgt",
+    "weightlang",
+    "neural network",
+    "machine learning",
+    "syntax highlighting"
+  ],
+  "homepage": "https://github.com/WeightLang/WeightLang",
+  "bugs": {
+    "url": "https://github.com/WeightLang/WeightLang/issues"
+  }
+}
