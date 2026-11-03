@@ -171,6 +171,12 @@ class Artifact:
     manifest: dict[str, Any]
     module: nn.Sequential
 
+    def save(self, path: str | Path, *, training: dict[str, Any] | None = None) -> Artifact:
+        """Save Python-updated weights to a new artifact directory; see save_artifact."""
+        from .interop import save_artifact
+
+        return save_artifact(self, path, training=training)
+
     @property
     def name(self) -> str:
         return self.manifest["model"]
@@ -321,6 +327,13 @@ def load_artifact(path: str | Path, *, warn_untrained: bool = True) -> Artifact:
         _check(value.dtype == torch.float32, f"tensor {name} must be float32, got {value.dtype}", weights_path)
         _check(weights_meta["tensors"][name]["origin"] in ORIGINS, f"tensor {name} has unknown origin", root)
     module.load_state_dict(tensors, strict=True)
+    policy = manifest.get("training_policy", {})
+    if not policy:
+        for imported in manifest.get("imports", []):
+            if imported.get("frozen"):
+                module.get_submodule(imported["layer"]).requires_grad_(False)
+    for name in policy.get("frozen", []):
+        module.get_parameter(name).requires_grad_(False)
     module.eval()
 
     artifact = Artifact(root, manifest, module)

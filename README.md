@@ -130,6 +130,12 @@ model.module                                # a plain torch.nn.Sequential
 Artifacts can also be loaded with only `torch` + `safetensors` — see
 [docs/artifact.md](docs/artifact.md).
 
+Train `model.module` in Python, then save a new artifact with
+`model.save("weights/finetuned", training={"method": "Adam"})`.
+Saving updates hashes and preserves provenance; training records are caller-reported,
+and changes without a training record are marked `edited`.
+See [Python interoperability](docs/python.md).
+
 | Command | What it does |
 |---|---|
 | `weightc check FILE` | Parse and type-check a `.wgt` file |

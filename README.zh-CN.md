@@ -134,6 +134,11 @@ model.module                               # 普通的 torch.nn.Sequential
 不安装 WeightLang，也可以只用 `torch` 和 `safetensors` 加载制品，
 见 [制品格式文档](docs/artifact.md)。
 
+也可以在 Python 中训练 `model.module`，再用
+`model.save("weights/finetuned", training={"method": "Adam"})`
+保存到新制品目录，保留权重来源并更新哈希。训练记录由调用者提供；
+不提供记录时，变化的权重标为 `edited`。详见 [Python 互操作](docs/python.md)。
+
 | 命令 | 用途 |
 |---|---|
 | `weightc check FILE` | 解析并检查模型或库文件 |
