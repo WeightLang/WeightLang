@@ -615,7 +615,7 @@ fn main() {{
     let output = Command::new(env!("CARGO_BIN_EXE_wgt")).env("WEIGHTLANG_CACHE", &cache)
         .arg("--offline").arg(&source).output().unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("source sha256 mismatch"), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cache hash mismatch"), "{}", String::from_utf8_lossy(&output.stderr));
     // An explicit empty block must not inherit the now-corrupted project dependency.
     fs::write(&source, "# /// script\n# [dependencies]\n# ///\nwgt 0.5\nfn main() { return 42; }").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_wgt")).env("WEIGHTLANG_CACHE", &cache)
