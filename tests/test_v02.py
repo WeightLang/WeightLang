@@ -294,3 +294,14 @@ def test_documented_plain_pytorch_loader(tmp_path):
     exec(code, namespace)
     x = torch.randn(3, 2)
     assert torch.equal(namespace["net"](x), result.module(x))
+
+
+def test_cli_trained_import_does_not_claim_random(tmp_path, capsys):
+    original = build(tmp_path, source("layer fc: linear(in=2, out=3)", suffix=DATA + TRAIN, width=3), "original")
+    text = source("layer fc: linear(in=2, out=3)", suffix=f'import fc from "{original.path}"\n', width=3)
+    path = tmp_path / "reuse.wgt"
+    path.write_text(text)
+    assert main(["build", str(path), "-o", str(tmp_path / "reuse")]) == 0
+    output = capsys.readouterr().out
+    assert "retained imported trained weights" in output
+    assert "WARNING" not in output

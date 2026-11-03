@@ -223,6 +223,7 @@ Available packages:
   six two-input gates, each correct on its complete truth table.
 - [iris v0.1.0](https://github.com/WeightLang/WeightLang/releases/tag/packages/iris/v0.1.0):
   a small classifier with 29/30 held-out accuracy; [data, license and limits](packages/iris).
+- [standard_reuse](examples/standard_reuse) imports the new packages with a committed lock file.
 - The example above remains pinned to gates v0.1.0 to exercise compatibility.
 
 Publishing your own:

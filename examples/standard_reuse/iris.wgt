@@ -1,0 +1,11 @@
+wgt 0.2
+use std/nn
+use std/heads
+model iris_reused
+input features: f32[4]
+output logits: f32[3]
+layer body: nn.mlp(in=4, hidden=16, out=8)
+layer head: heads.classifier(in=8, classes=3)
+init seed=7
+import body from "github.com/WeightLang/WeightLang/packages/iris/iris" layer=body
+import head from "github.com/WeightLang/WeightLang/packages/iris/iris" layer=head

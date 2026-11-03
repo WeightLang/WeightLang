@@ -53,8 +53,14 @@ def _cmd_build(args: argparse.Namespace) -> int:
             v = t["validation"]
             print(f"  validation loss {v['loss']:.4f}" + (f", accuracy {v['accuracy']:.4f}" if "accuracy" in v else ""))
 
+    elif any(
+        meta["origin"] == "random-init"
+        or (meta["origin"] == "imported" and meta.get("upstream_origin") == "random-init")
+        for meta in m["weights"]["tensors"].values()
+    ):
+        print("  WARNING: contains untrained weights; outputs are not meaningful")
     else:
-        print("  WARNING: no train statement; weights are random and outputs are not meaningful")
+        print("  no local training; retained imported trained weights")
     return 0
 
 
