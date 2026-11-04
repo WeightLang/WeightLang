@@ -12,10 +12,10 @@ module.exports = grammar({
       $.port_declaration, $.constant_declaration, $.dimension_declaration, $.directive, $.native_declaration, $.data_row,
       $.function_declaration, $.instance_declaration),
     learn_declaration: $ => choice(
-      seq('learn', field('name', $.identifier), ':', 'float', '=', field('initializer', $.number), ';'),
-      seq('learn', field('name', $.identifier), ':', 'float', '>', field('lower_bound', $.number), '=', field('initializer', $.number), ';'),
-      seq('learn', field('name', $.identifier), ':', 'float', 'in', field('lower_bound', $.number), '..=', field('upper_bound', $.number), '=', field('initializer', $.number), ';'),
-      seq('learn', field('name', $.identifier), ':', 'int', 'in', field('lower_bound', $.number), '..=', field('upper_bound', $.number), '=', field('initializer', $.number), ';'),
+      seq('learn', field('name', $.identifier), ':', 'float', '=', field('initializer', $.signed_number), ';'),
+      seq('learn', field('name', $.identifier), ':', 'float', '>', field('lower_bound', $.signed_number), '=', field('initializer', $.signed_number), ';'),
+      seq('learn', field('name', $.identifier), ':', 'float', 'in', field('lower_bound', $.learn_bound), '..=', field('upper_bound', $.learn_bound), '=', field('initializer', $.number), ';'),
+      seq('learn', field('name', $.identifier), ':', 'int', 'in', field('lower_bound', $.learn_bound), '..=', field('upper_bound', $.learn_bound), '=', field('initializer', $.number), ';'),
       seq('learn', field('name', $.identifier), ':', 'bool', '=', field('initializer', $.literal), ';')),
     module_declaration: $ => seq('module', field('name', $.identifier)),
     prelude_declaration: $ => seq('prelude', 'native', field('version', $.number), ';'),
@@ -52,7 +52,11 @@ module.exports = grammar({
     array: $ => seq('[', repeat(choice($._item, $._newline)), ']'),
     clause: _ => choice('from', 'as', 'extends'),
     identifier: _ => /[A-Za-z_][A-Za-z0-9_]*/,
-    number: _ => /(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?/,
+    // Range bounds consume the first dot only when it is part of a decimal;
+    // a trailing decimal point remains available to ordinary number syntax.
+    learn_bound: _ => token(seq(optional(choice('+', '-')), /(?:[0-9]+\.[0-9]+|[0-9]+|\.[0-9]+)(?:[eE][-+]?[0-9]+)?/)),
+    signed_number: _ => token(seq(optional(choice('+', '-')), /(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?/)),
+    number: _ => /(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?/,
     string: _ => /"([^"\\\n]|\\[^\n])*"/,
     operator: _ => choice('->', '==', '!=', '<=', '>=', '//', '&&', '||', '!', '=', '+', '-', '*', '/', '%', '<', '>'),
     punctuation: _ => choice(',', ':', '.'),

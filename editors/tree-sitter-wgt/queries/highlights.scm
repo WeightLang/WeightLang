@@ -11,9 +11,13 @@
 (learn_declaration "float" @type.builtin)
 (learn_declaration "int" @type.builtin)
 (learn_declaration "bool" @type.builtin)
-(learn_declaration lower_bound: (number) @number)
-(learn_declaration upper_bound: (number) @number)
+(learn_declaration lower_bound: (learn_bound) @number)
+(learn_declaration upper_bound: (learn_bound) @number)
+(learn_declaration lower_bound: (signed_number) @number)
 (learn_declaration initializer: (number) @number)
+(learn_declaration initializer: (signed_number) @number)
+(learn_bound) @number
+(signed_number) @number
 (learn_declaration initializer: (literal) @constant.builtin)
 ["wgt" "require" "use" "import" "inherit" "freeze" "unfreeze" "data" "init" "config" "parameter" "share" "adapter" "frozen" "precision" "wtype" "weight"] @keyword
 (clause) @keyword
@@ -32,7 +36,7 @@
 ";" @punctuation.delimiter
 (function_declaration name: (identifier) @function)
 (call function: (qualified_name) @function)
-((qualified_name) @function.builtin (#any-of? @function.builtin "add" "clip" "depth_gate" "detach" "exp" "gate" "linear" "log" "log_softmax" "mean" "memory_alloc" "memory_free" "memory_read" "memory_write" "minimum" "mul" "positive" "read" "relu" "resource_state" "route" "sigmoid" "slice" "softmax" "square" "sum" "tanh" "write"))
+((qualified_name) @function.builtin (#any-of? @function.builtin "add" "clip" "depth_gate" "detach" "exp" "gate" "linear" "log" "log_softmax" "matmul" "mean" "memory_alloc" "memory_free" "memory_read" "memory_write" "minimum" "mul" "positive" "read" "relu" "reshape" "resource_state" "route" "scale" "sigmoid" "slice" "softmax" "square" "sum" "tanh" "transpose" "write"))
 ((identifier) @function.builtin (#any-of? @function.builtin "identity" "linear" "relu" "sigmoid" "tanh"))
 (parameter name: (identifier) @variable.parameter)
 (model_declaration name: (identifier) @type)
@@ -41,6 +45,6 @@
 (dimension_declaration name: (identifier) @type)
 ((identifier) @type.builtin (#any-of? @type.builtin "f32" "logits" "prob" "probabilities"))
 ((qualified_name) @function.builtin (#any-of? @function.builtin "append" "argmax" "argmin" "argsort" "batch" "bce_logits" "benchmark" "clip" "close" "column" "commit_gradients" "compress" "compute_budget" "compute_call" "compute_capabilities" "compute_host_status" "compute_register" "compute_scope" "compute_status" "compute_trace" "concat" "cosine_similarity" "cross_entropy" "cross_entropy_probs" "cumsum" "dependency" "device_status" "device_submit" "device_wait" "devices" "diff" "differentiate" "differentiate_at" "dot" "elu" "ema" "entropy" "execution_cancel" "execution_resume" "execution_start" "exp" "expm1" "fma" "full" "gae" "gather" "gradient_snapshot" "hard_sigmoid" "hard_swish" "hf_dataset" "huber" "hypot" "js_divergence" "jsonl" "kl_divergence" "l2_normalize" "leaky_relu" "len" "linspace" "log" "log1p" "log_cosh" "log_softmax" "logsumexp" "mae" "max" "mean" "median" "metric" "min" "mlp" "moving_mean" "mse" "norm" "normalize_probabilities" "one_hot" "ones" "quantile" "random" "range" "reinforce" "release_gradient" "relu" "responses_cancel" "responses_next" "responses_restrict" "responses_scope" "responses_session" "responses_submit" "responses_usage" "reverse" "rsqrt" "seed" "sigmoid" "silu" "softmax" "softplus" "sort" "sqrt" "stddev" "sum" "temperature_softmax" "training_device" "training_status" "variance" "vector_slice" "wgsl_kernel" "wgsl_run" "zeros"))
-((qualified_name) @function.builtin (#any-of? @function.builtin "add" "clip" "depth_gate" "detach" "exp" "gate" "linear" "log" "log_softmax" "mean" "memory_alloc" "memory_free" "memory_read" "memory_write" "minimum" "mul" "positive" "read" "relu" "resource_state" "route" "sigmoid" "slice" "softmax" "square" "sum" "tanh" "write"))
+((qualified_name) @function.builtin (#any-of? @function.builtin "add" "clip" "depth_gate" "detach" "exp" "gate" "linear" "log" "log_softmax" "matmul" "mean" "memory_alloc" "memory_free" "memory_read" "memory_write" "minimum" "mul" "positive" "read" "relu" "reshape" "resource_state" "route" "scale" "sigmoid" "slice" "softmax" "square" "sum" "tanh" "transpose" "write"))
 ((identifier) @function.builtin (#any-of? @function.builtin "identity" "linear" "relu" "sigmoid" "tanh"))
 ((identifier) @keyword (#any-of? @keyword "mix" "then" "sample" "onehot"))

@@ -34,6 +34,8 @@ for (const query of ['highlights', 'outline', 'indents', 'brackets']) {
     assert(/function\.builtin[^\n]*`depth_gate`/.test(captures), 'depth_gate tensor intrinsic must be highlighted');
     assert(/keyword[^\n]*`learn`/.test(captures), 'top-level learn declaration keyword must be highlighted');
     assert(/variable[^\n]*`depth`/.test(captures), 'learn declaration name must be highlighted as a variable');
+    assert(/number[^\n]*`1\.`/.test(captures), 'trailing decimal point must remain part of one number token');
+    assert(/number[^\n]*`-5`/.test(captures), 'signed learn initializer must be highlighted as a number');
     assert(/keyword[^\n]*`train`/.test(captures), 'train expression keyword must be highlighted');
     assert(/keyword[^\n]*`against`/.test(captures), 'against keyword must be highlighted');
     assert(/keyword[^\n]*`using`/.test(captures), 'using keyword must be highlighted');

@@ -309,7 +309,11 @@ workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 | `linear(x,w[,b])` | w=[O,I]、x=[I]、结果=[O]，可选 b=[O] |
 | `add(a,b)` / `mul(a,b)` / `a+b` / `a*b` | 等长逐元素运算，无广播 |
 | `relu(x)` / `tanh(x)` / `sigmoid(x)` | 等长逐元素运算 |
-| `softmax(x)` | f32[N] 沿唯一向量轴归一化，返回 f32[N]；稳定指数实现，支持一阶梯度 |
+| `softmax(x)` / `softmax(x,axis)` | `softmax(x)` 保持 rank-1 向量语义；多轴形式沿非负整数字面量轴归一化，使用稳定计算和 f64 累加，行为待验证 |
+| `reshape(x,[d1,...,dn])` | 固定 shape 重解释，1..8 个正整数常量轴，每轴 1..16384、总元素数不超过 16777216；元素数须相同，行为待验证 |
+| `transpose(x)` | rank-2 张量交换两个轴，行为待验证 |
+| `matmul(a,b)` | rank-2 `[M,K] @ [K,N] -> [M,N]`，内轴须相等，无广播，行为待验证 |
+| `scale(x,literal)` | 乘以有限有符号数值字面量，不广播且保持 shape，行为待验证 |
 | `gate(p,x)` | 返回 p*x；x 为 f32[N]，p 为 f32[1] 或 f32[N]，每项须在 [0,1]；标量门广播；推理时 p 全为 0 跳过 x 表达式 |
 | `route(p,a,b)` | 返回 p*a+(1-p)*b；a/b 同为 f32[N]，p 为 f32[1] 或 f32[N] 且在 [0,1]；推理时 p 全为 1 只求值 a，全为 0 只求值 b，否则计算两边 |
 | `slice(x,start,length)` | start 非负整数、length 正整数，范围不得越界 |
@@ -328,6 +332,8 @@ workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 无需 `register`、标签、`jump` 或 `branch` 源码指令，这些仅存在于内部 IR。
 
 完整可执行示例：[self_modifying/model.wgt](../examples/self_modifying/model.wgt)。
+
+固定 shape 多轴几何与 attention 算子合同（行为待验证）见[固定 shape 张量几何](tensor-geometry.md)。实际使用新几何算子或多轴 softmax 时使用 adaptive IR v3；旧 IR v1/v2 不因 AST 中出现新 intrinsic 而全定义升级。参数读取始终为 flat vector，矩阵参数须显式 reshape。模型入口仍为单个 f32 向量，矩阵输出须 reshape 回向量。完整模型示例在 [T10 语法总览注释](../language/syntax-tour/model.wgt) 与后端测试 fixture `crates/wgtime-core/tests/fixtures/attention/model.wgt`；本地验证为 core 7 suites / 30 tests、真实 service 集成 1 项和 macro fixture 编译 1 项通过；native-cpu attention 100 步 SGD 的 MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训和资源释放。核心补充 IR 安全校验后须回归。未验证完整 Transformer、多头 attention、动态 batch 或 GPU 路径。
 可微路由训练示例：[soft_routing/model.wgt](../examples/native_training/soft_routing/model.wgt)，
 完整训练、状态与保存约束见[可微程序](differentiable-programs.md)。上述三种算子的张量梯度仅用于 forward，
 全部参数必填，无温度等隐式选项。`p=1` 表示完整通过或完全采用 a 的输出。

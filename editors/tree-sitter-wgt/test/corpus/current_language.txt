@@ -89,7 +89,8 @@ Top-level learn declarations and host learn statements
 ==================
 learn scale: float = 5.0;
 learn mix: float in 0.0..=1.0 = 0.5;
-learn temperature: float > 0.0 = 1.0;
+learn temperature: float > -0.0 = -1.0;
+learn negative_initializer: float = -5;
 learn depth: int in 1..=12 = 6;
 learn enabled: bool = true;
 fn legacy_training() {
@@ -101,20 +102,23 @@ fn legacy_training() {
 (source_file
   (learn_declaration
     (identifier)
+    (signed_number))
+  (learn_declaration
+    (identifier)
+    (learn_bound)
+    (learn_bound)
     (number))
   (learn_declaration
     (identifier)
-    (number)
-    (number)
-    (number))
+    (signed_number)
+    (signed_number))
   (learn_declaration
     (identifier)
-    (number)
-    (number))
+    (signed_number))
   (learn_declaration
     (identifier)
-    (number)
-    (number)
+    (learn_bound)
+    (learn_bound)
     (number))
   (learn_declaration
     (identifier)
@@ -194,3 +198,33 @@ fn main() {
           (punctuation)
           (qualified_name
             (identifier)))))))
+
+==================
+Learn range boundaries preserve integer and decimal dots
+==================
+learn integer_range: int in -1..=12 = 6;
+learn decimal_range: float in -1.0..=12.0 = 0.5;
+learn mixed_range: float in 1..=12 = 6;
+const trailing_decimal = 1.
+
+---
+
+(source_file
+  (learn_declaration
+    (identifier)
+    (learn_bound)
+    (learn_bound)
+    (number))
+  (learn_declaration
+    (identifier)
+    (learn_bound)
+    (learn_bound)
+    (number))
+  (learn_declaration
+    (identifier)
+    (learn_bound)
+    (learn_bound)
+    (number))
+  (constant_declaration
+    (identifier)
+    (number)))

@@ -88,6 +88,11 @@ impl LearnDomain {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Instruction {
+    Reshape { out: String, input: String },
+    Transpose { out: String, input: String },
+    Matmul { out: String, left: String, right: String },
+    SoftmaxAxis { out: String, input: String, axis: usize },
+    Scale { out: String, input: String, factor: f32 },
     Constant {
         out: String,
         data: Vec<f32>,

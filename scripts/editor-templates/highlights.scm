@@ -11,9 +11,13 @@
 (learn_declaration "float" @type.builtin)
 (learn_declaration "int" @type.builtin)
 (learn_declaration "bool" @type.builtin)
-(learn_declaration lower_bound: (number) @number)
-(learn_declaration upper_bound: (number) @number)
+(learn_declaration lower_bound: (learn_bound) @number)
+(learn_declaration upper_bound: (learn_bound) @number)
+(learn_declaration lower_bound: (signed_number) @number)
 (learn_declaration initializer: (number) @number)
+(learn_declaration initializer: (signed_number) @number)
+(learn_bound) @number
+(signed_number) @number
 (learn_declaration initializer: (literal) @constant.builtin)
 ["wgt" "require" "use" "import" "inherit" "freeze" "unfreeze" "data" "init" "config" "parameter" "share" "adapter" "frozen" "precision" "wtype" "weight"] @keyword
 (clause) @keyword

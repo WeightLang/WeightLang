@@ -18,6 +18,8 @@ Rust 控制应用、数据准备、I/O、调度和训练循环；WGT 只描述�
 
 首批覆盖 linear、逐元素运算、激活、归约、slice、softmax、gate/route，以及有预算的标签/分支/跳转。推理保留 gate/route 端点惰性求值；训练前向使用相同原生入口并启用 trace hook，记录实际张量结果供既有反向 tape 使用。反向传播仍遍历梯度 tape，不等同于 compiled backward。模型内部参数写入和工作内存指令尚未接入编译器，初始化明确拒绝；这是待补的模型状态能力，不应作为永久语言边界或广泛神经架构已覆盖的证明。
 
+固定 shape 张量几何合同包含 `reshape`、rank-2 `transpose`、rank-2 `matmul`、带非负常量轴的多轴 `softmax` 和有限有符号字面量 `scale`。实际使用这些新几何算子或多轴 softmax 时使用 adaptive IR v3；旧 adaptive IR v1/v2 不因 AST 中出现新 intrinsic 而全定义升级。参数 `read` 与裸参数引用始终为 flat vector，矩阵参数须在 forward 局部显式 reshape。Rust 模型服务入口仍只接受单个 f32 向量；forward 的矩阵结果须 reshape 回向量。完整签名、轴范围与 attention fixture 见[固定 shape 张量几何](tensor-geometry.md)。指定范围的本地验证已通过：core 7 suites / 30 tests、真实 service 集成一项及 macro fixture 编译一项。service 的 native-cpu attention 路径训练 100 步，MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训及资源释放。debug 单机 1000 次 evaluate 为 2.033213 ms（约 2.03 μs/次，含返回 Vec）；managed tensor 计量 1128 B（参数 96 B、tape 1056 B），charged work 98。这些是单次运行记录，不是 benchmark 优势、进程 RSS 或真实峰值内存。kernel 使用朴素 f64 累加而非 BLAS，并复用 AxisGroups；let k=q 已验证输出和梯度相同且 work 更少。当前无全局 CSE 或活跃区间复用，compiled workspace 各 register 常驻且 session 保留 reference buffers，不宣称内存最优。核心补充 IR 安全校验后仍需回归；未验证完整 Transformer、多头 attention、动态 batch 或 GPU 路径。
+
 本地 `compiled_forward`、`compiled_training`、`compiled_control_flow` 三个测试套件共 8 项通过，覆盖真实编译加载、当前权重、梯度、惰性分支、有限值、错误 shape 和预算。服务及 gates/iris 的 compiled 回归须另行验收，旧 VM 结果不能替代。
 
 ## 共享定义与 crate 边界

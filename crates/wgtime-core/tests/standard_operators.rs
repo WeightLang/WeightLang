@@ -1,74 +1,98 @@
-use std::{collections::BTreeMap, path::Path};
-use wgtime_core::script;
+use wgt_language::model::ModelDefinition;
+use wgtime_core::{
+    adaptive::{self, AdaptiveSession},
+    training::Optimizer,
+};
+
+const MEMORY: usize = 8 * 1024 * 1024;
+const WORK: u64 = 100_000;
+
+fn session(source: &str, compiled: bool) -> anyhow::Result<AdaptiveSession> {
+    // Resolve the complete bundled computation closure before core execution.
+    // Neither definition parsing nor execution has a source-directory argument.
+    let definition = ModelDefinition::parse(source)?;
+    assert!(!definition.source().lines().any(|line| line.trim_start().starts_with("import ")));
+    let mut model = AdaptiveSession::prepare(adaptive::parse(definition.source())?, MEMORY)?;
+    if compiled {
+        model.enable_compiled()?;
+        assert_eq!(model.execution_backend(), "native-cpu");
+    }
+    Ok(model)
+}
 
 fn evaluate(
     body: &str,
-    input: &str,
+    input: &[f32],
     width: usize,
     output: usize,
-) -> anyhow::Result<serde_json::Value> {
-    let source = format!("wgt 0.5\nimport act from \"std/activation\"\nimport losses from \"std/loss\"\nmodel Probe\ninput x: f32[{width}]\noutput y: f32[{output}]\nfn forward(x) {{ return {body}; }}\nfn main() {{ let net=Probe(\"sgd\"); return net({input}); }}");
-    Ok(script::run(&source, Path::new("."), 100000)?.result)
+    compiled: bool,
+) -> anyhow::Result<Vec<f32>> {
+    let source = format!("wgt 0.5\nimport act from \"std/activation\"\nimport losses from \"std/loss\"\nmodel Probe\ninput x: f32[{width}]\noutput y: f32[{output}]\nfn forward(x) {{ return {body}; }}\n");
+    let mut model = session(&source, compiled)?;
+    let result = model.run(input, WORK)?.to_vec();
+    assert_eq!(model.compiled_forward_counts(), if compiled { (1, 0) } else { (0, 0) });
+    Ok(result)
 }
 
-fn close(actual: &serde_json::Value, expected: &[f64]) {
-    let actual = actual.as_array().unwrap();
+fn close(actual: &[f32], expected: &[f64]) {
     assert_eq!(actual.len(), expected.len());
-    for (a, e) in actual.iter().zip(expected) {
-        let a = a.as_f64().unwrap();
+    for (&a, e) in actual.iter().zip(expected) {
+        let a = f64::from(a);
         assert!((a - e).abs() < 2e-5 * e.abs().max(1.0), "{a} != {e}");
     }
 }
 
 #[test]
 fn wgt_activation_math_and_boundaries() {
-    close(
-        &evaluate("act.swish(x)", "[-1000,0,1000]", 3, 3).unwrap(),
-        &[0., 0., 1000.],
-    );
-    close(
-        &evaluate("act.swiglu(x,[2,3,4])", "[-1,0,2]", 3, 3).unwrap(),
-        &[-2. / (1. + 1f64.exp()), 0., 8. / (1. + (-2f64).exp())],
-    );
-    close(
-        &evaluate("act.squared_relu(x)", "[-3,0,2]", 3, 3).unwrap(),
-        &[0., 0., 4.],
-    );
-    assert!(
-        evaluate("act.swiglu(x,[1])", "[1,2,3]", 3, 3).is_err(),
-        "no scalar broadcast"
-    );
-    assert!(
-        evaluate("act.squared_relu(x)", "[1e30]", 1, 1).is_err(),
-        "overflow must not silently clip"
-    );
+    for compiled in [false, true] {
+        close(
+            &evaluate("act.swish(x)", &[-1000., 0., 1000.], 3, 3, compiled).unwrap(),
+            &[0., 0., 1000.],
+        );
+        close(
+            &evaluate("act.swiglu(x,[2,3,4])", &[-1., 0., 2.], 3, 3, compiled).unwrap(),
+            &[-2. / (1. + 1f64.exp()), 0., 8. / (1. + (-2f64).exp())],
+        );
+        close(
+            &evaluate("act.squared_relu(x)", &[-3., 0., 2.], 3, 3, compiled).unwrap(),
+            &[0., 0., 4.],
+        );
+        assert!(
+            evaluate("act.swiglu(x,[1])", &[1., 2., 3.], 3, 3, compiled).is_err(),
+            "no scalar broadcast"
+        );
+        assert!(
+            evaluate("act.squared_relu(x)", &[1e30], 1, 1, compiled).is_err(),
+            "overflow must not silently clip"
+        );
+    }
 }
 
 #[test]
 fn wgt_loss_reductions_and_stable_logits() {
-    close(
-        &evaluate("losses.squared_error(x,[1,1,1])", "[2,3,4]", 3, 1).unwrap(),
-        &[14. / 3.],
-    );
-    close(
-        &evaluate("losses.half_squared_error(x,[1,1,1])", "[2,3,4]", 3, 1).unwrap(),
-        &[7. / 3.],
-    );
-    close(
-        &evaluate("losses.categorical_logits(x,[0,1])", "[1000,-1000]", 2, 1).unwrap(),
-        &[2000.],
-    );
-    close(
-        &evaluate(
-            "losses.categorical_logits(x,[0.25,0.75])",
-            "[1000,1000]",
-            2,
-            1,
-        )
-        .unwrap(),
-        &[2f64.ln()],
-    );
-    assert!(evaluate("losses.squared_error(x,[0])", "[1,2]", 2, 1).is_err());
+    for compiled in [false, true] {
+        close(
+            &evaluate("losses.squared_error(x,[1,1,1])", &[2., 3., 4.], 3, 1, compiled).unwrap(),
+            &[14. / 3.],
+        );
+        close(
+            &evaluate("losses.half_squared_error(x,[1,1,1])", &[2., 3., 4.], 3, 1, compiled).unwrap(),
+            &[7. / 3.],
+        );
+        close(
+            &evaluate("losses.categorical_logits(x,[0,1])", &[1000., -1000.], 2, 1, compiled).unwrap(),
+            &[2000.],
+        );
+        close(
+            &evaluate("losses.categorical_logits(x,[0.25,0.75])", &[1000., 1000.], 2, 1, compiled).unwrap(),
+            &[2f64.ln()],
+        );
+        assert!(evaluate("losses.squared_error(x,[0])", &[1., 2.], 2, 1, compiled).is_err());
+    }
+}
+
+fn imported_model(path: &str, body: &str) -> String {
+    format!("wgt 0.5\nimport ops from \"{path}\"\nmodel Probe\ninput x:f32[1]\noutput y:f32[1]\nfn forward(x){{return {body};}}\n")
 }
 
 #[test]
@@ -79,27 +103,35 @@ fn bundled_imports_are_exact_closed_and_do_not_use_working_directory() {
         "std/activation/missing",
         "std/nn",
     ] {
-        let source = format!("wgt 0.5\nimport ops from \"{path}\"\nfn main() {{ return true; }}");
-        let error = script::run(&source, Path::new("/does/not/exist"), 1000).unwrap_err();
+        let error = ModelDefinition::parse(&imported_model(path, "x")).unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("unsupported native standard operator module"),
+            format!("{error:#}").contains(&format!("unknown model standard module: {path}")),
             "{error:#}"
         );
     }
-    for path in ["std/activation", "std/loss"] {
-        let source = script::operators::standard_source(path).unwrap();
-        script::operators::library(source).unwrap();
+    for (path, body, expected) in [
+        ("std/activation", "ops.squared_relu(x)", 4.),
+        ("std/loss", "ops.squared_error(x,[0])", 4.),
+    ] {
+        let definition = ModelDefinition::parse(&imported_model(path, body)).unwrap();
+        let closed = definition.source().to_owned();
+        assert!(!closed.contains("import "));
+        // Reparse only the embedded closure, without the original module paths.
+        // This replaces host codegen-string assertions with actual native runs.
+        for compiled in [false, true] {
+            let mut model = session(&closed, compiled).unwrap();
+            close(&model.run(&[2.], WORK).unwrap(), &[expected]);
+            assert_eq!(model.compiled_forward_counts(), if compiled { (1, 0) } else { (0, 0) });
+        }
     }
     for path in ["std/activation/operators", "std/loss/operators"] {
-        let text=format!("wgt 0.5\nimport ops from \"{path}\"\nfn main(){{return null;}}");
-        assert!(script::parse_with_imports(&text,Path::new("."),&BTreeMap::new()).unwrap_err().to_string().contains("internal /operators import was removed"));
+        let error = ModelDefinition::parse(&imported_model(path, "x")).unwrap_err();
+        assert!(format!("{error:#}").contains(&format!("unknown model standard module: {path}")), "{error:#}");
     }
-    let source = "wgt 0.5\nimport ops from \"std/activation\"\nimport ops from \"std/loss\"\nfn main() { return true; }";
-    assert!(script::parse_with_imports(source, Path::new("."), &BTreeMap::new()).is_err());
+    let duplicate = "wgt 0.5\nimport ops from \"std/activation\"\nimport ops from \"std/loss\"\nmodel Probe\ninput x:f32[1]\noutput y:f32[1]\nfn forward(x){return x;}";
+    assert!(ModelDefinition::parse(duplicate).is_err());
     let ordinary = "wgt 0.5\nimport act from \"std/activation\"\nfn main(){return act.swish([1]);}";
-    assert!(script::run(ordinary, Path::new("/does/not/exist"), 10000).is_err());
+    assert!(ModelDefinition::parse(ordinary).is_err());
 }
 
 #[test]
@@ -113,12 +145,29 @@ output y:f32[1]
 parameter gain:f32[1]=[1]
 fn forward(x){return activation.squared_relu(x*gain);}
 fn loss(prediction,target){return loss_ops.squared_error(prediction,target);}
-fn main(){let net=Probe("sgd");let before=train net on [[2]] against [[0]] {rate:0.01;loss:loss;};let after=train net on [[2]] against [[0]] {rate:0.01;loss:loss;};assert after<before;return net([2]);}
 "#;
-    // Bundled imports do not depend on the source tree being present at runtime.
-    script::run(source, Path::new("/does/not/exist"), 100000).unwrap();
-    let rust = script::codegen::rust_source(source, "/does/not/exist").unwrap();
-    assert!(!rust.contains("include_str!"));
-    assert!(!rust.contains("standard_source("));
-    assert!(rust.contains("__adaptive"));
+    let definition = ModelDefinition::parse(source).unwrap();
+    let closed = definition.source();
+    assert!(!closed.contains("import "));
+    assert!(!closed.contains("include_str!"));
+    assert!(!closed.contains("standard_source("));
+    for compiled in [false, true] {
+        let mut model = session(closed, compiled).unwrap();
+        model.set_optimizer(Optimizer::Sgd).unwrap();
+        let inputs = [vec![2.]];
+        let targets = [vec![0.]];
+        let mut remaining = WORK;
+        let before = model.train_custom(&inputs, &targets, 0.01, &mut remaining, MEMORY).unwrap();
+        // y=4*g^2, loss=16*g^4, dloss/dg=64*g^3; SGD gives 1 -> 0.36.
+        close(&[before], &[16.]);
+        close(model.parameter("gain").unwrap(), &[0.36]);
+        let mut remaining = WORK;
+        let after = model.train_custom(&inputs, &targets, 0.01, &mut remaining, MEMORY).unwrap();
+        assert!(after < before);
+        close(&[after], &[16. * 0.36f64.powi(4)]);
+        let expected_gain = 0.36 - 0.01 * 64. * 0.36f64.powi(3);
+        close(model.parameter("gain").unwrap(), &[expected_gain]);
+        close(&model.run(&[2.], WORK).unwrap(), &[4. * expected_gain.powi(2)]);
+        assert_eq!(model.compiled_forward_counts(), if compiled { (3, 2) } else { (0, 0) });
+    }
 }

@@ -4,7 +4,9 @@ wgt 0.5
 native fn save_public(value);
 learn scale: float = 5.0;
 learn mix: float in 0.0..=1.0 = 0.5;
-learn temperature: float > 0.0 = 1.0;
+learn temperature: float > -0.0 = 1.0;
+learn negative_initializer: float = -5;
+const trailing_decimal = 1.
 learn depth: int in 1..=12 = 6;
 learn enabled: bool = true;
 # @contexts ["tensor"]

@@ -367,6 +367,7 @@ struct Generator<'a> {
 }
 impl<'a> Generator<'a> {
     fn new(program: &'a Program) -> Result<Self> {
+        ensure!(matches!(program.version, 1 | 2 | 3), "unsupported compiled adaptive IR version");
         ensure!(
             program.instructions.len() <= 16_384 && program.registers.len() <= 16_384,
             "compiled model instruction/register limit exceeded"
@@ -374,7 +375,10 @@ impl<'a> Generator<'a> {
         let mut registers = HashMap::new();
         let mut workspace = 0usize;
         let mut max = 0;
+        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Reshape { .. } | I::Transpose { .. } | I::Matmul { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
         for (i, r) in program.registers.iter().enumerate() {
+            ensure!(r.shape.len() <= 8 && r.shape.iter().all(|d| *d <= 16384) && crate::elements(&r.shape)? == r.len, "compiled register geometry/storage mismatch");
+            ensure!(program.version >= 3 || r.shape == [r.len], "multiaxis registers require compiled IR version 3");
             ensure!(
                 r.len > 0 && r.len <= 16_777_216,
                 "invalid compiled register width"
@@ -461,10 +465,51 @@ impl<'a> Generator<'a> {
         let mut output_width = None;
         for (index, instruction) in self.program.instructions.iter().enumerate() {
             code += &format!("L{index}:;if(*used>=budget)return 2;++*used;{{\n");
-            let mut out = None;
+            let mut out: Option<&str> = None;
             let mut reads: Vec<&str> = Vec::new();
             let mut body = String::new();
             match instruction {
+                I::Reshape { out:o,input:x } => {
+                    let (a,n,_) = self.reg(x)?;
+                    ensure!(n == self.reg(o)?.1, "compiled reshape count mismatch");
+                    body += &format!("memcpy(t,r+{a},{n}*sizeof(float));");
+                    reads.push(x); out=Some(o);
+                },
+                I::Transpose { out:o,input:x } => {
+                    let (a,_,_) = self.reg(x)?;
+                    let shape = &self.program.registers[self.reg(x)?.2].shape;
+                    ensure!(shape.len() == 2, "compiled transpose requires rank 2");
+                    let (m,n) = (shape[0],shape[1]);
+                    ensure!(self.program.registers[self.reg(o)?.2].shape == [n,m], "compiled transpose output geometry mismatch");
+                    body += &format!("for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++)t[j*{m}+i]=r[{a}+i*{n}+j];");
+                    reads.push(x); out=Some(o);
+                },
+                I::Matmul { out:o,left,right } => {
+                    let (a,_,ai) = self.reg(left)?; let (b,_,bi) = self.reg(right)?;
+                    let sa = &self.program.registers[ai].shape; let sb = &self.program.registers[bi].shape;
+                    ensure!(sa.len()==2 && sb.len()==2 && sa[1]==sb[0], "compiled matmul geometry mismatch");
+                    let (m,k,n)=(sa[0],sa[1],sb[1]);
+                    ensure!(self.program.registers[self.reg(o)?.2].shape == [m,n], "compiled matmul output geometry mismatch");
+                    let work=m.checked_mul(k).and_then(|v|v.checked_mul(n)).context("matmul work overflow")?;
+                    body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+i*{k}+q]*(double)r[{b}+q*{n}+j];t[i*{n}+j]=(float)sum;}}");
+                    reads.extend([left.as_str(),right.as_str()]); out=Some(o);
+                },
+                I::Scale { out:o,input:x,factor } => {
+                    let (a,n,id) = self.reg(x)?;
+                    ensure!(self.program.registers[id].shape == self.program.registers[self.reg(o)?.2].shape, "compiled scale geometry mismatch");
+                    body += &format!("for(size_t i=0;i<{n};i++)t[i]=r[{a}+i]*{};",Self::literal(*factor)?);
+                    reads.push(x); out=Some(o);
+                },
+                I::SoftmaxAxis { out:o,input:x,axis } => {
+                    let (a,_,id)=self.reg(x)?;
+                    let shape=&self.program.registers[id].shape;
+                    ensure!(*shape == self.program.registers[self.reg(o)?.2].shape, "compiled axis softmax geometry mismatch");
+                    ensure!(*axis<shape.len(), "compiled softmax axis out of range");
+                    let outer:usize=shape[..*axis].iter().product();
+                    let width=shape[*axis]; let inner:usize=shape[*axis+1..].iter().product();
+                    body += &format!("for(size_t o=0;o<{outer};o++)for(size_t j=0;j<{inner};j++){{float maximum=-INFINITY;for(size_t q=0;q<{width};q++)maximum=fmaxf(maximum,r[{a}+(o*{width}+q)*{inner}+j]);double sum=0.;for(size_t q=0;q<{width};q++)sum+=exp((double)r[{a}+(o*{width}+q)*{inner}+j]-(double)maximum);for(size_t q=0;q<{width};q++){{size_t z=(o*{width}+q)*{inner}+j;t[z]=(float)(exp((double)r[{a}+z]-(double)maximum)/sum);}}}}");
+                    reads.push(x); out=Some(o);
+                },
                 I::Constant { out: o, data } => {
                     let (_, n, _) = self.reg(o)?;
                     ensure!(n == data.len(), "compiled constant shape mismatch");

@@ -8,6 +8,7 @@ use std::{
 };
 
 const OPS: &[&str] = &[
+    "reshape", "transpose", "matmul", "scale",
     "add",
     "mul",
     "relu",
@@ -196,8 +197,9 @@ fn check_expr(
                 );
             } else {
                 let arity = match n.as_str() {
-                    "add" | "mul" | "gate" | "minimum" => 2,
+                    "add" | "mul" | "gate" | "minimum" | "reshape" | "matmul" | "scale" => 2,
                     "route" | "slice" | "clip" => 3,
+                    "softmax" if args.len() == 2 => 2,
                     _ => 1,
                 };
                 ensure!(args.len() == arity, "tensor primitive arity mismatch: {n}");

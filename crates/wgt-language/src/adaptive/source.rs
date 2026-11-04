@@ -175,6 +175,7 @@ fn parse_definition(source: &str, functions: &crate::script::parse::Program, mat
         call_depth: 0,
     };
     lower.block(&forward.body)?;
+
     ensure!(
         lower
             .program
@@ -246,12 +247,12 @@ fn parse_definition(source: &str, functions: &crate::script::parse::Program, mat
             "loss requires a scalar return"
         );
         if !lower.program.output_type.is_plain() {
-            loss_lower.program.version = 2;
+            loss_lower.program.version = loss_lower.program.version.max(2);
         }
         lower.program.loss = Some(Box::new(loss_lower.program));
     }
     if !lower.program.output_type.is_plain() {
-        lower.program.version = 2;
+        lower.program.version = lower.program.version.max(2);
     }
     Ok(lower.program)
 }
@@ -360,6 +361,20 @@ impl Lower<'_> {
                 len,
                 shape: vec![len],
             });
+        }
+        Ok(())
+    }
+    fn shape(&self, name: &str) -> Result<Vec<usize>> {
+        Ok(self.program.registers.iter().find(|r| r.name == name).context("undefined tensor shape")?.shape.clone())
+    }
+    fn register_shape(&mut self, name: &str, shape: Vec<usize>) -> Result<()> {
+        let len = crate::model::validate_shape(&shape)?;
+        if shape.len() > 1 { self.program.version = 3; }
+        if self.sizes.contains_key(name) {
+            ensure!(self.shape(name)? == shape, "register geometry changes: {name}");
+        } else {
+            self.register(name, len)?;
+            self.program.registers.last_mut().unwrap().shape = shape;
         }
         Ok(())
     }
@@ -512,6 +527,50 @@ impl Lower<'_> {
                 return Ok(());
             }
         }
+        if let Expr::Call(op, args) = expr {
+            let tensor = match (op.as_str(), args.as_slice()) {
+                ("reshape", [x, Expr::List(dims)]) => {
+                    let x = self.value(x)?;
+                    let shape = dims.iter().map(|e| {
+                        let n = scalar_literal(e)?;
+                        ensure!(n >= 1. && n <= 16384. && n.fract() == 0., "reshape dimensions must be integers in 1..16384");
+                        Ok(n as usize)
+                    }).collect::<Result<Vec<_>>>()?;
+                    ensure!(crate::model::validate_shape(&shape)? == self.size(&x)?, "reshape element count mismatch");
+                    Some((I::Reshape { out: out.into(), input: x }, shape))
+                },
+                ("transpose", [x]) => {
+                    let x = self.value(x)?; let shape = self.shape(&x)?;
+                    ensure!(shape.len() == 2, "transpose requires rank 2");
+                    Some((I::Transpose { out: out.into(), input: x }, vec![shape[1], shape[0]]))
+                },
+                ("matmul", [a,b]) => {
+                    let a = self.value(a)?; let b = self.value(b)?;
+                    let sa = self.shape(&a)?; let sb = self.shape(&b)?;
+                    ensure!(sa.len() == 2 && sb.len() == 2 && sa[1] == sb[0], "matmul requires [M,K] and [K,N]");
+                    Some((I::Matmul { out: out.into(), left:a, right:b }, vec![sa[0], sb[1]]))
+                },
+                ("softmax", [x,axis]) => {
+                    let x = self.value(x)?; let shape = self.shape(&x)?;
+                    let axis = scalar_literal(axis)?;
+                    ensure!(axis >= 0. && axis.fract() == 0. && axis < shape.len() as f32, "softmax axis must be a nonnegative in-range integer");
+                    Some((I::SoftmaxAxis { out: out.into(), input:x, axis:axis as usize }, shape))
+                },
+                ("scale", [x,factor]) => {
+                    let factor = scalar_literal(factor)?;
+                    let x = self.value(x)?; let shape = self.shape(&x)?;
+                    Some((I::Scale { out: out.into(), input:x, factor }, shape))
+                },
+                _ => None,
+            };
+            if let Some((instruction, shape)) = tensor {
+                self.register_shape(out, shape)?;
+                self.program.version = 3;
+                self.types.insert(out.into(), VectorType::F32);
+                self.program.instructions.push(instruction);
+                return Ok(());
+            }
+        }
         let (instruction,len) = match expr {
             Expr::List(items) => {
                 let data=items.iter().map(scalar_literal).collect::<Result<Vec<_>>>()?;
@@ -532,7 +591,7 @@ impl Lower<'_> {
                 (I::Neg{out:out.into(),input:x},len)
             },
             Expr::Name(name) if self.sizes.contains_key(name) => {
-                (I::Slice { out:out.into(), input:name.clone(), start:0 }, self.size(name)?)
+                (if self.shape(name)?.len() > 1 { I::Reshape { out:out.into(), input:name.clone() } } else { I::Slice { out:out.into(), input:name.clone(), start:0 } }, self.size(name)?)
             },
             Expr::Name(_) => {
                 let p = self.parameter(expr)?;
@@ -540,9 +599,9 @@ impl Lower<'_> {
             },
             Expr::Binary(op,a,b) if op=="+" || op=="*" || op=="-" => {
                 let a = self.value(a)?; let b = self.value(b)?; let len=self.size(&a)?;
-                ensure!(len==self.size(&b)?, "tensor arithmetic shape mismatch");
+                ensure!(self.shape(&a)? == self.shape(&b)?, "tensor arithmetic shape mismatch");
                 let b=if op=="-" {
-                    let neg=self.fresh(); self.register(&neg,len)?;
+                    let neg=self.fresh(); self.register_shape(&neg,self.shape(&a)?)?;
                     self.program.instructions.push(I::Neg{out:neg.clone(),input:b}); neg
                 } else { b };
                 (if op=="*" {I::Mul{out:out.into(),left:a,right:b}} else {I::Add{out:out.into(),left:a,right:b}},len)
@@ -554,7 +613,7 @@ impl Lower<'_> {
                 },
                 ("minimum",[a,b]) => {
                     let a=self.value(a)?; let b=self.value(b)?; let len=self.size(&a)?;
-                    ensure!(len==self.size(&b)?,"minimum shape mismatch");
+                    ensure!(self.shape(&a)? == self.shape(&b)?,"minimum shape mismatch");
                     (I::Minimum{out:out.into(),left:a,right:b},len)
                 },
                 ("clip",[x,low,high]) => {
@@ -585,7 +644,7 @@ impl Lower<'_> {
                 },
                 ("add",[a,b]) | ("mul",[a,b]) => {
                     let a=self.value(a)?; let b=self.value(b)?; let len=self.size(&a)?;
-                    ensure!(len==self.size(&b)?, "tensor arithmetic shape mismatch");
+                    ensure!(self.shape(&a)? == self.shape(&b)?, "tensor arithmetic shape mismatch");
                     (if op=="add" {I::Add{out:out.into(),left:a,right:b}}else{I::Mul{out:out.into(),left:a,right:b}},len)
                 },
                 ("mean",[x]) | ("square",[x]) => {
@@ -630,7 +689,30 @@ impl Lower<'_> {
             I::Softmax { .. } => VectorType::Probabilities,
             _ => VectorType::F32,
         };
-        self.register(out, len)?;
+        let shape = match &instruction {
+            I::Read { .. } => vec![len],
+            I::Reshape { input, .. } => self.shape(input)?,
+            I::Slice { input, start: 0, .. } if matches!(expr, Expr::Name(_)) => self.shape(input)?,
+            I::Neg { input, .. } | I::Detach { input, .. } | I::Exp { input, .. } | I::Log { input, .. }
+            | I::Tanh { input, .. } | I::Sigmoid { input, .. } | I::Relu { input, .. } | I::Clip { input, .. } => self.shape(input)?,
+            I::Add { left, .. } | I::Mul { left, .. } | I::Minimum { left, .. } => self.shape(left)?,
+            I::Gate { input, .. } | I::Route { yes: input, .. } => self.shape(input)?,
+            I::Softmax { input, .. } | I::LogSoftmax { input, .. } => {
+                ensure!(self.shape(input)?.len() == 1, "rank > 1 softmax requires explicit axis");
+                vec![len]
+            },
+            I::Linear { input, .. } => {
+                ensure!(self.shape(input)?.len() == 1, "linear requires vector input; use matmul for matrices");
+                vec![len]
+            },
+            I::Slice { input, .. } => {
+                ensure!(self.shape(input)?.len() == 1, "slice requires vector input");
+                vec![len]
+            },
+            _ => vec![len],
+        };
+        self.register_shape(out, shape)?;
+
         self.types.insert(out.into(), kind);
         self.program.instructions.push(instruction);
         Ok(())
@@ -713,7 +795,7 @@ impl Lower<'_> {
                     Stmt::Return(e) => {
                         let value = self.value(e)?;
                         ensure!(
-                            self.size(&value)? == self.output,
+                            self.shape(&value)? == vec![self.output],
                             "forward return/output shape mismatch"
                         );
                         self.program.instructions.push(I::Return { value });

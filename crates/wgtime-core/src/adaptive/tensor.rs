@@ -26,6 +26,27 @@ impl AxisGroups {
     fn index(self, outer: usize, axis: usize, inner: usize) -> usize {
         (outer * self.width + axis) * self.inner + inner
     }
+    pub fn softmax(self, input: &[f32], output: &mut [f32]) -> Result<()> {
+        ensure!(input.len() == self.len() && output.len() == self.len(), "softmax storage/shape mismatch");
+        for o in 0..self.outer { for i in 0..self.inner {
+            let max = (0..self.width).map(|a| input[self.index(o,a,i)]).fold(f32::NEG_INFINITY,f32::max);
+            let sum: f64 = (0..self.width).map(|a| (f64::from(input[self.index(o,a,i)])-f64::from(max)).exp()).sum();
+            for a in 0..self.width {
+                let j = self.index(o,a,i);
+                output[j] = ((f64::from(input[j])-f64::from(max)).exp()/sum) as f32;
+            }
+        } }
+        Ok(())
+    }
+    pub fn softmax_vjp(self, value: &[f32], gradient: &[f32], result: &mut [f32]) {
+        for o in 0..self.outer { for i in 0..self.inner {
+            let dot: f64 = (0..self.width).map(|a| { let j=self.index(o,a,i); f64::from(value[j])*f64::from(gradient[j]) }).sum();
+            for a in 0..self.width {
+                let j=self.index(o,a,i);
+                result[j] += (f64::from(value[j])*(f64::from(gradient[j])-dot)) as f32;
+            }
+        } }
+    }
     pub fn rms(self, input: &[f32], epsilon: f32, output: &mut [f32]) -> Result<()> {
         ensure!(input.len() == self.len() && output.len() == self.len(), "rms tensor storage/shape mismatch");
         ensure!(epsilon.is_finite() && epsilon > 0., "normalization epsilon must be positive and finite");

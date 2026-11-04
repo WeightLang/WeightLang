@@ -1,14 +1,14 @@
 wgt 0.5
 # WGT 当前模型语法总览：可直接读取的主模型 + 中文注释中的独立示例。
 # 本文件不是多个模型的拼接。只有未加 # 的 T01 是活跃模型。
-# T02..T09、R01、P01 均为注释资料；不要整体去掉 # 后当成一个编译单元。
+# T02..T11、R01、P01 均为注释资料；不要整体去掉 # 后当成一个编译单元。
 # 每个独立模型落盘时各用一个目录的 model.wgt；本次不创建 examples。
 # 语法依据：crates/wgt-language/src/source.rs、adaptive/source.rs、
 # script/parse.rs、script/operators.rs、model.rs、model_modules.rs。
 # 专题依据：docs/reference.zh-CN.md、native-backend.md、
 # learnable-architecture-parameters.md、custom-operators.md。
 # 这是当前本地实现导览，不代表已经发布，也不承诺覆盖所有神经网络架构。
-# 本地验证：T01 已通过定义解析和原生编译前向，[2,4] -> [9]、[0,0] -> [0]。
+# 本地验证：T01 定义解析和原生编译前向通过，[2,4] -> [9]、[0,0] -> [0]；T10 attention 最终 IR 安全校验后 core 7 suites/30 tests 通过。
 # T02/T03/T04/T05/T09 已单独抽取通过定义解析，T06 配套本地导入也已通过。
 # 解析不等于所有数值行为已验证。
 # 查阅目录：
@@ -17,7 +17,7 @@ wgt 0.5
 # 05 helper/std/本地导入（T05/T06）；06 门控/硬分支/循环/状态（T07）；
 # 07 工作内存/资源（T08）；08 五类 learn/depth_gate；09 loss/训练；
 # 10 顺序 layer/init（T09）；11 Rust 三入口/显式生命周期（R01）；
-# 12 遗留宿主索引；13 提案（P01）；14 提取与验证清单。
+# 12 遗留宿主索引；13 提案（P01）；14 提取与验证清单（T10 attention、T11 Richardson 松弛）。
 
 # 01 版本、名称、注释和边界
 # 首个非空、非注释行必须为 wgt 0.5；版本头只出现一次。
@@ -104,7 +104,7 @@ fn loss(prediction, target) {
 # target 不增加 forward 输入，不改变内置 MSE 的目标合同。
 # 同一个静态定义可初始化多个独立实例；定义复制不等于共享可变服务状态。
 
-# 03 当前张量表达式完整清单（除 linear 可省 b 外，所有参数必填）
+# 03 当前张量表达式清单与实现中固定 shape 几何合同（行为待验证；除 linear 可省 b 外参数必填）
 # x、局部名、参数名、read(parameter)：读取定长张量，参数读取按扁平向量处理。
 # [1, -2, 3e-2]：非空有限数字向量，宽度 1..16384；不是嵌套张量或动态列表。
 # (expr)、-x、a+b、a-b、a*b、add(a,b)、mul(a,b)：后四者须等长，无标量广播。
@@ -114,6 +114,7 @@ fn loss(prediction, target) {
 # relu(x)、tanh(x)、sigmoid(x)、square(x)、exp(x)、log(x)：[N] -> [N]。
 # log 输入需为正；有限值和运行预算检查仍适用，解析不会证明所有输入数值安全。
 # softmax(x)、log_softmax(x)：沿唯一向量轴，[N] -> [N]，使用稳定计算。
+# 多轴 softmax(x,axis)、reshape、rank-2 transpose/matmul、scale 的固定合同见 T10，行为待验证。
 # mean(x)、x.mean、sum(x)：[N] -> [1]，没有 axis 参数或 .sum 后缀。
 # minimum(a,b)：等长逐元素最小值，相等时梯度各半。
 # clip(x,lower,upper)：[N] -> [N]，有序有限带符号数字字面量边界，端点梯度为零。
@@ -444,9 +445,82 @@ fn loss(prediction, target) {
 # decode policy(input) {method:sample;}：目标语法，parser/runtime 接线与返回/RNG 契约待验收。
 # 更广泛的架构类别见 docs/architecture-coverage.md；设计矩阵不是当前支持承诺。
 
+# T10 BEGIN：独立完整固定 shape 多轴 attention 模型，合同冻结且指定范围已本地验证。
+# 单 vector 入口把两个 token、三个特征按 token-major 顺序展为 [6]；forward 内恢复 [2,3]。
+# 参数 read 始终是 flat vector；qk/value/output 在矩阵乘法前显式 reshape 到声明矩阵 shape。
+# Q/K 共用 qk:[3,2] 投影；score 为 [2,2]，沿 axis=1 对每个 query 的 keys 做 softmax。
+# V/output 使用 [3,3]；返回矩阵显式 reshape 为 [6]，满足模型单向量输出合同。
+# 参数是声明初值，不是已训练权重；此模型不改活跃 T01。
+# wgt 0.5
+# model TinyAttention
+# input x: f32[6]
+# output y: f32[6]
+# parameter qk: f32[3,2] = [0.3,-0.2,0.1,0.4,-0.3,0.2]
+# parameter value: f32[3,3] = [0.2,-0.1,0.3,0.4,0.2,-0.2,-0.1,0.3,0.2]
+# parameter output: f32[3,3] = [0.5,0.1,-0.2,-0.1,0.4,0.2,0.3,-0.2,0.5]
+# fn forward(x) {
+#     let tokens = reshape(x,[2,3]);
+#     let projection = reshape(qk,[3,2]);
+#     let values = reshape(value,[3,3]);
+#     let outputs = reshape(output,[3,3]);
+#     let q = matmul(tokens,projection);
+#     # Q 与 K 使用同一个共享权重 projection；本地数值验证确认复用 q 结果时输出和梯度一致且 work 更少。
+#     # 这里的 let k = q 复用计算结果；本身不代表新增的共享权重机制。
+#     let k = q;
+#     let v = matmul(tokens,values);
+#     let scores = scale(matmul(q,transpose(k)),0.7071067811865476);
+#     let attention = softmax(scores,1);
+#     let context = matmul(attention,v);
+#     return reshape(matmul(context,outputs),[6]);
+# }
+# fn loss(prediction,target) { return square(prediction-target).mean; }
+# T10 END
+# T10 合同：WGT 0.5；实际使用新几何 op 或多轴 softmax 时用 adaptive IR v3。
+# 旧 IR v1/v2 不因 AST 出现新 intrinsic 而全定义升级；read/裸参数引用始终 flat vector。
+# 参数矩阵必须局部显式 reshape(parameter,[...])，如本例 projection/values/outputs。
+# reshape 目标为 1..8 轴正整数常量，每轴 1..16384、总元素<=16777216，元素数相同。
+# transpose 仅 rank2；matmul [M,K]@[K,N]->[M,N]，无广播。
+# softmax(x,axis) 的 axis 是非负整常量，沿轴独立稳定归一化并用 f64 累加；softmax(x)/log_softmax(x) 仍为 rank1。
+# scale(x,literal) 接受有限有符号数值字面量，不广播并保持 shape。
+# 最终 IR 安全校验后的验证：core 7 suites/30 tests、真实 service 1 项、macro fixture 编译 1 项通过。
+# service native-cpu 100步 SGD：MSE 0.046146184 -> 0.00000076705595；权重 roundtrip、同 SGD 续训及资源释放通过。
+# 该验证只覆盖本固定 shape fixture，不表示完整 Transformer、多头 attention、动态 batch 或 GPU 已验证。
+# debug 单机 1000 次 evaluate 为 2.033213ms（约 2.03us/次，含返回 Vec）；managed tensor 1128B（参数96B、tape1056B），charged work 98。
+# 上述计量不是进程 RSS/真实峰值或 benchmark 优势。kernel 为朴素 f64 累加、复用 AxisGroups；无全局 CSE/活跃区间复用。
+# compiled workspace 各 register 常驻且 session 保留 reference buffers，不宣称内存最优。
+# 同源完整 fixture：crates/wgtime-core/tests/fixtures/attention/model.wgt
+
+# T11 BEGIN：完整 Richardson 松弛模型，源自 tests/fixtures/differentiable_program/model.wgt。
+# 一个样本的特征轴为 [observation, initial]；每轮共享同一个 gain，不为迭代创建独立权重。
+# Richardson 松弛反复以 gain*(observation-estimate) 修正估计；gain<=0.5 保证收缩，三轮对应教师闭式解 initial+7/8*residual。
+# depth_gate 只选择显式展开的三段，不生成动态循环，也不承诺推理时省略已写出的计算。
+# learn int/bool 使用硬前向与 identity STE 代理梯度；它们不是 rounding/comparison 的真实导数。
+# wgt 0.5
+# model BoundedRelaxation
+# input x: f32[2]
+# output estimate: f32[1]
+# learn gain: float in 0.1..=0.5 = 0.25;
+# learn depth: int in 1..=3 = 1;
+# learn enabled: bool = false;
+# fn relax(estimate, observation, gain) {
+#     return estimate + gain * (observation - estimate);
+# }
+# fn forward(x) {
+#     let observation = x[0:1], initial = x[1:2];
+#     let h1 = route(depth_gate(depth, 1), relax(initial, observation, gain), initial);
+#     let h2 = route(depth_gate(depth, 2), relax(h1, observation, gain), h1);
+#     let h3 = route(depth_gate(depth, 3), relax(h2, observation, gain), h2);
+#     return route(enabled, h3, initial);
+# }
+# fn loss(prediction, target) {
+#     return [0.5] * square(prediction - target).mean;
+# }
+# T11 END
+# 已提供的本地证据：crates/wgtime-core/tests/differentiable_program.rs 两项通过，覆盖参考解释器与 native-cpu 编译执行及训练/权重/checkpoint行为；不代表已发布。
+
 # 14 示例提取与验证清单
-# T01：本文件唯一活跃、完整模型；预期可用 ModelDefinition::from_file/parse 解析，待实测。
-# T02/T03/T04/T05/T09：注释中的独立完整模型；按编号各自提取、移除一层 '# ' 后单独解析。
+# T01：本文件唯一活跃、完整模型；已通过定义解析和原生编译前向，[2,4] -> [9]、[0,0] -> [0]。
+# T02/T03/T04/T05/T09/T10/T11：注释中的独立完整模型；T10/T11 已抽取并通过 wgt check，T02/T03/T04/T05/T09 保留原验证记录。
 # T06a：完整 operators 库，不是 ModelDefinition；T06b：完整消费者，必须提供配套 ops.wgt。
 # T07/T08：完整低层模型语法资料；包含当前服务 compiled 路径拒绝的状态能力，不作 facade 验收。
 # R01：完整 Rust 函数资料，内部宏字符串也是独立 Scale 模型；不是 WGT 提取块。

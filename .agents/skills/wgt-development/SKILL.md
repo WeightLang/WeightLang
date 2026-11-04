@@ -15,6 +15,10 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 
 当前模型入口支持单个 f32 向量；字符串入口可导入 `std/activation`、`std/loss`，文件入口还可解析相对路径纯计算模块及嵌套导入。不得宣称多输入、batch forward、cache 或任意 dtype 支持。模型定义与服务中初始化/加载的实例、训练权重和优化器检查点是不同对象；加载定义不得隐式执行训练或创建运行状态。准确接口及实现状态以 [docs/native-backend.md](../../../docs/native-backend.md) 为权威。
 
+### 固定 shape 多轴张量几何（行为待验证）
+
+核心合同为 WGT 0.5，相关 adaptive IR 为 v3；旧 IR v1/v2 仅在显式提供一维 `shape=[len]` 时接受，shape 缺失拒绝。`reshape(x,[d1,...,dn])` 的维度必须是 1..8 个正整数常量，每轴 1..16384，元素总数不超过 16777216，且总元素数须保持不变。`transpose(x)` 只接受 rank-2 并交换两轴；`matmul(a,b)` 为 rank-2 `[M,K] @ [K,N] -> [M,N]`，不广播。`softmax(x,axis)` 的 axis 是非负整数字面量，沿整轴独立稳定归一化并使用 f64 累加；原 `softmax(x)` 与 `log_softmax(x)` 仍为 rank-1 形式。`scale(x,literal)` 接受有限有符号数值字面量，不广播并保 shape。服务模型入口仍为单个 f32 向量，矩阵结果需 reshape 为向量。指定范围已本地验证：core 7 suites / 30 tests、真实 service 集成 1 项和 macro fixture 编译 1 项。native-cpu attention 100 步 SGD 的 MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训及资源释放。核心补充 IR 安全校验后须回归；不能据此声称完整 Transformer、多头 attention、动态 batch 或 GPU 路径已验证。完整 attention 模型见 [docs/tensor-geometry.md](../../../docs/tensor-geometry.md) 和 `language/syntax-tour/model.wgt` 的注释 T10。
+
 ### 可学习架构参数
 
 顶层模型定义支持标量 `learn`，当前本地定点验证覆盖解释执行、真实 C 编译，以及 Rust facade 真实 daemon 的三入口训练/推理与权重保存、载入续训。核心组合测试覆盖 adaptive、compiled forward 和 learn 共 17 项，daemon 集成 1 项；这是局部验证，不等于全仓验收或已发布。语法和边界见 [docs/learnable-architecture-parameters.md](../../../docs/learnable-architecture-parameters.md)。

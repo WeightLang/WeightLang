@@ -60,7 +60,7 @@ pub(super) fn validate(
             }
             I::Read { out, .. } | I::ResourceState { out } => vec![out],
             I::Write { value, .. } | I::Return { value } => vec![value],
-            I::Linear { out, input, .. }
+            I::Reshape { out, input } | I::Transpose { out, input } | I::SoftmaxAxis { out, input, .. } | I::Scale { out, input, .. } | I::Linear { out, input, .. }
             | I::Tanh { out, input }
             | I::Sigmoid { out, input }
             | I::Relu { out, input }
@@ -75,7 +75,7 @@ pub(super) fn validate(
             | I::Neg { out, input }
             | I::Mean { out, input }
             | I::Slice { out, input, .. } => vec![out, input],
-            I::Add { out, left, right }
+            I::Matmul { out, left, right } | I::Add { out, left, right }
             | I::Mul { out, left, right }
             | I::Minimum { out, left, right } => vec![out, left, right],
             I::Gate {

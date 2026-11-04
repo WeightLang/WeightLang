@@ -2044,12 +2044,88 @@
         "tensor_forward",
         "tensor_loss"
       ],
-      "purpose": "f32[N] 沿唯一向量轴归一化，返回 f32[N]；稳定指数实现，支持一阶梯度",
+      "purpose": "softmax(x) 保持 rank-1 向量语义；多轴 softmax(x,axis) 沿非负整数字面量轴独立稳定归一化并用 f64 累加。",
       "implementation": "crates/wgt-language/src/adaptive/source.rs",
-      "documentation": "docs/reference.zh-CN.md",
+      "documentation": "docs/tensor-geometry.md",
       "position": "expression",
-      "signature": "softmax(x)",
-      "defaults": {}
+      "signature": "softmax(x) / softmax(x,axis)",
+      "defaults": {},
+      "arity": {
+        "min": 1,
+        "max": 2
+      }
+    },
+    {
+      "name": "reshape",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "reshape(x,[dims]) 固定 shape 重解释；1..8 个正整数常量轴，每轴 1..16384、元素总数不超过 16777216，元素数须相同。",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/tensor-geometry.md",
+      "position": "expression",
+      "signature": "reshape(x,[d1,...,dn])",
+      "defaults": {},
+      "arity": {
+        "min": 2,
+        "max": 2
+      }
+    },
+    {
+      "name": "transpose",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "rank-2 张量交换两个轴。",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/tensor-geometry.md",
+      "position": "expression",
+      "signature": "transpose(x)",
+      "defaults": {},
+      "arity": {
+        "min": 1,
+        "max": 1
+      }
+    },
+    {
+      "name": "matmul",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "rank-2 [M,K] @ [K,N] -> [M,N]；内轴相等，无广播。",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/tensor-geometry.md",
+      "position": "expression",
+      "signature": "matmul(a,b)",
+      "defaults": {},
+      "arity": {
+        "min": 2,
+        "max": 2
+      }
+    },
+    {
+      "name": "scale",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "以有限有符号数值字面量缩放张量；不广播并保持 shape。",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/tensor-geometry.md",
+      "position": "expression",
+      "signature": "scale(x,literal)",
+      "defaults": {},
+      "arity": {
+        "min": 2,
+        "max": 2
+      }
     },
     {
       "name": "slice",

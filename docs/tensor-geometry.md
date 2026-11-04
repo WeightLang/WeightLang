@@ -1,0 +1,64 @@
+# 固定 shape 张量几何与多轴 attention
+
+> **状态：指定范围已在本地验证，尚未发布。** 最终 IR 安全校验后 core 7 suites / 30 tests、真实 service 集成 1 项、macro fixture 编译 1 项通过。范围限于本固定 shape attention fixture，不代表完整 Transformer、多头 attention、动态 batch 或 GPU 路径。
+
+## attention 本地验证记录
+
+真实 service 的 native-cpu 路径完成 100 步 SGD，MSE 从 `0.046146184` 降至 `0.00000076705595`，并验证权重 roundtrip、同 SGD 续训和资源释放。debug 单机 1000 次 evaluate 共 `2.033213 ms`（约 `2.03 μs/次`，含返回 `Vec`）；managed tensor 计量为 1128 B，其中参数 96 B、tape 1056 B，charged work 为 98。这些数值只描述该次运行，不是 benchmark 优势、进程 RSS 或真实峰值内存。
+
+当前 kernel 使用朴素 f64 累加而非 BLAS，并复用 `AxisGroups`。将 `let k = q` 已验证输出和梯度相同且 work 更少；目前没有全局 CSE 或活跃区间复用，compiled workspace 各 register 常驻，session 仍保留 reference buffers，因此不宣称内存最优。
+
+
+固定 shape 几何算子用于模型内部张量计算。模型服务入口仍只接受一个 `f32` 向量；需要矩阵输入时，在 forward 内显式 `reshape`。返回值仍须为向量，因此矩阵输出应显式 reshape 回一维。
+
+| 表达式 | 合同 | 限制 |
+| --- | --- | --- |
+| `reshape(x,[d1,...,dn])` | 按行优先元素顺序重解释 shape | 目标为 1..8 个正整数常量轴，每轴 1..16384，元素总数不超过 16777216；元素数须与输入相同 |
+| `transpose(x)` | rank-2 张量交换两个轴 | 不接受其他 rank |
+| `matmul(a,b)` | `[M,K] @ [K,N] -> [M,N]` | 两边必须是 rank-2 且内维相等；无广播 |
+| `softmax(x,axis)` | 沿指定整轴独立归一化；稳定计算，沿轴使用 f64 累加 | axis 为非负整数字面常量且必须在 rank 范围内；`softmax(x)` 与 `log_softmax(x)` 仍只接受 rank-1 向量 |
+| `scale(x,literal)` | 以有限有符号数值字面量缩放张量 | 不广播，shape 保持不变 |
+
+实际使用新几何算子或多轴 softmax 时使用 adaptive IR v3；旧 IR v1/v2 的读取规则不因 AST 中出现新 intrinsic 而全定义升级。参数 `read` 与裸参数引用始终产生 flat vector；矩阵参数必须在局部显式写 `reshape(parameter,[...])`。这里没有承诺动态 shape、广播、任意 dtype 或 rank-2 以上 matmul。
+
+## 完整模型示例
+
+以下完整模型与 `crates/wgtime-core/tests/fixtures/attention/model.wgt` 一致：两 token、每 token 三特征；Q/K 共用 `[3,2]` 投影参数，V 和输出投影为 `[3,3]`。参数读取始终是 flat vector，矩阵权重在局部显式 reshape。参数是定义中的初值，不代表训练后的权重。已提供的本地验证覆盖 attention 四项、native-cpu daemon 端到端一项（100 步 loss 下降、权重 roundtrip、同 SGD 续训及资源释放）和 macro fixture 编译一项；核心补充 IR 安全校验后须再次回归。
+
+```wgt
+wgt 0.5
+model TinyAttention
+input x: f32[6]
+output y: f32[6]
+# Two tokens, three features; Q and K deliberately share a [3,2] projection.
+# These are declared initial values, not trained weights. V has three channels.
+parameter qk: f32[3,2] = [0.3,-0.2,0.1,0.4,-0.3,0.2]
+parameter value: f32[3,3] = [0.2,-0.1,0.3,0.4,0.2,-0.2,-0.1,0.3,0.2]
+parameter output: f32[3,3] = [0.5,0.1,-0.2,-0.1,0.4,0.2,0.3,-0.2,0.5]
+fn forward(x) {
+    # Flat parameter reads are explicitly reshaped before matrix operations.
+    let tokens = reshape(x,[2,3]);
+    let projection = reshape(qk,[3,2]);
+    let values = reshape(value,[3,3]);
+    let outputs = reshape(output,[3,3]);
+    let q = matmul(tokens,projection);
+    # Q/K share the projection weights; reusing q here shares a computed value, not a new weight mechanism.
+    let k = q;
+    let v = matmul(tokens,values);
+    # [2,2] scores reduce over keys (axis 1), independently for each query.
+    let scores = scale(matmul(q,transpose(k)),0.7071067811865476);
+    let attention = softmax(scores,1);
+    let context = matmul(attention,v);
+    # Output projection preserves tokens; the host contract stays one vector.
+    return reshape(matmul(context,outputs),[6]);
+}
+fn loss(prediction,target) { return square(prediction-target).mean; }
+```
+
+将完整模型块抽取到独立 `model.wgt` 时，保留 `wgt 0.5` 版本头与完整参数/函数定义。以下资料同步了同一组规则：
+
+- [语言参考](reference.zh-CN.md) 的 forward/loss 张量表达式契约。
+- [Rust 后端契约](native-backend.md) 的 IR 版本和 compiled forward 验收状态。
+- [语法总览](../language/syntax-tour/model.wgt) 的 T10 注释示例；不改活跃主模型。
+- [wgt-development 技能](../.agents/skills/wgt-development/SKILL.md) 的固定 shape 与多轴规则。
+- [prelude.json](../language/prelude.json) 中张量 intrinsic 的合同元数据。

@@ -735,6 +735,10 @@
           {
             "type": "number",
             "named": true
+          },
+          {
+            "type": "signed_number",
+            "named": true
           }
         ]
       },
@@ -743,7 +747,11 @@
         "required": false,
         "types": [
           {
-            "type": "number",
+            "type": "learn_bound",
+            "named": true
+          },
+          {
+            "type": "signed_number",
             "named": true
           }
         ]
@@ -763,7 +771,7 @@
         "required": false,
         "types": [
           {
-            "type": "number",
+            "type": "learn_bound",
             "named": true
           }
         ]
@@ -1777,6 +1785,10 @@
     "named": false
   },
   {
+    "type": "learn_bound",
+    "named": true
+  },
+  {
     "type": "let",
     "named": false
   },
@@ -1863,6 +1875,10 @@
   {
     "type": "share",
     "named": false
+  },
+  {
+    "type": "signed_number",
+    "named": true
   },
   {
     "type": "size",

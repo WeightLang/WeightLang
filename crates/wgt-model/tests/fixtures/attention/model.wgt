@@ -1,0 +1,26 @@
+wgt 0.5
+model TinyAttention
+input x: f32[6]
+output y: f32[6]
+# Two tokens, three features; Q and K deliberately share a [3,2] projection.
+# These are declared initial values, not trained weights. V has three channels.
+parameter qk: f32[3,2] = [0.3,-0.2,0.1,0.4,-0.3,0.2]
+parameter value: f32[3,3] = [0.2,-0.1,0.3,0.4,0.2,-0.2,-0.1,0.3,0.2]
+parameter output: f32[3,3] = [0.5,0.1,-0.2,-0.1,0.4,0.2,0.3,-0.2,0.5]
+fn forward(x) {
+    # The flat IPC vector is explicitly reinterpreted as token-major storage.
+    let tokens = reshape(x,[2,3]);
+    let projection = reshape(qk,[3,2]);
+    let values = reshape(value,[3,3]);
+    let outputs = reshape(output,[3,3]);
+    let q = matmul(tokens,projection);
+    let k = matmul(tokens,projection);
+    let v = matmul(tokens,values);
+    # [2,2] scores reduce over keys (axis 1), independently for each query.
+    let scores = scale(matmul(q,transpose(k)),0.7071067811865476);
+    let attention = softmax(scores,1);
+    let context = matmul(attention,v);
+    # Output projection preserves tokens; the host contract stays one vector.
+    return reshape(matmul(context,outputs),[6]);
+}
+fn loss(prediction,target) { return square(prediction-target).mean; }

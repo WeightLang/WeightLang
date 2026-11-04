@@ -6,6 +6,11 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy)]
 enum Edge {
+    Matmul { a: usize, b: usize, m: usize, k: usize, n: usize },
+    Transpose { x: usize, m: usize, n: usize },
+    SoftmaxAxis { x: usize, groups: super::tensor::AxisGroups },
+    Scale { x: usize, factor: f32 },
+
     Minimum {
         a: usize,
         b: usize,
@@ -147,6 +152,11 @@ impl Tape {
 
     pub(super) fn record(&mut self, op: Op, value: &[f32]) -> Result<()> {
         let (out, edge) = match op {
+            Op::Reshape(r,x) => (r, Edge::Slice { x:self.reg(x)?, start:0 }),
+            Op::Transpose(r,x,m,n) => (r, Edge::Transpose { x:self.reg(x)?,m,n }),
+            Op::Matmul(r,a,b,m,k,n) => (r, Edge::Matmul { a:self.reg(a)?,b:self.reg(b)?,m,k,n }),
+            Op::SoftmaxAxis(r,x,groups) => (r, Edge::SoftmaxAxis { x:self.reg(x)?,groups }),
+            Op::Scale(r,x,factor) => (r, Edge::Scale { x:self.reg(x)?,factor }),
             Op::Constant(r, _) | Op::Unary(r, _, 5) => (r, Edge::Leaf),
             Op::Minimum(r, a, b) => (
                 r,
@@ -446,6 +456,20 @@ impl ForwardPass {
                         before[b].gradient[i] += g * db;
                     }
                 }
+                Edge::Matmul { a,b,m,k,n } => {
+                    for i in 0..m { for j in 0..n { for q in 0..k {
+                        let g = node.gradient[i*n+j];
+                        before[a].gradient[i*k+q] += g * before[b].value[q*n+j];
+                        before[b].gradient[q*n+j] += g * before[a].value[i*k+q];
+                    } } }
+                },
+                Edge::Transpose { x,m,n } => {
+                    for i in 0..m { for j in 0..n { before[x].gradient[i*n+j] += node.gradient[j*m+i]; } }
+                },
+                Edge::SoftmaxAxis { x,groups } => groups.softmax_vjp(&node.value,&node.gradient,&mut before[x].gradient),
+                Edge::Scale { x,factor } => {
+                    for (i,g) in node.gradient.iter().enumerate() { before[x].gradient[i] += g * factor; }
+                },
                 Edge::Minimum { a, b } => {
                     for (i, &g) in node.gradient.iter().enumerate() {
                         let (av, bv) = (before[a].value[i], before[b].value[i]);

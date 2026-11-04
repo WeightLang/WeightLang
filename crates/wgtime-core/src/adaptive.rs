@@ -17,6 +17,12 @@ pub use workspace::ExecutionProgress;
 pub use wgt_language::adaptive::{Program, Register, Parameter, Instruction};
 #[derive(Debug, Clone, Copy)]
 enum Op {
+    Reshape(usize, usize),
+    Transpose(usize, usize, usize, usize),
+    Matmul(usize, usize, usize, usize, usize, usize),
+    SoftmaxAxis(usize, usize, tensor::AxisGroups),
+    Scale(usize, usize, f32),
+
     Constant(usize, usize),
     Minimum(usize, usize, usize),
     Clip(usize, usize, f32, f32),
@@ -87,10 +93,13 @@ impl AdaptiveSession {
     }
     pub(crate) fn ensure_mutable(&self) -> Result<()> { self.collection.ensure_mutable() }
     pub fn prepare(program: Program, budget_bytes: usize) -> Result<Self> {
-        ensure!(matches!(program.version, 1 | 2), "unsupported adaptive IR version");
+        ensure!(matches!(program.version, 1 | 2 | 3), "unsupported adaptive IR version");
         ensure!(program.version >= 2 || (program.output_type.is_plain()
             && !program.instructions.iter().any(|i| matches!(i, Instruction::ValidateProbabilities { .. }))),
             "categorical output metadata and validation require adaptive IR version 2");
+        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,
+            Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Matmul { .. }
+            | Instruction::SoftmaxAxis { .. } | Instruction::Scale { .. })), "tensor operations require adaptive IR version 3");
         ensure!(!program.instructions.is_empty(), "empty adaptive program");
         if let Some(loss) = &program.loss {
             ensure!(
@@ -168,6 +177,11 @@ impl AdaptiveSession {
         let mut maximum = 0;
         for r in &program.registers {
             ensure!(r.len > 0, "register length must be positive");
+            ensure!(crate::elements(&r.shape)? == r.len && r.shape.len() <= 8 && r.len <= 16_777_216 && r.shape.iter().all(|d| *d <= 16384), "register shape/storage mismatch");
+            // Older IR carries explicit geometry too. Its operations retain their
+            // historical flat semantics; only v3 admits multidimensional registers.
+            ensure!(program.version >= 3 || r.shape == [r.len], "multiaxis registers require adaptive IR version 3");
+
             floats = floats
                 .checked_add(r.len)
                 .context("register size overflow")?;
@@ -187,6 +201,33 @@ impl AdaptiveSession {
         for (pc, instruction) in program.instructions.iter().enumerate() {
             let op = (|| -> Result<Op> {
                 Ok(match instruction {
+                    Instruction::Reshape { out, input } => {
+                        let (r,x) = (dest(out)?,reg(input)?);
+                        ensure!(len(r) == len(x), "reshape element count mismatch");
+                        Op::Reshape(r,x)
+                    },
+                    Instruction::Transpose { out, input } => {
+                        let (r,x) = (dest(out)?,reg(input)?);
+                        let shape = &program.registers[x].shape;
+                        ensure!(shape.len() == 2 && program.registers[r].shape == [shape[1],shape[0]], "transpose shape mismatch");
+                        Op::Transpose(r,x,shape[0],shape[1])
+                    },
+                    Instruction::Matmul { out, left, right } => {
+                        let (r,a,b) = (dest(out)?,reg(left)?,reg(right)?);
+                        let sa = &program.registers[a].shape; let sb = &program.registers[b].shape;
+                        ensure!(sa.len() == 2 && sb.len() == 2 && sa[1] == sb[0] && program.registers[r].shape == [sa[0],sb[1]], "matmul shape mismatch");
+                        Op::Matmul(r,a,b,sa[0],sa[1],sb[1])
+                    },
+                    Instruction::SoftmaxAxis { out, input, axis } => {
+                        let (r,x) = (dest(out)?,reg(input)?);
+                        ensure!(program.registers[r].shape == program.registers[x].shape, "axis softmax shape mismatch");
+                        Op::SoftmaxAxis(r,x,tensor::AxisGroups::new(&program.registers[x].shape,*axis)?)
+                    },
+                    Instruction::Scale { out, input, factor } => {
+                        let (r,x) = (dest(out)?,reg(input)?);
+                        ensure!(factor.is_finite() && program.registers[r].shape == program.registers[x].shape, "scale shape/factor mismatch");
+                        Op::Scale(r,x,*factor)
+                    },
                     Instruction::MemoryAlloc { out, slots, width } => {
                         Op::MemoryAlloc(dest(out)?, *slots, *width)
                     }
@@ -408,6 +449,24 @@ impl AdaptiveSession {
                 })
             })()
             .with_context(|| format!("instruction {pc}"))?;
+            if program.version >= 3 {
+                let shape = |r: usize| &program.registers[r].shape;
+                match op {
+                    Op::Read(r,_) => ensure!(*shape(r) == [program.registers[r].len], "parameter reads require a vector; reshape explicitly"),
+                    Op::Write(_,r) => ensure!(*shape(r) == [program.registers[r].len], "parameter writes require a vector; reshape explicitly"),
+                    Op::Binary(r,a,b,_) | Op::Minimum(r,a,b) => ensure!(shape(r) == shape(a) && shape(a) == shape(b), "elementwise geometry mismatch"),
+                    Op::Unary(r,x,k) => {
+                        ensure!(shape(r) == shape(x), "unary geometry mismatch");
+                        ensure!(!matches!(k,3|8|9) || shape(x).len() == 1, "vector softmax/validation requires rank 1");
+                    },
+                    Op::Clip(r,x,_,_) => ensure!(shape(r) == shape(x), "clip geometry mismatch"),
+                    Op::Linear(r,x,_,_) => ensure!(shape(r).len() == 1 && shape(x).len() == 1, "linear requires vectors"),
+                    Op::Slice(r,x,_) => ensure!(shape(r).len() == 1 && shape(x).len() == 1, "slice requires vectors"),
+                    Op::Blend(r,p,a,b) => ensure!(shape(r) == shape(a) && b.is_none_or(|b| shape(b) == shape(a)) && (shape(p) == &[1] || shape(p) == shape(a)), "blend geometry mismatch"),
+                    Op::Return(r) => ensure!(shape(r).len() == 1, "model output requires explicit vector reshape"),
+                    _ => {},
+                }
+            }
             ops.push(op);
         }
         let output_len = output_len.context("program requires a return")?;
@@ -654,7 +713,11 @@ impl AdaptiveSession {
                 .ops
                 .get(pc)
                 .context("adaptive program fell through without return")?;
-            let cost = self.workspace.cost(op)?;
+            let cost = match op {
+                Op::Matmul(_,_,_,m,k,n) => m.checked_mul(k).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("matmul work overflow")? as u64,
+                _ => self.workspace.cost(op)?,
+            };
+
             ensure!(
                 cost <= max_steps - self.steps,
                 "adaptive instruction budget exceeded"
@@ -721,6 +784,35 @@ impl AdaptiveSession {
                         .copy_from_slice(&self.registers[r]);
                     self.wrote = true;
                 }
+                Op::Reshape(r,x) => {
+                    self.ready(x)?;
+                    self.scratch[..self.registers[x].len()].copy_from_slice(&self.registers[x]);
+                    output = Some(r);
+                },
+                Op::Transpose(r,x,m,n) => {
+                    self.ready(x)?;
+                    for i in 0..m { for j in 0..n { self.scratch[j*m+i] = self.registers[x][i*n+j]; } }
+                    output = Some(r);
+                },
+                Op::Matmul(r,a,b,m,k,n) => {
+                    self.ready(a)?; self.ready(b)?;
+                    for i in 0..m { for j in 0..n {
+                        let mut sum = 0f64;
+                        for q in 0..k { sum += f64::from(self.registers[a][i*k+q]) * f64::from(self.registers[b][q*n+j]); }
+                        self.scratch[i*n+j] = sum as f32;
+                    } }
+                    output = Some(r);
+                },
+                Op::SoftmaxAxis(r,x,groups) => {
+                    self.ready(x)?;
+                    groups.softmax(&self.registers[x], &mut self.scratch[..self.registers[r].len()])?;
+                    output = Some(r);
+                },
+                Op::Scale(r,x,factor) => {
+                    self.ready(x)?;
+                    for (i,v) in self.registers[x].iter().enumerate() { self.scratch[i] = v * factor; }
+                    output = Some(r);
+                },
                 Op::Linear(r, x, w, b) => {
                     self.ready(x)?;
                     let x = &self.registers[x];
