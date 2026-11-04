@@ -1,7 +1,7 @@
 wgt 0.5
 model Policy
 input observation: f32[2]
-output logits: f32[2]
+output logits: logits[2]
 # 两列对应两个时间步的 one-hot 观测，两行对应动作；所有 rollout/epoch 共享同一组权重。
 # 零 logits 是均匀随机策略，尚未训练。独立价值网络在 main 中初始化。
 parameter weights: f32[2,2] = [0,0,0,0]
@@ -29,7 +29,7 @@ fn main() {
     seed(7);
     let policy = Policy("adam");
     let critic = mlp([2, 8, 1], "tanh", 19, "adam");
-    let initial = softmax(policy([1,0]))[1] * softmax(policy([0,1]))[1];
+    let initial = policy([1,0]).probabilities[1] * policy([0,1]).probabilities[1];
     for iteration in range(0, 40) {
         # 每行同时拥有观测、策略目标和价值目标，记录字段按样本对齐。
         # 整批采集完成才训练，所有旧概率来自同一个策略版本。
@@ -57,7 +57,7 @@ fn main() {
         fit(critic, rollout.observation, rollout.value_target, 0.03, "mse");
     }
     # 这里可精确算成功概率；随机策略为 0.25，不以训练批次偶然奖励代替评估。
-    let success = softmax(policy([1,0]))[1] * softmax(policy([0,1]))[1];
+    let success = policy([1,0]).probabilities[1] * policy([0,1]).probabilities[1];
     metric("initial_success_probability", initial);
     metric("final_success_probability", success);
     assert(success > 0.85, "PPO did not learn delayed reward");

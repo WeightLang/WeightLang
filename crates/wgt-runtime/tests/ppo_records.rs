@@ -9,7 +9,11 @@ fn record_ppo_preserves_seed_rollout_and_every_training_update() {
   .replace("train policy on (xs, ys) rate 0.03 clip 0.5;", "train policy on (xs, ys) rate 0.03 clip 0.5; trace=append(trace,concat(policy([1,0]),policy([0,1])));")
   .replace("fit(critic, observations, returns, 0.03, \"mse\");", "trace=append(trace,[len(observations),len(targets),random()]); fit(critic, observations, returns, 0.03, \"mse\");")
   .replace("return success;", "return [success,trace];");
- let new=NEW.replace("for iteration in range(0, 40) {", "let trace=[]; for iteration in range(0, 40) {")
+ // Preserve the pre-typed f32 oracle explicitly: typed logits intentionally
+ // use f64 subtraction, while legacy f32 keeps its sampling arithmetic.
+ let legacy=NEW.replace("output logits: logits[2]","output logits: f32[2]")
+  .replace("policy([1,0]).probabilities[1] * policy([0,1]).probabilities[1]","softmax(policy([1,0]))[1] * softmax(policy([0,1]))[1]");
+ let new=legacy.replace("for iteration in range(0, 40) {", "let trace=[]; for iteration in range(0, 40) {")
   .replace("train policy on (minibatch.observation, minibatch.target) rate 0.03 clip 0.5;", "train policy on (minibatch.observation, minibatch.target) rate 0.03 clip 0.5; trace=append(trace,concat(policy([1,0]),policy([0,1])));")
   .replace("fit(critic, rollout.observation, rollout.value_target, 0.03, \"mse\");", "trace=append(trace,[len(rollout),len(rollout.target),random()]); fit(critic, rollout.observation, rollout.value_target, 0.03, \"mse\");")
   .replace("return success;", "return [success,trace];");
