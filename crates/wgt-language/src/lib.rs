@@ -5,3 +5,4 @@ pub mod adaptive;
 pub mod categorical;
 pub mod weight_artifact;
 pub mod model;
+mod model_modules;

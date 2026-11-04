@@ -1,26 +1,36 @@
-#[path = "src/script/prelude_declarations.rs"]
-mod prelude_declarations;
-
 fn main() {
     for path in [
-        "../../std/prelude.wgt",
         "../../language/prelude.json",
         "../../language/prelude_metadata.json",
     ] {
         println!("cargo:rerun-if-changed={path}");
     }
-    prelude_declarations::validate(
-        include_str!("../../std/prelude.wgt"),
-        include_str!("../../language/prelude.json"),
-    )
-    .expect("native prelude declaration contract");
-    let metadata: serde_json::Value =
-        serde_json::from_str(include_str!("../../language/prelude_metadata.json")).unwrap();
     let catalog: serde_json::Value =
-        serde_json::from_str(include_str!("../../language/prelude.json")).unwrap();
-    let entries: Vec<_> = catalog["entries"]
+        serde_json::from_str(include_str!("../../language/prelude.json"))
+            .expect("valid source prelude catalog JSON");
+    let catalog_entries = catalog["entries"]
         .as_array()
-        .unwrap()
+        .expect("source prelude catalog entries array");
+    let mut declarations = std::collections::BTreeSet::new();
+    for entry in catalog_entries {
+        let name = entry["name"]
+            .as_str()
+            .expect("source prelude entry name string");
+        let kind = entry["kind"]
+            .as_str()
+            .expect("source prelude entry kind string");
+        assert!(
+            declarations.insert((name, kind)),
+            "duplicate source prelude declaration: {name} ({kind})"
+        );
+        assert!(entry["contexts"].as_array().is_some(), "missing prelude entry contexts");
+        assert!(entry["signature"].as_str().is_some(), "missing prelude entry signature");
+    }
+
+    let metadata: serde_json::Value =
+        serde_json::from_str(include_str!("../../language/prelude_metadata.json"))
+            .expect("valid source prelude metadata JSON");
+    let entries: Vec<_> = catalog_entries
         .iter()
         .filter(|e| !matches!(e["kind"].as_str(), Some("function" | "intrinsic")))
         .collect();

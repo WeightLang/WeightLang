@@ -19,6 +19,7 @@ pub struct ParameterSchema {
     pub name: String,
     pub shape: Vec<usize>,
     pub frozen: bool,
+    pub learn: Option<adaptive::LearnDomain>,
 }
 
 /// Source and validated schemas; no initialized parameters, optimizer or service connection.
@@ -44,9 +45,12 @@ pub enum ModelPlan {
 }
 impl ModelDefinition {
     pub fn parse(text: &str) -> Result<Self> {
+        let (source, _) = crate::model_modules::resolve(text, None)?;
+        Self::parse_resolved(&source)
+    }
+    fn parse_resolved(text: &str) -> Result<Self> {
         ensure!(text.len() <= MAX_SOURCE_BYTES, "model definition exceeds 1 MiB source limit");
         let unit = source::split(text)?;
-        ensure!(!text.lines().any(|line| line.trim_start().starts_with("import ")), "model imports are not supported by the Rust model API");
         let functions = script::parse::parse_functions(&unit.functions)?;
         for (name, function) in &functions {
             ensure!(name != "main" && !name.starts_with("__"), "model definitions cannot contain application entrypoints or agent/environment declarations: {name}");
@@ -74,7 +78,7 @@ impl ModelDefinition {
                 let count = validate_shape(&p.shape)?;
                 total = total.checked_add(count).context("parameter size overflow")?;
                 ensure!(total <= MAX_PARAMETER_ELEMENTS, "model parameter element limit exceeded");
-                Ok(ParameterSchema { name:p.name, shape:p.shape, frozen:p.frozen })
+                Ok(ParameterSchema { name:p.name, shape:p.shape, frozen:p.frozen, learn:p.learn })
             }).collect::<Result<Vec<_>>>()?;
             (ModelInterface {input,output,output_type,target}, parameters)
         } else {
@@ -88,7 +92,7 @@ impl ModelDefinition {
                         .chain(layer.bias.then(||(format!("{}.bias",layer.name),vec![layer.output]))) {
                         total=total.checked_add(validate_shape(&shape)?).context("parameter size overflow")?;
                         ensure!(total <= MAX_PARAMETER_ELEMENTS, "model parameter element limit exceeded");
-                        parameters.push(ParameterSchema{name,shape,frozen:false});
+                        parameters.push(ParameterSchema{name,shape,frozen:false,learn:None});
                     }
                 }
             }
@@ -98,13 +102,16 @@ impl ModelDefinition {
         Ok(Self {source:text.into(),name,interface,parameters})
     }
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
-        use std::io::Read;
-        let path=path.as_ref();
-        let file=std::fs::File::open(path).with_context(||path.display().to_string())?;
-        ensure!(file.metadata()?.len() <= MAX_SOURCE_BYTES as u64, "model definition exceeds 1 MiB source limit");
-        let mut source=String::new();
-        file.take(MAX_SOURCE_BYTES as u64+1).read_to_string(&mut source)?;
-        Self::parse(&source).with_context(||path.display().to_string())
+        Self::from_file_with_dependencies(path).map(|(definition, _)| definition)
+    }
+    /// Resolve and embed the full pure-computation dependency closure. Returned
+    /// paths are build dependencies, never runtime lookup requirements.
+    pub fn from_file_with_dependencies(path: impl AsRef<Path>) -> Result<(Self, Vec<std::path::PathBuf>)> {
+        let path = path.as_ref();
+        let source = crate::model_modules::read(path)?;
+        let (source, dependencies) = crate::model_modules::resolve(&source, Some(path))?;
+        let definition = Self::parse_resolved(&source).with_context(|| path.display().to_string())?;
+        Ok((definition, dependencies))
     }
     pub fn name(&self) -> &str { &self.name }
     pub fn interface(&self) -> &ModelInterface { &self.interface }

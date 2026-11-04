@@ -11,9 +11,10 @@
     table))
 (defvar wgt-font-lock-keywords
   (list
+    (cons "\\\\_<native\\\\_>[ \\t]+\\\\(?:fn\\\\|intrinsic\\\\)[ \\t]+\\\\([A-Za-z_][A-Za-z0-9_]*\\\\)" '(1 font-lock-function-name-face))
     (cons (regexp-opt '(@@constants_QUOTED@@) 'symbols) 'font-lock-constant-face)
     (cons (regexp-opt '(@@keywords_QUOTED@@) 'symbols) 'font-lock-keyword-face)
-    (cons (regexp-opt '(@@builtins_QUOTED@@) 'symbols) 'font-lock-builtin-face)
+    (cons (regexp-opt '(@@builtins_QUOTED@@ @@intrinsics_QUOTED@@ @@layers_QUOTED@@) 'symbols) 'font-lock-builtin-face)
     (cons (regexp-opt '(@@types_QUOTED@@) 'symbols) 'font-lock-type-face)
     (cons "\\_<[0-9]+\\(?:\\.[0-9]*\\)?\\(?:[eE][-+]?[0-9]+\\)?\\_>" 'font-lock-constant-face)))
 ;;;###autoload

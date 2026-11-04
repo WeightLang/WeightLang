@@ -92,7 +92,7 @@ fn main() { let m=mlp([1,1],"identity",1,"adam"); training_device(m,"{}",1048576
 fn main() { let k=wgsl_kernel("@group(0) @binding(0) var<storage,read> x:array<f32>; @group(0) @binding(1) var<storage,read_write> y:array<f32>; @compute @workgroup_size(1) fn main(){y[0]=x[0];}","main","{}",1024); return wgsl_run(k,[1],1); }"#,
     ] {
         let source = source.replace("{}", &device.id);
-        let report = script::run(source, Path::new("."), 100000).unwrap();
+        let report = script::run(&source, Path::new("."), 100000).unwrap();
         eprintln!("{}", serde_json::to_string(&report).unwrap());
     }
     let overflow = format!(

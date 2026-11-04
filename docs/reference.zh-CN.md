@@ -7,12 +7,12 @@
 
 ## Rust 主程序与 WGT 模型目标
 
-目标工作流由 Rust 主程序负责数据准备、I/O、调度与训练循环，WGT 定义模型结构、模型内部计算及可选的可微 loss。Rust 库包名为 `wgt-model`，crate 名为 `wgt`。`ModelDefinition::parse`、`ModelDefinition::from_file`、`model!` 与 `include_model!` 共用模型解析与定义；两个宏仅接受 Rust 字符串字面量，编译时复用同一 parser 检查并嵌入源码，运行时仍解析定义。三种入口都拒绝 `import`，当前首期模型只支持单个 `f32` 向量输入。
+目标工作流由 Rust 主程序负责数据准备、I/O、调度与训练循环，WGT 定义模型结构、模型内部计算及可选的可微 loss。Rust 库包名为 `wgt-model`，crate 名为 `wgt`。`ModelDefinition::parse`、`ModelDefinition::from_file`、`model!` 与 `include_model!` 共用模型解析与定义；两个宏仅接受 Rust 字符串字面量，编译时复用同一 parser 检查并嵌入源码，运行时仍解析定义。字符串模型入口支持纯张量 `std/activation` 与 `std/loss` 模块；文件入口还支持相对路径纯计算模块及嵌套导入。当前模型只支持单个 `f32` 向量输入。
 
-模型执行、参数和优化器状态由唯一的机器级 `wgtime` 服务持有。解析定义、编译期检查和嵌入源码都不会连接服务或初始化模型；初始化、训练、权重保存和检查点恢复必须由程序显式请求。当前 API 尚在验证，属于未发布目标，不代表已发布或更广泛的能力支持。完整签名与契约见 [Rust 后端契约](native-backend.md)。
+模型执行、参数和优化器状态由唯一的机器级 `wgtime` 服务持有。定义解析、编译期检查和源码嵌入不连接服务或初始化模型；Rust 程序须先显式调用 `Client::connect()`，再请求初始化、训练或权重保存。当前 facade 提供 `Model::save_weights`，没有公共训练 checkpoint API。Rust facade 通过 IPC 使用服务端原生编译 forward；这不意味着旧脚本执行路径已全部删除。API 已在本地实现并通过定点验证，尚未发布；不代表更广泛的能力支持。完整签名与契约见 [Rust 后端契约](native-backend.md)。
 
 ```rust,ignore
-use wgt::{model, include_model, ModelDefinition};
+use wgt::{include_model, model, Client, InstanceOptions, ModelDefinition};
 
 let inline: ModelDefinition = model!(r#"wgt 0.5
 model Scale
@@ -23,20 +23,22 @@ fn forward(x) { return x * gain; }
 "#);
 let compiled = include_model!("models/scale/model.wgt");
 let runtime = ModelDefinition::from_file("models/scale/model.wgt")?;
-# let _ = (inline, compiled, runtime);
+
+// 显式连接并初始化后才执行模型。
+let client = Client::connect()?;
+let model = client.initialize(&runtime, InstanceOptions::default())?;
+let output = model.forward(&[3.0])?;
+assert_eq!(output, vec![6.0]);
+# let _ = (inline, compiled);
 ```
 
-宏用法及后端 API 仍在验证中；不应据此推断尚未列明的模型形状、导入或执行能力。
+宏和定义解析只检查/构造定义，不执行模型；应用先调用 `Client::connect()`，再显式初始化并执行实例。训练与保存也由 Rust 代码显式请求，不会随定义加载自动发生。
 
-当前实现为纯 Rust。`std/` 只保留真实的原生预导入声明和可导入 WGT 模块，
-旧图占位与带 main 的分类数学演示已删除。完整图算子、参数化层工厂与多轴神经网络结构
-尚未全部迁入原生构造器；不支持的声明显式报错，不回退 Python。
+当前模型后端由 Rust 实现。`std/` 用户原生声明与其他旧宿主模块已移除；模型纯张量逻辑模块目前保留 `std/activation` 与 `std/loss`。完整图算子、参数化层工厂与多轴神经网络结构尚未全部迁入原生构造器；不支持的声明显式报错，不回退 Python。
 
-## wgtime 服务边界（目标合同，接线待实现）
+## wgtime 服务边界
 
-[wgtime 专题](wgtime.md) 定义机器级单服务、轻量 IPC 客户端、服务端驻留权重/梯度/优化器、共享缓冲所有权及性能验收。
-当前解释与 AOT 仍内嵌执行核心；本段不宣称已有服务隔离或零拷贝。迁移不得改变现有 WGT 自定义 loss、optimizer、SAM 与 checkpoint 语义。
-外部程序保留数据、控制流、HTTP、工具循环与 harness；服务失败明确报错，不回退本地训练/推理。检查和编译仍不得隐式训练。
+Rust facade 通过 IPC 连接机器级 `wgtime` 服务，由服务持有模型执行、参数和优化器状态；模型 forward 使用服务端原生编译实现。旧脚本控制与执行路径仍在源码中，正在逐步退出，不能据此认为已全部删除或等同于新模型 API。`wgtime` 服务专题见 [wgtime](wgtime.md)。服务连接失败明确报错，不回退到应用进程内执行。模型定义解析、检查和编译不隐式初始化或训练。
 
 ## 语法与能力边界的机器可读规格
 
@@ -50,9 +52,7 @@ let runtime = ModelDefinition::from_file("models/scale/model.wgt")?;
 
 ## 无需 import 的内置入口
 
-[std/prelude.wgt](../std/prelude.wgt) 是公开原生函数与张量 intrinsic 的权威声明源，集中参数、默认值、上下文、用途和 Rust 实现绑定。
-语法、类型、常量、顺序层及内部 lowering 保存在 [language/prelude_metadata.json](../language/prelude_metadata.json)，合并生成 [language/prelude.json](../language/prelude.json) 供注册和编辑器读取。
-`native` 声明没有 WGT 函数体，仅专用声明前端接受，普通源码拒绝。`wgt check` 支持声明模块，构建强校验完整契约且不执行声明。详见[预导入声明](prelude.md)。
+旧 `std/prelude.wgt` 用户声明源已移除。当前 [language/prelude.json](../language/prelude.json) 是运行时 registry 与编辑器使用的过渡内部目录；不要将其视为新的用户声明入口或稳定公开 API。`language/prelude_metadata.json` 保留语法、类型、常量及内部 lowering 元数据。模型当前通过 `std/activation`、`std/loss` 两个纯张量模块复用计算；详细边界见[模型内部标准库](standard-library.md)。
 `ordinary_function` 供解释与 AOT 共用；`tensor_forward` / `tensor_loss` 是独立张量转换契约，
 不能因名字出现在目录中就用于普通函数。`write` 等标注为语句，`positive` 只用于张量条件。
 目录也列出 `true`、`false`、`null` 常量及 `f32`、`prob`、`logits`、`probabilities` 声明类型；这些不是可调用函数。
@@ -64,11 +64,8 @@ let runtime = ModelDefinition::from_file("models/scale/model.wgt")?;
 `half_squared_error(prediction,target)`（特征均值）及 `categorical_logits(logits,target)`
 （类别加权负对数似然之和），均返回 f32[1]。target 分布条件由调用方保证，不动态验证。
 库不创建权重或训练状态，支持 CPU 梯度及 AOT；标准源内嵌、未知 std 路径报错。
-普通 `std/openresponses/harness` 模块提供 async `next(session,profile)`、
-`submit(session,results)`（返回 null）与 `finished(step)`（返回 `step.status != "tools"`）；
-参数必填，只能在普通脚本调用，工具映射和执行由调用方显式编写，finished 不等于响应成功。
-内部 `/operators` 源码路径不是公共导入名；未知 std 名称、重复别名及跨上下文调用明确拒绝。
-完整数学定义、形状、状态边界与可执行示例见[标准库](standard-library.md)。
+模型纯计算只允许已提供并通过定义解析的标准逻辑模块；普通宿主 harness 模块正在退出，不属于新的模型导入 API。
+完整数学定义、形状与状态边界见[模型内部标准库](standard-library.md)。
 
 ## 编译单元与入口
 
@@ -102,6 +99,8 @@ weightc compile examples/native_training/supervised/model.wgt -o .cache/weightla
 ## 声明式模型
 
 以下为当前原生构造支持的完整声明集；端口不含 batch 轴。
+
+模型定义中的标量可学习参数 `learn` 已在本地实现并通过定点验证：解释执行、真实 C 编译及 Rust daemon facade 覆盖了当前测试范围；这不代表全量验收或发布。语法、float 投影、离散 shadow/STE 与 `depth_gate` 的具体限制见[可学习的模型架构参数](learnable-architecture-parameters.md)。它是顶层模型架构声明，不是旧宿主脚本中采集记录并调用 learner 的 `learn actor { ... }` 形式；旧形式不代表新模型定义 API。
 
 | 声明 | 参数、默认值与约束 |
 | --- | --- |

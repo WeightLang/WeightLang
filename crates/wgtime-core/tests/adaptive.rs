@@ -125,13 +125,14 @@ fn shapes_frozen_parameters_and_targets_are_checked_before_execution() {
         EXAMPLE.replace("parameter memory:", "frozen memory:"),
         EXAMPLE.replace("positive(gate)", "positive(missing)"),
         EXAMPLE.replace("f32[1,1] = [0.5]", "f32[1,2] = [0.5,0.5]"),
-        EXAMPLE.replace("slice(x, 1, 1)", "slice(x, 2, 1)"),
-        EXAMPLE.replace("write(memory, next)", "write(memory, x)"),
+        EXAMPLE.replace("slice(x,1,1)", "slice(x,2,1)"),
+        EXAMPLE.replace("write(memory,next)", "write(memory,x)"),
         EXAMPLE.replace("return query;", "return x;"),
-        EXAMPLE.replace("let old = read(memory)", "let x = read(memory)"),
+        EXAMPLE.replace("old=read(memory)", "x=read(memory)"),
         EXAMPLE.replace("input x: f32[2]", "input x: f32[0]"),
     ];
     for source in errors {
+        assert_ne!(source, EXAMPLE, "negative fixture replacement must change source");
         assert!(
             parse(&source)
                 .and_then(|p| AdaptiveSession::prepare(p, 4096))

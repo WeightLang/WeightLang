@@ -27,7 +27,7 @@ fn facade_alias_compiles_and_invalid_definitions_fail_during_compilation() {
     // JSON quoting is also valid TOML basic-string quoting for this path.
     let path = format!("{:?}", facade.to_str().unwrap());
     fs::write(root.join("Cargo.toml"), format!(
-        "[package]\nname=\"wgt-macro-consumer\"\nversion=\"0.0.0\"\nedition=\"2021\"\n[workspace]\n[dependencies]\nrenamed_wgt={{package=\"wgt-model\",path={path}}}\n"
+        "[package]\nname=\"wgt-macro-consumer\"\nversion=\"0.0.0\"\nedition=\"2024\"\n[workspace]\n[dependencies]\nrenamed_wgt={{package=\"wgt-model\",path={path}}}\n"
     )).unwrap();
     fs::write(root.join("model.wgt"), include_str!("fixtures/model.wgt")).unwrap();
     let valid = check(
@@ -69,8 +69,20 @@ fn forward(x){return @;}
     // Changing only the included WGT file must invalidate Cargo's cached build.
     let file_consumer =
         "fn main(){let _=renamed_wgt::include_model!(crate = renamed_wgt; \"model.wgt\");}";
+    fs::write(root.join("model.wgt"), "wgt 0.5\nimport block from \"./block.wgt\"\nmodel DependencyProbe\ninput x:f32[1]\noutput y:f32[1]\nfn forward(x){return block.apply(x);}\n").unwrap();
+    fs::write(
+        root.join("block.wgt"),
+        "wgt 0.5\noperators Block\nfn apply(x){return x+x;}\n",
+    )
+    .unwrap();
     assert!(check(&root, file_consumer).status.success());
-    fs::write(root.join("model.wgt"), "wgt 0.5\nfn main(){return @;}\n").unwrap();
+    // Rust and the root WGT remain unchanged; a transitive dependency alone
+    // changes. include_model! must rerun and reject its invalid computation.
+    fs::write(
+        root.join("block.wgt"),
+        "wgt 0.5\noperators Block\nfn apply(x){return @;}\n",
+    )
+    .unwrap();
     let changed = Command::new(env!("CARGO"))
         .args(["check", "--offline", "--quiet", "--manifest-path"])
         .arg(root.join("Cargo.toml"))

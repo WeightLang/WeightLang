@@ -36,6 +36,53 @@ pub struct Parameter {
     /// Trainable probabilities store logits; frozen probabilities store exact values.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub probability: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learn: Option<LearnDomain>,
+}
+
+/// Projected parameter-space optimization. Discrete reads use identity STE;
+/// storage, optimizer moments and snapshots retain the continuous shadow value.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LearnDomain {
+    Float,
+    Bounded { low: f32, high: f32 },
+    Positive { low: f32 },
+    Int { low: f32, high: f32 },
+    Bool,
+}
+impl LearnDomain {
+    pub fn validate(&self, value: f32) -> anyhow::Result<()> {
+        use anyhow::ensure;
+        ensure!(value.is_finite(), "learn value must be finite");
+        match *self {
+            Self::Float => {},
+            Self::Bounded { low, high } | Self::Int { low, high } => {
+                ensure!(low.is_finite() && high.is_finite() && low < high, "invalid learn interval");
+                if matches!(self, Self::Int { .. }) {
+                    ensure!(low.fract() == 0. && high.fract() == 0. && low.abs() <= 16777216. && high.abs() <= 16777216., "learn int bounds must be exact f32 integers within +/-16777216");
+                }
+                ensure!((low..=high).contains(&value), "learn value outside declared interval");
+            },
+            Self::Positive { low } => {
+                ensure!(low.is_finite() && low >= 0. && low < f32::MAX, "invalid learn positive bound");
+                ensure!(value > low, "learn value must exceed strict lower bound");
+            },
+            Self::Bool => ensure!((0. ..=1.).contains(&value), "learn bool shadow must be in [0,1]"),
+        }
+        Ok(())
+    }
+    pub fn project(&self, value: f32) -> f32 {
+        match *self {
+            Self::Float => value,
+            Self::Bounded { low, high } | Self::Int { low, high } => value.clamp(low, high),
+            Self::Positive { low } => value.max(if low == 0. { f32::from_bits(1) } else { f32::from_bits(low.to_bits() + 1) }),
+            Self::Bool => value.clamp(0., 1.),
+        }
+    }
+    pub fn read(&self, value: f32) -> f32 {
+        match self { Self::Int { .. } => value.round(), Self::Bool => if value >= 0.5 { 1. } else { 0. }, _ => value }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

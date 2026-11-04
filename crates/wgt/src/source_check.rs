@@ -12,12 +12,6 @@ pub struct Diagnostic {
 
 pub fn check_file(path: &Path) -> Result<()> {
     let source = fs::read_to_string(path).with_context(|| path.display().to_string())?;
-    if source.lines().any(|line| line.trim() == "prelude native 0.5;") {
-        wgt_language::script::prelude::declarations::validate(
-            &source, include_str!("../../../language/prelude.json"),
-        ).map_err(anyhow::Error::msg)?;
-        return Ok(());
-    }
     crate::script_dependencies::metadata(&source)?;
     if source.lines().any(|line| line.trim().starts_with("operators ")) {
         wgt_language::script::operators::library(&source)?;
@@ -31,21 +25,6 @@ pub fn check_file(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn prelude_check_validates_contract_without_execution() {
-        let source = include_str!("../../../std/prelude.wgt");
-        let parent = std::env::var_os("CLAUDE_JOB_DIR").map(|p| std::path::PathBuf::from(p).join("tmp"))
-            .unwrap_or_else(|| std::env::temp_dir().join("weightlang"));
-        std::fs::create_dir_all(&parent).unwrap();
-        let path = parent.join(format!("prelude-check-{}.wgt", std::process::id()));
-        std::fs::write(&path, source).unwrap();
-        super::check_file(&path).unwrap();
-        std::fs::write(&path, source.replacen("profiles, tools);", "profiles);", 1)).unwrap();
-        assert!(super::check_file(&path).unwrap_err().to_string().contains("stale prelude"));
-        std::fs::write(&path, "wgt 0.5\nnative fn hidden();\nfn main() {}\n").unwrap();
-        assert!(super::check_file(&path).is_err());
-        std::fs::remove_file(path).unwrap();
-    }
 }
 
 fn excluded(name: &str) -> bool {

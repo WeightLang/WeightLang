@@ -28,6 +28,10 @@
           "named": true
         },
         {
+          "type": "native_declaration",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -49,6 +53,14 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "train_expression",
+          "named": true
+        },
+        {
+          "type": "using_expression",
           "named": true
         }
       ]
@@ -83,6 +95,10 @@
           "named": true
         },
         {
+          "type": "native_declaration",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -104,6 +120,14 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "train_expression",
+          "named": true
+        },
+        {
+          "type": "using_expression",
           "named": true
         }
       ]
@@ -168,6 +192,10 @@
           "named": true
         },
         {
+          "type": "native_declaration",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -193,6 +221,14 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "train_expression",
+          "named": true
+        },
+        {
+          "type": "using_expression",
           "named": true
         }
       ]
@@ -269,6 +305,10 @@
           "named": true
         },
         {
+          "type": "native_declaration",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -290,6 +330,14 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "train_expression",
+          "named": true
+        },
+        {
+          "type": "using_expression",
           "named": true
         }
       ]
@@ -350,6 +398,10 @@
           "named": true
         },
         {
+          "type": "native_declaration",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -371,6 +423,14 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "train_expression",
+          "named": true
+        },
+        {
+          "type": "using_expression",
           "named": true
         }
       ]
@@ -488,6 +548,10 @@
           "named": true
         },
         {
+          "type": "native_declaration",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -509,6 +573,14 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "train_expression",
+          "named": true
+        },
+        {
+          "type": "using_expression",
           "named": true
         }
       ]
@@ -610,6 +682,10 @@
           "named": true
         },
         {
+          "type": "native_declaration",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -632,8 +708,66 @@
         {
           "type": "string",
           "named": true
+        },
+        {
+          "type": "train_expression",
+          "named": true
+        },
+        {
+          "type": "using_expression",
+          "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "learn_declaration",
+    "named": true,
+    "fields": {
+      "initializer": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "literal",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          }
+        ]
+      },
+      "lower_bound": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "number",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "upper_bound": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "number",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -681,6 +815,10 @@
           "named": true
         },
         {
+          "type": "native_declaration",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -702,6 +840,56 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "train_expression",
+          "named": true
+        },
+        {
+          "type": "using_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "module_declaration",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "native_declaration",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "arguments",
           "named": true
         }
       ]
@@ -784,6 +972,10 @@
           "named": true
         },
         {
+          "type": "native_declaration",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -806,8 +998,32 @@
         {
           "type": "string",
           "named": true
+        },
+        {
+          "type": "train_expression",
+          "named": true
+        },
+        {
+          "type": "using_expression",
+          "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "prelude_declaration",
+    "named": true,
+    "fields": {
+      "version": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "number",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -877,7 +1093,19 @@
           "named": true
         },
         {
+          "type": "learn_declaration",
+          "named": true
+        },
+        {
           "type": "model_declaration",
+          "named": true
+        },
+        {
+          "type": "module_declaration",
+          "named": true
+        },
+        {
+          "type": "native_declaration",
           "named": true
         },
         {
@@ -886,6 +1114,398 @@
         },
         {
           "type": "port_declaration",
+          "named": true
+        },
+        {
+          "type": "prelude_declaration",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "train_expression",
+    "named": true,
+    "fields": {
+      "inputs": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "arguments",
+            "named": true
+          },
+          {
+            "type": "array",
+            "named": true
+          },
+          {
+            "type": "call",
+            "named": true
+          },
+          {
+            "type": "clause",
+            "named": true
+          },
+          {
+            "type": "literal",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "operator",
+            "named": true
+          },
+          {
+            "type": "parameter",
+            "named": true
+          },
+          {
+            "type": "punctuation",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          }
+        ]
+      },
+      "model": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "arguments",
+            "named": true
+          },
+          {
+            "type": "array",
+            "named": true
+          },
+          {
+            "type": "call",
+            "named": true
+          },
+          {
+            "type": "clause",
+            "named": true
+          },
+          {
+            "type": "literal",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "operator",
+            "named": true
+          },
+          {
+            "type": "parameter",
+            "named": true
+          },
+          {
+            "type": "punctuation",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          }
+        ]
+      },
+      "strategy": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "arguments",
+            "named": true
+          },
+          {
+            "type": "array",
+            "named": true
+          },
+          {
+            "type": "call",
+            "named": true
+          },
+          {
+            "type": "clause",
+            "named": true
+          },
+          {
+            "type": "literal",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "operator",
+            "named": true
+          },
+          {
+            "type": "parameter",
+            "named": true
+          },
+          {
+            "type": "punctuation",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "train_expression",
+            "named": true
+          },
+          {
+            "type": "using_expression",
+            "named": true
+          }
+        ]
+      },
+      "targets": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "arguments",
+            "named": true
+          },
+          {
+            "type": "array",
+            "named": true
+          },
+          {
+            "type": "call",
+            "named": true
+          },
+          {
+            "type": "clause",
+            "named": true
+          },
+          {
+            "type": "literal",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "operator",
+            "named": true
+          },
+          {
+            "type": "parameter",
+            "named": true
+          },
+          {
+            "type": "punctuation",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "training_options",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "training_option",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "clip",
+            "named": false
+          },
+          {
+            "type": "loss",
+            "named": false
+          },
+          {
+            "type": "rate",
+            "named": false
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "arguments",
+          "named": true
+        },
+        {
+          "type": "array",
+          "named": true
+        },
+        {
+          "type": "call",
+          "named": true
+        },
+        {
+          "type": "clause",
+          "named": true
+        },
+        {
+          "type": "literal",
+          "named": true
+        },
+        {
+          "type": "native_declaration",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "operator",
+          "named": true
+        },
+        {
+          "type": "parameter",
+          "named": true
+        },
+        {
+          "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "qualified_name",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "train_expression",
+          "named": true
+        },
+        {
+          "type": "using_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "training_options",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "training_option",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "using_expression",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "arguments",
+          "named": true
+        },
+        {
+          "type": "array",
+          "named": true
+        },
+        {
+          "type": "call",
+          "named": true
+        },
+        {
+          "type": "clause",
+          "named": true
+        },
+        {
+          "type": "literal",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "operator",
+          "named": true
+        },
+        {
+          "type": "parameter",
+          "named": true
+        },
+        {
+          "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "qualified_name",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "train_expression",
+          "named": true
+        },
+        {
+          "type": "using_expression",
           "named": true
         }
       ]
@@ -937,6 +1557,10 @@
   },
   {
     "type": ".",
+    "named": false
+  },
+  {
+    "type": "..=",
     "named": false
   },
   {
@@ -992,6 +1616,10 @@
     "named": false
   },
   {
+    "type": "against",
+    "named": false
+  },
+  {
     "type": "agent",
     "named": false
   },
@@ -1013,6 +1641,10 @@
   },
   {
     "type": "block",
+    "named": false
+  },
+  {
+    "type": "bool",
     "named": false
   },
   {
@@ -1073,6 +1705,10 @@
     "named": false
   },
   {
+    "type": "float",
+    "named": false
+  },
+  {
     "type": "fn",
     "named": false
   },
@@ -1121,6 +1757,14 @@
     "named": false
   },
   {
+    "type": "int",
+    "named": false
+  },
+  {
+    "type": "intrinsic",
+    "named": false
+  },
+  {
     "type": "json",
     "named": false
   },
@@ -1141,7 +1785,19 @@
     "named": false
   },
   {
+    "type": "loss",
+    "named": false
+  },
+  {
     "type": "model",
+    "named": false
+  },
+  {
+    "type": "module",
+    "named": false
+  },
+  {
+    "type": "native",
     "named": false
   },
   {
@@ -1177,6 +1833,10 @@
     "named": false
   },
   {
+    "type": "prelude",
+    "named": false
+  },
+  {
     "type": "rate",
     "named": false
   },
@@ -1190,6 +1850,10 @@
   },
   {
     "type": "return",
+    "named": false
+  },
+  {
+    "type": "sample",
     "named": false
   },
   {

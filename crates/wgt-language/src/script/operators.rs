@@ -35,6 +35,7 @@ pub(crate) fn intrinsic(name: &str) -> bool {
             "write",
             "linear",
             "positive",
+            "depth_gate",
             "resource_state",
             "memory_alloc",
             "memory_read",
@@ -269,8 +270,8 @@ pub fn imports(source: &str) -> Result<Vec<(String, String)>> {
 /// traversal, symlinks and package shadowing without probing the filesystem.
 pub fn standard_source(path: &str) -> Option<&'static str> {
     match path {
-        "std/activation" => Some(include_str!("../../../../std/activation/operators.wgt")),
-        "std/loss" => Some(include_str!("../../../../std/loss/operators.wgt")),
+        "std/activation" => Some(include_str!("../../../../std/activation.wgt")),
+        "std/loss" => Some(include_str!("../../../../std/loss.wgt")),
         _ => None,
     }
 }

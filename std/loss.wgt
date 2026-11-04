@@ -2,25 +2,24 @@ wgt 0.5
 operators Losses
 
 # squared_error(prediction: f32[N], target: f32[N]) -> f32[1].
-# Reduce the nonempty feature axis, not the training batch axis. No broadcast.
-# The trainer separately averages samples. No weights or state are created.
+# Reduce matching features of one sample, not a batch. All inputs are explicit;
+# no broadcasting, initialized weights, optimizer or mutable state live here.
 fn squared_error(prediction, target) {
     let residual = prediction - target, errors = square(residual);
     return mean(errors);
 }
 
 # half_squared_error(prediction: f32[N], target: f32[N]) -> f32[1].
-# Scale after reduction so the explicit constant has the same f32[1] shape.
+# The explicit scale has the reduced scalar shape, avoiding implicit broadcast.
 fn half_squared_error(prediction, target) {
     let average = squared_error(prediction, target);
     return average * [0.5];
 }
 
 # categorical_logits(logits: f32[N], target: f32[N]) -> f32[1].
-# N is the class axis. Use logits and nonnegative unit-sum one-hot/soft targets.
-# Stable log_softmax avoids taking log of an underflowed probability.
-# This pure function does not validate target distributions; arbitrary finite
-# targets follow the weighted formula. Both arguments remain differentiable.
+# N is the class axis. Stable log_softmax consumes logits directly. Targets
+# should be nonnegative unit-sum one-hot or soft labels; the pure helper does
+# not validate distributions and otherwise computes the same weighted sum.
 fn categorical_logits(logits, target) {
     let log_probabilities = log_softmax(logits), weighted = target * log_probabilities;
     return -sum(weighted);

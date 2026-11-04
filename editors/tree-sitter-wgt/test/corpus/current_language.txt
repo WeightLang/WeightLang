@@ -1,0 +1,196 @@
+==================
+Native declarations, learn declarations and training expressions
+==================
+wgt 0.5
+# @contexts ["ordinary_function"]
+native fn public_function(value);
+# @contexts ["tensor"]
+native intrinsic tensor_op(value);
+fn strategy(model, inputs, targets) {
+    return train model on inputs against targets using update;
+}
+fn main() {
+    let first = 1;
+    let result = train model on inputs against targets {rate: 0.1; loss: mse; clip: 1;};
+    return result;
+}
+
+---
+
+(source_file
+  (directive
+    (number))
+  (comment)
+  (native_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier))))
+  (comment)
+  (native_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier))))
+  (function_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (qualified_name
+        (identifier)))
+    (body
+      (script_keyword)
+      (train_expression
+        (qualified_name
+          (identifier))
+        (qualified_name
+          (identifier))
+        (qualified_name
+          (identifier))
+        (qualified_name
+          (identifier)))))
+  (function_declaration
+    (identifier)
+    (arguments)
+    (body
+      (script_keyword)
+      (parameter
+        (identifier))
+      (number)
+      (script_keyword)
+      (parameter
+        (identifier))
+      (train_expression
+        (qualified_name
+          (identifier))
+        (qualified_name
+          (identifier))
+        (qualified_name
+          (identifier))
+        (training_options
+          (training_option
+            (number))
+          (training_option
+            (qualified_name
+              (identifier)))
+          (training_option
+            (number))))
+      (script_keyword)
+      (qualified_name
+        (identifier)))))
+
+==================
+Top-level learn declarations and host learn statements
+==================
+learn scale: float = 5.0;
+learn mix: float in 0.0..=1.0 = 0.5;
+learn temperature: float > 0.0 = 1.0;
+learn depth: int in 1..=12 = 6;
+learn enabled: bool = true;
+fn legacy_training() {
+    learn model on inputs against targets using update;
+}
+
+---
+
+(source_file
+  (learn_declaration
+    (identifier)
+    (number))
+  (learn_declaration
+    (identifier)
+    (number)
+    (number)
+    (number))
+  (learn_declaration
+    (identifier)
+    (number)
+    (number))
+  (learn_declaration
+    (identifier)
+    (number)
+    (number)
+    (number))
+  (learn_declaration
+    (identifier)
+    (literal))
+  (function_declaration
+    (identifier)
+    (arguments)
+    (body
+      (script_keyword)
+      (qualified_name
+        (identifier))
+      (qualified_name
+        (identifier))
+      (qualified_name
+        (identifier))
+      (qualified_name
+        (identifier))
+      (qualified_name
+        (identifier))
+      (using_expression
+        (qualified_name
+          (identifier))))))
+
+==================
+Module and native prelude headers
+==================
+module OpenResponsesHarness
+prelude native 0.5;
+
+---
+
+(source_file
+  (module_declaration
+    (identifier))
+  (prelude_declaration
+    (number)))
+
+==================
+Removed call forms remain error-tolerant editor tokens
+==================
+wgt 0.5
+fn main() {
+    fit(model, inputs, targets, 0.1);
+    return predict(model, inputs);
+}
+
+---
+
+(source_file
+  (directive
+    (number))
+  (function_declaration
+    (identifier)
+    (arguments)
+    (body
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (number)))
+      (script_keyword)
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (qualified_name
+            (identifier)))))))

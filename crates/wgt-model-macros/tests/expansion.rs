@@ -31,3 +31,25 @@ fn explicit_facade_alias_works_for_both_macros() {
     assert_eq!(inline.name(), "AliasProbe");
     assert_eq!(file.name(), "MacroProbe");
 }
+
+#[test]
+fn imported_computation_is_embedded_for_both_macro_entries() {
+    let inline = model!(
+        r#"wgt 0.5
+import act from "std/activation"
+model InlineStandard
+input x:f32[2]
+output y:f32[2]
+fn forward(x){return act.squared_relu(x);}
+"#
+    );
+    let file = include_model!("tests/fixtures/composed/model.wgt");
+    assert!(!inline.source().contains("import "));
+    assert!(!file.source().contains("import "));
+    assert!(
+        ModelDefinition::parse(file.source())
+            .unwrap()
+            .instantiate_plan()
+            .is_ok()
+    );
+}

@@ -13,7 +13,7 @@ init seed=42
 fn graph_and_training_share_one_compilation_unit_and_weights() {
     let source = format!(
         "{GRAPH}
-fn loss(model) {{ return train model on [[0], [1]] against [[1], [3]] {rate:0.05;loss:mse;}; }}
+fn loss(model) {{ return train model on [[0], [1]] against [[1], [3]] {{rate:0.05;loss:mse;}}; }}
 fn main() {{
     let model = Regression(\"sgd\");
     let before = loss(model);

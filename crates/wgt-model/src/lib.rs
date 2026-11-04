@@ -32,15 +32,17 @@ impl Client {
     /// Initialize parameters explicitly; parsing a definition never calls this method.
     pub fn initialize(&self, definition: &ModelDefinition, options: InstanceOptions) -> Result<Model> {
         let reply=self.connection.borrow_mut().call(Request::InitializeDefinition {source:definition.source().into(),memory:options.memory_bytes,optimizer:options.optimizer.map(|o|o.name().into())})?;
-        Ok(Model { connection:self.connection.clone(), handle:Some(reply["handle"].as_u64().context("missing model handle")?), interface:definition.interface().clone() })
+        Ok(Model { connection:self.connection.clone(), handle:Some(reply["handle"].as_u64().context("missing model handle")?), interface:definition.interface().clone(), backend:reply["backend"].as_str().context("missing execution backend")?.into() })
     }
     pub fn stats(&self) -> Result<serde_json::Value> { self.connection.borrow_mut().call(Request::Stats) }
 }
 
-pub struct Model { connection: Rc<RefCell<wgtime::Client>>, handle: Option<u64>, interface: ModelInterface }
+pub struct Model { connection: Rc<RefCell<wgtime::Client>>, handle: Option<u64>, interface: ModelInterface, backend: String }
 impl Model {
     fn handle(&self)->Result<u64> { self.handle.context("model is closed") }
     pub fn interface(&self)->&ModelInterface { &self.interface }
+    /// Execution backend reported by the initialized service instance.
+    pub fn backend(&self)->&str { &self.backend }
     /// One finite f32 input vector; multi-input models are not supported in this slice.
     pub fn forward(&self, input:&[f32])->Result<Vec<f32>> {
         ensure!(input.len()==self.interface.input && input.iter().all(|n|n.is_finite()), "input must be a finite vector of width {}",self.interface.input);

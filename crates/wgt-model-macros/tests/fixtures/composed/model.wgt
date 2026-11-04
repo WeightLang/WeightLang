@@ -1,0 +1,7 @@
+wgt 0.5
+import block from "./block.wgt"
+model ComposedMacro
+input x: f32[2]
+output y: f32[2]
+# Model owns the feature contract; imported computation owns no weights.
+fn forward(x) { return block.apply(x); }

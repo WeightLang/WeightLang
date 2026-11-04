@@ -7,7 +7,8 @@
 //! package's manifest directory and emits `include_str!` for rustc tracking.
 //! Both validate at compile time and parse the embedded source again when the
 //! Rust expression runs. They do not embed precompiled IR or promise zero parse
-//! overhead. Imports follow the shared model parser's current rejection rules.
+//! overhead. Standard pure tensor imports are embedded; file imports recursively
+//! embed the dependency closure and track every file, never looking up runtime sources.
 //! Both return `::wgt::ModelDefinition`; when the facade dependency is renamed,
 //! use `model!(crate = renamed_wgt; r#"..."#)` (likewise for `include_model!`).
 
@@ -15,7 +16,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Tokens;
 use quote::quote;
 use std::path::Path;
-use syn::{parse::Parse, parse::ParseStream, parse_macro_input, LitStr, Token};
+use syn::{LitStr, Token, parse::Parse, parse::ParseStream, parse_macro_input};
 
 struct Input {
     facade: syn::Path,
@@ -42,17 +43,6 @@ impl Parse for Input {
     }
 }
 
-fn validate(source: &str, literal: &LitStr) -> syn::Result<()> {
-    wgt_language::model::ModelDefinition::parse(source)
-        .map(|_| ())
-        .map_err(|error| {
-            syn::Error::new(
-                literal.span(),
-                format!("invalid WGT model definition: {error:#}"),
-            )
-        })
-}
-
 fn definition(facade: &syn::Path, source: Tokens) -> Tokens {
     quote! {
         #facade::ModelDefinition::parse(#source)
@@ -61,17 +51,15 @@ fn definition(facade: &syn::Path, source: Tokens) -> Tokens {
 }
 
 fn inline(input: Input) -> syn::Result<Tokens> {
-    validate(&input.literal.value(), &input.literal)?;
-    let literal = input.literal;
+    let parsed =
+        wgt_language::model::ModelDefinition::parse(&input.literal.value()).map_err(|error| {
+            syn::Error::new(
+                input.literal.span(),
+                format!("invalid WGT model definition: {error:#}"),
+            )
+        })?;
+    let literal = LitStr::new(parsed.source(), input.literal.span());
     Ok(definition(&input.facade, quote!(#literal)))
-}
-
-fn read_source(path: &Path) -> std::io::Result<String> {
-    use std::io::Read;
-    let file = std::fs::File::open(path)?;
-    let mut source = String::new();
-    file.take(1024 * 1024 + 1).read_to_string(&mut source)?;
-    Ok(source)
 }
 
 fn file(input: Input, manifest: &Path) -> syn::Result<Tokens> {
@@ -84,26 +72,34 @@ fn file(input: Input, manifest: &Path) -> syn::Result<Tokens> {
         ));
     }
     let resolved = manifest.join(path);
-    let source = read_source(&resolved).map_err(|error| {
+    let (parsed, dependencies) = wgt_language::model::ModelDefinition::from_file_with_dependencies(
+        &resolved,
+    )
+    .map_err(|error| {
         syn::Error::new(
             input.literal.span(),
-            format!("cannot read WGT model {}: {error}", resolved.display()),
+            format!(
+                "invalid WGT model definition {}: {error:#}",
+                resolved.display()
+            ),
         )
     })?;
-    validate(&source, &input.literal)?;
-    // Retain the manifest-resolved path (including symlink spelling) so rustc
-    // observes replacement of the caller's actual dependency on rebuild.
-    let path = resolved.to_str().ok_or_else(|| {
-        syn::Error::new(
-            input.literal.span(),
-            "WGT model path must be valid UTF-8 for include_str!",
-        )
-    })?;
-    let tracked = LitStr::new(path, input.literal.span());
-    Ok(definition(
-        &input.facade,
-        quote!(::core::include_str!(#tracked)),
-    ))
+    let source = LitStr::new(parsed.source(), input.literal.span());
+    let tracked = dependencies
+        .iter()
+        .map(|path| {
+            path.to_str()
+                .map(|path| LitStr::new(path, input.literal.span()))
+                .ok_or_else(|| {
+                    syn::Error::new(
+                        input.literal.span(),
+                        "WGT model dependency path must be valid UTF-8",
+                    )
+                })
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
+    let value = definition(&input.facade, quote!(#source));
+    Ok(quote!({ #(const _: &str = ::core::include_str!(#tracked);)* #value }))
 }
 
 /// Embed and validate a complete WGT model source string without initialization.
@@ -163,7 +159,11 @@ mod tests {
         assert!(syn::parse2::<Input>(quote!("source", "extra")).is_err());
         let input: Input = syn::parse2(quote!("wgt 0.5\nfn main(){return 1;}")).unwrap();
         assert!(inline(input).is_err());
-        let imported = SOURCE.replacen("wgt 0.5", "wgt 0.5\nimport helper from \"./missing.wgt\"", 1);
+        let imported = SOURCE.replacen(
+            "wgt 0.5",
+            "wgt 0.5\nimport helper from \"./missing.wgt\"",
+            1,
+        );
         let literal = LitStr::new(&imported, proc_macro2::Span::call_site());
         let input: Input = syn::parse2(quote!(#literal)).unwrap();
         assert!(inline(input).unwrap_err().to_string().contains("imports"));

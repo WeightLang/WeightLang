@@ -165,23 +165,20 @@ impl Connection {
                 })?;
                 ensure!(parameter_bytes <= memory, "definition parameter memory budget exceeded");
                 let handle = shared.next.fetch_add(1, Ordering::Relaxed);
-                match definition.instantiate_plan()? {
+                let program = match definition.instantiate_plan()? {
                     wgt_language::model::ModelPlan::Graph(graph) => {
                         let model = wgtime_core::source::Graph(graph).instantiate()?;
-                        let trainer = match optimizer.as_deref() {
-                            None => Trainer::inference(model, Path::new("."), memory)?,
-                            Some(name) => Trainer::new(model, Path::new("."), memory, if name=="adam" {Optimizer::Adam} else {Optimizer::Sgd})?,
-                        };
-                        self.sessions.insert(handle,(trainer,memory));
+                        wgtime_core::compiled_forward::CompiledForward::model_program(&model)?
                     }
-                    wgt_language::model::ModelPlan::Forward(program) => {
-                        let mut session = wgtime_core::adaptive::AdaptiveSession::prepare(program, memory)?;
-                        if let Some(name)=optimizer { session.set_optimizer(if name=="adam" {Optimizer::Adam} else {Optimizer::Sgd})?; }
-                        self.adaptive.insert(handle,(session,memory));
-                    }
-                }
+                    wgt_language::model::ModelPlan::Forward(program) => program,
+                };
+                let mut session = wgtime_core::adaptive::AdaptiveSession::prepare(program, memory)?;
+                session.enable_compiled()?;
+                if let Some(name)=optimizer { session.set_optimizer(if name=="adam" {Optimizer::Adam} else {Optimizer::Sgd})?; }
+                let backend = session.execution_backend();
+                self.adaptive.insert(handle,(session,memory));
                 self.reserved += memory;
-                Ok(serde_json::json!({"handle":handle}))
+                Ok(serde_json::json!({"handle":handle,"backend":backend}))
             }
             Request::Predict { handle, input } => {
                 if let Some((session, _)) = self.adaptive.get_mut(&handle) {
@@ -384,7 +381,7 @@ impl Connection {
                 Ok(serde_json::json!({"released": true}))
             }
             Request::Stats => Ok(
-                serde_json::json!({"sessions": self.sessions.len() + self.adaptive.len(), "reserved": self.reserved, "connections": shared.connections.load(Ordering::Relaxed),"allocator":metrics::snapshot()}),
+                serde_json::json!({"sessions": self.sessions.len() + self.adaptive.len(), "reserved": self.reserved, "connections": shared.connections.load(Ordering::Relaxed),"allocator":metrics::snapshot(),"execution":self.adaptive.iter().map(|(handle,(session,_))| {let (forward,tape)=session.compiled_forward_counts(); serde_json::json!({"handle":handle,"backend":session.execution_backend(),"native_forwards":forward,"native_tape_forwards":tape})}).collect::<Vec<_>>()}),
             ),
             Request::Hello { .. } => unreachable!(),
         }

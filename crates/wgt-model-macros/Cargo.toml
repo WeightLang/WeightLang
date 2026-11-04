@@ -1,7 +1,7 @@
 [package]
 name = "wgt-model-macros"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 description = "Compile-time checked WGT model definitions for Rust programs"
 

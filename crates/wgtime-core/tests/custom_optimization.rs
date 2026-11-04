@@ -94,8 +94,8 @@ fn host_temporary_gradient_reuses_batch_without_consuming_rng() {
         let g=differentiate(net,[[1],[2]],[[2],[4]]);
         let second=differentiate_at(g,[[-0.1]]);
         let s=gradient_snapshot(second);
-        assert(s[\"parameters\"]==[[0]],\"original commit base\");
-        assert(random()==expected,\"differentiation must not consume host RNG\");
+        assert s[\"parameters\"]==[[0]], \"original commit base\";
+        assert random()==expected, \"differentiation must not consume host RNG\";
         release_gradient(g); commit_gradients(second,[[1.05]],[1]);
         return net([1]);
     }}"

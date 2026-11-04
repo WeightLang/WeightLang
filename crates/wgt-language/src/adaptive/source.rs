@@ -66,6 +66,40 @@ fn parse_definition(source: &str, functions: &crate::script::parse::Program, mat
                 output = Some(n);
                 program.output_type = kind;
             }
+            "learn" => {
+                let (name, declaration) = body.split_once(':').context("learn requires name: type = initializer;")?;
+                let declaration = declaration.trim().strip_suffix(';').context("learn declaration requires trailing semicolon")?;
+                let (domain, initial) = declaration.rsplit_once('=').context("learn requires explicit initializer")?;
+                let domain = domain.trim();
+                use super::LearnDomain as D;
+                let (domain, value) = if domain == "bool" {
+                    (D::Bool, match initial.trim() { "true" => 1., "false" => 0., _ => bail!("learn bool initializer must be true or false") })
+                } else {
+                    let value: f32 = initial.trim().parse().context("learn initializer must be a finite scalar")?;
+                    let kind = if domain == "float" { D::Float }
+                    else if let Some(low) = domain.strip_prefix("float >") {
+                        D::Positive { low: low.trim().parse().context("invalid learn strict lower bound")? }
+                    } else {
+                        let (kind, bounds) = domain.split_once(" in ").context("unsupported learn type; choice is not supported")?;
+                        let (low, high) = bounds.split_once("..=").context("learn bounds require inclusive low..=high")?;
+                        let low64: f64 = low.trim().parse().context("invalid learn lower bound")?;
+                        let high64: f64 = high.trim().parse().context("invalid learn upper bound")?;
+                        if kind.trim() == "int" {
+                            ensure!(low64.fract() == 0. && high64.fract() == 0. && low64.abs() <= 16777216. && high64.abs() <= 16777216., "learn int bounds must be exact integers within +/-16777216");
+                        }
+                        let low = low64 as f32;
+                        let high = high64 as f32;
+                        match kind.trim() { "float" => D::Bounded { low, high }, "int" => D::Int { low, high }, _ => bail!("unsupported learn type; choice is not supported") }
+                    };
+                    if matches!(kind, D::Int { .. }) {
+                        let exact: f64 = initial.trim().parse().context("invalid learn int initializer")?;
+                        ensure!(exact.is_finite() && exact.fract() == 0. && f64::from(value) == exact, "learn int initializer must be an exact f32 integer");
+                    }
+                    (kind, value)
+                };
+                domain.validate(value).with_context(|| format!("learn {}", name.trim()))?;
+                program.parameters.push(Parameter { name: name.trim().into(), shape: vec![1], data: if materialize { vec![value] } else { vec![] }, frozen: false, probability: false, learn: Some(domain) });
+            }
             "parameter" | "frozen" => {
                 let (name, body) = body
                     .split_once(':')
@@ -106,6 +140,7 @@ fn parse_definition(source: &str, functions: &crate::script::parse::Program, mat
                     data,
                     frozen: kw == "frozen",
                     probability,
+                    learn: None,
                 });
             }
             _ => bail!(
@@ -438,6 +473,21 @@ impl Lower<'_> {
                 ),
             );
         }
+        // Bounded shared-depth unrolling: hard 0/1 forward gate for iteration
+        // index, identity surrogate dgate/ddepth=1 during training. All bounded
+        // candidate steps execute on tape; inference route can short circuit.
+        if let Expr::Call(op, args) = expr {
+            if op == "depth_gate" {
+                let [depth, index] = args.as_slice() else { bail!("depth_gate requires learn int and literal iteration index") };
+                let parameter = self.parameter(depth)?;
+                let Some(super::LearnDomain::Int { low, high }) = &parameter.learn else { bail!("depth_gate requires learn int") };
+                let index = scalar_literal(index)?;
+                ensure!(*low >= 0. && *high <= 256. && index.fract() == 0. && index >= 1. && index <= *high, "depth_gate requires nonnegative depth bounded by 256 and index in 1..=maximum");
+                let hard = Expr::Call("detach".into(), vec![Expr::Call("clip".into(), vec![Expr::Binary("-".into(), Box::new(depth.clone()), Box::new(Expr::List(vec![Expr::Number(f64::from(index - 1.))]))), Expr::Number(0.), Expr::Number(1.)])]);
+                let surrogate = Expr::Binary("-".into(), Box::new(depth.clone()), Box::new(Expr::Call("detach".into(), vec![depth.clone()])));
+                return self.assign(out, &Expr::Binary("+".into(), Box::new(hard), Box::new(surrogate)));
+            }
+        }
         // Public reads expose probabilities; optimizer/checkpoint storage remains logits.
         let read_parameter = match expr {
             Expr::Name(n) if !self.sizes.contains_key(n) => Some(expr),
@@ -527,10 +577,10 @@ impl Lower<'_> {
                 ("read",[p]) => {let p=self.parameter(p)?; (I::Read{out:out.into(),parameter:p.name.clone()},p.shape.iter().product())},
                 ("linear",[x,w]) | ("linear",[x,w,_]) => {
                     let x=self.value(x)?; let w=self.parameter(w)?;
-                    ensure!(!w.probability,"linear weight cannot be prob");
+                    ensure!(!w.probability && w.learn.is_none(),"linear weight cannot be prob/learn; read architecture values explicitly");
                     ensure!(w.shape.len()==2 && w.shape[1]==self.size(&x)?, "linear weight/input shape mismatch");
                     let (weight,len)=(w.name.clone(),w.shape[0]);
-                    let bias=if args.len()==3 {let b=self.parameter(&args[2])?; ensure!(!b.probability,"linear bias cannot be prob");Some(b.name.clone())}else{None};
+                    let bias=if args.len()==3 {let b=self.parameter(&args[2])?; ensure!(!b.probability && b.learn.is_none(),"linear bias cannot be prob/learn");Some(b.name.clone())}else{None};
                     (I::Linear{out:out.into(),input:x,weight,bias},len)
                 },
                 ("add",[a,b]) | ("mul",[a,b]) => {

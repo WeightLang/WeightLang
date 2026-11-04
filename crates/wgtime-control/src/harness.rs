@@ -86,7 +86,7 @@ impl Harness {
     }
     fn handle<'a>(&self, value: &'a Value) -> Result<&'a HarnessHandle> {
         let Value::Harness(handle) = value else {
-            bail!("expected opaque harness session")
+            bail!("expected response session")
         };
         ensure!(
             handle.owner == self.owner,

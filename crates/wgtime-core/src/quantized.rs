@@ -166,12 +166,17 @@ mod simd {
     use std::arch::x86_64::*;
     #[target_feature(enable = "avx2,fma")]
     unsafe fn sum(v: __m256) -> f32 {
-        let v = _mm_add_ps(_mm256_castps256_ps128(v), _mm256_extractf128_ps(v, 1));
-        let v = _mm_hadd_ps(v, v);
-        _mm_cvtss_f32(_mm_hadd_ps(v, v))
+        // SAFETY: Caller guarantees AVX2; this function is only called from target-feature kernels.
+        unsafe {
+            let v = _mm_add_ps(_mm256_castps256_ps128(v), _mm256_extractf128_ps(v, 1));
+            let v = _mm_hadd_ps(v, v);
+            _mm_cvtss_f32(_mm_hadd_ps(v, v))
+        }
     }
     #[target_feature(enable = "avx2,fma")]
     pub unsafe fn float_dot(w: &[f32], x: &[f32]) -> f32 {
+        // SAFETY: Caller checks AVX2/FMA and equal slice lengths; loops bound each 8-lane load.
+        unsafe {
         let mut a = _mm256_setzero_ps();
         let mut b = a;
         let mut i = 0;
@@ -194,9 +199,12 @@ mod simd {
             i += 1;
         }
         value
+        }
     }
     #[target_feature(enable = "avx2,fma,f16c")]
     pub unsafe fn half_dot(p: &Packed, row: usize, x: &[f32]) -> f32 {
+        // SAFETY: Caller checks AVX2/FMA/F16C; row, packed dimensions, and equal input width are validated.
+        unsafe {
         let mut a = _mm256_setzero_ps();
         let mut b = a;
         let mut i = 0;
@@ -223,9 +231,12 @@ mod simd {
             i += 1;
         }
         result
+        }
     }
     #[target_feature(enable = "avx2,fma")]
     pub unsafe fn int4_group32(p: &Packed, row: usize, x: &[f32]) -> f32 {
+        // SAFETY: Caller checks AVX2/FMA, matching input width, row bounds and int4 group-32 format.
+        unsafe {
         let mut total0 = _mm256_setzero_ps();
         let mut total1 = total0;
         let mask = _mm_set1_epi8(15);
@@ -269,9 +280,12 @@ mod simd {
             value += input * p.value(row * p.cols + col);
         }
         value
+        }
     }
     #[target_feature(enable = "avx2,fma")]
     pub unsafe fn packed_dot(p: &Packed, row: usize, x: &[f32]) -> f32 {
+        // SAFETY: Caller checks AVX2/FMA and matching row/input dimensions; each packed load is bounded by its format and group loop.
+        unsafe {
         let mut total = _mm256_setzero_ps();
         let mut tail = 0.;
         let mask = _mm_set1_epi8(15);
@@ -321,5 +335,6 @@ mod simd {
             }
         }
         sum(total) + tail
+        }
     }
 }

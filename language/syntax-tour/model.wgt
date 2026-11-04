@@ -1,0 +1,454 @@
+wgt 0.5
+# WGT 当前模型语法总览：可直接读取的主模型 + 中文注释中的独立示例。
+# 本文件不是多个模型的拼接。只有未加 # 的 T01 是活跃模型。
+# T02..T09、R01、P01 均为注释资料；不要整体去掉 # 后当成一个编译单元。
+# 每个独立模型落盘时各用一个目录的 model.wgt；本次不创建 examples。
+# 语法依据：crates/wgt-language/src/source.rs、adaptive/source.rs、
+# script/parse.rs、script/operators.rs、model.rs、model_modules.rs。
+# 专题依据：docs/reference.zh-CN.md、native-backend.md、
+# learnable-architecture-parameters.md、custom-operators.md。
+# 这是当前本地实现导览，不代表已经发布，也不承诺覆盖所有神经网络架构。
+# 本地验证：T01 已通过定义解析和原生编译前向，[2,4] -> [9]、[0,0] -> [0]。
+# T02/T03/T04/T05/T09 已单独抽取通过定义解析，T06 配套本地导入也已通过。
+# 解析不等于所有数值行为已验证。
+# 查阅目录：
+# 01 版本/名称/注释；T01 活跃模型；02 接口/参数/初始化/shape；
+# 03 全部张量表达式（T02）；04 分类输出/后缀（T03/T04）；
+# 05 helper/std/本地导入（T05/T06）；06 门控/硬分支/循环/状态（T07）；
+# 07 工作内存/资源（T08）；08 五类 learn/depth_gate；09 loss/训练；
+# 10 顺序 layer/init（T09）；11 Rust 三入口/显式生命周期（R01）；
+# 12 遗留宿主索引；13 提案（P01）；14 提取与验证清单。
+
+# 01 版本、名称、注释和边界
+# 首个非空、非注释行必须为 wgt 0.5；版本头只出现一次。
+# # 注释持续到行尾；没有块注释。旧 wgt 0.1/0.2/0.3、script/adaptive 版本头拒绝。
+# Rust edition 2024 与 WGT 0.5 是不同版本概念。
+# 名称用 ASCII 字母或下划线开头，后接字母、数字、下划线；避免 __ 保留前缀。
+# 顶层声明一行一条。parameter/frozen 的初始化行不写分号；learn 必须写分号。
+# import 路径用 JSON 双引号字符串，独占一行，不写分号或尾注释。
+# 函数的 let、赋值、return 和调用语句以分号结束；控制流块无需分号。
+# 模型专用入口不接受 fn main、async、agent/environment、训练、保存、应用 I/O。
+# Rust 管理数据、服务连接、训练循环与制品；WGT 管理模型内部计算和可选 loss。
+
+# T01 BEGIN：活跃综合模型。一个样本有 2 个特征，输出 1 个回归值。
+# 没有 batch 轴：输入 [2,4] 表示一个样本，不表示两个样本。
+# 初始化、未训练时的数学预期为 [9]；输入 [0,0] 的数学预期为 [0]。
+# [2,4] -> identity linear [2,4] -> mean [3] -> gain 路 [15]，旁路 [3]
+# -> p=0.5 混合 [9] -> depth>=2、enabled=true、两个初值为 1 的增益 -> [9]。
+# 浮点实现应按容差比较；训练后预期值会改变。
+model SyntaxTour
+input x: f32[2]
+output y: f32[1]
+target target: f32[1]
+import activation from "std/activation"
+import loss_ops from "std/loss"
+
+# w 的轴是 [输出特征, 输入特征]；扁平列表按 C 行优先排列。
+# frozen 仍参与计算和梯度传播，但不被优化器更新，也不能 write。
+frozen w: f32[2,2] = [1,0,0,1]
+parameter bias: f32[2] = [0,0]
+# prob 是标量概率，不是 f32 权重的范围声明。
+# 可训练 prob 内部存 logit，读取为 f32[1] 概率；初值严格属于 (0,1)。
+parameter p: prob = 0.5
+# 冻结概率允许精确端点，便于解释推理时的惰性路由。
+frozen pass: prob = 1
+
+# 五类 learn 均为顶层标量，读取为 f32[1]，不改变 shape。
+learn gain: float = 5.0;
+learn bounded_gain: float in 0.5..=2.0 = 1.0;
+learn positive_gain: float > 0 = 1.0;
+learn enabled: bool = true;
+learn depth: int in 0..=3 = 2;
+
+# 纯 helper 不拥有参数、不捕获 gain；调用方显式传入参数读出的张量。
+# 同一文件的 helper 与 std 模块一样，只有不可重复 let 和最终 return。
+# 连续 let 左到右求值一次，后项可以引用前项；不是元组或原子声明组。
+fn scaled_average(features, scale) {
+    let average = features.mean, scaled = average * scale;
+    return scaled;
+}
+
+fn forward(x) {
+    # linear 要求原始参数名，w:[2,2]、bias:[2]，结果:[2]。
+    # read 与直接参数引用均读当前值；复制 local 不会创建新的可训练参数。
+    let projected = linear(x, w, bias), baseline = mean(projected);
+    let transformed = scaled_average(projected, read(gain));
+    # 两条路均为 [1]。mix 等价 route(p,transformed,baseline)。
+    # 每支只能有一个表达式，可选尾随分号；不能在支内 let/return。
+    let mixed = mix p {
+        then { transformed }
+        else { baseline; }
+    };
+    # depth_gate 只认顶层 learn int 名和字面量索引。它不自动重复模型。
+    # 这里显式启用第二段；每次引用共享同一组参数，不会产生独立层权重。
+    let selected = route(depth_gate(depth, 2), mixed, baseline);
+    let active = gate(enabled, selected);
+    # 一般逐元素乘法不广播；这里所有因子都是 [1]。
+    return gate(pass, active * bounded_gain * positive_gain);
+}
+
+fn loss(prediction, target) {
+    # [1] 预测、[1] 目标 -> [1] 半平方损失；沿特征轴平均，不隐含 batch。
+    # 自定义 loss 不捕获模型参数；Rust 必须显式选择 Loss::Custom 才使用它。
+    return loss_ops.half_squared_error(prediction, target);
+}
+# T01 END
+
+# 02 声明、初始化和形状速查
+# input NAME:f32[N] 仅一个；output NAME:f32[M]、logits[M] 或 probabilities[M]。
+# 端口宽度 1..16384；参数 shape 为 1..8 个正整数轴，初始化扁平有限 f32，
+# 单参数和模型总参数最多 16777216 个元素；顺序 layer 构造另有 400 万上限。
+# parameter/frozen 必须显式给初值；forward 模型不写 init seed，也不混用 layer。
+# 普通 f32 权重无 [0,1] 或布尔限制；bool 学习参数用 learn，不用 parameter b:bool。
+# target NAME:f32[N] 必须与 loss 第二参数名一致；省略则目标宽度等于输出宽度。
+# target 不增加 forward 输入，不改变内置 MSE 的目标合同。
+# 同一个静态定义可初始化多个独立实例；定义复制不等于共享可变服务状态。
+
+# 03 当前张量表达式完整清单（除 linear 可省 b 外，所有参数必填）
+# x、局部名、参数名、read(parameter)：读取定长张量，参数读取按扁平向量处理。
+# [1, -2, 3e-2]：非空有限数字向量，宽度 1..16384；不是嵌套张量或动态列表。
+# (expr)、-x、a+b、a-b、a*b、add(a,b)、mul(a,b)：后四者须等长，无标量广播。
+# 不支持张量 a/b、%、比较、&&、||、!；数字裸常量不能充当张量，使用 [2]。
+# linear(x,w[,b])：x:[I]，参数 w:[O,I]，可选参数 b:[O]，返回 [O]。
+# w/b 必须为原始普通 f32 参数名；局部张量、prob、learn 不能直接充当 w/b。
+# relu(x)、tanh(x)、sigmoid(x)、square(x)、exp(x)、log(x)：[N] -> [N]。
+# log 输入需为正；有限值和运行预算检查仍适用，解析不会证明所有输入数值安全。
+# softmax(x)、log_softmax(x)：沿唯一向量轴，[N] -> [N]，使用稳定计算。
+# mean(x)、x.mean、sum(x)：[N] -> [1]，没有 axis 参数或 .sum 后缀。
+# minimum(a,b)：等长逐元素最小值，相等时梯度各半。
+# clip(x,lower,upper)：[N] -> [N]，有序有限带符号数字字面量边界，端点梯度为零。
+# detach(x)：数值/shape 不变，切断该路径梯度；不是复制或冻结参数声明。
+# x[start:end]、x[:end]、x[start:]、x[:]：零基、左闭右开。
+# 张量切片端点只接受编译期数字常量表达式，可用括号、一元 -、+ - * / %；
+# 必须 0<=start<end<=N，不接受空结果、负索引、步长、多轴或下标赋值。
+# slice(x,start,length)：旧函数第三参为正长度，两个数字字面量；slice(x,1,1)=x[1:2]。
+# 后缀/切片优先于一元和二元运算；(a-b).mean 与 -a.mean 分别先做差/先平均。
+# gate(p,x)：p:[1] 或 [N]、值在 [0,1]，结果 p*x；这是显式允许的门广播。
+# route(p,a,b)、mix p {then {a} else {b}}：a/b:[N]，p 同 gate，结果 p*a+(1-p)*b。
+# positive(x)：仅条件，x:[1] 严格大于 0；不是输出张量运算或通用 bool 转换。
+# depth_gate(depth,index)：见第 08 节。状态/工作区表达式见 T07/T08。
+# 自定义纯 helper 及 alias.helper(...)：见第 05 节，不是任意宿主函数调用。
+
+# T02 BEGIN：独立完整模型；当前纯张量表达式组合示例，不在本文件执行。
+# 这里用 [2] 特征轴演示非线性处理，再用 [1] 归约结果构造输出。
+# wgt 0.5
+# model TensorExpressions
+# input x: f32[2]
+# output y: f32[1]
+# frozen w: f32[2,2] = [1,0,0,1]
+# parameter b: f32[2] = [0,0]
+# fn forward(x) {
+#     let affine = linear(x,w,b), no_bias = linear(x,w);
+#     let copied = read(b), shifted = add(affine, [1,1]);
+#     let r = relu(shifted), t = tanh(no_bias), s = sigmoid(x);
+#     let product = mul(r,s), difference = product-t, negative = -difference;
+#     let finite = clip(negative,-4,4), smallest = minimum(finite,copied);
+#     let probabilities = softmax(smallest), logs = log_softmax(smallest);
+#     let exponentiated = exp(logs), roundtrip = log(exponentiated);
+#     let stopped = detach(roundtrip), errors = square(stopped + [1,1]);
+#     let left = errors[:1], right = slice(errors,1,1);
+#     let all = errors[:], suffix = all[1:], prefix = all[:(1+1)];
+#     # 所有加项是 [1]，没有把归约标量自动广播回 [2]。
+#     return (left+right).mean + sum(probabilities) + mean(prefix) + suffix;
+# }
+# T02 END
+
+# 04 输出分类合同与 .probabilities
+# logits[N] 表示互斥类别原始分数；probabilities[N] 表示已算好的类别概率。
+# 声明本身不做 softmax 或归一化。不要把 linear 原始分数声明为 probabilities。
+# probabilities 检查每项有限且属于 [0,1]，f64 累加总和距 1 的绝对误差 <=1e-5。
+# .probabilities 对 logits 做稳定 softmax，对 probabilities 验证后保持原值。
+# 普通 f32 向量不能用此后缀；显式 softmax(x) 仍可用。
+# 分类类型只用于 output，不能写 input logits 或 parameter probabilities。
+# loss 的 prediction 保留输出类别类型；CE/log_softmax 直接消费 logits。
+# Rust facade forward 返回 Vec<f32>，不要在 Rust Vec 上套用 WGT 后缀。
+# T03 BEGIN：独立完整 logits 模型，注释示例。
+# wgt 0.5
+# model Categories
+# input x: f32[3]
+# output scores: logits[3]
+# target target: f32[3]
+# import loss_ops from "std/loss"
+# fn forward(x) { return x; }
+# fn loss(prediction,target) {
+#     let probabilities = prediction.probabilities;
+#     # 此处保留 probabilities 作为后缀示范，损失仍直接使用原始 logits。
+#     return loss_ops.categorical_logits(prediction,target);
+# }
+# T03 END
+# T04 BEGIN：独立完整概率输出模型，注释示例；输入是分数，输出是真概率。
+# wgt 0.5
+# model Probabilities
+# input x: f32[3]
+# output choices: probabilities[3]
+# fn forward(x) { return softmax(x); }
+# T04 END
+# 不支持独立二分类 logit[N]；标量 prob 与互斥类别向量不是同一类型。
+# decode policy(x) {method:sample;} 尚未完成 parser/runtime 接线，列入末尾提案。
+
+# 05 helper、std 和本地纯计算模块
+# fn helper(a,b) { let c=...; return ...; }：位置参数全部必填，一个张量返回值。
+# 仅不可重复 let（含连续 let）和最终 return；不可赋值、if、循环、递归、I/O、状态写入。
+# 不可捕获模型参数/调用者局部；参数须显式传入。调用按左到右求实参一次。
+# helper 可组合上面纯运算，但不能使用 read/write/linear/positive/depth_gate/工作内存。
+# 调用链最多 32 层，每个 forward/loss 最多 1024 次 helper 展开。
+# 当前 std 纯模型库只有这两个，必须 import，不自动注入：
+# activation.swish(x) -> x*sigmoid(x)
+# activation.swiglu(gate,value) -> swish(gate)*value
+# activation.squared_relu(x) -> square(relu(x))
+# 三者输入/输出都是同形非空 [N]，swiglu 两参同形，无隐含 batch 或权重。
+# loss_ops.squared_error(prediction,target) -> mean(square(prediction-target))
+# loss_ops.half_squared_error(prediction,target) -> [0.5]*上述均值
+# loss_ops.categorical_logits(logits,target) -> -sum(target*log_softmax(logits))
+# 三者返回 [1]，两参同形；类别 target 的非负/单位和由调用方保证。
+# T01 导入了 activation 但不调用；这也演示导入不初始化/执行模型。
+
+# T05 BEGIN：独立完整 std 消费模型，注释示例。
+# wgt 0.5
+# model StandardComputation
+# input x: f32[2]
+# output y: f32[2]
+# import activation from "std/activation"
+# fn forward(x) {
+#     let a = activation.swish(x), b = activation.squared_relu(x);
+#     return activation.swiglu(a,b);
+# }
+# T05 END
+
+# T06 BEGIN：两文件方案，全部是注释，不能当成一个单文件模型去解析。
+# T06a：独立库 ./ops.wgt（库文件不受 model.wgt 模型入口命名限制）。
+# wgt 0.5
+# operators Residual
+# fn blend(x,residual) {
+#     let result = x + residual;
+#     return result;
+# }
+# T06b：与 ops.wgt 同目录的独立 model.wgt。
+# wgt 0.5
+# model LocalComputation
+# input x: f32[2]
+# output y: f32[2]
+# import ops from "./ops.wgt"
+# fn forward(x) { return ops.blend(x,[1,1]); }
+# T06 END
+# ModelDefinition::parse/model! 的字符串入口支持 std，不提供相对文件根目录。
+# ModelDefinition::from_file/include_model! 才支持 ./ 文件及嵌套纯计算导入。
+# 模型 loader 闭合并嵌入依赖，禁止 ..、绝对路径、越界符号链接、循环、重复别名、宿主 module。
+# 模型闭包源码合计 <=1MiB，模块 <256，导入深度 <32，每文件导入 <=64。
+# 模型专用 loader 的嵌套导入与旧 operators 包 loader 是不同入口；后者不能据此声称支持嵌套。
+# 旧算子包入口 import ops from "MODULE/LibraryName" 需要已解析包依赖上下文；
+# 当前 Rust 模型定义入口只接受 std/... 和 ./...，不支持包注册表查找。
+
+# 06 gate、route、mix、硬分支和共享参数
+# 推理 p 精确全 0 时 gate 跳过 x；route 全 1 只算 a，全 0 只算 b，否则两支都算。
+# 必须把昂贵表达式直接内联在门内才能跳过；提前 let 已经计算，T01 即属此情形。
+# 训练/VJP 计算两支以保留门梯度；不能把推理短路理解为零端点永不训练。
+# 向量门不逐元素拆开专家执行。route/mix 梯度沿连续门传播，硬 if 选择不因此可微。
+# forward 条件只接受 positive([1]张量) 或 true/false 字面量；learn bool 读取仍是 [1]，
+# 不能写 if enabled，应该明确用 positive(enabled) 或连续 gate(enabled,x)。
+# 标签、jump、branch 是内部 IR，不是当前源语言声明。
+
+# T07 BEGIN：独立完整低层状态/循环模型；仅作注释，不作为当前 facade 验收例。
+# 现有 lowering 有 if/else、while、赋值、break、continue、write。
+# 当前服务 compiled forward 尚未接入参数 write；不能声称这个模型能走 facade 初始化。
+# 输入 [1] 输出 [1]。while 每次复用同一个 state，不会生成每步独立参数。
+# wgt 0.5
+# model StatefulLoop
+# input x: f32[1]
+# output y: f32[1]
+# parameter state: f32[1] = [0]
+# fn forward(x) {
+#     let result = read(state), remaining = [2];
+#     while positive(remaining) {
+#         remaining = remaining - [1];
+#         if positive(x) {
+#             result = result + x;
+#             continue;
+#         } else {
+#             break;
+#         }
+#     }
+#     write(state,result);
+#     return result;
+# }
+# T07 END
+# 只允许赋值已声明的局部张量，长度不能变，输入不可覆盖；没有 forward for。
+# while 没有自动终止保证，必须依赖显式递减/退出和运行预算。
+# write 全量替换普通非 frozen 参数，长度须匹配；prob/learn 不允许 write。
+# 低层成功前向提交写入，失败回滚；frozen 不可更新不等于数学梯度为零。
+
+# 07 临时工作内存和资源状态（当前低层实现，服务 compiled 路径未接入）
+# memory_alloc(slots,width)：两个 1..16384 整数字面量，创建零初始化 [N,D] 工作区句柄。
+# memory_read(bank,address)：address:[N]、每项 [0,1]，返回加权和 [D]，不自动归一化。
+# memory_write(bank,address,value);：value:[D]，第 i 槽为 (1-a[i])*old+a[i]*value。
+# memory_free(bank);：释放句柄，重复释放/释放后访问报错；句柄不能当张量或复制。
+# resource_state()：[3]，依次剩余前向工作量、剩余工作区字节、存活工作区字节，无梯度。
+# 工作内存每任务/每训练样本重新开始，完成/失败释放，不是跨请求 cache，不保存进权重。
+# T08 BEGIN：独立完整低层工作内存模型，仅注释，不作为 facade 可执行示例。
+# wgt 0.5
+# model WorkingMemory
+# input x: f32[2]
+# output y: f32[2]
+# fn forward(x) {
+#     # 槽轴 N=2，特征轴 D=2；[1,0] 只写/读第一个槽。
+#     let bank = memory_alloc(2,2), address = [1,0];
+#     memory_write(bank,address,x);
+#     let result = memory_read(bank,address), budget = resource_state();
+#     memory_free(bank);
+#     return result;
+# }
+# T08 END
+
+# 08 五类 learn 的训练语义与 depth_gate 边界
+# float：有限 f32 初值，无界，不做范围投影。
+# float in low..=high：有限 low<high，初值在闭区间，SGD/Adam 更新后投影回该区间。
+# float > low：low 有限、>=0、低于最大有限 f32，初值>low；更新后至少 next_up(low)。
+# >0 的最小合法值可能是正 subnormal，不保证下游除法/对数等数值适宜。
+# bool：初值仅 true/false，shadow 限制 [0,1]，读取 shadow>=0.5 为 1，否则 0。
+# int in low..=high：有界整数，low<high，端点绝对值<=16777216，初值为范围内精确整数。
+# int 读取用 Rust round（半整数远离零），不把更新后的 shadow 强制取整。
+# int/bool 反向采用 identity STE：把上游梯度传给连续 shadow；不是离散函数的真导数。
+# float 为普通连续梯度，不叫 STE；边界处不会自动清零离散代理梯度。
+# depth_gate(depth,index) 仅 tensor forward，depth 必须是声明的 learn int 参数名，
+# 下界>=0、上界<=256，index 为带符号整数字面量且 1..=上界，返回 [1] 硬门。
+# depth>=index 为 1，否则 0；对 depth 用值为 1 的代理梯度。
+# 不能用于无参数 loss、纯 helper、局部张量或计算式，也不改变 shape/循环次数。
+# T01 是显式有限计算段的一个门；要演示三段需显式写三次调用/路由。
+# 重复使用同一 w 是共享权重；要独立权重必须声明不同参数，当前没有模块实例数组语法。
+# 共享结构是多次调用同一 helper/复用同一模型定义：复用计算规则，不自动共享可变参数。
+# 共享权重是调用时读取同一参数（或复用同一服务实例）；不同初始化实例仍各有参数。
+# 共享专家还涉及专家身份、实例池、选择与调度，不能由共享 helper/权重推断已经支持。
+# weights 保存 learn 的连续 shadow，重载必须绑定同 learn 元数据的定义。
+# prepare 拒绝越界值；自定义 gradient commit 拒绝越界候选，不替调用者静默投影。
+# 当前已有定点测试覆盖 float 5->5.5、int、bool、depth；本文件没有重跑这些测试。
+
+# 09 自定义 loss 与 Rust 训练
+# fn loss(prediction,target) 返回 [1]，可组合当前张量原语和纯 helper/std。
+# 不读取模型参数，不执行数据加载、训练循环或优化器，不代表任意宿主函数自动可微。
+# T01 半平方损失对预测值的梯度为 prediction-target；全平方损失多系数 2。
+# 标量模型 x*scale、x=1、scale=5、target=10、SGD rate=0.1 时一步变成 5.5。
+# Rust Loss::Mse 配 Targets::Values，Loss::CrossEntropy 配 Targets::Classes，
+# Loss::Custom 配 Targets::Values；clip 是可选正有限全局梯度范数阈值。
+# facade 的 train 输入为样本行集合；batch 轴由 Rust 提供，不加到 WGT input shape。
+
+# 10 与 forward 互斥的 layer/init 形式
+# layer 按源码顺序；线性 out 必填，in 默认前宽度、bias 默认 1，可写 linear(M)。
+# 激活层仅 relu/tanh/sigmoid/identity，无参数，保持宽度；init seed 为非负 u64。
+# 初始化为均匀 Xavier、bias 为零；这是初始化说明，不是已训练权重。
+# 不与 parameter/frozen/learn/fn forward 混用；当前顺序模型也不能附带 helper/loss。
+# T09 BEGIN：独立完整顺序模型，注释示例。
+# wgt 0.5
+# model Sequential
+# input x: f32[2]
+# output y: f32[1]
+# layer first: linear(in=2,out=2,bias=0)
+# layer r: relu
+# layer second: linear(2)
+# layer t: tanh
+# layer s: sigmoid
+# layer i: identity
+# layer result: linear(out=1)
+# init seed=42
+# T09 END
+
+# 11 R01：Rust edition 2024 使用示意，全部是 Rust 注释资料，不是 WGT 语法
+# 包 wgt-model 的 Rust crate 名是 wgt。三个入口：model! 字符串、include_model! 编译期文件、
+# ModelDefinition::from_file 运行期文件；ModelDefinition::parse 是运行期字符串对应接口。
+# 宏只接受字符串字面量，不接受 WGT token 块；可用 crate = alias 适配依赖改名。
+# include_model! 路径相对消费 crate 的 CARGO_MANIFEST_DIR；需放置被引用的真实 model.wgt。
+# 三入口只构造/检查定义，不连接服务、不初始化权重、不训练、不隐式保存。
+# 下方完整 Rust 函数需要依赖 wgt-model（crate wgt）和 anyhow、已有服务和模型文件；
+# weights/syntax-tour 目录应事先存在，输出文件不能已经存在，本示例不执行这些动作。
+#
+# use std::path::Path;
+# use wgt::{model, include_model, Client, ModelDefinition, InstanceOptions,
+#           Optimizer, Loss, Targets, TrainOptions};
+#
+# fn main() -> anyhow::Result<()> {
+#     let inline = model!(r#"wgt 0.5
+# model Scale
+# input x: f32[1]
+# output y: f32[1]
+# learn scale: float = 5.0;
+# fn forward(x) { return x * scale; }
+# fn loss(prediction,target) { return [0.5] * square(prediction-target).mean; }
+# "#);
+#     let embedded = include_model!("language/syntax-tour/model.wgt");
+#     let runtime = ModelDefinition::from_file("language/syntax-tour/model.wgt")?;
+#     let _definitions = (embedded, runtime);
+#     let client = Client::connect()?;
+#     let net = client.initialize(&inline, InstanceOptions {
+#         memory_bytes: 1024 * 1024, optimizer: Some(Optimizer::Sgd),
+#     })?;
+#     let before = net.forward(&[1.0])?;
+#     let inputs = vec![vec![1.0]];
+#     let targets = vec![vec![10.0]];
+#     let loss = net.train(&inputs, Targets::Values(&targets), TrainOptions {
+#         rate: 0.1, loss: Loss::Custom, clip: None,
+#     })?;
+#     let after = net.forward(&[1.0])?;
+#     // 数学预期 before=[5]，loss=12.5，after=[5.5]；按 f32 容差验收。
+#     let _observed = (before, loss, after);
+#     net.save_weights(Path::new("weights/syntax-tour/weights.safetensors"))?;
+#     // 显式绑定到同定义的独立实例；载入重置优化器，不恢复 checkpoint 状态。
+#     let restored = client.initialize(&inline, InstanceOptions::default())?;
+#     restored.load_weights(Path::new("weights/syntax-tour/weights.safetensors"),
+#                           Some(Optimizer::Sgd))?;
+#     let _restored_output = restored.forward(&[1.0])?;
+#     restored.close()?;
+#     net.close()?;
+#     Ok(())
+# }
+# R01 END
+# 真实签名概要（Rust，不是新增 WGT 语法）：
+# Client::connect() -> anyhow::Result<Client>
+# Client::connect_to(endpoint:&Path) -> anyhow::Result<Client>
+# client.initialize(definition:&ModelDefinition, options:InstanceOptions) -> Result<Model>
+# net.forward(input:&[f32]) -> Result<Vec<f32>>
+# net.train(inputs:&[Vec<f32>], targets:Targets<'_>, options:TrainOptions) -> Result<f32>
+# net.save_weights(path:&Path) -> Result<()>
+# net.load_weights(path:&Path, optimizer:Option<Optimizer>) -> Result<()>
+# net.close(self) -> Result<()>
+# 缺省 InstanceOptions 为 64MiB、无优化器；无优化器训练报错。
+# 模型执行和可变状态属于机器级唯一 wgtime 服务；连接失败不回退应用进程内核心。
+# 当前 service forward 是固定 shape IR -> C -> 本机共享库；初始化需要可用 C 编译器。
+# 参数与机器码分离，训练/绑定权重后 forward 读当前权重；反向仍为 tape，不是 compiled backward。
+# 源码解析成功不等于已执行 forward；本地实现/定点验证不等于发布或全架构验收。
+# facade 目前只有单 f32 向量 forward、CPU 训练和权重保存/绑定；没有公共 checkpoint API。
+# 不承诺多输入、batch forward、跨请求 cache、任意 dtype、GPU 新分类类型或通用模块实例。
+
+# 12 历史宿主脚本仅作索引，不作为新模型主程序写法
+# 共用 parser 中仍保留普通值、函数、控制流、I/O、训练、agent、environment、异步等语法。
+# 这些不能因为 parser 接受就放进 ModelDefinition；不要为新应用创建 WGT 宿主控制脚本。
+# 普通函数：let/赋值、列表/记录/索引、算术比较布尔、if/while/for、break/continue/return；
+# 其中普通列表切片可用运行期整数端点和空结果，区别于非空定长张量切片。
+# sample p {then {...} else {...}} 仅普通函数离散采样，非 forward/loss 的 mix。
+# 普通 onehot[N] index、collect/yield、for minibatch in batch size N 不是模型张量结构。
+# 宿主 train ... on ... against ... {...}/using ...、differentiate/commit、reinforce、
+# save/load/reload、agent/environment/learn actor、async/tasks/spawn/await 都正在退出主架构。
+# 仅为查旧实现提供链接，不在此提供新宿主示范：
+# docs/native-training.md：旧训练、静态策略、自定义一阶优化器与 checkpoint。
+# docs/agents-environments.md：旧 agent/environment/采集 learn，与顶层标量 learn 不同。
+# docs/async-tasks.md、docs/file-io.md：旧异步和文件控制。
+# docs/compute-budget.md、docs/working-memory.md：预算及低层分段执行接口。
+# docs/standard-library.md：普通标量/列表函数与模型纯 std 的不同上下文。
+# 新应用把对应的数据准备、I/O、调度、训练循环放在 Rust 中。
+
+# 13 P01：提案/待实现区，不是当前可执行 WGT，以下故意不提供伪造语法
+# 子模型 A 的实例数组：需要定义实例身份、初始化与权重/状态所有权，当前无已验收语法。
+# shared 专家：当前可重复引用同参数实现共享计算，但没有已验收的专家 shared 声明。
+# top-k 路由：当前 gate/route/mix 只做固定张量计算/混合，不提供 top-k 专家调度。
+# 多专家数量/比例学习：标量 learn 不改变参数个数、shape 或实例数组长度。
+# automatic repeat：depth_gate 配显式展开，不自动重复模块，也不让动态循环次数可微。
+# choice/categorical 架构参数：当前 learn 不接受 choice，不以 prob 或 logits 输出冒充实现。
+# decode policy(input) {method:sample;}：目标语法，parser/runtime 接线与返回/RNG 契约待验收。
+# 更广泛的架构类别见 docs/architecture-coverage.md；设计矩阵不是当前支持承诺。
+
+# 14 示例提取与验证清单
+# T01：本文件唯一活跃、完整模型；预期可用 ModelDefinition::from_file/parse 解析，待实测。
+# T02/T03/T04/T05/T09：注释中的独立完整模型；按编号各自提取、移除一层 '# ' 后单独解析。
+# T06a：完整 operators 库，不是 ModelDefinition；T06b：完整消费者，必须提供配套 ops.wgt。
+# T07/T08：完整低层模型语法资料；包含当前服务 compiled 路径拒绝的状态能力，不作 facade 验收。
+# R01：完整 Rust 函数资料，内部宏字符串也是独立 Scale 模型；不是 WGT 提取块。
+# P01：有意非运行设计说明，没有现行模型语法保证。
+# 不要将各编号连成一个文件，也不要把注释中的旧宿主索引当成可执行模型。

@@ -5,11 +5,7 @@ weightfs 是 Linux FUSE 内存文件系统，直接连接 Rust 进程里的模�
 
 ## 自动挂载与生命周期
 
-`wgt run`、`wgt run --compiled`、编译后的独立程序、`wgt-native script` 在模型构造或恢复后
-默认尝试挂载；`wgt-native MODEL.json ...` 和 `wgt-native adaptive ...` 在开始接收推理请求前尝试挂载。
-同一脚本中的多个模型各有独立目录，句柄副本共享同一个目录。
-`weightc legacy-build` 的显式执行阶段同样挂载，返回模型进行导出前卸载。
-纯检查、只编译和设备枚举不挂载、不初始化模型、不执行训练。
+底层 `wgtime-core` 的脚本、训练及自更新会话包装可在 Linux 上尝试自动挂载；裸 `Session`、`Trainer` 和 `ExecutionSession` 构造器无操作系统挂载副作用。`Mounted<T>` 可显式包装实现 `Weights` 的会话类型。独立 CLI `wgt-native` 已删除。`weightc legacy-build` 仍保留，但它不是本规范所述的持续运行挂载会话接口。新模型 Rust facade 尚未公开 weightfs 配置；当前需由底层 core 集成调用 `Mounted<T>`，服务端/facade 集成仍待完成。
 
 规范路径：
 
@@ -48,7 +44,7 @@ weightlang/weightfs 子目录按 0700 创建。会话目录使用独占创建，
 ## 文件格式与编辑协议
 
 `manifest.json` 只读，包含 `format="weightlang.weightfs.v1"`、PID、当前模型 revision 和参数表。
-每个参数记录 `file`、原始 `name`、`shape`、`dtype="f32"`、`writable`。
+每个参数记录 `file`、原始 `name`、`shape`、`dtype="f32"`、`writable`。这些是底层 core 实现的挂载格式，不表示新 Rust facade 已提供挂载配置。
 参数文件用从零开始的六位十进制索引命名；更多位数不截断。顺序为模型原始参数顺序，
 同一会话中固定。原始参数名仅出现在 manifest，不作为路径解析，避免 `/`、`..` 等名称逃逸。
 
@@ -57,17 +53,7 @@ weightlang/weightfs 子目录按 0700 创建。会话目录使用独占创建，
 不支持修改形状、dtype、参数名称、模型结构或优化器状态。
 冻结参数、file/add/量化存储保持原运行时的只读规则；可写 view 更新其实际 resident owner。
 
-```sh
-# 启动一个长期读取 stdin 的推理会话；用已经保存的原生推理模型：
-WGT_WEIGHTFS=on wgt-native weights/native_training/model.json 1048576 --device cpu
-
-# 另一个终端，复制 stderr 打印的准确路径：
-MOUNT=/run/user/1000/weightlang/weightfs/12345-0
-cat "$MOUNT/manifest.json"
-cat "$MOUNT/000000.json"
-# 仅当 manifest 表明这个参数有一个元素且可写时：
-printf '[2.0]\n' > "$MOUNT/000000.json"
-```
+当前没有受支持的高层命令启动此挂载会话；新 Rust facade 也尚未公开 weightfs 配置。底层 `wgtime-core` 的 Linux 集成由 `Mounted<T>` 与 weightfs 测试覆盖；真实挂载测试需要 `/dev/fuse`、`fusermount3` 和私有 `XDG_RUNTIME_DIR`，具体验证入口见下节。实现细节不构成已发布 CLI 承诺。
 
 读取在 `open` 时获取单个参数的稳定快照；重新打开可看到最新值。不同文件的读取不构成
 跨参数快照。编辑是单文件事务：`write` 仅更新该描述符的内存缓冲，`fsync` 或 close 的 flush
@@ -106,11 +92,10 @@ JSON 浏览与文件编辑会分配内存；底层未封装的 CPU 前向仍保�
 
 ## 验证
 
+底层集成测试位于 `crates/wgtime-core/tests/weightfs.rs`。真实挂载测试显式标为 ignored，避免在没有 FUSE 的环境中误报通过；当前源码验证可使用：
+
 ```sh
-WGT_WEIGHTFS=on cargo test -p wgtime-core --no-default-features --test weightfs -- --ignored
-WGT_WEIGHTFS=off cargo test -p wgtime-core --no-default-features --test training --test script --test unified
+WGT_WEIGHTFS=on cargo test -p wgtime-core --test weightfs -- --ignored
 ```
 
-真实挂载测试显式标为 ignored，避免在没有 FUSE 的构建容器中伪报通过；上述第一条明确运行它们。
-覆盖挂载目录浏览、编辑后的预测、训练可见性、冲突/非法写回滚、冻结权重、自更新模型、
-CLI 等待 stdin 时的外部编辑和正常退出卸载。
+该测试覆盖挂载目录浏览、编辑后的预测、训练可见性、冲突与非法写回滚、冻结权重、自更新模型和正常退出卸载。已删除的 CLI stdin 测试不再作为当前集成入口。

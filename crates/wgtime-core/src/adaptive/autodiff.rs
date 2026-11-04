@@ -173,10 +173,9 @@ impl Tape {
                 },
             ),
             Op::Mean(r, x) => (r, Edge::Mean { x: self.reg(x)? }),
-            Op::Read(r, p) => {
-                self.registers[r] = Some(self.parameters[p]);
-                return Ok(());
-            }
+            // Preserve the hard forward primal while passing identity STE to
+            // the continuous parameter node (also identity for ordinary reads).
+            Op::Read(r, p) => (r, Edge::Slice { x: self.parameters[p], start: 0 }),
             Op::Linear(r, x, w, b) => (
                 r,
                 Edge::Linear {

@@ -1,6 +1,12 @@
 use wgtime_core::script::{parse, prelude::declarations};
-const SOURCE: &str = include_str!("../../../std/prelude.wgt");
-const CATALOG: &str = include_str!("../../../language/prelude.json");
+
+const SOURCE: &str = r#"prelude native 0.5;
+# @contexts ["ordinary_function"]
+# @purpose "Test declaration metadata consistency."
+# @implementation "No runtime body is provided."
+native fn responses_scope(limits, profiles, tools);
+"#;
+const CATALOG: &str = r#"{"entries":[{"contexts":["ordinary_function"],"purpose":"Test declaration metadata consistency.","implementation":"No runtime body is provided.","name":"responses_scope","kind":"function","signature":"responses_scope(limits,profiles,tools)","defaults":{},"arity":{"min":3,"max":3}}]}"#;
 
 #[test]
 fn bundled_contract_is_complete_and_inert() {
@@ -9,10 +15,10 @@ fn bundled_contract_is_complete_and_inert() {
     assert!(entries
         .iter()
         .all(|e| !e["name"].as_str().unwrap().starts_with("__")));
-    assert!(entries.iter().all(|e| e["name"] != "fit"));
-    let benchmark = entries.iter().find(|e| e["name"] == "benchmark").unwrap();
-    assert_eq!(benchmark["arity"], serde_json::json!({"min":5,"max":6}));
-    assert_eq!(benchmark["defaults"]["mode"], "cpu");
+    assert_eq!(entries.len(), 1);
+    let declaration = &entries[0];
+    assert_eq!(declaration["name"], "responses_scope");
+    assert_eq!(declaration["arity"], serde_json::json!({"min":3,"max":3}));
     assert!(parse(SOURCE).is_err());
     assert!(parse("wgt 0.5\nnative fn hidden();\nfn main() {}\n").is_err());
     assert!(parse("wgt 0.5\nfn main() { return mean([1,2,3]); }\n").is_ok());
@@ -32,14 +38,18 @@ fn declarations_reject_bodies_and_contract_drift() {
             1,
         ),
         SOURCE.replacen("# @contexts [\"ordinary_function\"]", "# @contexts []", 1),
+        SOURCE.replacen("native fn responses_scope", "fn responses_scope", 1),
         format!("{SOURCE}\n# @purpose \"dangling\"\n"),
     ] {
         assert!(declarations::parse(&changed).is_err());
     }
     for changed in [
-        SOURCE.replacen("profiles, tools);", "profiles);", 1),
-        SOURCE.replacen("mode = \"cpu\"", "mode = \"gpu\"", 1),
-        SOURCE.replacen("Configure one execution-only", "Changed execution-only", 1),
+        SOURCE.replacen("limits, profiles, tools", "limits, profiles", 1),
+        SOURCE.replacen(
+            "Test declaration metadata consistency.",
+            "Changed declaration metadata consistency.",
+            1,
+        ),
     ] {
         assert!(declarations::validate(&changed, CATALOG).is_err());
     }

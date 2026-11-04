@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/wgt", "crates/wgtime-core", "crates/wgt-language", "crates/wgtime", "crates/wgtime-service", "crates/wgtime-control", "crates/wgt-model", "crates/wgt-model-macros"]
-resolver = "2"
+resolver = "3"
 
 [profile.release]
 strip = true

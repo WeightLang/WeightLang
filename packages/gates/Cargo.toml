@@ -1,0 +1,16 @@
+[package]
+name = "weightlang-gates"
+version = "0.5.0"
+edition = "2024"
+license = "MIT"
+description = "Train the six WeightLang logic gate models through wgtime"
+
+[workspace]
+
+[[bin]]
+name = "gates"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+wgt = { package = "wgt-model", path = "../../crates/wgt-model" }

@@ -10,11 +10,9 @@ frozen updater: f32[1,1] = [0.5]
 frozen router: f32[1,1] = [1]
 
 fn forward(x) {
-    let observation = slice(x, 0, 1);
-    let query = slice(x, 1, 1);
-    let delta = linear(observation, updater);
-    let old = read(memory);
-    let next = add(old, delta);
+    let observation = slice(x, 0, 1), query = slice(x, 1, 1),
+        delta = linear(observation, updater), old = read(memory),
+        next = add(old, delta);
     # 写回立即影响本次后续计算，仅在成功返回时提交；预算/数值错误回滚。
     write(memory, next);
     let gate = linear(observation, router);

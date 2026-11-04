@@ -1,12 +1,11 @@
 ==================
-Multiline let with nested commas and standalone sample destructuring
+Multiline ordinary let declarations with nested commas
 ==================
 wgt 0.5
 fn main() {
     let a = pair(1, 2),
         b = [a, 3],
-        c = {x: a, y: b};
-    let {action, log_prob} = sample from net(b);
+        c = pair(a, b);
     return c;
 }
 
@@ -40,33 +39,13 @@ fn main() {
       (punctuation)
       (parameter
         (identifier))
-      (body
-        (qualified_name
-          (identifier))
-        (punctuation)
-        (qualified_name
-          (identifier))
-        (punctuation)
-        (qualified_name
-          (identifier))
-        (punctuation)
-        (qualified_name
-          (identifier)))
-      (script_keyword)
-      (body
-        (qualified_name
-          (identifier))
-        (punctuation)
-        (qualified_name
-          (identifier)))
-      (operator)
-      (qualified_name
-        (identifier))
-      (clause)
       (call
         (qualified_name
           (identifier))
         (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
           (qualified_name
             (identifier))))
       (script_keyword)

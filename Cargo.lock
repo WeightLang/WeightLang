@@ -2163,6 +2163,7 @@ dependencies = [
  "bytemuck",
  "fuser",
  "libc",
+ "libloading",
  "pollster",
  "reqwest",
  "safetensors",

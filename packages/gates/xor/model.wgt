@@ -1,30 +1,11 @@
 wgt 0.5
 # Published as github.com/WeightLang/WeightLang/packages/gates/xor_mlp.
+# 定义 2→8→1 tanh/sigmoid 模型；参数由显式初始化请求按 seed=42 生成，未训练。
 model xor_mlp
-
-input  bits: f32[2]
+input bits: f32[2]
 output prob: f32[1]
-
 layer hidden: linear(in=2, out=8)
-layer act:    tanh
-layer head:   linear(in=8, out=1)
-layer out:    sigmoid
-
-# 使用同一组参数学习完整真值表；不是通用逻辑实现或泛化评估。
+layer act: tanh
+layer head: linear(in=8, out=1)
+layer out: sigmoid
 init seed=42
-fn main() {
-    let net = xor_mlp("adam"), inputs = [[0,0], [0,1], [1,0], [1,1]], targets = [[0], [1], [1], [0]], loss = 0;
-    for step in range(0, 1500) {
-        loss = train net on inputs against targets { rate: 0.05; loss: mse; };
-    }
-    let correct = 0;
-    for i in range(0, 4) {
-        let prediction = net(inputs[i])[0] >= 0.5;
-        if prediction == (targets[i][0] >= 0.5) { correct = correct + 1; }
-    }
-    metric("truth_table_correct", correct);
-    metric("truth_table_total", 4);
-    metric("final_mse", loss);
-    assert correct == 4, "truth table failed";
-    return net;
-}

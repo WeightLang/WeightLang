@@ -1,0 +1,24 @@
+wgt 0.5
+operators Activation
+
+# swish(x: f32[N]) -> f32[N], N is a feature axis, not a batch.
+# Stable sigmoid gates matching features; no weights or state are allocated.
+fn swish(x) {
+    let probability = sigmoid(x), gated = x * probability;
+    return gated;
+}
+
+# swiglu(gate: f32[N], value: f32[N]) -> f32[N], no broadcasting.
+# Both projected branches are explicit inputs. The model owns projection
+# weights and decides whether repeated calls share them; this helper is pure.
+fn swiglu(gate, value) {
+    let activated = swish(gate);
+    return activated * value;
+}
+
+# squared_relu(x: f32[N]) -> f32[N]. Negative/zero features have zero gradient.
+# The feature axis is unchanged; overflow follows the underlying f32 contract.
+fn squared_relu(x) {
+    let active = relu(x);
+    return square(active);
+}

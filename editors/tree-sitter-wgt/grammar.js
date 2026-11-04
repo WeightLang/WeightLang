@@ -1,9 +1,5 @@
 // An error-tolerant editor grammar, not a replacement for WeightLang validation.
-// Newlines terminate declarations; function bodies use balanced braces and semicolons.
-// Comma-separated let groups use the same balanced body items as single let;
-// nested call/list/record commas stay inside their balanced containers.
-// Indentation is deliberately not semantic here: declarations remain flat in the
-// tree, so editing an unfinished block does not hide later model declarations.
+// Balanced declarations intentionally preserve incomplete model syntax while editing.
 module.exports = grammar({
   name: 'wgt',
   extras: $ => [/[ \t\r]+/, $.comment],
@@ -12,14 +8,25 @@ module.exports = grammar({
     source_file: $ => seq(repeat(choice($._newline, seq($._statement, $._newline))), optional($._statement)),
     _newline: _ => /\n/,
     comment: _ => /#[^\n]*/,
-    _statement: $ => choice($.model_declaration, $.operators_declaration, $.block_declaration, $.layer_declaration,
-      $.port_declaration, $.constant_declaration, $.dimension_declaration,
-      $.directive, $.data_row, $.function_declaration, $.instance_declaration),
-    instance_declaration: $ => seq(choice('agent','environment'), field('name',$.identifier), repeat($._newline), $.body),
+    _statement: $ => choice($.module_declaration, $.prelude_declaration, $.learn_declaration, $.model_declaration, $.operators_declaration, $.block_declaration, $.layer_declaration,
+      $.port_declaration, $.constant_declaration, $.dimension_declaration, $.directive, $.native_declaration, $.data_row,
+      $.function_declaration, $.instance_declaration),
+    learn_declaration: $ => choice(
+      seq('learn', field('name', $.identifier), ':', 'float', '=', field('initializer', $.number), ';'),
+      seq('learn', field('name', $.identifier), ':', 'float', '>', field('lower_bound', $.number), '=', field('initializer', $.number), ';'),
+      seq('learn', field('name', $.identifier), ':', 'float', 'in', field('lower_bound', $.number), '..=', field('upper_bound', $.number), '=', field('initializer', $.number), ';'),
+      seq('learn', field('name', $.identifier), ':', 'int', 'in', field('lower_bound', $.number), '..=', field('upper_bound', $.number), '=', field('initializer', $.number), ';'),
+      seq('learn', field('name', $.identifier), ':', 'bool', '=', field('initializer', $.literal), ';')),
+    module_declaration: $ => seq('module', field('name', $.identifier)),
+    prelude_declaration: $ => seq('prelude', 'native', field('version', $.number), ';'),
+    instance_declaration: $ => seq(choice('agent', 'environment'), field('name', $.identifier), repeat($._newline), $.body),
     function_declaration: $ => seq(optional('async'), 'fn', field('name', $.identifier), $.arguments, repeat($._newline), $.body),
-    // Balanced editor structure; semantic validation belongs to the Rust frontend.
     body: $ => seq('{', repeat(choice($._item, $._newline, $.body, $.script_keyword, ';')), '}'),
-    script_keyword: _ => choice('learn', 'collect', 'yield', 'size', 'tasks', 'spawn', 'await', 'let', 'if', 'else', 'while', 'for', 'in', 'break', 'continue', 'return', 'train', 'on', 'rate', 'clip', 'save', 'load', 'reload', 'assert', 'checkpoint', 'json', 'text', 'to', 'using', 'overwrite'),
+    // Keywords with dedicated syntax productions live only in those productions,
+    // avoiding competing token ownership in tolerant bodies and expressions.
+    script_keyword: _ => choice('learn', 'collect', 'yield', 'size', 'tasks', 'spawn', 'await', 'let', 'if', 'else', 'while', 'for', 'in', 'break', 'continue', 'return', 'save', 'load', 'reload', 'assert', 'checkpoint', 'json', 'text', 'to', 'overwrite', 'async', 'sample'),
+    // `from` belongs to clause syntax. Training separators/options belong only
+    // to train_expression/training_options; they are not free body keywords.
     literal: _ => choice('true', 'false', 'null'),
     model_declaration: $ => seq('model', field('name', $.identifier), repeat($._item)),
     operators_declaration: $ => seq('operators', field('name', $.identifier)),
@@ -28,19 +35,24 @@ module.exports = grammar({
     port_declaration: $ => seq(choice('input', 'output', 'target'), field('name', $.identifier), ':', repeat1($._item)),
     constant_declaration: $ => seq('const', field('name', $.identifier), '=', repeat1($._item)),
     dimension_declaration: $ => seq('dim', field('name', $.identifier), repeat($._item)),
-    directive: $ => seq(field('keyword', choice('wgt', 'require', 'use', 'import', 'inherit',
-      'freeze', 'unfreeze', 'data', 'init', 'train', 'config', 'parameter', 'share', 'adapter', 'wtype', 'weight', 'frozen', 'precision', 'return')), repeat1($._item)),
+    directive: $ => seq(field('keyword', choice('wgt', 'require', 'use', 'import', 'inherit', 'freeze', 'unfreeze', 'data', 'init', 'train', 'config', 'parameter', 'share', 'adapter', 'wtype', 'weight', 'frozen', 'precision', 'return')), repeat1($._item)),
     data_row: $ => seq($.array, '->', $.array),
-    _item: $ => choice($.call, $.parameter, $.qualified_name, $.number, $.string,
-      $.array, $.arguments, $.literal, $.operator, $.punctuation, $.clause),
-    clause: _ => choice('from', 'as', 'extends'),
+    _expression: $ => choice($.train_expression, $.using_expression, $._atom),
+    _item: $ => choice($._expression, $.native_declaration),
+    _atom: $ => choice($.call, $.parameter, $.qualified_name, $.number, $.string, $.array, $.arguments, $.literal, $.operator, $.punctuation, $.clause),
+    native_declaration: $ => seq('native', choice('fn', 'intrinsic'), field('name', $.identifier), $.arguments, ';'),
+    train_expression: $ => seq('train', field('model', $._atom), 'on', field('inputs', $._atom), 'against', field('targets', $._atom), choice(seq('using', field('strategy', $._expression)), $.training_options)),
+    using_expression: $ => seq('using', $._expression),
+    training_options: $ => seq('{', repeat1(choice($.training_option, ';')), '}'),
+    training_option: $ => seq(field('name', choice('rate', 'loss', 'clip')), ':', $._item, ';'),
     call: $ => prec(2, seq(field('function', $.qualified_name), $.arguments)),
     qualified_name: $ => prec.right(seq($.identifier, repeat(seq('.', $.identifier)))),
     parameter: $ => prec(1, seq(field('name', $.identifier), '=')),
     arguments: $ => seq('(', repeat(choice($._item, $._newline)), ')'),
     array: $ => seq('[', repeat(choice($._item, $._newline)), ']'),
+    clause: _ => choice('from', 'as', 'extends'),
     identifier: _ => /[A-Za-z_][A-Za-z0-9_]*/,
-    number: _ => /(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?/,
+    number: _ => /(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?/,
     string: _ => /"([^"\\\n]|\\[^\n])*"/,
     operator: _ => choice('->', '==', '!=', '<=', '>=', '//', '&&', '||', '!', '=', '+', '-', '*', '/', '%', '<', '>'),
     punctuation: _ => choice(',', ':', '.'),

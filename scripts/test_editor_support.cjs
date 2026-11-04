@@ -15,26 +15,43 @@ function wgtFiles(dir) {
     return entry.isDirectory() ? wgtFiles(name) : entry.isFile() && entry.name.endsWith('.wgt') ? [name] : [];
   });
 }
-const files = ['examples/native_training', 'examples/self_modifying'].flatMap(dir => wgtFiles(path.join(root, dir)));
-files.push(path.join(root, 'editors/vscode/media/example.wgt'));
+const files = ['packages', 'std', 'tests'].flatMap(dir => wgtFiles(path.join(root, dir)));
+files.push(path.join(root, 'editors/vscode/media/example.wgt'),
+  path.join(root, 'editors/tree-sitter-wgt/test/fixtures/editor_current.wgt'),
+  path.join(root, 'editors/tree-sitter-wgt/test/fixtures/forward.wgt'));
 run('tree-sitter', ['parse', '--quiet', ...files], grammar);
-const sample = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/forward.wgt');
+const sample = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/editor_current.wgt');
 const vocabulary = JSON.parse(fs.readFileSync(path.join(root, 'editors/vocabulary.json'), 'utf8'));
 assert(vocabulary.keywords.includes('against'), 'against must be highlighted as a training keyword');
+assert(!vocabulary.builtins.includes('fit') && !vocabulary.builtins.includes('predict'), 'removed APIs must not be listed as builtins');
+assert(vocabulary.intrinsics.includes('linear') || vocabulary.layers.includes('linear'), 'linear must be highlighted in its supported context');
+assert(!vocabulary.builtins.some(name => name.startsWith('__')), 'internal implementation names must not be public builtins');
 for (const query of ['highlights', 'outline', 'indents', 'brackets']) {
   const captures = run('tree-sitter', ['query', `queries/${query}.scm`, sample], grammar);
   assert(captures.includes('capture:'), `${query}: no captures`);
   if (query === 'highlights') {
-    assert(/function\.builtin[^\n]*`write`/.test(captures), 'write must be a builtin');
-    assert(/function[^\n]*`forward`/.test(captures), 'forward must be a function');
+    assert(/function\.builtin[^\n]*`linear`/.test(captures), 'tensor intrinsic must be highlighted');
+    assert(/function\.builtin[^\n]*`depth_gate`/.test(captures), 'depth_gate tensor intrinsic must be highlighted');
+    assert(/keyword[^\n]*`learn`/.test(captures), 'top-level learn declaration keyword must be highlighted');
+    assert(/variable[^\n]*`depth`/.test(captures), 'learn declaration name must be highlighted as a variable');
+    assert(/keyword[^\n]*`train`/.test(captures), 'train expression keyword must be highlighted');
+    assert(/keyword[^\n]*`against`/.test(captures), 'against keyword must be highlighted');
+    assert(/keyword[^\n]*`using`/.test(captures), 'using keyword must be highlighted');
+    assert(/function[^\n]*`update`/.test(captures), 'train strategy name must be highlighted as a function');
+    assert(/function[^\n]*`save_public`/.test(captures), 'native declaration name must be highlighted');
+    assert(/comment[^\n]*`# @contexts/.test(captures), 'declaration annotations must remain comments');
+    assert(!/function\.builtin[^\n]*`fit`/.test(captures) && !/function\.builtin[^\n]*`predict`/.test(captures), 'removed builtins must not be captured');
   }
   assert.equal(fs.readFileSync(path.join(grammar, `queries/${query}.scm`), 'utf8'),
     fs.readFileSync(path.join(root, `editors/zed/languages/wgt/${query}.scm`), 'utf8'));
 }
 run('xmllint', ['--noout', 'editors/kate/wgt.xml', 'editors/gtksourceview/wgt.lang',
   'editors/WeightLang.tmbundle/Syntaxes/WeightLang.tmLanguage']);
-fs.mkdirSync('/tmp/weightlang', {recursive: true});
-const scratch = fs.mkdtempSync('/tmp/weightlang/editors-');
+const scratchRoot = process.env.CLAUDE_JOB_DIR
+  ? path.join(process.env.CLAUDE_JOB_DIR, 'tmp')
+  : '/tmp/weightlang';
+fs.mkdirSync(scratchRoot, {recursive: true});
+const scratch = fs.mkdtempSync(path.join(scratchRoot, 'editors-'));
 try {
   const script = path.join(scratch, 'check.vim');
   fs.writeFileSync(script, `set nocompatible
@@ -49,6 +66,13 @@ call assert_equal('wgtOperator', synIDattr(synID(2, 14, 1), 'name'))
 call assert_equal('wgtString', synIDattr(synID(3, 19, 1), 'name'))
 call assert_equal('wgtComment', synIDattr(synID(3, 28, 1), 'name'))
 call assert_equal('wgtBuiltins', synIDattr(synID(4, 1, 1), 'name'))
+call append(4, ['let x = train m on xs against ys using update;', 'fit(m); # fit(m)', 'native fn public(value);', 'native intrinsic linear(x, w);'])
+syn sync fromstart
+call assert_equal('wgtKeywords', synIDattr(synID(5, 9, 1), 'name'))
+call assert_notequal('wgtBuiltins', synIDattr(synID(6, 1, 1), 'name'))
+call assert_equal('wgtComment', synIDattr(synID(6, 10, 1), 'name'))
+call assert_equal('wgtNativeDecl', synIDattr(synID(7, 11, 1), 'name'))
+call assert_equal('wgtBuiltins', synIDattr(synID(8, 22, 1), 'name'))
 if len(v:errors) | call writefile(v:errors, '${scratch}/errors') | cquit | endif
 qa!
 `);

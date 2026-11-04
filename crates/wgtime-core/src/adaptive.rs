@@ -64,6 +64,9 @@ pub struct AdaptiveSession {
     wrote: bool,
     pending: Option<Box<AdaptiveSession>>,
     execution_limit: u64,
+    compiled: Option<crate::compiled_forward::CompiledForward>,
+    compiled_forward_calls: u64,
+    compiled_tape_calls: u64,
 }
 
 fn names<'a>(items: impl Iterator<Item = &'a str>) -> Result<HashMap<String, usize>> {
@@ -133,6 +136,11 @@ impl AdaptiveSession {
         let memories = workspace::validate(&program, &regs)?;
         let mut floats = 0usize;
         for p in &program.parameters {
+            if let Some(domain) = &p.learn {
+                ensure!(p.shape == [1] && !p.probability && !p.frozen, "learn parameter must be a trainable scalar");
+                ensure!(p.data.len() == 1, "learn parameter requires one shadow value");
+                domain.validate(p.data[0]).with_context(|| format!("learn {}", p.name))?;
+            }
             if p.probability {
                 ensure!(p.shape == [1], "prob parameter must be scalar");
                 ensure!(
@@ -229,8 +237,8 @@ impl AdaptiveSession {
                             "cannot write frozen parameter: {parameter}"
                         );
                         ensure!(
-                            !program.parameters[p].probability,
-                            "write to prob is unsupported; use optimizer updates"
+                            !program.parameters[p].probability && program.parameters[p].learn.is_none(),
+                            "write to prob/learn is unsupported; use optimizer updates"
                         );
                         ensure!(
                             len(r) == program.parameters[p].data.len(),
@@ -245,12 +253,14 @@ impl AdaptiveSession {
                         bias,
                     } => {
                         let (r, x, w) = (dest(out)?, reg(input)?, param(weight)?);
+                        ensure!(program.parameters[w].learn.is_none(), "linear cannot consume raw learn shadow");
                         ensure!(
                             program.parameters[w].shape == [len(r), len(x)],
                             "linear weight must be [output, input]"
                         );
                         let b = bias.as_deref().map(param).transpose()?;
                         if let Some(b) = b {
+                            ensure!(program.parameters[b].learn.is_none(), "linear bias cannot consume raw learn shadow");
                             ensure!(
                                 program.parameters[b].shape == [len(r)],
                                 "bias shape mismatch"
@@ -418,6 +428,9 @@ impl AdaptiveSession {
             wrote: false,
             pending: None,
             execution_limit: 0,
+            compiled: None,
+            compiled_forward_calls: 0,
+            compiled_tape_calls: 0,
             initialized: vec![false; program.registers.len()],
             program,
             ops,
@@ -433,6 +446,33 @@ impl AdaptiveSession {
             optimizer: None,
             custom_optimizer: None,
         })
+    }
+
+    /// Require native forward execution for this instance, including training tapes.
+    /// Compilation and workspace admission complete before changing execution mode.
+    pub fn enable_compiled(&mut self) -> Result<()> {
+        self.ensure_idle()?;
+        if self.compiled.is_some() { return Ok(()); }
+        let remaining = self.memory_limit.checked_sub(self.managed_bytes)
+            .context("compiled workspace exceeds session memory budget")?;
+        let compiled = crate::compiled_forward::CompiledForward::compile(&self.program, remaining)?;
+        if let Some(loss) = &self.program.loss {
+            // Validate the complete executable definition before publishing an instance.
+            crate::compiled_forward::CompiledForward::compile(loss, self.memory_limit)?;
+        }
+        self.managed_bytes = self.managed_bytes.checked_add(compiled.workspace_bytes())
+            .context("compiled memory size overflow")?;
+        self.compiled = Some(compiled);
+        Ok(())
+    }
+
+    pub fn is_compiled(&self) -> bool { self.compiled.is_some() }
+    pub fn execution_backend(&self) -> &'static str {
+        if self.is_compiled() { "native-cpu" } else { "reference-interpreter" }
+    }
+    /// Successful native calls and the subset that recorded a gradient tape.
+    pub fn compiled_forward_counts(&self) -> (u64, u64) {
+        (self.compiled_forward_calls, self.compiled_tape_calls)
     }
 
     pub fn managed_bytes(&self) -> usize {
@@ -479,6 +519,7 @@ impl AdaptiveSession {
         ensure!(!p.frozen, "frozen parameter");
         ensure!(values.len() == p.data.len(), "parameter length mismatch");
         ensure!(values.iter().all(|v| v.is_finite()), "nonfinite parameter");
+        if let Some(domain) = &p.learn { domain.validate(values[0])?; }
         let revision = self.revision.checked_add(1).context("revision overflow")?;
         p.data.copy_from_slice(values);
         self.revision = revision;
@@ -564,6 +605,30 @@ impl AdaptiveSession {
         max_steps: u64,
         tape: Option<&mut autodiff::Tape>,
     ) -> Result<(usize, bool)> {
+        if let Some(compiled) = &mut self.compiled {
+            let parameters: Vec<&[f32]> = self.program.parameters.iter()
+                .map(|parameter| parameter.data.as_slice()).collect();
+            let ops = &self.ops;
+            let mut returned = None;
+            let mut tape = tape;
+            let traced = tape.is_some();
+            let result = compiled.run_with_hook(&self.registers[self.input], &parameters, max_steps, traced, &mut |index, value| {
+                let op = ops[index];
+                if let Op::Return(register) = op {
+                    returned = Some(register);
+                } else if let Some(tape) = tape.as_deref_mut() {
+                    tape.record(op, value)?;
+                }
+                Ok(())
+            });
+            self.steps = compiled.last_steps();
+            let output = result?;
+            let register = returned.context("compiled forward did not return")?;
+            self.registers[register].copy_from_slice(&output);
+            self.compiled_forward_calls = self.compiled_forward_calls.saturating_add(1);
+            if traced { self.compiled_tape_calls = self.compiled_tape_calls.saturating_add(1); }
+            return Ok((register, false));
+        }
         self.execute_slice(max_steps, tape, u64::MAX)?
             .context("unexpected execution suspension")
     }
@@ -638,8 +703,12 @@ impl AdaptiveSession {
                     output = Some(r);
                 }
                 Op::Read(r, p) => {
-                    let data = &self.program.parameters[p].data;
+                    let parameter = &self.program.parameters[p];
+                    let data = &parameter.data;
                     self.scratch[..data.len()].copy_from_slice(data);
+                    if let Some(domain) = &parameter.learn {
+                        self.scratch[0] = domain.read(data[0]);
+                    }
                     output = Some(r);
                 }
                 Op::Write(p, r) => {

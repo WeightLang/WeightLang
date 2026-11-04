@@ -222,6 +222,9 @@ impl AdaptiveSession {
                 original.len() == value.len() && value.iter().all(|v| v.is_finite()),
                 "invalid temporary parameter"
             );
+            if let Some(domain) = &self.program.parameters.iter().find(|p| &p.name == name).context("unknown temporary parameter")?.learn {
+                domain.validate(value[0])?;
+            }
             bindings.insert(name.clone(), value.clone());
         }
         let binding_bytes = candidates.iter().try_fold(0usize, |n, v| {
@@ -283,6 +286,7 @@ impl AdaptiveSession {
                 value.iter().all(|v| v.is_finite()),
                 "nonfinite candidate parameter"
             );
+            if let Some(domain) = &p.learn { domain.validate(value[0])?; }
         }
         let steps = self
             .custom_optimizer

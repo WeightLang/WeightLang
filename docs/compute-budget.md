@@ -95,7 +95,7 @@ WGT_HOST_POLICY=/absolute/path/policy.json wgt run examples/native_training/host
 
 宿主策略可额外设置 `cpu_seconds`（1..1000000000 的整数秒）和
 `address_space_bytes`（正整数，最大 i64::MAX）。未设置时不改变原有执行模式。
-设置任一项时，`wgt run`、`wgt-native script` 和生成的 AOT 可执行文件会启动独立工作进程。
+设置任一项时，`wgt run` 和生成的 AOT 可执行文件会启动独立工作进程。Rust 嵌入接口不因此自动切换到工作进程，硬限制行为见下文。
 Linux 内核在执行前设置 CPU 的 RLIMIT_CPU 和地址空间的 RLIMIT_AS，软硬上限相同；
 超过 CPU 时间会杀死工作进程，地址空间分配失败可能导致工作进程退出，父进程报告失败。
 父进程还按 deadline_ms 监控并终止超时工作进程。检查与编译不会设置限制或运行训练。

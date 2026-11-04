@@ -1,5 +1,7 @@
 # Rust 主程序与 WGT 模型契约
 
+架构类别覆盖及逐项验收计划见[模型架构覆盖矩阵](architecture-coverage.md)；该矩阵是设计清单，不构成当前语法或能力支持承诺。
+
 Rust 控制应用、数据准备、I/O、调度和训练循环；WGT 只描述模型结构、模型内部计算及可选的可微 loss。Rust 库提供内嵌源码、编译期文件和运行期文件三个入口，共用一个模型定义类型和解析器。模型执行、参数与优化器状态由机器级唯一 `wgtime` 服务持有；应用只持 IPC 连接和实例句柄，连接失败明确报错，不回退到进程内核心。
 
 ## 当前实现与本轮目标
@@ -7,6 +9,16 @@ Rust 控制应用、数据准备、I/O、调度和训练循环；WGT 只描述�
 当前源码已拆成 `wgt-language` 静态解析库、`wgtime-core` 执行库、`wgtime` IPC 协议及客户端、`wgtime-control` 脚本客户端和 `wgtime-service` 服务。生产 CLI 不依赖 core，旧脚本控制路径仍保留在源码中，不能将其视为新模型 API。下文区分已实现的静态定义/宏与正在接入验收的 Rust 客户端接口；均不是已发布能力，验证状态见下文。
 
 可复用入口是 `wgt_language::source::{split,graph}`、`adaptive::{parse,parse_with_functions}` 和共用函数 AST。当前 `adaptive::Program` 已包含参数 `data`，`source::Graph` 包含初始化 seed；它们是 lowering 产物，不能直接等同于不持有运行权重的模型定义。`ModelDefinition` 必须把结构、参数 schema 和初始化说明，与服务中的已初始化/已加载实例区分开。
+
+## 服务端 compiled forward
+
+新 Rust 模型入口在服务初始化时把固定 shape 模型 IR 生成为 C，再调用本机 `cc` 编译共享库。推理通过 `wgt_forward_v1` 单一原生入口执行固定控制流，不逐条分派 IR；这是服务侧即时 AOT，不是 Rust 宏直接生成机器码。初始化需要 Linux、可用 C 编译器和可写磁盘缓存；缺少工具、编译失败或超时明确报错，不回退 VM。
+
+入口 ABI 接收输入、当前参数指针表、工作区、输出、预算与可选 trace hook；参数独立于机器码，每次调用提供当前权重，因此训练或重新绑定权重不会复用旧值。代码仅由校验后的 IR、shape、有限常量生成，不拼接用户标识符或任意源码。编译使用独立私有临时目录，30 秒超时终止并回收子进程；已加载库以完整生成源码/ABI为进程内缓存键，最后实例释放后卸载并清理临时文件。默认缓存根为 `.cache/weightlang/compiled-forward`，可通过 `WGTIME_COMPILE_CACHE` 指定磁盘路径。
+
+首批覆盖 linear、逐元素运算、激活、归约、slice、softmax、gate/route，以及有预算的标签/分支/跳转。推理保留 gate/route 端点惰性求值；训练前向使用相同原生入口并启用 trace hook，记录实际张量结果供既有反向 tape 使用。反向传播仍遍历梯度 tape，不等同于 compiled backward。模型内部参数写入和工作内存指令尚未接入编译器，初始化明确拒绝；这是待补的模型状态能力，不应作为永久语言边界或广泛神经架构已覆盖的证明。
+
+本地 `compiled_forward`、`compiled_training`、`compiled_control_flow` 三个测试套件共 8 项通过，覆盖真实编译加载、当前权重、梯度、惰性分支、有限值、错误 shape 和预算。服务及 gates/iris 的 compiled 回归须另行验收，旧 VM 结果不能替代。
 
 ## 共享定义与 crate 边界
 
@@ -20,7 +32,7 @@ Rust 控制应用、数据准备、I/O、调度和训练循环；WGT 只描述�
 
 `ModelDefinition` 是可重复使用的静态值，至少含模型名、语言/IR 版本、单输入/输出合同、可选 loss target、参数 schema、计算计划和声明的初始化说明。字段通过受校验构造器建立；宏和运行期解析不能各自维护一套语义。定义可包含声明的初始化常量，但没有已训练状态、优化器状态或活跃设备资源；复制定义不复制服务模型。首期只承诺当前已实现的单个 f32 向量输入，保留输出 logits/probabilities 类型；不据此宣称多输入、batch forward、cache 或任意 dtype 支持。
 
-`ModelDefinition::parse(source: &str) -> Result<Self>` 与 `ModelDefinition::from_file(path: impl AsRef<Path>) -> Result<Self>` 已在 language 库实现并通过定点测试。二者只解析和检查；首期所有入口一致拒绝 import，不解析本地或包模块。源码上限 1 MiB，单个参数和模型总参数上限 16,777,216 个元素，shape 为 1..8 个正整数轴；乘法溢出、长度不匹配和非有限初始化值均拒绝。参数初始化列表以流式方式检查，不在定义中构造权重向量。模型专用入口复用现有 parser，但拒绝 `fn main`、agent/environment、应用 I/O、tasks、训练/保存语句和宿主控制函数；允许模型 forward/loss 及现 lowering 能接受的纯张量辅助函数。不得仅解析成功就声称 forward 已执行。
+`ModelDefinition::parse(source: &str) -> Result<Self>` 与 `ModelDefinition::from_file(path: impl AsRef<Path>) -> Result<Self>` 已在 language 库实现并通过定点测试。二者只解析和检查；字符串入口支持 `std/activation`、`std/loss` 纯张量逻辑模块，文件入口另支持相对文件的 `./` 计算模块及嵌套导入。解析将依赖闭合为自包含源码；服务端可重新验证而不读取客户端目录。不提供宿主模块或包注册表查找。新增导入行为的定点验收状态单独记录，不能由原有无 import 测试推断。源码上限 1 MiB，单个参数和模型总参数上限 16,777,216 个元素，shape 为 1..8 个正整数轴；乘法溢出、长度不匹配和非有限初始化值均拒绝。参数初始化列表以流式方式检查，不在定义中构造权重向量。模型专用入口复用现有 parser，但拒绝 `fn main`、agent/environment、应用 I/O、tasks、训练/保存语句和宿主控制函数；允许模型 forward/loss 及现 lowering 能接受的纯张量辅助函数。不得仅解析成功就声称 forward 已执行。
 
 ## 三种 Rust 入口
 
@@ -44,7 +56,7 @@ let output = model.forward(&[3.0])?;
 assert_eq!(output, vec![6.0]);
 ```
 
-`model!` 首期接受 Rust 字符串字面量，避免 Rust token 重排改变 WGT 换行/注释语义；token 形式不是首批承诺。`include_model!` 接受相对消费 crate `CARGO_MANIFEST_DIR` 的路径，生成 `include_str!` 引用以跟踪源码重编译。两个宏编译时复用同一解析器验证，展开式首次构造时仍调用纯 `ModelDefinition::parse`，不是预生成静态 IR；均不在编译期间连接服务、执行 forward 或创建制品。宏默认使用 `::wgt` 公共库路径，依赖改名可用 `crate = alias` 显式指定。运行期文件入口允许部署后更换定义；所有入口拒绝 import。
+`model!` 首期接受 Rust 字符串字面量，避免 Rust token 重排改变 WGT 换行/注释语义；token 形式不是首批承诺。`include_model!` 接受相对消费 crate `CARGO_MANIFEST_DIR` 的路径，嵌入完整闭合源码，并对根文件和每个传递依赖生成 `include_str!` 引用以跟踪重编译；产物运行不再查找模型文件。两个宏编译时复用同一解析器验证，展开式首次构造时仍调用纯 `ModelDefinition::parse`，不是预生成静态 IR；均不在编译期间连接服务、执行 forward 或创建制品。宏默认使用 `::wgt` 公共库路径，依赖改名可用 `crate = alias` 显式指定。运行期文件入口允许部署后更换定义，解析完成后不再依赖原文件。模块只提供不可变 let/return 的纯张量计算，不拥有权重或应用状态；循环、路径越界、重复别名和宿主模块明确拒绝，完整闭包限额与标准函数合同见[模型内部标准库](standard-library.md)。
 
 ## 显式生命周期与训练
 

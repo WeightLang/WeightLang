@@ -1841,6 +1841,19 @@
       "defaults": {}
     },
     {
+      "name": "depth_gate",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward"
+      ],
+      "purpose": "Hard 0/1 gate for a learn int depth parameter with identity surrogate gradient.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression",
+      "signature": "depth_gate(depth_parameter_name,literal_index)",
+      "defaults": {}
+    },
+    {
       "name": "resource_state",
       "kind": "intrinsic",
       "contexts": [

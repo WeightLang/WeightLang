@@ -1,23 +1,29 @@
 ---
 name: wgt-development
-description: 编写和验证本仓库当前原生 WGT 0.5 模型、训练与概率控制表达式。
+description: 编写和验证本仓库当前 WGT 模型定义与 Rust 主程序边界。
 ---
 
 模型源码入口必须命名为 `model.wgt`。每个独立模型/训练示例一个目录，使用 `<模型或示例名>/model.wgt`，不要创建 `main.wgt`、`train.wgt` 或功能命名的模型入口。`fn main()` 是执行函数，不是入口文件名。迁移或移动入口时同步命令、文档链接、测试引用及相对数据/保存路径；标准库模块和制品的 `source.wgt` 快照不改名。
 
-以 docs/reference.zh-CN.md、docs/differentiable-programs.md 和 Rust 实现为准；不是已发布功能承诺。
+以 docs/reference.zh-CN.md、docs/differentiable-programs.md 和 Rust 实现为准；不是已发布功能承诺。Rust host 集成目标使用 edition 2024；WGT 语言版本仍以实际 parser 声明为准，不能因 Rust edition 将其改写为 WGT 版本。
 
 ## 架构迁移方向
 
-新模型工作流由 Rust 应用控制，WGT 专注描述模型结构、模型内部计算及可选的可微 loss。Rust 负责数据准备、I/O、调度、训练循环和服务连接。不要继续扩展旧的通用 WGT 脚本控制路径来实现新的 Rust 模型 API；旧语法和参考保留为当前实现/迁移历史，仍按已有 parser/runtime 契约描述，不代表新工作流的目标接口。
+Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT 与 `std/` 聚焦可复用模型架构及模型内部参数/张量流、子模块、分支、循环和状态，并可定义可微 loss。旧通用 WGT 宿主脚本架构正在退出，不新建宿主控制脚本，也不将其描述为持续支持方向；这不表示现有代码已经删除。
 
 `wgt-model` facade 的 Rust 库名为 `wgt`，当前提供 `model!`、`include_model!` 字符串宏以及 `ModelDefinition::parse`、`ModelDefinition::from_file`。内嵌源码、编译期文件和运行期文件入口共享模型定义解析语义。上述能力已在本地实现并通过定点验证，尚未发布。不要把 Rust 宏形式加入 WGT 语法说明，也不要用解析成功推断 forward 已执行；宏和定义解析只构造/检查定义，不连接服务、不执行模型。
 
-当前模型输入合同仅支持单个 f32 向量；三个定义入口均拒绝 `import`。不要宣称多输入、batch forward、cache、任意 dtype 或模块导入支持。模型定义与服务中初始化/加载的实例、训练权重和优化器检查点是不同对象；加载定义不得隐式执行训练或创建运行状态。准确接口及其余边界以 [docs/native-backend.md](../../../docs/native-backend.md) 为权威。
+当前模型入口支持单个 f32 向量；字符串入口可导入 `std/activation`、`std/loss`，文件入口还可解析相对路径纯计算模块及嵌套导入。不得宣称多输入、batch forward、cache 或任意 dtype 支持。模型定义与服务中初始化/加载的实例、训练权重和优化器检查点是不同对象；加载定义不得隐式执行训练或创建运行状态。准确接口及实现状态以 [docs/native-backend.md](../../../docs/native-backend.md) 为权威。
 
-权重互通：`save weights net to "weights.safetensors";` 与 `reload weights net from "weights.safetensors" using "sgd";`；绑定显式构造的源模型，标准safetensors仅有限F32精确name/shape/C-row-major，不猜图/改名/转置/下载。成功保留句柄别名、重置优化器/步数/自定义状态，失败原子保留。view/add只存独立参数；weights不含图或checkpoint训练状态，不宣称torch.load完整兼容。示例与限制见docs/file-io.md。
-只接受 wgt 0.5，模型、forward、loss 和 main 可在同文件；执行不得依赖 Python。
-原生`agent Actor {policy; [critic;] learner:update;}`显式模型别名；`learn actor {...yield record;}`整批后一次静态同步二参learner(actor,batch)，using可覆盖，无默认报错，普通model必须using。采集按policy identity拒绝所有写/重载/optimizer reset，错误/return释放且不调用learner；learner前释放，可自行多步更新。
+### 可学习架构参数
+
+顶层模型定义支持标量 `learn`，当前本地定点验证覆盖解释执行、真实 C 编译，以及 Rust facade 真实 daemon 的三入口训练/推理与权重保存、载入续训。核心组合测试覆盖 adaptive、compiled forward 和 learn 共 17 项，daemon 集成 1 项；这是局部验证，不等于全仓验收或已发布。语法和边界见 [docs/learnable-architecture-parameters.md](../../../docs/learnable-architecture-parameters.md)。
+
+`learn` 每项独占一行且以分号结束：float 无界、float 闭区间、float 严格下界、bool 字面量及有界 int。float 在 SGD/Adam 更新后投影；int/bool 使用连续 shadow，硬读取并以 identity STE 反传。`depth_gate` 仅用于 tensor forward，配合显式 `route` 展开有限计算段并共享参数；它不提供自动 repeat 或可微动态循环。learn 参数读取为 f32[1]，可参与 gate/mix，不能直接作为 linear 原始 bias 或被 write。`choice` 不支持。
+
+权重互通：`save weights net to "weights.safetensors";` 与 `reload weights net from "weights.safetensors" using "sgd";`；绑定显式构造的源模型，标准safetensors仅有限F32精确name/shape/C-row-major，不猜图/改名/转置/下载。成功保留句柄别名、重置优化器/步数/自定义状态，失败原子保留。view/add只存独立参数；weights不含图或checkpoint训练状态，不宣称torch.load完整兼容。learn 参数权重保存其 shadow，重新加载必须绑定声明相同 learn 元数据的模型定义。示例与限制见docs/file-io.md。
+只接受 wgt 0.5，模型、forward、loss 和 main 可在同文件。顶层 `learn` 是模型架构参数声明，不是 `main` 中的宿主训练控制流；训练循环与应用控制由 Rust 主程序负责。执行不得依赖 Python。
+旧通用 WGT 宿主脚本的 `agent Actor {policy; [critic;] learner:update;}` 与 `learn actor {...yield record;}` 属于不同的整批采集/learner 回调机制；不将它们与顶层模型定义中的标量 learn 参数混为一谈，也不把旧脚本机制作为新模型 API 的发展方向。保留中的现有实现契约见 docs/agents-environments.md。
 原生environment声明observation/action/feedback固定f32宽度及reset/step；Ctor(state,seed)构造reset一次，reset->{state,observation}，step->{state,observation,feedback,terminated,truncated}；同步纯WGT，state固定schema，有界有限记录字面量，全部验证后state/RNG原子提交。结束后拒step至reset，实例RNG隔离，reset重放seed，不影响host RNG。actor.act仅类别sample，logprob先取actor.policy局部变量。资源递归拒save json/async，无agent/env整实例checkpoint，仅显式policy checkpoint。完整签名/限制docs/agents-environments.md，真实例子examples/native_training/agent_environment/model.wgt。
 语境能力见 language/source_capabilities.json；共同正负语料在 language/conformance.json。
 连续声明 `let a=expr, b=expr;` 在共用 parser 展开为原有 Stmt::Let 序列；从左到右各求值一次，后项可引用前项，无整组回滚。host/async/forward/loss 继承原有作用域和重名规则；纯 operator 在支持它的工作区同样展开。嵌套调用/列表/record 的逗号不分隔声明；无元组/新赋值语法或尾逗号，sample 解构及 collect/learn 须独立声明。完整例子 examples/native_training/continuous_let/model.wgt；验证 tests/continuous_let.rs 与真实 AOT。
@@ -31,8 +37,8 @@ language/primitive_specs.json 是制品 graph 原语域，不是源码内置表�
 仅纯数据参数/返回值，嵌套async await可用；拒绝嵌套tasks、async内spawn/tasks、模型等资源参数/返回、host/compute活跃上下文。await net(x)没有异步模型执行路径，不能宣称支持。
 资源预算见 docs/compute-budget.md：WGT_HOST_POLICY 单次解析，权限/HTTP/状态共用资源初始化前固定的绝对截止时间；子scope只收紧，错误退出恢复原父deadline与上限但不退已消费额度。HTTP仅固定授权端点GET，不跟重定向、不带环境代理/认证，剩余不足1ms拒绝；不提供POST/SSE/共享异步网络账本或完整沙箱。真实AOT验证用 crates/wgt/tests/resource_execution.rs，不能用compiled::run替代生成二进制。
 await sleep(ms)与await load text from path通过固定两线程/64队列阻塞池执行；文本最多64MiB，metadata后按大小预留共享操作预算，worker按实际字节结算，未用预留恰一次归还。解释/AOT均须真实运行，不把解析通过当并发支持；AOT生成原生future，不回放AST。
-`train model on inputs against targets using strategy` 静态调用同单元同步用户fn strategy(model,inputs,targets)，
-三参各求值一次且左至右、策略调用一次并返回实际结果；局部同名值不覆盖静态目标，拒绝builtin/构造器/async/错误形参。
+`train model on inputs against targets using strategy` 是旧通用 WGT 脚本训练接口，静态调用同单元同步用户fn strategy(model,inputs,targets)，
+三参各求值一次且左至右、策略调用一次并返回实际结果；局部同名值不覆盖静态目标，拒绝builtin/构造器/async/错误形参。新 Rust 主程序模型 API 不通过扩展此脚本入口实现。
 结果限纯数据，允许null，最大深度32、计量1MiB，拒绝资源句柄。超参写在策略体内，与配置块互斥；策略决定零/多次显式commit，无隐式提交或重试；失败不撤销已成功commit。
 例examples/native_training/train_strategy/model.wgt；完整契约docs/native-training.md。
 CPU forward 自定义算法：以 none 构造，differentiate(model,inputs,targets) 对受限 fn loss 求批次平均梯度；
@@ -44,7 +50,7 @@ forward-training.v2 checkpoint保存自定义状态和步数，仍读旧v1；不
 differentiate_at(gradient,candidates) 在临时参数上复用首次句柄保留的同一f32批次求一阶梯度，
 新快照parameters/state/steps仍是原提交基准，loss/gradients来自临时点；不写live模型，保留批次与绑定计入64MiB。
 examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原子提交定义可修改SAM+SGD/动量，无高阶AD或SAM专用对象。
-普通函数中保存推理模型用 `save model VALUE to PATH;`，读取用 `load model from PATH using OPTIMIZER` 创建新优化器；
+旧通用 WGT 脚本普通函数中保存推理模型用 `save model VALUE to PATH;`，读取用 `load model from PATH using OPTIMIZER` 创建新优化器；Rust 主程序模型 API 的生命周期与权重入口见 [docs/native-backend.md](../../../docs/native-backend.md)。
 保存训练断点用 `save checkpoint VALUE to PATH;`，读取用 `load checkpoint from PATH` 恢复原优化器状态。
 旧 model/save/restore 仅为 legacy 别名，新例子使用新名；所有参数必填，保存拒绝已有目标。
 本地运行 `cargo test -p wgtime-core --test source_conformance` 与 `node scripts/test_source_conformance.cjs`。
@@ -91,7 +97,7 @@ examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原�
 公共语言变更同步主参考、专题文档和此技能；运行 git diff --check。
 模型构造/加载与训练分离；保留模型放 weights/，不覆盖已有产物。遵循 docs/storage.md。
 
-标准库完整契约见 docs/standard-library.md。std/ 只保留真实声明和可导入模块，旧图占位与带 main 的分类演示已删除，不要恢复它们来证明执行支持。纯张量逻辑模块 std/activation 导出 swish(x)、swiglu(gate,value)、squared_relu(x)，非空同形 f32[N] 到 f32[N]；std/loss 导出 squared_error(prediction,target)、half_squared_error(prediction,target)、categorical_logits(logits,target)，同形 f32[N] 到 f32[1]，前两项特征均值、最后一项类别加权负对数似然之和。全部参数必填，无默认值/广播/隐含batch；不创建权重或状态，target分布由调用方保证，CPU梯度继承展开原语。使用逻辑名导入，不暴露内部 /operators 路径。普通列表原生函数无需import，不能据此用于forward/loss。
+标准库完整契约见 docs/standard-library.md。`std/` 的旧用户原生声明与宿主模块已移除；当前模型纯张量库仅有 `std/activation` 和 `std/loss`，不要恢复旧声明或宿主模块来证明模型执行支持。纯张量逻辑模块 std/activation 导出 swish(x)、swiglu(gate,value)、squared_relu(x)，非空同形 f32[N] 到 f32[N]；std/loss 导出 squared_error(prediction,target)、half_squared_error(prediction,target)、categorical_logits(logits,target)，同形 f32[N] 到 f32[1]，前两项特征均值、最后一项类别加权负对数似然之和。全部参数必填，无默认值/广播/隐含batch；不创建权重或状态，target分布由调用方保证，CPU梯度继承展开原语。使用逻辑名导入，不暴露内部 /operators 路径。普通列表原生函数无需import，不能据此用于forward/loss。
 数据接口：zeros(count)、ones(count)、full(count,value)、linspace(start,end,count)、
 one_hot(index,classes)、concat(x,y)、vector_slice(x,start,end)、gather(x,indices)、
 compress(x,mask)、reverse(x)。参数全部必填；有限 f64 一维列表，允许空列表；

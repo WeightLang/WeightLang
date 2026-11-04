@@ -7,14 +7,21 @@ fn main() { return (x[:])[1:3][0]; }
 ---
 
 (source_file
-  (directive (number))
+  (directive
+    (number))
   (function_declaration
     (identifier)
     (arguments)
     (body
       (script_keyword)
       (arguments
-        (qualified_name (identifier))
-        (array (punctuation)))
-      (array (number) (punctuation) (number))
-      (array (number)))))
+        (qualified_name
+          (identifier))
+        (array
+          (punctuation)))
+      (array
+        (number)
+        (punctuation)
+        (number))
+      (array
+        (number)))))

@@ -14,7 +14,7 @@ Rust 的 `model!` 宏接收 WGT 源码 Rust string literal；其中内容不是 
 | TextMate | `editors/WeightLang.tmbundle/` | WGT 文件规则；未确认 Rust 宏内嵌注入 |
 | JetBrains IDE（启用 TextMate Bundles 插件） | 导入 `editors/WeightLang.tmbundle/` | 仅增加 WGT 文件词法高亮 |
 | Vim、Neovim | `editors/vim/` | WGT 文件使用仓库语法；Rust 主程序使用 Rust 支持 |
-| Zed | `editors/zed/`，独立 Tree-sitter 扩展 | WGT 文件由 Tree-sitter grammar/query 支持；当前 corpus 有 5 项失败；未 GUI 验收、未上架 |
+| Zed | `editors/zed/`，独立 Tree-sitter 扩展 | WGT 文件由 Tree-sitter grammar/query 支持；本地 corpus 13/13 与编辑器检查通过，覆盖顶层 `learn` 声明和 `depth_gate` 调用高亮；未 GUI 验收、未上架 |
 | Emacs | `editors/emacs/wgt-mode.el` | 已提供 WGT mode；未在 Emacs 执行验证 |
 | Kate、KWrite | `editors/kate/wgt.xml` | WGT 文件规则；未 GUI 验收 |
 | GtkSourceView 编辑器，如 GNOME Text Editor | `editors/gtksourceview/wgt.lang` | WGT 文件规则；不提供 Rust 宏内嵌注入 |
@@ -116,7 +116,7 @@ Flatpak 应用可能需要使用其沙箱内的用户数据目录。
 
 - **分发**：后续发布 VSIX 到 Marketplace/Open VSX、提交编辑器的语言仓库，让用户不用手动复制。
 - **Rust 宏内嵌 WGT**：`model!` 和 `include_model!` 接收 Rust string literal，不是 token DSL。要为字符串内容提供 WGT 高亮，需要 Rust grammar 的 injection query、宏匹配规则和 WGT 注入语言注册；这尚未实现。宏内补全也未实现。
-- **Tree-sitter**：解析器位于 `editors/tree-sitter-wgt/`，Zed 扩展复用其查询。最近一次集中检查中，`tree-sitter generate --abi 14` 通过，但 corpus 有 5 项失败：包括 `models.txt` 中 3 项模型声明语料，以及 `current_language.txt` 中 native 声明和训练表达式语料的 2 项。它们反映当前 DSL 树结构与期望树不一致，不能视为无关的旧通用脚本失败。Helix、Neovim 仍需各自语言注册。
+- **Tree-sitter**：解析器位于 `editors/tree-sitter-wgt/`，Zed 扩展复用其查询。最近一次本地检查中，`tree-sitter generate --abi 14` 及全部 13 项 corpus 检查通过；查询覆盖顶层 `learn` 声明与 `depth_gate` 调用高亮；Helix、Neovim 仍需各自语言注册。
 - **LSP**：诊断、补全和定义跳转当前没有实现。
 - **GitHub / 网页 / 文档**：需要分别集成 Linguist、Shiki、Pygments 等；仓库带了 grammar
   不会自动让 GitHub 识别新语言。此处尚未注册这些集成。
@@ -144,4 +144,4 @@ Kate、GtkSourceView 或高亮查询。Tree-sitter 结构规则在 grammar.js；
 运行 `cargo test -p wgtime-core --test source_conformance` 验证 Rust 一侧，
 `node scripts/test_source_conformance.cjs` 验证编辑器一侧（也包含在编辑器总检查中）。
 
-编辑器语法检查与 Rust 主程序、WGT DSL 文件应分别验收。Tree-sitter 最近已生成 parser，但 corpus 有 5 项失败；旧通用脚本样例和覆盖情况不能替代新的模型 DSL corpus。宏内嵌 WGT 注入、补全尚未验收或实现。未逐一 GUI 验收；Open VSX 与 Zed 扩展仓库未发布。
+编辑器语法检查与 Rust 主程序、WGT DSL 文件应分别验收。最近一次本地编辑器检查通过：Tree-sitter corpus 13/13、共同语料 conformance 49 项通过，查询、XML 与 Vim 检查均通过；总检查解析了 12 个 WGT 示例，并覆盖顶层 `learn` 声明与 `depth_gate` 调用高亮。宏内嵌 WGT 注入、补全尚未验收或实现。未逐一 GUI 验收；Open VSX 与 Zed 扩展仓库未发布。

@@ -144,7 +144,8 @@ impl AdaptiveSession {
                 .loss
                 .as_ref()
                 .context("fit loss requires fn loss(prediction,target)")?;
-            let session = Self::prepare((**program).clone(), tape_budget)?;
+            let mut session = Self::prepare((**program).clone(), tape_budget)?;
+            if self.is_compiled() { session.enable_compiled()?; }
             ensure!(
                 session.input_len() > self.output_len() && session.output_len() == 1,
                 "custom loss shape mismatch"
@@ -285,6 +286,8 @@ impl AdaptiveSession {
                         }
                     };
                     *value -= rate * direction;
+                    ensure!(value.is_finite(), "nonfinite learn/parameter optimizer update");
+                    if let Some(domain) = &p.learn { *value = domain.project(*value); }
                 }
             }
             updates.push(values);

@@ -55,7 +55,7 @@ pub fn compile_text_entry_with_dependencies(source: &str, root: &Path, output: &
     let mut manifest = toml_edit::DocumentMut::new();
     manifest["package"]["name"] = toml_edit::value(&name);
     manifest["package"]["version"] = toml_edit::value("0.0.0");
-    manifest["package"]["edition"] = toml_edit::value("2021");
+    manifest["package"]["edition"] = toml_edit::value("2024");
     manifest["workspace"] = toml_edit::Item::Table(toml_edit::Table::new());
     manifest["dependencies"] = toml_edit::Item::Table(toml_edit::Table::new());
     manifest["dependencies"]["anyhow"] = toml_edit::value("1");

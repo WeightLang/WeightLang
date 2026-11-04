@@ -44,6 +44,9 @@ impl AdaptiveSession {
             structure(self)? == structure(&candidate)?,
             "reload requires identical model structure"
         );
+        if self.is_compiled() { candidate.enable_compiled()?; }
+        candidate.compiled_forward_calls = self.compiled_forward_calls;
+        candidate.compiled_tape_calls = self.compiled_tape_calls;
         candidate.revision = self.revision.checked_add(1).context("revision overflow")?;
         *self = candidate;
         Ok(())
@@ -70,6 +73,7 @@ mod tests {
                     data: vec![data],
                     frozen: false,
                     probability: false,
+                    learn: None,
                 }],
                 instructions: vec![crate::adaptive::Instruction::Return { value: "x".into() }],
                 loss: None,

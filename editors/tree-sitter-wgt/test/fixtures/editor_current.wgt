@@ -1,0 +1,23 @@
+wgt 0.5
+# fit and predict in comments and strings stay plain text: "fit(model)"
+# @contexts ["ordinary_function"]
+native fn save_public(value);
+learn scale: float = 5.0;
+learn mix: float in 0.0..=1.0 = 0.5;
+learn temperature: float > 0.0 = 1.0;
+learn depth: int in 1..=12 = 6;
+learn enabled: bool = true;
+# @contexts ["tensor"]
+native intrinsic linear(x, weight);
+native intrinsic depth_gate(depth, literal_index);
+fn forward(x) {
+    return route(depth_gate(depth, 1), x, x);
+}
+fn strategy(model, inputs, targets) {
+    return train model on inputs against targets using update;
+}
+fn main() {
+    let model = make_model(), inputs = [1], targets = [2];
+    let result = train model on inputs against targets {rate: 0.1; loss: mse; clip: 1;};
+    return result;
+}

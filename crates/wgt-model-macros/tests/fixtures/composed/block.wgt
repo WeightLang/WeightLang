@@ -1,0 +1,5 @@
+wgt 0.5
+import activation from "std/activation"
+operators MacroBlock
+# Two feature values enter and leave; no parameter or state initialization.
+fn apply(x) { return activation.squared_relu(x); }

@@ -57,7 +57,7 @@ GPU 驱动可能需要较大的虚拟地址空间，不能把小型 CPU 脚本�
 | `device_status(alias)` | 返回实际设备 ID、kind（Gpu/Npu）、active、ready、queued、并发/队列上限、受管内存额度、每任务额度、提交计数/余量、计算量/余量。未经授权的别名报错。 |
 
 三项接口参数均必填；提交前必须调用 compute_budget，等待也要求该预算存在。
-compute_host_status() 的 devices 字段返回授权别名列表。查看内置 CPU/GPU 设备使用 `wgt-native --devices`；注册 NPU 通过授权别名的 device_status 查询。
+compute_host_status() 的 devices 字段返回授权别名列表。当前没有独立设备枚举 CLI；注册 NPU 通过授权别名的 device_status 查询。
 
 提交时捕获模型当前权重快照，任务执行期间修改模型不会影响已提交任务；不会隐式训练或保存模型。
 当前每个任务独立准备执行会话，不复用模型设备缓存，适合验证调度与授权；小模型的初始化开销可能超过计算时间。

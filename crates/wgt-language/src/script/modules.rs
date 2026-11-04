@@ -4,9 +4,7 @@ use anyhow::{ensure, Result};
 use std::{collections::HashMap, path::Path};
 
 pub(super) fn load(path: &str, root: &Path) -> Result<Option<Program>> {
-    let source = if path == "std/openresponses/harness" {
-        include_str!("../../../../std/openresponses/harness.wgt").to_owned()
-    } else if let Some(relative) = path.strip_prefix("./") {
+    let source = if let Some(relative) = path.strip_prefix("./") {
         ensure!(
             Path::new(relative)
                 .components()
@@ -22,7 +20,7 @@ pub(super) fn load(path: &str, root: &Path) -> Result<Option<Program>> {
         );
         std::fs::read_to_string(file)?
     } else {
-        return Ok(None);
+        anyhow::bail!("unsupported script module import: {path}");
     };
     let unit = crate::source::split(&source)?;
     let declarations = unit

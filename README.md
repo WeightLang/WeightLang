@@ -2,95 +2,113 @@
 
 [简体中文](README.zh-CN.md)
 
-Native WGT programs for model construction, training and inference. `weightc`,
-`wgt` and `wgt-native` are Rust executables. The current source tree has retired
-Python implementation files, tests, callbacks, packaging and installers.
-These changes are local source capabilities, not a claim about published releases.
+> **Express neural architectures clearly and elegantly.**
 
-## Install and update
+WGT describes a model's internal architecture and computation, making tensor
+flow, shared parameters, module composition and state transitions visible. Rust
+controls data preparation, I/O, orchestration and training loops. Model execution
+is designed around one WGT definition and the `wgtime` service.
 
-Rust/Cargo is required to build from source:
+**Learnable Architecture Parameters** let a model train numeric values and
+structural gates with explicit constraints. The following declarations are locally
+implemented; integer and boolean reads use hard values with straight-through
+surrogate gradients during training:
 
-```sh
-cargo install --locked --force --path crates/wgt --bin weightc --bin wgt
-cargo install --locked --force --path crates/wgt-runtime --bin wgt-native
+```wgt
+learn depth: int in 1..=12 = 6;
+learn use_skip: bool = true;
 ```
 
-The [shell installer](install.sh) and [PowerShell installer](install.ps1) install
-and update `wgt` and `weightc` together. Set `WEIGHTLANG_SOURCE` to a checkout;
-outside a checkout they build GitHub main, or the tag in `WEIGHTLANG_VERSION`.
-They do not install Python, uv or Torch. Existing model directories are preserved.
+Use `depth_gate` with explicitly bounded computation to train depth, or use a
+boolean parameter to gate a skip connection. Automatic `repeat`, shape changes
+and `choice` remain design work. See the [language contract and tested examples](docs/learnable-architecture-parameters.md)
+for floating-point constraints, discrete training rules and weight persistence.
+
+See the [design philosophy](docs/design-philosophy.md) and
+[architecture coverage](docs/architecture-coverage.md) for the motivation and
+verification boundaries.
+
+## Build and start the service
+
+Build the service binary from this workspace:
 
 ```sh
-wgt update --version X.Y.Z
-# Or select the latest complete native release:
-wgt update
+cargo build --locked -p wgtime-service
 ```
 
-Updates require a `wgt-vX.Y.Z` release containing both platform binaries and
-`SHA256SUMS`. Both hashes and versions are checked before selecting the new
-version. `weightc` and `wgt` follow the same project pin or default selection.
-Old Python-only releases and incomplete native releases are not update candidates.
-See [migration and release packaging](docs/weightc-migration.md).
-
-## Run
+By default, `wgtime` listens under `/run/wgtime`; that directory must already
+exist, be owned by the service UID, and have mode `0700`. For a development
+instance, create a private directory and pass it explicitly:
 
 ```sh
-cargo build --locked --workspace --bins
-./target/debug/weightc check examples/native_training/build/model.wgt
-./target/debug/wgt run examples/native_training/supervised/model.wgt
-./target/debug/weightc legacy-build examples/native_training/build/model.wgt -o weights/native-demo
-./target/debug/weightc compile examples/native_training/compiled/model.wgt -o .cache/weightlang/demo
-./.cache/weightlang/demo
+install -d -m 700 /tmp/weightlang/wgtime
+./target/debug/wgtime --test-directory /tmp/weightlang/wgtime
 ```
 
-The only source language is `wgt 0.5`: model declarations and functions share one compilation unit. See the [language reference](docs/reference.zh-CN.md). `check` parses without
-executing; compilation generates a native executable; scripts explicitly control
-training and saving. `legacy-build` (`build` alias) requires `main` to return a
-model and writes a complete model directory. It refuses existing destinations.
-
-Use `wgt new demo` to create a native script project, `wgt sync` to synchronize
-package dependencies, and `wgt run model.wgt` to run it. Model source entrypoints
-must be named **`model.wgt`**; give each independent model or training example its
-own directory and use the directory name to identify it. No Python environment
-is prepared. Native artifact inspection, graph rendering and package fetching
-remain separate from script execution.
-
-## Scope and documentation
-
-The native runtime supports the subset described in [native training](docs/native-training.md),
-[native inference](docs/native-backend.md), [quantization](docs/quantization.md)
-and [adaptive execution](docs/self-modifying-runtime.md). Python removal does
-not mean every historical operator, trainer or CLI command has a native replacement.
-Old CLI-dependent `wgt check/build/package/install/train/export/trace/debug`
-commands report that they are retired. Use the native script commands above.
-The native `wgt test` command runs project tests; see [native testing](docs/native-testing.md).
-
-On Linux, [weightfs](docs/weightfs.md) can expose live weights as editable JSON
-files. The runtime attempts to mount it by default; an explicit model or
-checkpoint save is still required for persistence.
-
-The categorized `std/` directories provide runnable scalar and vector examples; see the [native math library](docs/standard-library.md). Older graph
-sources in `std/` and artifact fixtures remain migration material, not proof of
-execution support. See the [WGT 0.5 reference](docs/reference.zh-CN.md),
-[package guide](docs/packages.md), [command guide](docs/wgt.md), and
-[editor guide](docs/editors.md).
-
-Complete models and retained experiment results belong in `weights/`.
-Large build/download caches must be disk-backed; small scratch files use
-`/tmp/weightlang/`. See [storage](docs/storage.md). Model artifacts and optimizer
-checkpoints are distinct; initialization alone is not training.
-
-## Verification and releases
+Keep the service running in that terminal. In another shell, direct clients to its
+Unix socket (`service.sock`):
 
 ```sh
-cargo test --locked --workspace
-cargo build --locked --release -p weightlang-wgt --bins
-sh scripts/package_wgt.sh --binary target/release/wgt --output dist/native-release
-# Windows: scripts/package_wgt.ps1 -Binary target/release/wgt.exe -Output dist/native-release
+export WGTIME_ENDPOINT=/tmp/weightlang/wgtime/service.sock
 ```
 
-Packaging verifies matching versions and creates both platform assets plus
-checksums in a new directory. Publishing is a separate operation.
+The service accepts only the optional `--test-directory DIRECTORY` argument.
+Rust clients connect to the service; they do not start a second model execution
+core automatically. The facade uses `WGTIME_ENDPOINT` when set, otherwise its
+default endpoint `/run/wgtime/service.sock`.
+
+## Use WGT from Rust
+
+The [annotated WGT syntax tour](language/syntax-tour/model.wgt) collects current
+model syntax with Chinese comments and separates implemented forms from proposals.
+
+The workspace package is named `wgt-model` and its library crate path is `wgt`.
+It provides three model-source entry points: `model!` for an inline Rust string,
+`include_model!` for a file embedded at build time, and
+`ModelDefinition::from_file` for parsing a deployed source file at runtime.
+The macros validate WGT during compilation and embed the WGT source; runtime
+construction parses it again. They do not embed static IR. Model imports support
+standard modules and nested local modules for file based definitions; see the
+[standard library](docs/standard-library.md) and [package guide](docs/packages.md).
+
+```toml
+[dependencies]
+wgt-model = { path = "../WeightLang/crates/wgt-model" }
+```
+
+```rust
+use wgt::{model, Client, InstanceOptions};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let definition = model!(r#"wgt 0.5
+model Scale
+input x: f32[1]
+output y: f32[1]
+parameter gain: f32[1] = [2]
+fn forward(x) { return x * gain; }
+"#);
+    let client = Client::connect()?;
+    let model = client.initialize(&definition, InstanceOptions::default())?;
+    assert_eq!(model.forward(&[3.0])?, vec![6.0]);
+    Ok(())
+}
+```
+
+Parsing a definition does not initialize a model, fetch weights, train or create
+artifacts. Initialization is explicit and defaults to no optimizer. Weight
+binding, training, saving and service startup are separate explicit operations.
+On Linux, service side model instantiation currently requires an available `cc`
+compiler to build a native shared library; a compiler free service deployment is
+not yet supported. See the [Rust backend contract](docs/native-backend.md) and
+[WGT source package guide](docs/packages.md) for current limits and boundaries.
+
+## Project scope
+
+The source language is WGT 0.5. See the [language reference](docs/reference.zh-CN.md),
+[native training](docs/native-training.md), [standard library](docs/standard-library.md),
+[storage guidance](docs/storage.md) and [documentation index](docs/wgt.md).
+The `std/` tree provides composable activation and loss computation modules;
+see the standard library guide for their shape and gradient contracts. Complete models and retained experiment results
+belong in `weights/`.
 
 [MIT license](LICENSE).

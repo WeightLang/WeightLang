@@ -6,25 +6,9 @@
 已有内部 Program JSON 是单独版本化的模型制品，不是源语言。
 
 模型先声明 `model`、`input/output ...: f32[N]` 及显式初值的 `parameter/frozen`，
-然后用 `fn forward(x)` 表达张量计算、`write`、`if positive(...)` 和 `while`。
-同文件 main 调用 `模型名("none"|"sgd"|"adam")` 与 `predict`；这里的竖线表示三选一字符串。
-sgd/adam 可由声明式 `train` / `reinforce` 训练整个 forward，见[可微程序](differentiable-programs.md)。输入不含 batch；当前仅 CPU。
-可执行且带轴、状态、梯度说明的完整示例：[model.wgt](../examples/self_modifying/model.wgt)。
-
-```sh
-weightc check examples/self_modifying/model.wgt
-wgt run examples/self_modifying/model.wgt
-wgt run examples/self_modifying/model.wgt --compiled
-# 保留底层有状态张量会话接口，用于连续输入或原生 VJP：
-wgt-native adaptive examples/self_modifying/model.wgt 4096 100 --check
-```
-
-`wgt-native adaptive SOURCE BUDGET_BYTES MAX_STEPS [--check]` 的后三项分别是字节预算、
-正整数指令预算、可选检查。SOURCE 可以是同一 0.5 源码或内部 Program JSON。
-`--check` 不运行 main/forward。实际会话的 stdin 每行是输入 JSON 向量，
-成功响应为 `{"output":[...],"revision":N,"steps":N}`，失败为 `{"error":"..."}`。
-输入 `[2,3]`、`[4,3]`、`[-2,7]` 时示例依次输出 `[3]`、`[9]`、`[7]`。
-不预热自更新模型，避免加载过程改变状态。
+然后用 `fn forward(x)` 表达张量计算、`write`、`if positive(...)` 和 `while`。同文件 `main` 与训练语法属于旧 WGT 脚本控制路径；新 Rust 模型定义只接受模型结构及其计算，不自动执行 `main` 或训练，边界见[Rust 模型后端契约](native-backend.md)。
+底层 `wgtime-core` 仍有 `AdaptiveSession`、显式 `run` 与 VJP API，但它们尚未通过新 facade/service 集成为稳定的应用入口；不要使用已删除的 `wgt-native adaptive` 命令或将 core API 描述成新 facade 功能。
+自更新运行时的行为和限制仍可由当前底层测试覆盖：`crates/wgtime-core/tests/adaptive.rs`、`adaptive_autodiff.rs`、`unified.rs`。
 
 ## 状态与失败
 

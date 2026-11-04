@@ -451,7 +451,7 @@ weightc --offline --locked compile model.wgt -o demo
 
 编译模式会把已解析目录映射写入程序；数据/包文件不嵌入可执行文件，移动缓存后需重新编译。
 独立可执行程序不自动联网解析或重新校验包，--root 仅影响脚本相对路径，不改变依赖缓存路径。
-底层 wgt-native script 与 Rust run/run_file 不负责包管理；需要自动依赖时使用 wgt 入口。
+`wgt-model` Rust facade 与 `wgtime` 服务不负责 WGT 包解析；包依赖解析属于 `wgt` CLI 脚本入口。当前 Rust 模型定义入口拒绝 `import`，不能用包依赖功能绕过此限制。
 
 ## 计算能力调用策略
 
