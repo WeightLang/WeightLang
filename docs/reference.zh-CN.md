@@ -117,6 +117,8 @@ WGT 0.5 普通函数还支持 `let action = sample from net(input);`：`net` 必
 无显式写入的前向不改变参数、revision 或训练步数。forward 中显式 `write` 仍按原有事务契约提交，
 失败则回滚；运行工作量仍计入执行预算。错误包含调用名、所在语句行号及形状不匹配时的预期/实际宽度。
 
+普通函数支持原生 `assert CONDITION [, MESSAGE];` 语句，条件严格为 bool 且只求值一次；仅失败才求字符串消息，默认 `assertion failed`。括号条件可写 `assert(condition);`。旧两实参 `assert(condition,message)` 保持急求值与返回 null 的兼容契约。解释/AOT 行为一致，错误含语句行号，详见[原生断言](assertions.md)。
+
 控制流为 `if condition { ... } else { ... }`、`while condition { ... }`、
 `for name in list { ... }`、`break;`、`continue;`、`return expr;`。
 当前函数内共享变量环境，if/for 不创建词法局部作用域；重复 let 覆盖绑定。

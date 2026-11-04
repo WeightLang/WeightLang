@@ -43,6 +43,7 @@ pub enum Stmt {
     Let(String, Expr),
     Set(String, Expr),
     Eval(Expr),
+    Assert(Expr, Option<Expr>),
     If(Expr, Vec<Statement>, Vec<Statement>),
     While(Expr, Vec<Statement>),
     For(String, Expr, Vec<Statement>),
@@ -305,6 +306,28 @@ impl Parser {
             let value = self.expr(0)?;
             self.expect(";")?;
             Stmt::Let(name, value)
+        } else if self.take("assert") {
+            // Preserve the published two-argument function's eager evaluation.
+            let start = self.pos;
+            if self.take("(") {
+                let mut args = self.arguments(")")?;
+                if args.len() == 2 && self.is(";") {
+                    self.expect(";")?;
+                    Stmt::Eval(Expr::BuiltinCall("assert".into(), args))
+                } else {
+                    ensure!(args.len() == 1, "line {line}: assert expects one condition");
+                    self.pos = start;
+                    let condition = self.expr(0)?;
+                    let message = if self.take(",") { Some(self.expr(0)?) } else { None };
+                    self.expect(";")?;
+                    Stmt::Assert(condition, message)
+                }
+            } else {
+                let condition = self.expr(0)?;
+                let message = if self.take(",") { Some(self.expr(0)?) } else { None };
+                self.expect(";")?;
+                Stmt::Assert(condition, message)
+            }
         } else if self.is("train") && self.train_statement() {
             self.expect("train")?;
             let model = self.expr(0)?;

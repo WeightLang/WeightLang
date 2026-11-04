@@ -34,6 +34,7 @@ examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原�
   `let {action,log_prob}=sample from net(x);` 或字段别名 `action:a` 用同一次forward/RNG绑定动作和稳定自然对数概率；仅声明形式，字段/绑定不可重复。logits直接f64 log-sum-exp，probabilities返回log(p_action)-log(sum(p))，旧f32动作/RNG不变。例子 examples/native_training/sample_record/model.wgt。
   完整例子 examples/native_training/categorical/model.wgt；契约 docs/reference.zh-CN.md、docs/native-training.md。
 - 普通函数文件IO用 `save KIND VALUE to PATH [overwrite];`、`load KIND from PATH`，KIND为text/json/model/checkpoint；load model必填using优化器，checkpoint恢复记录状态。父目录须存在，默认拒绝覆盖，显式overwrite只原子替换普通可写文件；64MiB/文件、按编码字节消耗operation budget，host policy下拒绝直接IO。JSON拒绝句柄/非有限数，UTF-8文本，JSONL继续流式batch/close。断言用`assert CONDITION [, MESSAGE];`，严格bool且仅失败求消息，旧assert(cond,msg)保持急求值兼容。详见docs/file-io.md与examples/native_training/file_io/model.wgt。
+- 原生断言写 `assert CONDITION [, MESSAGE];`，严格bool，条件仅求一次且消息只在失败时求值；旧`assert(cond,msg)`保持急求值/null兼容。解释/AOT一致，详见docs/assertions.md。
 - 普通 f32 权重不默认限制到 [0,1]；当前没有 0/1 布尔参数或自定义权重范围声明。区间含零不能防止除零，普通脚本的除零和非有限结果报错。
 - mix p { then { a } else { b } } 用于 forward/loss 张量混合，每支一个表达式。
   与 route 相同，推理在精确端点短路内联分支；训练/VJP 保留完整梯度。提前 let 的计算不会省略。

@@ -97,7 +97,8 @@ fn main() {
 | `column(rows,key)` | 从对象列表逐行提取字段，缺失即报错 |
 | `sum(numbers)` | 求和，空列表为 0 |
 | `sqrt(x)`, `log(x)`, `exp(x)` | 标量数学；域错误/溢出报错 |
-| `assert(condition,message)` | bool 为 false 时终止脚本 |
+| `assert CONDITION [, MESSAGE];` | 原生语句：严格 bool，失败才求消息，默认 assertion failed；[完整契约](assertions.md) |
+| `assert(condition,message)` | 兼容函数：两实参急求值，bool 为 false 时终止脚本，返回 null |
 | `metric(name,value)` | 按名称保存 JSON 指标；同名覆盖，只保留最后值，不自动平均或 detach |
 | `seed(integer)` | 设置脚本局部采样 RNG；整数范围 0..1000000000 |
 | `random()` | 确定性 SplitMix64 流，返回 [0,1)；不影响模型初始化 RNG |

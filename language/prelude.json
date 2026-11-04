@@ -4,6 +4,20 @@
   "scope": "Implicit source functions, intrinsics, constants and declaration types. No std modules are imported. Contexts are separate contracts; ordinary functions are shared by interpreter and AOT. Parameters are required unless defaults explicitly say otherwise.",
   "entries": [
     {
+      "name": "assert",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "assert CONDITION [, MESSAGE];",
+      "purpose": "条件必须bool且仅求值一次；仅失败时求消息。兼容两实参assert(condition,message)保持急求值。",
+      "documentation": "docs/assertions.md",
+      "defaults": {
+        "message": "assertion failed"
+      },
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
       "name": "differentiate_at",
       "kind": "function",
       "contexts": [

@@ -1,6 +1,8 @@
 {
   "schema_version": 1,
   "cases": [
+    {"id":"ordinary-assert-syntax","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main(){assert true; assert (1)==1, \"ok\";}\n"},
+    {"id":"tensor-assert-rejected","context":"tensor_forward","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x){assert true;return x;}\n"},
     {"id":"ordinary-slicing","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main() { let x = [1,2,3]; return (x[:])[1:][0:1].mean; }\n"},
     {"id":"slice-step-rejected","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return [1,2][::2]; }\n"},
     {"id":"slice-axis-rejected","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return [1,2][:,0]; }\n"},

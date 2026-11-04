@@ -16,7 +16,7 @@ module.exports = grammar({
     function_declaration: $ => seq('fn', field('name', $.identifier), $.arguments, repeat($._newline), $.body),
     // Balanced editor structure; semantic validation belongs to the Rust frontend.
     body: $ => seq('{', repeat(choice($._item, $._newline, $.body, $.script_keyword, ';')), '}'),
-    script_keyword: _ => choice('let', 'if', 'else', 'while', 'for', 'in', 'break', 'continue', 'return', 'train', 'on', 'rate', 'clip'),
+    script_keyword: _ => choice('let', 'if', 'else', 'while', 'for', 'in', 'break', 'continue', 'return', 'train', 'on', 'rate', 'clip', 'assert'),
     literal: _ => choice('true', 'false', 'null'),
     model_declaration: $ => seq('model', field('name', $.identifier), repeat($._item)),
     operators_declaration: $ => seq('operators', field('name', $.identifier)),

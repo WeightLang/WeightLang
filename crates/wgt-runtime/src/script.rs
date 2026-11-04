@@ -313,6 +313,12 @@ impl Runtime {
             Stmt::Eval(expr) => {
                 self.eval(expr, env)?;
             }
+            Stmt::Assert(condition, message) => {
+                if !self.eval(condition, env)?.boolean()? {
+                    let message = match message { Some(e) => self.eval(e, env)?, None => Value::Text("assertion failed".into()) };
+                    bail!("{}", message.text()?);
+                }
+            }
             Stmt::Return(expr) => return Ok(Flow::Return(self.eval(expr, env)?)),
             Stmt::Break => return Ok(Flow::Break),
             Stmt::Continue => return Ok(Flow::Continue),

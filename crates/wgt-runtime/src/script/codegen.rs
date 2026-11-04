@@ -61,6 +61,7 @@ fn block(body: &[Statement]) -> String {
             Stmt::Let(n,e) => format!("let value = {}; env.insert({n:?}.into(),value);",expr(e)),
             Stmt::Set(n,e) => format!("ensure!(env.contains_key({n:?}), {:?}); let value = {}; env.insert({n:?}.into(),value);", format!("assignment to undeclared variable: {n}"), expr(e)),
             Stmt::Eval(e) => format!("let _ = {};",expr(e)),
+            Stmt::Assert(e,message) => format!("if !{}.boolean()? {{ let message = {}; anyhow::bail!(\"{{}}\", message.text()?); }}", expr(e), message.as_ref().map(expr).unwrap_or_else(|| "Value::Text(\"assertion failed\".into())".into())),
             Stmt::Return(e) => format!("return Ok(Flow::Return({}));",expr(e)),
             Stmt::Break => "return Ok(Flow::Break);".into(),
             Stmt::Continue => "return Ok(Flow::Continue);".into(),

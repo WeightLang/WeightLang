@@ -37,7 +37,7 @@
     },
     {
       "name": "keyword.control.wgt",
-      "match": "\\b(?:break|continue|else|fn|for|from|frozen|if|import|in|init|input|layer|let|mix|model|onehot|operators|output|parameter|return|sample|then|train|on|rate|clip|target|wgt|while)\\b"
+      "match": "\\b(?:assert|break|continue|else|fn|for|from|frozen|if|import|in|init|input|layer|let|mix|model|onehot|operators|output|parameter|return|sample|then|train|on|rate|clip|target|wgt|while)\\b"
     },
     {
       "name": "storage.type.wgt",
