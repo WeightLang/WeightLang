@@ -1,0 +1,18 @@
+wgt 0.5
+# 新目标写入 weights/persistence；保存拒绝覆盖已有文件。
+# 每个样本只有一个特征和一个目标，以下 main 显式训练而非加载时训练。
+fn main() {
+    let net = mlp([1, 2, 1], "tanh", 7, "adam");
+    fit(net, [[1]], [[2]], 0.03, "mse");
+    save_model(net, "../../../weights/persistence/model.json");
+    save_checkpoint(net, "../../../weights/persistence/checkpoint.json");
+    # 推理模型加载只恢复结构和权重；sgd 是新建的优化器。
+    let inference = load_model("../../../weights/persistence/model.json", "sgd");
+    assert(predict(net, [1]) == predict(inference, [1]), "model reload mismatch");
+    # 断点恢复 Adam 步数和矩；相同下一批次必须产生相同更新。
+    let resumed = load_checkpoint("../../../weights/persistence/checkpoint.json");
+    fit(net, [[1]], [[2]], 0.03, "mse");
+    fit(resumed, [[1]], [[2]], 0.03, "mse");
+    assert(predict(net, [1]) == predict(resumed, [1]), "checkpoint resume mismatch");
+    return predict(resumed, [1]);
+}

@@ -3,20 +3,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 process.chdir(path.resolve(__dirname, '..'));
 const read = file => fs.readFileSync(file, 'utf8');
-const nativeBuiltins = JSON.parse(read('scripts/editor-templates/native-builtins.json'));
-// The editor release is independent of the in-progress native language migration.
-// When native source is present, require this release snapshot to stay in sync.
-const nativePath = 'crates/wgt-runtime/src/script.rs';
-if (fs.existsSync(nativePath)) {
-  const runtime = read(nativePath).match(/const BUILTINS:[\s\S]*?= &\[([\s\S]*?)\];/)[1];
-  const actual = [...runtime.matchAll(/"(\w+)"/g)].map(m => m[1]).filter(s => !s.startsWith('__')).sort();
-  require('node:assert/strict').deepEqual(nativeBuiltins, actual, 'Update native-builtins.json from the Rust BUILTINS table');
-}
+const prelude = JSON.parse(read('language/prelude.json')).entries;
+// The snapshot is generated, never a second handwritten builtin registry.
+const nativeBuiltins = prelude.filter(e => e.kind === 'function' && e.contexts.includes('ordinary_function')).map(e => e.name).sort();
 const vocabulary = {
-  keywords: 'break continue else fn for frozen if in init input layer let mix model onehot output parameter return sample then train on rate clip target wgt while'.split(' '),
-  builtins: [...new Set(nativeBuiltins.concat('read write linear add mul relu tanh sigmoid identity slice positive gate route softmax mean square detach minimum log_softmax exp log sum clip'.split(' ')))].sort(),
-  types: ['f32', 'prob'],
-  constants: ['false', 'null', 'true'],
+  keywords: 'break continue else fn for from frozen if import in init input layer let mix model onehot operators output parameter return sample then train on rate clip target wgt while'.split(' '),
+  builtins: [...new Set(prelude.filter(e => ['function', 'intrinsic', 'layer'].includes(e.kind)).map(e => e.name))].sort(),
+  types: prelude.filter(e => e.kind === 'type').map(e => e.name).sort(),
+  constants: prelude.filter(e => e.kind === 'constant').map(e => e.name).sort(),
 };
 let stale = false;
 function write(file, text) {
@@ -24,6 +18,7 @@ function write(file, text) {
     if (!fs.existsSync(file) || read(file) !== text) { console.error(`Out of date: ${file}`); stale = true; }
   } else fs.writeFileSync(file, text);
 }
+write('scripts/editor-templates/native-builtins.json', JSON.stringify(nativeBuiltins, null, 2)+'\n');
 const words = key => `\\b(?:${vocabulary[key].join('|')})\\b`;
 const grammar = {
   name: 'WeightLang', scopeName: 'source.wgt', fileTypes: ['wgt'],

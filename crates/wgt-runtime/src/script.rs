@@ -7,6 +7,7 @@ mod math;
 pub mod testing;
 mod one_hot;
 pub(crate) mod parse;
+pub mod prelude;
 use crate::training::{mlp, random, Objective, Optimizer, Trainer};
 use anyhow::{bail, ensure, Context, Result};
 pub fn parse(source: &str) -> Result<Program> {
@@ -15,7 +16,7 @@ pub fn parse(source: &str) -> Result<Program> {
     let model_name = unit.declarations.lines().find_map(|l| l.split('#').next().unwrap_or("").trim().strip_prefix("model ")).map(str::trim);
     if let Some(name) = model_name {
         ensure!(!name.starts_with("__") && !name.is_empty() && name.bytes().enumerate().all(|(i,c)| c.is_ascii_alphabetic() || c==b'_' || (i>0 && c.is_ascii_digit())), "invalid model name");
-        ensure!(!program.contains_key(name) && !BUILTINS.contains(&name), "model name conflicts with function: {name}");
+        ensure!(!program.contains_key(name) && !prelude::is_builtin(name), "model name conflicts with function: {name}");
         let (builtin, plan) = if program.remove("forward").is_some() {
             program.remove("loss");
             ("__adaptive", serde_json::to_string(&crate::adaptive::parse(source)?)?)
@@ -38,45 +39,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const BUILTINS: &[&str] = &[
-    "__graph",
-    "__adaptive",
-    "dependency",
-    "len",
-    "range",
-    "append",
-    "column",
-    "sum",
-    "sqrt",
-    "rsqrt", "fma", "hypot", "expm1", "log1p", "sigmoid", "softplus", "silu",
-    "dot", "norm", "mean", "softmax", "log_softmax", "logsumexp", "l2_normalize", "mse", "mae", "cross_entropy",
-    "min", "max", "argmin", "argmax", "variance", "stddev", "median", "quantile", "sort", "argsort", "cumsum", "cosine_similarity", "clip",
-    "relu", "leaky_relu", "elu", "hard_sigmoid", "hard_swish", "bce_logits", "huber", "log_cosh", "diff", "ema", "moving_mean",
-    "zeros", "ones", "full", "linspace", "concat", "vector_slice", "gather", "compress", "one_hot", "reverse",
-    "entropy", "normalize_probabilities", "kl_divergence", "js_divergence", "cross_entropy_probs", "temperature_softmax",
-    "log",
-    "exp",
-    "assert",
-    "metric",
-    "seed",
-    "random",
-    "mlp",
-    "model",
-    "save_model",
-    "predict",
-    "fit",
-    "reinforce",
-    "train",
-    "sample",
-    "gae",
-    "jsonl",
-    "hf_dataset",
-    "batch",
-    "close",
-    "save",
-    "restore",
-    "benchmark",
-];
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Number(f64),
@@ -492,35 +454,18 @@ impl Runtime {
             .with_context(|| format!("{name}()"))
     }
     fn builtin(&mut self, name: &str, a: &[Value]) -> Result<Value> {
+        let entry = prelude::builtin(name).with_context(|| format!("unknown function: {name}"))?;
+        let arity = entry.arity.as_ref().expect("builtin arity in prelude");
+        ensure!(
+            (arity.min..=arity.max).contains(&a.len()),
+            "{}: expected {}..={} arguments, got {}",
+            entry.signature, arity.min, arity.max, a.len()
+        );
+        let name = entry.legacy_alias_for.as_deref().unwrap_or(name);
+
         if name == "benchmark" {
             return self.benchmark(a);
         }
-        let count = match name {
-            "random" => 0,
-            "dependency" | "len" | "sum" | "sqrt" | "log" | "exp" | "seed" | "jsonl" | "close"
-            | "restore" | "rsqrt" | "expm1" | "log1p" | "sigmoid" | "softplus" | "silu"
-            | "norm" | "mean" | "softmax" | "log_softmax" | "logsumexp"
-            | "min" | "max" | "argmin" | "argmax" | "median" | "sort" | "argsort" | "cumsum"
-            | "relu" | "hard_sigmoid" | "hard_swish" | "diff" | "zeros" | "ones" | "reverse"
-            | "entropy" | "normalize_probabilities" => 1,
-            "__graph" | "__adaptive" | "model" | "save_model" | "range" | "append" | "column" | "assert" | "metric"
-            | "predict" | "sample" | "batch" | "save" | "hypot"
-            | "dot" | "l2_normalize" | "mse" | "mae" | "cross_entropy"
-            | "variance" | "stddev" | "quantile" | "cosine_similarity"
-            | "leaky_relu" | "elu" | "bce_logits" | "log_cosh" | "ema" | "moving_mean"
-            | "full" | "concat" | "gather" | "compress" | "one_hot"
-            | "kl_divergence" | "js_divergence" | "cross_entropy_probs" | "temperature_softmax" => 2,
-            "hf_dataset" | "fma" | "clip" | "huber" | "linspace" | "vector_slice" => 3,
-            "mlp" => 4,
-            "fit" | "reinforce" | "train" => 5,
-            "gae" => 7,
-            _ => bail!("unknown function: {name}"),
-        };
-        ensure!(
-            a.len() == count,
-            "expected {count} arguments, got {}",
-            a.len()
-        );
         match name {
             "entropy" | "normalize_probabilities" | "kl_divergence" | "js_divergence" | "cross_entropy_probs" | "temperature_softmax" => {
                 let n = a[0].list()?.len() as u64;
@@ -661,10 +606,11 @@ impl Runtime {
                 }
                 let index = self.adaptive.len(); self.adaptive.push(crate::weightfs::Mounted::auto(session)?); Ok(Value::Adaptive(index))
             }
-            "model" => {
+            "load_model" => {
                 ensure!(self.models.len() < 64, "model handle limit exceeded");
                 let path = self.root.join(a[0].text()?);
                 let value: serde_json::Value = serde_json::from_reader(File::open(&path)?)?;
+                ensure!(value.get("format").is_none(), "load_model expects inference model IR; use load_checkpoint for training checkpoints");
                 if value.get("instructions").is_some() {
                     ensure!(self.adaptive.len() < 64, "model handle limit exceeded");
                     let mut session = crate::adaptive::AdaptiveSession::prepare(serde_json::from_value(value)?,64*1024*1024)?;
@@ -870,7 +816,7 @@ impl Runtime {
                 self.readers[a[0].reader()?].take();
                 Ok(Value::Null)
             }
-            "save" => {
+            "save_checkpoint" => {
                 let path = self.root.join(a[1].text()?);
                 if let Value::Adaptive(index)=a[0] {
                     self.adaptive[index].lock()?.save_checkpoint(&path)?;
@@ -879,9 +825,10 @@ impl Runtime {
                 self.models[a[0].model()?].lock()?.save(&path)?;
                 Ok(Value::Null)
             }
-            "restore" => {
+            "load_checkpoint" => {
                 let path=self.root.join(a[0].text()?);
                 let value:serde_json::Value=serde_json::from_reader(File::open(&path)?)?;
+                ensure!(matches!(value.get("format").and_then(|v| v.as_str()), Some("weightlang.forward-training.v1" | "weightlang.native-training.v1")), "load_checkpoint expects a native training checkpoint; use load_model(path, optimizer) for inference model IR");
                 if value.get("format").and_then(|v| v.as_str())==Some("weightlang.forward-training.v1") {
                     ensure!(self.adaptive.len()<64,"model handle limit exceeded");
                     let session=crate::adaptive::AdaptiveSession::restore_checkpoint(value,64*1024*1024)?;

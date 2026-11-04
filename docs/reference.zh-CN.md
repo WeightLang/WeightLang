@@ -19,6 +19,16 @@
 [primitive_specs.json](../language/primitive_specs.json) 描述制品 graph 原语，供制品验证使用，
 不能当作当前源码全部可调用内置函数的清单，也不改变旧制品的读取兼容性。
 
+## 无需 import 的内置入口
+
+[language/prelude.json](../language/prelude.json) 是唯一手写内置目录，集中名称、签名、默认值、
+用途、适用上下文与实现路径。Rust 的 [script/prelude.rs](../crates/wgt-runtime/src/script/prelude.rs)
+直接读取它驱动普通函数名称保留、参数数量检查及兼容别名；编辑器生成器从同一目录生成快照。
+`ordinary_function` 供解释与 AOT 共用；`tensor_forward` / `tensor_loss` 是独立张量转换契约，
+不能因名字出现在目录中就用于普通函数。`write` 等标注为语句，`positive` 只用于张量条件。
+目录也列出 `true`、`false`、`null` 常量及 `f32`、`prob` 声明类型；这些不是可调用函数。
+`std/` 模块不自动导入，仍须按各模块的使用契约显式引入。
+
 ## 编译单元与入口
 
 首个非空、非注释行必须恰好是 `wgt 0.5`，版本头只能出现一次。
@@ -105,7 +115,7 @@ fn main() {
 训练、流式 JSONL、强化学习、保存与 benchmark 的完整内置签名、默认值及限制见
 [原生训练](native-training.md#内置接口)。常用 `predict(model,input)`、
 `fit(model,inputs,targets,rate,loss)` 没有隐式训练或保存。
-`save_model` 保存模型，`save` 保存优化器断点，两者不能混用。
+`save_model` 保存模型，`save_checkpoint` 保存优化器断点，两者不能混用。
 
 ## 自更新前向函数
 

@@ -11,7 +11,7 @@
 
 预计写入超过 100 MB 前，检查目标目录、剩余空间、实际挂载和冗余内容。大文件不能放在 tmpfs，包括 `/tmp` 或 `/dev/shm` 的内存挂载。结束后只清理本任务产生且不再需要的临时文件，不删除已有权重、实验、缓存或其他工作。
 
-`weightc legacy-build` 默认向 `weights/<source stem>/` 输出 `model.json`、`checkpoint.json`、`source.wgt` 和完成标记 `manifest.json`。这些文件应作为完整目录保留。`save_model` 写入推理模型；`save` 写入包含优化器状态的训练断点，两者不能互换。调用者还需保存数据及脚本进度；断点不自动保存脚本 RNG 和外部依赖。详见[原生训练](native-training.md#保存与续训)。
+`weightc legacy-build` 默认向 `weights/<source stem>/` 输出 `model.json`、`checkpoint.json`、`source.wgt` 和完成标记 `manifest.json`。这些文件应作为完整目录保留。`save_model` 写入推理模型；`save_checkpoint` 写入包含优化器状态的训练断点，两者不能互换。调用者还需保存数据及脚本进度；断点不自动保存脚本 RNG 和外部依赖。详见[原生训练](native-training.md#保存与续训)。
 
 原生编译的 Cargo 中间文件使用当前目录下的 `.cache/weightlang/aot/`；编译不执行训练或生成权重。单文件脚本的依赖锁位于包缓存中的 `scripts/<脚本规范路径的 SHA256>/wgt.sum`；项目脚本使用项目的 `wgt.sum`。完整路径及依赖规则见[原生训练](native-training.md#单文件依赖注释与直接执行)。
 

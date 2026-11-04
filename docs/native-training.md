@@ -61,6 +61,16 @@ fn main() {
 
 ## 内置接口
 
+完整内置目录在 [language/prelude.json](../language/prelude.json)，同时驱动运行时名称与参数数量检查、编辑器快照；领域实现仍保留在目录所指的模块中。
+
+持久化推荐 `save_model(model,path)` / `load_model(path,optimizer)` 和
+`save_checkpoint(model,path)` / `load_checkpoint(path)`。`load_model` 必须显式指定新优化器，
+不会恢复训练状态；`load_checkpoint` 使用断点保存的优化器、步数和矩，不接受 optimizer 参数。
+旧 `model(path,optimizer)`、`save(model,path)`、`restore(path)` 仅作为 legacy 兼容别名保留，
+参数及行为与对应新名完全一致；新旧名称均不能被源码函数或模型声明覆盖。
+完整可运行例子见 [persistence/model.wgt](../examples/native_training/persistence/model.wgt)。
+
+
 所有参数均必填，除表内明确写出的固定内部行为外没有隐式默认参数。相对路径相对脚本文件目录。
 
 | 签名 | 契约 |
@@ -76,7 +86,7 @@ fn main() {
 | `seed(integer)` | 设置脚本局部采样 RNG；整数范围 0..1000000000 |
 | `random()` | 确定性 SplitMix64 流，返回 [0,1)；不影响模型初始化 RNG |
 | `mlp(widths,activation,seed,optimizer)` | 新建 CPU f32 顺序网络；widths 是包括输入输出的 2..64 个整数，每个 1..16384，最多 4000000 参数；隐藏层 activation 为 relu/tanh/sigmoid/identity，输出层始终 linear；optimizer 为 sgd/adam |
-| `model(path,optimizer)` | 加载原生顺序 IR 或 forward Program IR v1 JSON，使用新优化器；forward 另可选 none；不是普通 .wgt 模型解析器，也不接受传统 manifest 制品 |
+| `load_model(path,optimizer)` | 加载原生顺序 IR 或 forward Program IR v1 JSON，使用新优化器；forward 另可选 none；不是普通 .wgt 模型解析器，也不接受传统 manifest 制品 |
 | `predict(model,input)` | 输入单个 f32 向量，返回输出列表；不改变权重/优化器、不训练 |
 | `fit(model,inputs,targets,lr,loss)` | 一个批次一次更新，返回更新前损失；lr 正有限；loss 为 mse/cross_entropy |
 | `train(model,inputs,targets,rate,max_norm)` | forward 自定义损失的批次平均梯度、全局 L2 裁剪及原子更新；等价 train 语句，见[原生 RL](reinforcement-learning.md) |
@@ -87,9 +97,9 @@ fn main() {
 | `jsonl(path)` | 打开 UTF-8 JSON Lines 数据流；每行一个 JSON 值，不允许空行 |
 | `batch(reader,count)` | count 在 1..65536；返回最多 count 行；尾批保留，到 EOF 返回 []；单行 <=1MiB、单批 <=16MiB |
 | `close(reader)` | 关闭流，重复关闭无操作；关闭后 batch 报错 |
-| `save(model,path)` | 保存顺序或 forward 训练断点：结构、权重、冻结关系、优化器类别、步数和矩状态；顺序模型另保留共享关系 |
-| `restore(path)` | 读取断点，返回模型及恢复后的优化器 |
-| `save_model(model,path)` | 导出原生推理 IR v1 JSON；不包含优化器；forward 使用 Program 格式，供 model() 或 wgt-native adaptive 加载 |
+| `save_checkpoint(model,path)` | 保存顺序或 forward 训练断点：结构、权重、冻结关系、优化器类别、步数和矩状态；顺序模型另保留共享关系 |
+| `load_checkpoint(path)` | 读取断点，返回模型及恢复后的优化器 |
+| `save_model(model,path)` | 导出原生推理 IR v1 JSON；不包含优化器；forward 使用 Program 格式，供 load_model() 或 wgt-native adaptive 加载 |
 | `benchmark(model,workload,warmup,repeats,name[,mode])` | mode 默认 cpu；支持同步 GPU 前向和 train:cpu MSE 训练步；warmup 0..10000，repeats 1..100000；完整契约见[原生测试](native-testing.md#benchmark) |
 
 脚本整数参数目前限制为 0..1000000000；列表索引仍需满足实际长度。
@@ -180,7 +190,7 @@ cargo build -p weightlang-wgt --bin weightc
 `source.wgt`（入口快照）、`manifest.json`（格式 weightlang.native-build.v1、源码/模型 SHA256、
 编译器版本、更新步数、预算和指标）。最后发布 manifest 作为完成标记；消费者应拒绝没有
 完成标记的构建目录。推理使用 `wgt-native DIRECTORY/model.json BUDGET_BYTES --device cpu`。
-断点可通过脚本 `restore(path)` 恢复，再训练并返回模型到新的输出目录。
+断点可通过脚本 `load_checkpoint(path)` 恢复，再训练并返回模型到新的输出目录。
 
 已有输出目录或符号链接一律拒绝，不提供覆盖选项。构建预留目标目录，同盘暂存产物；
 执行失败时删除空预留目录，发布中失败保留部分输出供诊断，不宣称整个目录原子发布。
@@ -301,8 +311,8 @@ weightc --offline --locked compile demo.wgt -o demo
 
 新增 `dependency(module: string) -> string`：参数为已声明模块的完整路径，无默认参数，
 返回已校验缓存目录的绝对路径；未声明或未解析时报错。可拼接包内路径交给已有文件 API。
-它不导入 WGT 函数，不扩展 model() 接受的格式：传统 manifest/safetensors 制品不能自动作为
-原生 IR JSON 训练。原生训练支持范围仍以 model/restore 等接口契约为准。
+它不导入 WGT 函数，不扩展 load_model() 接受的格式：传统 manifest/safetensors 制品不能自动作为
+原生 IR JSON 训练。原生训练支持范围仍以 load_model/load_checkpoint 等接口契约为准。
 
 编译模式会把已解析目录映射写入程序；数据/包文件不嵌入可执行文件，移动缓存后需重新编译。
 独立可执行程序不自动联网解析或重新校验包，--root 仅影响脚本相对路径，不改变依赖缓存路径。
@@ -412,7 +422,7 @@ CPU Session 与 Trainer 是已提交权重及优化器矩的权威副本：每�
 事务结束回读并释放临时设备 arena；没有跨步常驻权重或吞吐量提升承诺。`predict` 仍用 CPU，
 `export`/`save` 使用已提交 CPU 副本，设备丢失后仍可保存；后续 GPU 调用报错，可显式切回 CPU。
 外部 Session/weightfs 参数写入会被下一次训练读取，保留已有矩和步数；weightfs 仍通过同一模型锁串行访问。
-`save` 保存完整 `first`/`second`/`steps`，格式仍是 `weightlang.native-training.v1`；CPU 断点可恢复后显式
+`save_checkpoint` 保存完整 `first`/`second`/`steps`，格式仍是 `weightlang.native-training.v1`；CPU 断点可恢复后显式
 选择 GPU 续训，GPU 断点可直接由默认 CPU 恢复，跨后端允许 f32 误差，不承诺逐位相同。
 冻结 file/packed 参数可物化用于计算，可训练 file 仍拒绝。
 

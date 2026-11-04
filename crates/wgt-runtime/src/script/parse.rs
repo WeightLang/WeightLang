@@ -169,7 +169,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
         parser.expect("fn")?;
         let name = parser.name()?;
         ensure!(
-            !super::BUILTINS.contains(&name.as_str()),
+            !super::prelude::is_builtin(&name),
             "function shadows builtin: {name}"
         );
         parser.expect("(")?;

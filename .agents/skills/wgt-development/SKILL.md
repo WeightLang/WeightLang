@@ -8,6 +8,12 @@ description: 编写和验证本仓库当前原生 WGT 0.5 模型、训练与概�
 语境能力见 language/source_capabilities.json；共同正负语料在 language/conformance.json。
 函数共用 parser 不表示普通 fn 与 tensor forward/loss 语义相同；模型声明独立解析。
 language/primitive_specs.json 是制品 graph 原语域，不是源码内置表。编辑器容错不证明源码有效。
+无需 import 的函数、张量 intrinsic、常量和声明类型统一登记在 language/prelude.json；
+script/prelude.rs 直接消费它，编辑器快照由它生成，领域实现路径见各 entry。
+普通函数与 tensor 上下文分开登记，不自动引入 std 模块。
+保存推理模型用 save_model(model,path)，加载用 load_model(path,optimizer) 创建新优化器；
+保存训练断点用 save_checkpoint(model,path)，load_checkpoint(path) 恢复原优化器状态。
+旧 model/save/restore 仅为 legacy 别名，新例子使用新名；所有参数必填，保存拒绝已有目标。
 本地运行 cargo test -p weightlang-runtime --test source_conformance 与 node scripts/test_source_conformance.cjs。
 
 - parameter p: prob = 0.7 使用可训练 logit，初值必须在 (0,1)；frozen p: prob = 1 支持精确端点。

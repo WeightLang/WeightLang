@@ -14,5 +14,6 @@
     "model_declaration": {"parser": "source.rs", "shares_function_parser": false},
     "editor": {"parser": "editors/tree-sitter-wgt/grammar.js", "validation": "balanced structure with recovery; does not enforce edition, call validity or tensor semantics"}
   },
+  "prelude": "language/prelude.json",
   "conformance": "language/conformance.json"
 }

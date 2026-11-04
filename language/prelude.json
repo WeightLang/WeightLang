@@ -1,0 +1,1904 @@
+{
+  "schema_version": 1,
+  "source_edition": "0.5",
+  "scope": "Implicit source functions, intrinsics, constants and declaration types. No std modules are imported. Contexts are separate contracts; ordinary functions are shared by interpreter and AOT. Parameters are required unless defaults explicitly say otherwise.",
+  "entries": [
+    {
+      "name": "__graph",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__graph(plan,optimizer)",
+      "purpose": "Compiler-only sequential model construction.",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "__adaptive",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__adaptive(plan,optimizer)",
+      "purpose": "Compiler-only forward model construction.",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "dependency",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "dependency(name)",
+      "purpose": "Resolve an explicitly locked dependency to its local artifact path.",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "len",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "len(list)",
+      "purpose": "列表长度",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "range",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "range(start,end)",
+      "purpose": "非负整数半开区间；end >= start，最多 1000000 项",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "append",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "append(list,value)",
+      "purpose": "返回追加后的新列表，不原地改动；最多 1000000 项",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "column",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "column(rows,key)",
+      "purpose": "从对象列表逐行提取字段，缺失即报错",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "sum",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "sum(p*(log(p)-log(q)))",
+      "purpose": "等长分布，标量 `sum(p*(log(p)-log(q)))`；方向是目标 p 相对参考 q，不对称",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/mod.rs"
+    },
+    {
+      "name": "sqrt",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "sqrt(x)",
+      "purpose": "Scalar square root; reject nonfinite results.",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "rsqrt",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "rsqrt(x)",
+      "purpose": "`1/sqrt(x)`，x > 0；精确平方根再取倒数，未使用低精度快速近似",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/mod.rs"
+    },
+    {
+      "name": "fma",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "fma(x,y,z)",
+      "purpose": "融合乘加 x*y+z，只舍入一次",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/mod.rs"
+    },
+    {
+      "name": "hypot",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "hypot(x,y)",
+      "purpose": "欧氏长度，避免直接平方造成中间溢出/下溢",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/mod.rs"
+    },
+    {
+      "name": "expm1",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "expm1(x)",
+      "purpose": "exp(x)-1，保留接近零的小量精度",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/mod.rs"
+    },
+    {
+      "name": "log1p",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "log1p(x)",
+      "purpose": "log(1+x)，x > -1，保留接近零的小量精度",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/mod.rs"
+    },
+    {
+      "name": "sigmoid",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "sigmoid(x)",
+      "purpose": "logistic，按正负分支避免指数溢出",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/mod.rs"
+    },
+    {
+      "name": "softplus",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "softplus(x)",
+      "purpose": "max(x,0)+log1p(exp(-abs(x)))，避免大正数指数溢出",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/mod.rs"
+    },
+    {
+      "name": "silu",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "silu(x)",
+      "purpose": "x*sigmoid(x)，使用稳定 sigmoid",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/mod.rs"
+    },
+    {
+      "name": "dot",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "dot(x,y)",
+      "purpose": "标量内积；长度相同，顺序 FMA 累加",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/vector.rs"
+    },
+    {
+      "name": "norm",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "norm(x)",
+      "purpose": "标量 L2 长度；逐步 hypot 避免直接平方溢出",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/vector.rs"
+    },
+    {
+      "name": "mean",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "mean(x)",
+      "purpose": "标量均值；先除 N 再求和以减少求和溢出；后缀无参数，语义及预算相同",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/vector.rs"
+    },
+    {
+      "name": "softmax",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "softmax(x)",
+      "purpose": "`[N]` 概率；减最大值后指数归一化",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/vector.rs"
+    },
+    {
+      "name": "log_softmax",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "log_softmax(x)",
+      "purpose": "`[N]` 对数概率；直接在对数域计算，避免概率下溢后取 log",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/vector.rs"
+    },
+    {
+      "name": "logsumexp",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "logsumexp(x)",
+      "purpose": "标量 log(sum(exp(x)))；减最大值稳定计算",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/vector.rs"
+    },
+    {
+      "name": "l2_normalize",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "l2_normalize(x,eps)",
+      "purpose": "`[N]`，x/max(norm(x),eps)；eps 有限且 >0；缩放后求范数，零向量返回零",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/vector.rs"
+    },
+    {
+      "name": "mse",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "mse(x,y)",
+      "purpose": "标量均方误差；等长，均值取全部 N 个元素",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/vector.rs"
+    },
+    {
+      "name": "mae",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "mae(x,y)",
+      "purpose": "标量平均绝对误差；等长",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/vector.rs"
+    },
+    {
+      "name": "cross_entropy",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "cross_entropy(logits,target)",
+      "purpose": "单样本标量负对数似然；target 为 0..N-1 的整数，不接受概率标签",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/vector.rs"
+    },
+    {
+      "name": "min",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "min(x)",
+      "purpose": "标量最小/最大值",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "max",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "max(x)",
+      "purpose": "标量最小/最大值",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "argmin",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "argmin(x)",
+      "purpose": "极值首次出现的索引，数值相等的正负零也按首次处理",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "argmax",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "argmax(x)",
+      "purpose": "极值首次出现的索引，数值相等的正负零也按首次处理",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "variance",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "variance(x,ddof)",
+      "purpose": "标量方差，分母 N-ddof；ddof 为整数且 0<=ddof<N；0 是总体方差、1 是样本方差",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "stddev",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "stddev(x,ddof)",
+      "purpose": "同一方差定义的标准差；先缩放和中心化，避免直接平方溢出",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "median",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "median(x)",
+      "purpose": "排序后中位数；偶数长度取中间两数平均",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "quantile",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "quantile(x,q)",
+      "purpose": "q 为 [0,1] 数值；对升序序列位置 q*(N-1) 做线性插值，单元素返回该元素",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "sort",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "sort(x)",
+      "purpose": "升序 `[N]`，稳定排序；不修改原列表",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "argsort",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "argsort(x)",
+      "purpose": "升序对应的原始索引 `[N]`，相等元素保持原顺序",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "cumsum",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "cumsum(x)",
+      "purpose": "包含当前元素的顺序前缀和 `[N]`；任何中间和溢出均报错",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "cosine_similarity",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "cosine_similarity(x,y)",
+      "purpose": "标量余弦相似度，等长且两个向量均非零；分别缩放后求内积与范数，最终裁剪到 [-1,1]",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "clip",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "clip(x,lower,upper)",
+      "purpose": "逐元素裁剪到闭区间，同形返回；两边界有限且 lower<=upper",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs"
+    },
+    {
+      "name": "relu",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "relu(x)",
+      "purpose": "标量 max(x,0)",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/activation.rs"
+    },
+    {
+      "name": "leaky_relu",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "leaky_relu(x,alpha)",
+      "purpose": "x>=0 时 x，否则 alpha*x；alpha 有限且 >=0",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/activation.rs"
+    },
+    {
+      "name": "elu",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "elu(x,alpha)",
+      "purpose": "x>=0 时 x，否则 alpha*expm1(x)；alpha 有限且 >=0",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/activation.rs"
+    },
+    {
+      "name": "hard_sigmoid",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "hard_sigmoid(x)",
+      "purpose": "标量 clamp(x/6+0.5,0,1)，端点 -3 与 3",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/activation.rs"
+    },
+    {
+      "name": "hard_swish",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "hard_swish(x)",
+      "purpose": "标量 x*hard_sigmoid(x)，分段计算避免中间溢出",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/activation.rs"
+    },
+    {
+      "name": "bce_logits",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "bce_logits(logits,targets)",
+      "purpose": "等长 `[N]` → 标量均值二元交叉熵；targets 每项在 [0,1]，支持软标签；输入为 logits 而非概率",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/loss.rs"
+    },
+    {
+      "name": "huber",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "huber(x,y,delta)",
+      "purpose": "等长 `[N]` → 标量均值；delta 有限且 >0；绝对残差 d<=delta 时 0.5*d²，否则 delta*(d-0.5*delta)",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/loss.rs"
+    },
+    {
+      "name": "log_cosh",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "log_cosh(x,y)",
+      "purpose": "等长 `[N]` → 标量均值 log(cosh(x-y))，小残差用 log1p，大残差在对数域计算",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/loss.rs"
+    },
+    {
+      "name": "diff",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "diff(x)",
+      "purpose": "`[N]` → `[N-1]`，输出 x[i+1]-x[i]；N>=2",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/signal.rs"
+    },
+    {
+      "name": "ema",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "ema(x,alpha)",
+      "purpose": "`[N]` → `[N]`；y[0]=x[0]，y[t]=(1-alpha)*y[t-1]+alpha*x[t]；0<alpha<=1",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/signal.rs"
+    },
+    {
+      "name": "moving_mean",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "moving_mean(x,window)",
+      "purpose": "`[N]` → `[N-window+1]`，仅有效窗口、不填充；window 是 1..N 的整数",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/signal.rs"
+    },
+    {
+      "name": "zeros",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "zeros(count)",
+      "purpose": "长度 count 的全零列表，count 为 0..1,000,000 的整数",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/data.rs"
+    },
+    {
+      "name": "ones",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "ones(count)",
+      "purpose": "同上，填充 1",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/data.rs"
+    },
+    {
+      "name": "full",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "full(count,value)",
+      "purpose": "同上，填充有限 f64 value；即使 count=0 也验证 value",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/data.rs"
+    },
+    {
+      "name": "linspace",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "linspace(start,end,count)",
+      "purpose": "等间距列表，含两端点；start/end 有限，count 为 1..1,000,000 整数；count=1 仅返回 start，支持降序",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/data.rs"
+    },
+    {
+      "name": "concat",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "concat(x,y)",
+      "purpose": "拼接 `[N]` 与 `[M]` 为 `[N+M]`，总长度不超过上限",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/data.rs"
+    },
+    {
+      "name": "vector_slice",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "vector_slice(x,start,end)",
+      "purpose": "左闭右开 `[start,end)`，要求整数 0<=start<=end<=N；输出 `[end-start]`，不支持步长或负索引",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/data.rs"
+    },
+    {
+      "name": "gather",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "gather(x,indices)",
+      "purpose": "按整数索引列表顺序取值，输出长度等于索引数；允许重复，全部索引须在 0..N-1，空 indices 合法",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/data.rs"
+    },
+    {
+      "name": "compress",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "compress(x,mask)",
+      "purpose": "mask 是等长 bool 列表，仅保留 true 位置且保持顺序；不将 0/1 隐式转为 bool；全 false 返回空列表",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/data.rs"
+    },
+    {
+      "name": "one_hot",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "one_hot(index,classes)",
+      "purpose": "`[classes]`，index 位置为 1，其余为 0；classes 是 1..1,000,000 整数，index 是 0..classes-1 整数",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/one_hot.rs"
+    },
+    {
+      "name": "reverse",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "reverse(x)",
+      "purpose": "返回倒序的新 `[N]` 列表",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/data.rs"
+    },
+    {
+      "name": "entropy",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "entropy(p)",
+      "purpose": "标量 Shannon 熵 `-sum(p*log(p))`，零概率项贡献为 0",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/probability.rs"
+    },
+    {
+      "name": "normalize_probabilities",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "normalize_probabilities(weights)",
+      "purpose": "非负权重、至少一项>0；先除最大值再归一化，返回同形概率列表，避免直接求和溢出",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/probability.rs"
+    },
+    {
+      "name": "kl_divergence",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "kl_divergence(p,q)",
+      "purpose": "等长分布，标量 `sum(p*(log(p)-log(q)))`；方向是目标 p 相对参考 q，不对称",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/probability.rs"
+    },
+    {
+      "name": "js_divergence",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "js_divergence(p,q)",
+      "purpose": "等长分布，标量 `(KL(p,m)+KL(q,m))/2`，m=(p+q)/2；对称，精确值在 [0,log(2)]",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/probability.rs"
+    },
+    {
+      "name": "cross_entropy_probs",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "cross_entropy_probs(p,q)",
+      "purpose": "等长分布，标量 `-sum(p*log(q))`；p 是目标分布，q 是预测概率；不同于接受 logits 和类别编号的 `cross_entropy`",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/probability.rs"
+    },
+    {
+      "name": "temperature_softmax",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "temperature_softmax(logits,temperature)",
+      "purpose": "正且有限的温度；同形输出 softmax(logits/temperature)，温度 1 对应普通 softmax",
+      "documentation": "docs/standard-library.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/math/probability.rs"
+    },
+    {
+      "name": "log",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "log(x)",
+      "purpose": "Scalar natural logarithm; reject nonfinite results.",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "exp",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "exp(x)",
+      "purpose": "Scalar exponential; reject nonfinite results.",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "assert",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "assert(condition,message)",
+      "purpose": "bool 为 false 时终止脚本",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "metric",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "metric(name,value)",
+      "purpose": "按名称保存 JSON 指标；同名覆盖，只保留最后值，不自动平均或 detach",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "seed",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "seed(integer)",
+      "purpose": "设置脚本局部采样 RNG；整数范围 [0,1000000000]",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "random",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "random()",
+      "purpose": "确定性 SplitMix64 流，返回 [0,1)；不影响模型初始化 RNG",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 0,
+        "max": 0
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "mlp",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "mlp(widths,activation,seed,optimizer)",
+      "purpose": "新建 CPU f32 顺序网络；widths 是包括输入输出的 2..64 个整数，每个 1..16384，最多 4000000 参数；隐藏层 activation 为 relu/tanh/sigmoid/identity，输出层始终 linear；optimizer 为 sgd/adam",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 4,
+        "max": 4
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "model",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "model(path,optimizer)",
+      "purpose": "Legacy alias of load_model; 加载原生顺序 IR 或 forward Program IR v1 JSON，使用新优化器；forward 另可选 none；不是普通 .wgt 模型解析器，也不接受传统 manifest 制品",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs",
+      "legacy_alias_for": "load_model"
+    },
+    {
+      "name": "save_model",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "save_model(model,path)",
+      "purpose": "导出原生推理 IR v1 JSON；不包含优化器；forward 使用 Program 格式，供 model() 或 wgt-native adaptive 加载",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "predict",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "predict(model,input)",
+      "purpose": "输入单个 f32 向量，返回输出列表；普通模型不训练，`forward` 模型可通过显式 `write` 提交参数更新",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "fit",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "fit(model,inputs,targets,lr,loss)",
+      "purpose": "一个批次一次更新，返回更新前损失；lr 正有限；loss 为 mse/cross_entropy，forward 模型还可用 `loss` 调用同文件 `fn loss`",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 5,
+        "max": 5
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "reinforce",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "reinforce(model,observations,actions,advantages,lr)",
+      "purpose": "一批观测的策略梯度更新，返回更新前的 mean(-advantage*log pi(action))",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 5,
+        "max": 5
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "train",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "train(model,inputs,targets,rate,max_norm)",
+      "purpose": "forward 自定义损失的批次平均梯度、全局 L2 裁剪及原子更新；等价 train 语句，见[原生 RL](reinforcement-learning.md)",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 5,
+        "max": 5
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "sample",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "sample(model,observation)",
+      "purpose": "将模型输出视为 logits，稳定 softmax 后由脚本 RNG 抽取动作索引；forward 模型使用无 tape 的端点短路推理，不提交 write",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs",
+      "status": "legacy; retained until an equivalent categorical syntax is available"
+    },
+    {
+      "name": "gae",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "gae(rewards,values,next_values,terminated,truncated,gamma,lambda)",
+      "purpose": "同长度一维列表；后两种标记是 bool，gamma/lambda 在 [0,1]；返回优势列表",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 7,
+        "max": 7
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "jsonl",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "jsonl(path)",
+      "purpose": "打开 UTF-8 JSON Lines 数据流；每行一个 JSON 值，不允许空行",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/dataset.rs"
+    },
+    {
+      "name": "hf_dataset",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "hf_dataset(dataset,config,split)",
+      "purpose": "Rust 原生 Hugging Face 分页数据流；全部参数必填，首次 batch 联网；HF_TOKEN 可选，详见 [数据集契约](datasets.md#原生数据集加载器wgt-05当前源码)",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/dataset.rs"
+    },
+    {
+      "name": "batch",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "batch(reader,count)",
+      "purpose": "count 在 1..65536；返回最多 count 行；尾批保留，到 EOF 返回 []；单行 <=1MiB、单批 <=16MiB",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/dataset.rs"
+    },
+    {
+      "name": "close",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "close(reader)",
+      "purpose": "关闭流，重复关闭无操作；关闭后 batch 报错",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/dataset.rs"
+    },
+    {
+      "name": "save",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "save(model,path)",
+      "purpose": "Legacy alias of save_checkpoint; 保存顺序或 forward 训练断点：结构、权重、冻结关系、优化器类别、步数和矩状态；顺序模型另保留共享关系",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs",
+      "legacy_alias_for": "save_checkpoint"
+    },
+    {
+      "name": "restore",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "restore(path)",
+      "purpose": "Legacy alias of load_checkpoint; 读取断点，返回模型及恢复后的优化器",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs",
+      "legacy_alias_for": "load_checkpoint"
+    },
+    {
+      "name": "benchmark",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "benchmark(model,workload,warmup,repeats,name[,mode])",
+      "purpose": "mode 默认 cpu；支持同步 GPU 前向和 train:cpu MSE 训练步；warmup 0..10000，repeats 1..100000；完整契约见[原生测试](native-testing.md#benchmark)",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 5,
+        "max": 6
+      },
+      "defaults": {
+        "mode": "cpu"
+      },
+      "implementation": "crates/wgt-runtime/src/script/benchmark.rs"
+    },
+    {
+      "name": "load_model",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "load_model(path,optimizer)",
+      "purpose": "加载原生顺序 IR 或 forward Program IR v1 JSON，使用新优化器；forward 另可选 none；不是普通 .wgt 模型解析器，也不接受传统 manifest 制品",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "save_checkpoint",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "save_checkpoint(model,path)",
+      "purpose": "保存顺序或 forward 训练断点：结构、权重、冻结关系、优化器类别、步数和矩状态；顺序模型另保留共享关系",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "load_checkpoint",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "load_checkpoint(path)",
+      "purpose": "读取断点，返回模型及恢复后的优化器",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "detach",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "detach(x)",
+      "purpose": "Stop the input gradient.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "exp",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "exp(x)",
+      "purpose": "Elementwise exponential.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "log",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "log(x)",
+      "purpose": "Elementwise natural logarithm.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "log_softmax",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "log_softmax(x)",
+      "purpose": "Stable vector log probabilities.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "minimum",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "minimum(a,b)",
+      "purpose": "Elementwise minimum; ties split gradients equally.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "clip",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "clip(x,low,high)",
+      "purpose": "Elementwise clamp using signed literal bounds; zero gradient at endpoints.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "sum",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "sum(x)",
+      "purpose": "Reduce f32[N] to f32[1].",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "read",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "read(parameter)",
+      "purpose": "读取参数当前值，结果为扁平向量；直接引用参数也会读取",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "linear",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "linear(x,weight[,bias])",
+      "purpose": "out 必填；in 默认前层宽度；bias 仅 0/1，默认 1；可用 `linear(M)`",
+      "defaults": {
+        "bias": "absent (no bias)"
+      },
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "add",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "add(a,b)",
+      "purpose": "等长逐元素运算，无广播",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "mul",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "mul(a,b)",
+      "purpose": "等长逐元素运算，无广播",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "mean",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "mean(x)",
+      "purpose": "Reduce f32[N] to f32[1]; also x.mean.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "square",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "square(x)",
+      "purpose": "Elementwise square.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "gate",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "gate(p,x)",
+      "purpose": "返回 p*x；x 为 f32[N]，p 为 f32[1] 或 f32[N]，每项须在 [0,1]；标量门广播；推理时 p 全为 0 跳过 x 表达式",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "route",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "route(p,a,b)",
+      "purpose": "返回 p*a+(1-p)*b；a/b 同为 f32[N]，p 为 f32[1] 或 f32[N] 且在 [0,1]；推理时 p 全为 1 只求值 a，全为 0 只求值 b，否则计算两边",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "relu",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "relu(x)",
+      "purpose": "等长逐元素运算",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "tanh",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "tanh(x)",
+      "purpose": "等长逐元素运算",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "sigmoid",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "sigmoid(x)",
+      "purpose": "等长逐元素运算",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "softmax",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "softmax(x)",
+      "purpose": "f32[N] 沿唯一向量轴归一化，返回 f32[N]；稳定指数实现，支持一阶梯度",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "slice",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "slice(x,start,length)",
+      "purpose": "Slice fixed tensor using literal zero-based start and positive length; no default arguments.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "positive",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "positive(x)",
+      "purpose": "Condition only: f32[1] strictly greater than zero.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "condition"
+    },
+    {
+      "name": "write",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "write(parameter,value)",
+      "purpose": "全量替换非冻结参数，元素数须相同",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "statement"
+    },
+    {
+      "name": "true",
+      "kind": "constant",
+      "contexts": [
+        "ordinary_function",
+        "tensor_condition"
+      ],
+      "signature": "true",
+      "purpose": "Boolean literal.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "false",
+      "kind": "constant",
+      "contexts": [
+        "ordinary_function",
+        "tensor_condition"
+      ],
+      "signature": "false",
+      "purpose": "Boolean literal.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "null",
+      "kind": "constant",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "null",
+      "purpose": "Null value; also the implicit function return.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "f32",
+      "kind": "type",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "f32[N] / f32[O,I]",
+      "purpose": "Fixed-shape 32-bit floating-point tensor; supported ranks depend on declaration.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "prob",
+      "kind": "type",
+      "contexts": [
+        "forward_parameter_declaration"
+      ],
+      "signature": "prob",
+      "purpose": "Probability parameter represented by a logit; trainable initial value strictly in (0,1), frozen permits endpoints; reads f32[1]. Initializer required.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs"
+    },
+    {
+      "name": "linear",
+      "kind": "layer",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "linear(in=previous_width,out,bias=1) / linear(out)",
+      "purpose": "Sequential affine layer; out required, in defaults to preceding width, bias defaults to 1.",
+      "defaults": {
+        "in": "previous width",
+        "bias": 1
+      },
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "relu",
+      "kind": "layer",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "relu",
+      "purpose": "Sequential activation preserving vector width.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "tanh",
+      "kind": "layer",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "tanh",
+      "purpose": "Sequential activation preserving vector width.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "sigmoid",
+      "kind": "layer",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "sigmoid",
+      "purpose": "Sequential activation preserving vector width.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "identity",
+      "kind": "layer",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "identity",
+      "purpose": "Sequential activation preserving vector width.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    }
+  ]
+}
