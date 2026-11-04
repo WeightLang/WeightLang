@@ -1,6 +1,0 @@
-wgt 0.5
-# 对一个非空列表的全部元素求平均，输出标量；不隐含 batch 轴。
-fn main() {
-    assert(mean([1, 2, 3]) == 2, "mean");
-    return mean([1e308, 1e308]);
-}

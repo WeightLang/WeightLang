@@ -190,11 +190,11 @@ limits 契约同 compute_scope。`compute_call(name,input)` 把整个 input 列�
 | 自定义能力 | WGT 求平方和返回 25；解释/AOT 均计费 21 工作单位，失败子任务计费 10 |
 | 成本感知强化学习 | 三个固定采样种子的策略梯度测试；解释/AOT 评估指标一致，低价格同成功率下平均工作量 2 → 1 |
 
-可重现检查：`cargo test -p weightlang-runtime --no-default-features`，
+可重现检查：`cargo test -p wgtime-core --no-default-features`，
 然后分别对 custom_budget/model.wgt 和 cost_aware_policy/model.wgt 执行 `wgt run` 与 `wgt run --compiled`。
-本次使用 `WGT_WEIGHTFS=off cargo test --locked --offline -p weightlang-runtime --no-default-features`，
+本次使用 `WGT_WEIGHTFS=off cargo test --locked --offline -p wgtime-core --no-default-features`，
 一次本地源码快照的运行时测试中，105 项通过，4 项 WeightFS/FUSE 实机测试按其原有标记忽略；资源相关测试均执行。测试数量会随源码变化。
-随后单独使用 `WGT_WEIGHTFS=on cargo test --locked --offline -p weightlang-runtime --no-default-features --test weightfs -- --ignored`，
+随后单独使用 `WGT_WEIGHTFS=on cargo test --locked --offline -p wgtime-core --no-default-features --test weightfs -- --ignored`，
 4 项 WeightFS/FUSE 实机测试通过。
 共享构建产物存在并行操作时，应使用独立磁盘 CARGO_TARGET_DIR 复核。
 

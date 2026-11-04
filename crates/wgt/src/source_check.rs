@@ -13,16 +13,16 @@ pub struct Diagnostic {
 pub fn check_file(path: &Path) -> Result<()> {
     let source = fs::read_to_string(path).with_context(|| path.display().to_string())?;
     if source.lines().any(|line| line.trim() == "prelude native 0.5;") {
-        weightlang_runtime::script::prelude::declarations::validate(
+        wgt_language::script::prelude::declarations::validate(
             &source, include_str!("../../../language/prelude.json"),
         ).map_err(anyhow::Error::msg)?;
         return Ok(());
     }
     crate::script_dependencies::metadata(&source)?;
     if source.lines().any(|line| line.trim().starts_with("operators ")) {
-        weightlang_runtime::script::operators::library(&source)?;
+        wgt_language::script::operators::library(&source)?;
     } else {
-        weightlang_runtime::script::parse_with_imports(
+        wgt_language::script::parse_with_imports(
             &source, path.parent().unwrap_or(Path::new(".")), &Default::default(),
         )?;
     }

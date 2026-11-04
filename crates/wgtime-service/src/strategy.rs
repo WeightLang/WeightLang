@@ -2,7 +2,7 @@
 //! No source evaluation, native libraries, paths, or runtime host calls during execution.
 use anyhow::{bail, ensure, Context, Result};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use weightlang_runtime::{
+use wgtime_core::{
     adaptive::{optimization::GradientSnapshot, AdaptiveSession},
     script::{self, Expr, Statement, Stmt, Value},
 };
@@ -183,12 +183,12 @@ impl Strategy {
         };
         let mut args = vec![Value::Adaptive(0), vm.batch(inputs)?, vm.batch(targets)?];
         if self.functions[&self.entry].args.len() == 4 {
-            weightlang_runtime::adaptive::optimization::validate_state(parameters)?;
+            wgtime_core::adaptive::optimization::validate_state(parameters)?;
             vm.reserve(json_size(parameters)?)?;
             args.push(from_json(parameters));
         }
         let result = vm.call(self, &self.entry, args)?;
-        weightlang_runtime::script::validate_strategy_result(&result)?;
+        wgtime_core::script::validate_strategy_result(&result)?;
         let result = json(&result)?;
         Ok(serde_json::json!({"commits":vm.commits,"loss":vm.loss,"remaining":*vm.remaining,"result":result}))
     }

@@ -54,17 +54,29 @@ fn main() {
         fs::write(&source, &text).unwrap();
         script_compiler::compile(&source, &executable).unwrap();
         fs::remove_file(&source).unwrap();
-        let reference = weightlang_runtime::script::run(&text, &interpreted, 100_000);
+        let reference = wgtime_core::script::run(&text, &interpreted, 100_000);
         let actual = Command::new(&executable).env("PATH", "/nonexistent").env("WGTIME_ENDPOINT", &endpoint).arg("--root").arg(&compiled).output().unwrap();
         if mode < 2 || mode == 4 {
             assert!(actual.status.success(), "{}", String::from_utf8_lossy(&actual.stderr));
             let actual: serde_json::Value = serde_json::from_slice(&actual.stdout).unwrap();
-            assert_eq!(serde_json::to_value(reference.unwrap()).unwrap(), actual);
+            let reference = serde_json::to_value(reference.unwrap()).unwrap();
+            // The interpreter reports operations; the client report omits them.
+            // Persistence equivalence covers the prediction and metrics only.
+            for report in [&reference, &actual] {
+                assert!(report.is_object(), "report must be an object: {report}");
+                let result = report.get("result").expect("prediction result is required");
+                let prediction = result.as_array().expect("prediction must be an array");
+                assert_eq!(prediction.len(), 1);
+                assert!(prediction[0].as_f64().is_some_and(f64::is_finite));
+                assert!(report.get("metrics").expect("metrics are required").is_object());
+            }
+            assert_eq!(reference.get("result"), actual.get("result"));
+            assert_eq!(reference.get("metrics"), actual.get("metrics"));
         } else {
             let expected = "load format does not match model/checkpoint kind";
             assert!(format!("{:#}", reference.unwrap_err()).contains(expected));
             assert!(!actual.status.success());
-            assert!(String::from_utf8_lossy(&actual.stderr).contains(expected));
+            assert!(String::from_utf8_lossy(&actual.stderr).contains(expected), "mode {mode}: {}", String::from_utf8_lossy(&actual.stderr));
         }
     }
     for root in [&interpreted, &compiled] {

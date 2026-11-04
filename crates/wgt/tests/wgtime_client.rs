@@ -24,7 +24,7 @@ fn main(){
  let ce=train classifier on [[1],[2]] against [0,1] {rate:0.01;loss:cross_entropy;};
  return [loss,value,other,ce];
 }"#;
- fs::write(&source,text).unwrap();let interpreted=weightlang_runtime::script::run(text,&root,100000).unwrap();
+ fs::write(&source,text).unwrap();let interpreted=wgtime_core::script::run(text,&root,100000).unwrap();
  weightlang_wgt::script_compiler::compile(&source,&binary).unwrap();fs::remove_file(&source).unwrap();
  let out=Command::new(&binary).env_clear().env("PATH","/nonexistent").env("WGTIME_ENDPOINT",&endpoint).output().unwrap();assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));let json:serde_json::Value=serde_json::from_slice(&out.stdout).unwrap();assert_eq!(json["result"][1],interpreted.result[1],"strategy f64 result remains exact");for index in [0,2,3] {assert_eq!(json["result"][index].as_f64().unwrap() as f32,interpreted.result[index].as_f64().unwrap() as f32,"model loss must retain exact f32 value across JSON transport");}
  let removed="wgt 0.5\nfn main(){return model(\"missing.json\",\"sgd\");}";

@@ -1,0 +1,15 @@
+[package]
+name = "wgt-language"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Static WeightLang syntax, model plans and artifact schemas"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+safetensors = "0.8"
+
+[build-dependencies]
+serde_json = "1"

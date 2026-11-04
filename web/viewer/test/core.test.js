@@ -104,6 +104,24 @@ test('recurrent feedback does not destroy feed-forward ranks', () => {
   assert.ok(p.get('gate').y < p.get('result').y);
 });
 
+test('locale files contain complete, unique source translations', async () => {
+  const {readFile} = await import('node:fs/promises');
+  const {fileURLToPath} = await import('node:url');
+  const base = new URL('../locales/', import.meta.url);
+  const zh = JSON.parse(await readFile(new URL('zh-CN.json', base), 'utf8'));
+  const en = JSON.parse(await readFile(new URL('en.json', base), 'utf8'));
+  const zhKeys = Object.keys(zh), enKeys = Object.keys(en);
+  assert.equal(zhKeys.length, 177);
+  assert.equal(new Set(zhKeys).size, zhKeys.length);
+  assert.equal(new Set(enKeys).size, enKeys.length);
+  assert.deepEqual(new Set(zhKeys.map(key => zh[key])), new Set(enKeys));
+  assert.ok(zhKeys.every(key => en[zh[key]] !== undefined));
+  assert.ok(enKeys.every(key => zh[en[key]] !== undefined));
+  const source = await readFile(fileURLToPath(new URL('../viewer.js', import.meta.url)), 'utf8');
+  assert.equal(source.includes('const translations ='), false);
+  assert.equal(source.includes('translations.push('), false);
+});
+
 test('translation preserves identifiers and supports both directions', async () => {
   const {translate,nodeDescription}=await import('../viewer.js');
   assert.equal(translate('展开内部层','en'),'Expand layers');

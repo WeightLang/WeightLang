@@ -1,5 +1,5 @@
 use std::{fs, path::Path, process::Command};
-use weightlang_runtime::script;
+use wgtime_core::script;
 use weightlang_wgt::script_compiler;
 
 #[test]
@@ -9,7 +9,30 @@ fn slicing_aot_matches_interpreter() {
     let dir = tempfile::tempdir_in(root).unwrap();
     let source = dir.path().join("model.wgt");
     let executable = dir.path().join("compiled");
-    let text = include_str!("../../../examples/native_training/slicing/model.wgt");
+    let text = r#"wgt 0.5
+model SliceWindow
+input x: f32[4]
+output y: f32[2]
+parameter scale: f32[2] = [1,1]
+fn forward(x) { return (x[:])[1:3] * scale; }
+fn loss(prediction, truth) {
+    return square((prediction - truth)[:]).mean;
+}
+fn main() {
+    let row = [10,20,30,40];
+    let start = 1;
+    assert(row[start:3] == [20,30], "runtime list endpoints");
+    assert(row[:2] == [10,20], "prefix");
+    assert(row[2:] == [30,40], "suffix");
+    assert(row[4:] == [], "empty list slice");
+    assert(row[:][1:3][0] == 20, "nested slicing");
+    let net = SliceWindow("sgd");
+    assert(net([1,2,3,4]) == [2,3], "initialized forward");
+    fit(net, [[1,2,3,4]], [[0,0]], 0.01, "loss");
+    assert(net([1,2,3,4])[0] < 2, "selected features train");
+    return true;
+}
+"#;
     fs::write(&source, &text).unwrap();
     let expected = script::run(&text, dir.path(), 10000).unwrap();
     script_compiler::compile(&source, &executable).unwrap();

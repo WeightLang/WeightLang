@@ -1,5 +1,5 @@
 use std::{fs, path::Path, process::Command};
-use weightlang_runtime::script;
+use wgtime_core::script;
 use weightlang_wgt::script_compiler;
 #[test]
 fn record_collection_aot_preserves_control_flow_projection_and_budgets() {

@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
-use weightlang_runtime::script;
+use wgt_language::script;
 
 #[derive(Parser)]
 #[command(
@@ -99,11 +99,19 @@ fn main() -> Result<()> {
                 let stage = tempfile::Builder::new()
                     .prefix(".weightc-")
                     .tempdir_in(parent)?;
-                let (mut trainer, report) =
-                    script::build(&text, source.parent().unwrap(), max_operations)
-                        .with_context(|| source.display().to_string())?;
-                trainer.export(&stage.path().join("model.json"))?;
-                trainer.save(&stage.path().join("checkpoint.json"))?;
+                let executable = stage.path().join(format!("builder{}", std::env::consts::EXE_SUFFIX));
+                weightlang_wgt::script_compiler::compile_options(&source, &executable, cli.offline, cli.locked)?;
+                let execution = std::process::Command::new(&executable)
+                    .arg("--max-operations").arg(max_operations.to_string())
+                    .arg("--root").arg(source.parent().unwrap())
+                    .arg("--build-output").arg(stage.path().canonicalize()?)
+                    .output().context("execute wgtime build client")?;
+                ensure!(execution.status.success(), "wgtime build failed: {}", String::from_utf8_lossy(&execution.stderr));
+                let report: serde_json::Value = serde_json::from_slice(&execution.stdout)?;
+                let build = report.get("build").context("missing build report")?;
+                let steps = build["steps"].as_u64().context("missing training steps")?;
+                let input = build["input"].as_u64().context("missing input width")?;
+                let output_width = build["output"].as_u64().context("missing output width")?;
                 fs::write(stage.path().join("source.wgt"), &text)?;
                 let manifest = json!({
                     "format": "weightlang.native-build.v1",
@@ -114,10 +122,10 @@ fn main() -> Result<()> {
                     "model": "model.json", "checkpoint": "checkpoint.json", "source": "source.wgt",
                     "source_sha256": format!("{:x}", Sha256::digest(text.as_bytes())),
                     "model_sha256": format!("{:x}", Sha256::digest(fs::read(stage.path().join("model.json"))?)),
-                    "training_steps": trainer.steps(),
-                    "interface": {"input": {"dtype": "f32", "shape": [trainer.session.report().input]},
-                                  "output": {"dtype": "f32", "shape": [trainer.session.report().output]}},
-                    "state": if trainer.steps() > 0 { "updated" } else { "initialized" },
+                    "training_steps": steps,
+                    "interface": {"input": {"dtype": "f32", "shape": [input]},
+                                  "output": {"dtype": "f32", "shape": [output_width]}},
+                    "state": if steps > 0 { "updated" } else { "initialized" },
                     "max_operations": max_operations, "report": report
                 });
                 fs::write(

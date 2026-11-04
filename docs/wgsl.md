@@ -83,9 +83,9 @@ wgpu 验证着色器和绑定合法性，不证明算法正确或每个输出都
 ## 验证
 
 ```sh
-WGT_WEIGHTFS=off cargo test -p weightlang-runtime --no-default-features --test script_gpu
-WGT_WEIGHTFS=off WGT_REQUIRE_GPU=1 cargo test -p weightlang-runtime --features gpu --test gpu_training -- --include-ignored --test-threads=1
-WGT_WEIGHTFS=off cargo test -p weightlang-runtime --features gpu --test script_gpu -- --include-ignored --test-threads=1 --nocapture
+WGT_WEIGHTFS=off cargo test -p wgtime-core --no-default-features --test script_gpu
+WGT_WEIGHTFS=off WGT_REQUIRE_GPU=1 cargo test -p wgtime-core --features gpu --test gpu_training -- --include-ignored --test-threads=1
+WGT_WEIGHTFS=off cargo test -p wgtime-core --features gpu --test script_gpu -- --include-ignored --test-threads=1 --nocapture
 WGT_WEIGHTFS=off cargo test -p weightlang-wgt --features gpu --test script_compiler compiled_gpu_and_wgsl -- --ignored --nocapture
 ```
 

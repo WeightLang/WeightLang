@@ -1,25 +1,23 @@
 # 编辑器语法高亮
 
-仓库提供 WGT 0.5 `.wgt` 的离线高亮配置，不需要 Python、PyTorch 或运行模型。
-颜色跟随编辑器主题。支持关键字、内置算子、类型、数值、双引号字符串和 `#` 注释；
-支持 `fn`、控制流、训练与自更新前向内置函数、布尔/null 字面量、JSON 字符串转义及花括号。
-TextMate 还区分函数定义、参数、调用名称、标点和运算符。高亮不判断版本是否合法，也不做形状检查。
-词表以当前 Rust 实现为准；旧模型材料不代表 0.5 可执行功能。
-当前工作区的词表包含标量数学、计算预算和设备队列函数；这些本地更改不代表已安装的 0.2.0 扩展已更新。
+仓库提供 WGT 模型 DSL 的 `.wgt` 文件离线高亮配置。Rust 主程序区域使用 Rust 编辑器工具；WGT 文件由仓库现有的 WGT 语法配置支持。
+编译期读取的 WGT 文件和运行期读取的 WGT 文件都仍是 WGT 源文件，编辑器按文件类型提供高亮，不据此判断其加载时机或执行语义。
+颜色跟随编辑器主题。WGT 文件规则覆盖关键字、可公开调用的函数、Tensor intrinsic、类型、数值、双引号字符串和 `#` 注释；高亮不验证 DSL 语义、版本或形状。
+Rust 的 `model!` 宏接收 WGT 源码 Rust string literal；其中内容不是 Rust token DSL。目前没有该源码字符串的 WGT 语法注入、高亮或补全支持，不能假设会自动继承 `.wgt` 文件的语法支持。`include_model!` 接收文件路径字符串，注入支持不适用于路径字符串。
 
 ## 支持范围
 
 | 编辑器 | 文件/方式 | 状态 |
 | --- | --- | --- |
-| VS Code、VSCodium，以及兼容 VS Code 扩展的编辑器 | `editors/vscode/`，本地 VSIX | TextMate 引擎测试通过；当前扩展版本 0.2.0 |
-| Sublime Text | `editors/WeightLang.tmbundle/Syntaxes/WeightLang.tmLanguage` | 格式已验证，未逐一 GUI 验收 |
-| TextMate | `editors/WeightLang.tmbundle/` | 同上 |
-| JetBrains IDE（启用 TextMate Bundles 插件） | 导入 `editors/WeightLang.tmbundle/` | 同上 |
-| Vim、Neovim | `editors/vim/` | 两者无界面实际高亮测试通过 |
-| Zed | `editors/zed/`，独立 Tree-sitter 扩展 | 原生解析/查询测试和 WASM 编译通过；未 GUI 验收、未上架 |
-| Emacs | `editors/emacs/wgt-mode.el` | 已提供 mode；未在 Emacs 执行验证 |
-| Kate、KWrite | `editors/kate/wgt.xml` | XML 检查通过；未 GUI 验收 |
-| GtkSourceView 编辑器，如 GNOME Text Editor | `editors/gtksourceview/wgt.lang` | GtkSourceView 5 实际加载/高亮测试通过 |
+| VS Code、VSCodium，以及兼容 VS Code 扩展的编辑器 | `editors/vscode/`，本地 VSIX | WGT 文件使用 TextMate；Rust 主程序使用编辑器的 Rust 支持；当前扩展版本 0.2.0 |
+| Sublime Text | `editors/WeightLang.tmbundle/Syntaxes/WeightLang.tmLanguage` | WGT 文件规则；格式验证状态以本轮检查结果为准 |
+| TextMate | `editors/WeightLang.tmbundle/` | WGT 文件规则；未确认 Rust 宏内嵌注入 |
+| JetBrains IDE（启用 TextMate Bundles 插件） | 导入 `editors/WeightLang.tmbundle/` | 仅增加 WGT 文件词法高亮 |
+| Vim、Neovim | `editors/vim/` | WGT 文件使用仓库语法；Rust 主程序使用 Rust 支持 |
+| Zed | `editors/zed/`，独立 Tree-sitter 扩展 | WGT 文件由 Tree-sitter grammar/query 支持；当前 corpus 有 5 项失败；未 GUI 验收、未上架 |
+| Emacs | `editors/emacs/wgt-mode.el` | 已提供 WGT mode；未在 Emacs 执行验证 |
+| Kate、KWrite | `editors/kate/wgt.xml` | WGT 文件规则；未 GUI 验收 |
+| GtkSourceView 编辑器，如 GNOME Text Editor | `editors/gtksourceview/wgt.lang` | WGT 文件规则；不提供 Rust 宏内嵌注入 |
 
 VS Code 使用 [TextMate grammar](https://code.visualstudio.com/api/language-extensions/syntax-highlight-guide)；
 [Sublime 支持 tmLanguage](https://www.sublimetext.com/docs/syntax.html)，
@@ -81,7 +79,8 @@ vim.cmd('syntax enable')
 在命令面板运行 **`zed: install dev extension`**，选择本仓库的 `editors/zed/`。
 0.2.0 的 manifest 已固定到包含 WGT 0.5 解析器的远端提交。
 Zed 会从 manifest 固定的提交下载并编译 `editors/tree-sitter-wgt/` 中的解析器；
-首次需要网络及 WASI 工具链，之后高亮可离线工作。打开 `.wgt` 文件后语言应显示 **WeightLang**。
+首次需要网络及 WASI 工具链，之后可为 `.wgt` 文件提供高亮。打开 `.wgt` 文件后语言应显示 **WeightLang**。
+该 grammar 只注册 WGT 文件类型；Rust 宏中的内嵌 DSL 注入尚未实现。
 
 扩展提供高亮、括号配对、注释切换、平铺声明大纲，函数大纲，以及括号和花括号内部的缩进。
 尚无 LSP、按缩进划分的折叠或嵌套大纲；`wgt init 1` 算法脚本和
@@ -116,9 +115,9 @@ Flatpak 应用可能需要使用其沙箱内的用户数据目录。
 ## 如何继续扩大覆盖
 
 - **分发**：后续发布 VSIX 到 Marketplace/Open VSX、提交编辑器的语言仓库，让用户不用手动复制。
-- **Tree-sitter**：已实现于 `editors/tree-sitter-wgt/`，Zed 包复用相同查询。
-  Helix、Neovim 可复用解析器，但仍需各自的语言注册；尚未提交这些编辑器的上游仓库。
-- **LSP**：复用 WGT 解析器提供诊断、补全、定义跳转等。它是下一层语义工具，当前没有实现。
+- **Rust 宏内嵌 WGT**：`model!` 和 `include_model!` 接收 Rust string literal，不是 token DSL。要为字符串内容提供 WGT 高亮，需要 Rust grammar 的 injection query、宏匹配规则和 WGT 注入语言注册；这尚未实现。宏内补全也未实现。
+- **Tree-sitter**：解析器位于 `editors/tree-sitter-wgt/`，Zed 扩展复用其查询。最近一次集中检查中，`tree-sitter generate --abi 14` 通过，但 corpus 有 5 项失败：包括 `models.txt` 中 3 项模型声明语料，以及 `current_language.txt` 中 native 声明和训练表达式语料的 2 项。它们反映当前 DSL 树结构与期望树不一致，不能视为无关的旧通用脚本失败。Helix、Neovim 仍需各自语言注册。
+- **LSP**：诊断、补全和定义跳转当前没有实现。
 - **GitHub / 网页 / 文档**：需要分别集成 Linguist、Shiki、Pygments 等；仓库带了 grammar
   不会自动让 GitHub 识别新语言。此处尚未注册这些集成。
 
@@ -134,8 +133,7 @@ npm test --prefix editors/vscode
 node scripts/test_editor_support.cjs
 ```
 
-生成器使用 native-builtins.json 中的原生函数快照；存在 Rust BUILTINS 源码时检查两者一致。
-编辑器可独立发布，不依赖尚未合入的语言迁移；显式维护 0.5 声明、控制流和 forward 运算。
+生成器从当前 prelude metadata 生成 WGT 文件高亮词表；这些规则服务于 WGT DSL 文件，不代表 Rust 宏字符串已启用注入。
 修改生成器及 scripts/editor-templates/，不要直接修改生成的词表、TextMate、Vim、Emacs、
 Kate、GtkSourceView 或高亮查询。Tree-sitter 结构规则在 grammar.js；结构变更后提交生成的 C/JSON。
 编辑器解析器允许部分旧语法以便阅读迁移材料，不替代 weightc check。
@@ -143,9 +141,7 @@ Kate、GtkSourceView 或高亮查询。Tree-sitter 结构规则在 grammar.js；
 `.5`、`//` 等宽松词法规则仅用于编辑器结构恢复，不表示 Rust 接受这些源码表达式。
 [上下文规格](../language/source_capabilities.json) 与[共同语料](../language/conformance.json)
 分别声明 Rust 接受与编辑器结构接受的预期；语义负例无需在编辑器中产生 ERROR。
-运行 `cargo test -p weightlang-runtime --test source_conformance` 验证 Rust 一侧，
+运行 `cargo test -p wgtime-core --test source_conformance` 验证 Rust 一侧，
 `node scripts/test_source_conformance.cjs` 验证编辑器一侧（也包含在编辑器总检查中）。
 
-测试覆盖具体 TextMate scope、仓库源码遍历、Tree-sitter 语料和四种查询。
-新增 0.5 样例覆盖训练循环、自更新 forward、嵌套花括号、逻辑运算与字符串转义。
-未逐一 GUI 验收；Open VSX 与 Zed 扩展仓库未发布。
+编辑器语法检查与 Rust 主程序、WGT DSL 文件应分别验收。Tree-sitter 最近已生成 parser，但 corpus 有 5 项失败；旧通用脚本样例和覆盖情况不能替代新的模型 DSL corpus。宏内嵌 WGT 注入、补全尚未验收或实现。未逐一 GUI 验收；Open VSX 与 Zed 扩展仓库未发布。

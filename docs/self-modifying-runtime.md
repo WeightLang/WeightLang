@@ -61,7 +61,7 @@ Rust `AdaptiveSession::forward(input,max_steps,tape_budget_bytes)` 返回不提�
 JSON 传输命令 `forward` 接收 input、parameters（默认空映射）、tape_budget_bytes（默认剩余预算）；
 `backward` 接收 tape、output_gradient、state_gradients（默认空映射）、retain（默认 false）；
 `release` 释放 tape，`parameters` 读取当前参数。每会话最多 64 个活动 tape。
-API 详情以 `crates/wgt-runtime/src/adaptive/transport.rs` 为准。
+API 详情以 `crates/wgtime-core/src/adaptive/transport.rs` 为准。
 高层普通函数暂不暴露 VJP/外部优化器接口；`predict` 用于提交推理状态。
 声明式 `train` / `reinforce` 已接通此 VJP；训练不提交 forward 中的 write，最终状态梯度为零。
 `gate`/`route` 对门与各输入求导；`softmax` 使用完整向量 Jacobian 的 VJP，不是逐项 sigmoid 导数。

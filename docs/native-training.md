@@ -8,7 +8,9 @@
 环境反馈不限定奖励，learner使用现有train或显式梯度提交；无整实例checkpoint或异步环境支持。
 命令签名中的 SOURCE/FILE.wgt 表示路径占位符，模型入口应传入实际的 `model.wgt` 路径。
 
-`wgt run FILE.wgt` 是当前本地脚本解释入口；目标架构中，编译后的程序将通过轻量 IPC client 调用机器级唯一 `wgtime` 服务执行模型加载、推理、反向传播、权重更新与 checkpoint 操作，不嵌入执行核心。训练和推理状态归服务端；服务和客户端接线尚未实现。
+目标职责分工是：Rust 主程序负责数据准备、训练循环和业务控制，WGT `ModelDefinition` 负责模型内部计算，所有模型计算由唯一 `wgtime` service 执行。模型定义、运行时实例、权重和 checkpoint 分离；解析定义不创建实例，不初始化权重或训练状态，不训练、不写文件。
+
+首期定义 API 提供纯 `ModelDefinition` 的 `parse` / `from_file`，以及接受 Rust 字符串字面量的 `model!` / `include_model!` 宏。三种入口共用 parser 并统一拒绝 `import`。宏在编译期验证后嵌入源码；运行时构造定义仍是纯解析，不是预编译 IR。此 facade 已通过本地定点验证（语言 4 项、宏 7 项、facade 2 项，含真实三入口推理/训练/weights/drop 及删除源码后无工具链运行），但尚未发布；这不代表全仓、全 GPU 或性能验收通过。本文其余现有 WGT 训练语法描述当前脚本接口，不代表新 facade 具备相同 API。
 ## 统一训练入口契约（本轮实现中）
 
 监督训练使用同一个表达式入口，作为语句时忽略返回值：
@@ -46,7 +48,7 @@ cargo build -p weightlang-wgt
 它不做完整类型检查或证明未执行分支中的名称/调用有效。模型与实参在执行时检查。
 `wgt run --max-operations N` 默认 10000000，限制解释器表达式、语句、循环和调用的执行次数；
 这不是超时、内存限额或内置训练算子的 FLOP 限制。内置文件操作可能阻塞。
-当前 `wgt-native script` 仅为本地实现入口；目标架构收敛后将移除重复公开入口，命令能力归入 `wgt`，具体拆分尚未实现。
+历史 `wgt-native script` 本地实现入口已随执行服务拆分移除；脚本运行请使用 `wgt run`，模型执行接口由 wgtime client/service 提供。
 
 ## 显式分类输出
 
@@ -127,7 +129,7 @@ fn main() {
 `load checkpoint from PATH`；前者必须显式指定新优化器，不恢复训练状态，后者使用断点保存的优化器、步数和矩。
 这些语句默认拒绝覆盖已有目标，路径父目录须预先存在。完整文件语法与边界见[file-io.md](file-io.md)。
 显式模型加载、checkpoint 保存与恢复只使用上文声明式语法；未列出的旧函数拼写不属于 WGT 0.5 当前接口。
-完整可运行例子见 [persistence/model.wgt](../examples/native_training/persistence/model.wgt)。
+safetensors 是独立权重导入/导出链路，仅承载权重张量，不包含模型定义、实例状态、优化器、训练步数或完整 checkpoint；它不构成 PyTorch 训练状态互通。更高层的模型与权重绑定 API 仍在实现和契约确认中，具体签名与事务语义待接口冻结后补充。
 
 | 签名 | 契约 |
 | --- | --- |
@@ -300,8 +302,7 @@ mkdir -p weights/native_training
 ```
 
 它只创建全新的 `weights/native_training/checkpoint.json` 与 `model.json`；再次运行会拒绝覆盖。
-前者验证 Adam 续训，后者可交给 `wgt-native weights/native_training/model.json 1048576 --device cpu`
-并从标准输入逐行发送 `[0.25]` 等单样本向量。
+前者验证 Adam 续训；推理请通过 wgtime service client 执行，不使用已移除的 `wgt-native` 命令。
 
 ## 原生 weightc 模型构建器
 
@@ -321,10 +322,10 @@ cargo build -p weightlang-wgt --bin weightc
 完整示例 [build/model.wgt](../examples/native_training/build/model.wgt) 从初始化开始原生训练回归模型，
 返回训练后的模型；整个构建与重载不需要 Python/PyTorch、虚拟环境或外部进程。
 
-输出目录包括：`model.json`（结构和实际权重）、`checkpoint.json`（模型与优化器）、
-`source.wgt`（入口快照）、`manifest.json`（格式 weightlang.native-build.v1、源码/模型 SHA256、
+输出目录包括：`model.json`（结构和实际权重）、`checkpoint.json`（WeightLang 模型与优化器状态，不是 PyTorch training-state 互通格式）、
+`source.wgt`（入口快照）、`manifest.json`（格式 weightlang.native-build.v1、源码/模型 SHA256，
 编译器版本、更新步数、预算和指标）。最后发布 manifest 作为完成标记；消费者应拒绝没有
-完成标记的构建目录。当前本地诊断可使用 `wgt-native DIRECTORY/model.json BUDGET_BYTES --device cpu`；目标将收敛到 `wgt` 命令并经 wgtime service 执行，尚未实现。
+完成标记的构建目录。历史 `wgt-native` 本地诊断入口已移除；模型推理由 wgtime service 执行。
 断点可通过脚本 `load checkpoint from PATH` 恢复，再训练并返回模型到新的输出目录。
 
 已有输出目录或符号链接一律拒绝，不提供覆盖选项。构建预留目标目录，同盘暂存产物；
@@ -332,8 +333,7 @@ cargo build -p weightlang-wgt --bin weightc
 脚本显式 `save model` / `save checkpoint` 语句的外部写入不在构建回滚范围内。
 
 零更新标记 initialized，有优化器更新历史标记 updated；updated 不意味着通过任务质量验收。
-恢复断点的步数包含历史更新。入口快照与哈希并不包含数据、外部模型依赖或脚本 RNG/数据进度，
-不保证仅凭制品完整复现训练；应另行保留数据和依赖。原生支持范围仍限于本页列出的算子，
+恢复断点的步数包含历史更新。该 checkpoint 是 WeightLang 原生格式，不承诺 PyTorch optimizer 或 training-state 互通；safetensors 只覆盖独立权重链路。入口快照与哈希并不包含数据、外部模型依赖或脚本 RNG/数据进度，不保证仅凭制品完整复现训练；应另行保留数据和依赖。原生支持范围仍限于本页列出的算子，
 构建入口必须有 main 并显式返回模型句柄；模型声明可与 main 共存。不自动执行训练、不回退 Python。
 
 ## 同一脚本的解释执行与 Rust 编译执行
@@ -372,9 +372,9 @@ cargo build -p weightlang-wgt --bin wgt --bin weightc
 短路求值、函数局部作用域、块内重绑定、递归限制、预算计数和行号诊断保持一致。
 编译不增加静态类型推断：未执行分支中的未知名称和错误调用仍可在执行时失败。
 
-本地编译需要 Cargo、rustc、系统链接器、匹配版本的 runtime crate 源码及已缓存的 Rust 依赖。
-默认使用构建 weightc 时仓库内的 runtime 路径；搬移工具链后可设置
-`WEIGHTLANG_RUNTIME_SOURCE=/path/to/crates/wgt-runtime`。Cargo 使用 --offline，不隐式联网下载。
+本地编译需要 Cargo、rustc、系统链接器、匹配版本的 `wgtime-core` 源码及已缓存的 Rust 依赖。
+默认使用构建 weightc 时仓库内的 core 路径；搬移工具链后可设置
+`WGT_CONTROL_SOURCE=/path/to/crates/wgtime-control`。Cargo 使用 --offline，不隐式联网下载。
 构建中间文件在当前工作目录 `.cache/weightlang/aot/` 的磁盘缓存；临时 Rust 项目结束即清理，
 Cargo target 保留加速后续编译。不同编译调用通过锁保护共享产物，最终文件禁止覆盖。
 这不是已实现的可独立分发编译 SDK，编译时仍需上述源码与工具链。
@@ -390,7 +390,7 @@ mkdir -p weights/native_script
 ./.cache/weightlang/train-native
 ```
 
-该脚本自己调用 mlp、fit、save model 与 save checkpoint，生成 model.json 与 checkpoint.json；重复执行拒绝覆盖。
+该脚本显式训练并保存原生 model.json 与 checkpoint.json；重复执行拒绝覆盖。此 legacy-build 制品格式不是 PyTorch optimizer/training-state 互通格式；safetensors 支持属于独立权重导入/导出链路。
 也可通过 `wgt run ...` 解释执行或 `wgt run ... --compiled` 编译执行。
 先前实验性模型构建入口保留为 `weightc legacy-build`（`build` 为兼容别名）；它仍消费返回模型
 并自动导出，不是新的编译工作流。原 Python 同名 CLI 和 wgt build 打包入口已移除。
@@ -533,13 +533,13 @@ WGT 0.5 也支持 `values.mean`，与 `mean(values)` 等价；列表只接受非
 
 **本地实验性实现；WGT 已接入 training_device，尚未发布**。`training::Trainer::new` 与 `restore` 默认 CPU，
 CPU 的运算顺序、SGD/Adam 和 `weightlang.native-training.v1` 断点格式保持不变。
-开启 runtime 的 `gpu` feature 后，可显式选择 `TrainingBackend::Gpu`；WGT 使用普通内置函数选择，
+开启 `wgtime-core` 的 `gpu` feature 后，可显式选择 `TrainingBackend::Gpu`；WGT 使用普通内置函数选择，
 不依赖设备池。支持顺序 IR 的 linear/relu/tanh/sigmoid/identity、f32、MSE、交叉熵与 REINFORCE，
 优化器支持无动量 SGD 和 Adam。不支持任意 forward 程序或多 GPU，也不自动回退 CPU。
 
 ```rust,no_run
 use std::path::Path;
-use weightlang_runtime::training::{
+use wgtime_core::training::{
     mlp, GpuTraining, Objective, Optimizer, Trainer, TrainingBackend,
 };
 # fn main() -> anyhow::Result<()> {
@@ -604,8 +604,8 @@ ReLU 测试避开零点。真实硬件测试默认 ignored；显式运行，缺�
 `WGT_REQUIRE_GPU=1` 则缺硬件失败：
 
 ```sh
-WGT_REQUIRE_GPU=1 cargo test -p weightlang-runtime --features gpu --test gpu_training -- --include-ignored --nocapture
-WGT_REQUIRE_GPU=1 cargo test -p weightlang-runtime --features gpu --lib training::gpu::tests::device_loss_preserves_last_committed_model -- --ignored --nocapture
+WGT_REQUIRE_GPU=1 cargo test -p wgtime-core --features gpu --test gpu_training -- --include-ignored --nocapture
+WGT_REQUIRE_GPU=1 cargo test -p wgtime-core --features gpu --lib training::gpu::tests::device_loss_preserves_last_committed_model -- --ignored --nocapture
 ```
 
 模型输出分析可使用 `normalize_probabilities`、`entropy`、`kl_divergence`、

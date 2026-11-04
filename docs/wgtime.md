@@ -1,12 +1,18 @@
 # wgtime 统一训练与推理运行时
 
-状态：架构合同已确定，当前 WGT 解释器仍内嵌 `weightlang-runtime`；默认 `weightc compile` / `wgt run --compiled` 已切换轻客户端后端，但仅迁移首片能力，未覆盖能力明确拒绝。全部语言、性能与资源验收尚未完成，也未发布。检查/编译不得初始化权重或执行训练。
+状态：架构合同已确定，当前 WGT 解释器由 `wgtime-core` 执行；默认 `weightc compile` / `wgt run --compiled` 已切换轻客户端后端，但仅迁移首片能力，未覆盖能力明确拒绝。全部语言、性能与资源验收尚未完成，也未发布。检查/编译不得初始化权重或执行训练。
 
 ## 库与进程边界
 
-核心库名为 `wgtime`。`crates/wgtime` 仅含协议与轻量本地 IPC 客户端；物理独立的 `crates/wgtime-service` 才依赖现有内部执行核心，避免 Cargo feature 合并导致客户端意外链接核心。旧 `weightlang-runtime` 是迁移期内部依赖，不是最终并存的第二套运行时。编译程序负责 WGT 控制流、数据读取、HTTP、OpenResponses、工具循环和 harness。机器级唯一 wgtime 服务负责权重加载、前向、反向、参数与优化器状态、计算预算和 checkpoint。客户端不得加载权重、创建 GPU 上下文或在连接失败后回退内嵌执行。
+核心库名为 `wgtime`。`crates/wgtime` 仅含协议与轻量本地 IPC 客户端；物理独立的 `crates/wgtime-service` 才依赖现有内部执行核心，避免 Cargo feature 合并导致客户端意外链接核心。`wgt` 的 `gpu` feature 不链接 `wgtime-core`，设备执行由 service 完成。`wgtime-core` 提供执行服务使用的内部执行核心；`wgt-language` 提供共享前端，不是第二套运行时。
 
-编译器本身仍使用 `weightlang-runtime` 前端解析和生成计划；默认 AOT 产物改为仅依赖 `wgtime-control`。旧 `script::compiled` 本地支持仍供未迁移内部测试使用，不能作为轻客户端验收。编译器携带前端不等于生成程序可携带训练核心。现有 CPU 顺序模型训练、adaptive forward/loss、自定义优化器及 SAM 语义需全部迁移验证，不能把服务端训练限制为固定 loss/优化器后宣布完成。现有 gradient_snapshot 暴露参数和梯度；目标方案需在服务端执行 WGT 优化器计算，客户端仅持有控制句柄与指标，不传回梯度再上传候选参数。
+目标职责分工是：WGT 模型定义拥有模型内部计算；Rust 主程序负责数据准备、训练循环及业务控制；所有模型推理与训练计算只由唯一 wgtime service 执行。模型定义、运行时实例、权重和 checkpoint 是分离的对象；读取或加载模型定义不应隐式创建训练实例、初始化训练状态、执行训练或写入文件。
+
+首期模型定义入口是纯 `ModelDefinition` 解析：支持 `parse` 和 `from_file`，以及 `model!` / `include_model!` 宏接收 Rust 字符串字面量。三种入口共用 WGT parser，并统一拒绝 `import`。宏在编译期校验源码并嵌入源码文本；运行时构造定义仍执行纯解析，不生成或嵌入预编译 IR。该定义入口不创建模型实例，也不初始化权重、优化器或训练状态。facade 已通过本地定点验证（语言 4 项、宏 7 项、facade 2 项，含真实三入口推理/训练/weights/drop，以及删除源码后无工具链运行）；尚未发布。这不代表全仓、全 GPU 或性能验收通过。更高层接口契约仍以实际实现冻结为准。
+
+当前实现仍处于迁移阶段：编译程序负责 WGT 控制流、数据读取、HTTP、OpenResponses、工具循环和 harness，服务负责已接通的权重加载、前向、反向、参数与优化器状态、计算预算和 checkpoint。客户端不得加载权重、创建 GPU 上下文或在连接失败后回退内嵌执行。普通 `wgt run` 的脚本执行会编译 IPC client，因此需要 Cargo、rustc、系统 linker 和可连接的 wgtime 服务；已编译产物运行时不需要这些构建工具，但仍需要服务。
+
+编译器本身使用 `wgt-language` 前端解析并生成计划；默认 AOT 产物改为仅依赖 `wgtime-control`。`script::compiled` 本地支持仍用于内部测试，不能作为轻客户端验收。编译器携带前端不等于生成程序可携带训练核心。现有 CPU 顺序模型训练、adaptive forward/loss、自定义优化器及 SAM 语义需全部迁移验证，不能把服务端训练限制为固定 loss/优化器后宣布完成。现有 gradient_snapshot 暴露参数和梯度；目标方案需在服务端执行 WGT 优化器计算，客户端仅持有控制句柄与指标，不传回梯度再上传候选参数。
 
 ## Linux 首期进程与身份合同
 

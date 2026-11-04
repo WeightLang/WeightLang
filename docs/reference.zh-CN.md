@@ -5,9 +5,32 @@
 模型声明、训练函数和自更新前向函数属于同一个编译单元，不能通过选择命令改变语法版本。
 工具包版本、模型 JSON 的 `version` 和训练断点版本是独立概念，不随语言版本替换。
 
-当前实现为纯 Rust。原 Python 前端的完整图算子、block/import 等尚未全部迁入原生构造器；
-`std/` 根目录的旧图源码作为迁移材料保留，不能因为文件头改为 0.5 就宣称可执行；
-`std/math/` 和 `std/activation/` 中的原生标量示例可单独运行。不支持的声明显式报错，不回退 Python。
+## Rust 主程序与 WGT 模型目标
+
+目标工作流由 Rust 主程序负责数据准备、I/O、调度与训练循环，WGT 定义模型结构、模型内部计算及可选的可微 loss。Rust 库包名为 `wgt-model`，crate 名为 `wgt`。`ModelDefinition::parse`、`ModelDefinition::from_file`、`model!` 与 `include_model!` 共用模型解析与定义；两个宏仅接受 Rust 字符串字面量，编译时复用同一 parser 检查并嵌入源码，运行时仍解析定义。三种入口都拒绝 `import`，当前首期模型只支持单个 `f32` 向量输入。
+
+模型执行、参数和优化器状态由唯一的机器级 `wgtime` 服务持有。解析定义、编译期检查和嵌入源码都不会连接服务或初始化模型；初始化、训练、权重保存和检查点恢复必须由程序显式请求。当前 API 尚在验证，属于未发布目标，不代表已发布或更广泛的能力支持。完整签名与契约见 [Rust 后端契约](native-backend.md)。
+
+```rust,ignore
+use wgt::{model, include_model, ModelDefinition};
+
+let inline: ModelDefinition = model!(r#"wgt 0.5
+model Scale
+input x: f32[1]
+output y: f32[1]
+parameter gain: f32[1] = [2]
+fn forward(x) { return x * gain; }
+"#);
+let compiled = include_model!("models/scale/model.wgt");
+let runtime = ModelDefinition::from_file("models/scale/model.wgt")?;
+# let _ = (inline, compiled, runtime);
+```
+
+宏用法及后端 API 仍在验证中；不应据此推断尚未列明的模型形状、导入或执行能力。
+
+当前实现为纯 Rust。`std/` 只保留真实的原生预导入声明和可导入 WGT 模块，
+旧图占位与带 main 的分类数学演示已删除。完整图算子、参数化层工厂与多轴神经网络结构
+尚未全部迁入原生构造器；不支持的声明显式报错，不回退 Python。
 
 ## wgtime 服务边界（目标合同，接线待实现）
 
@@ -41,7 +64,11 @@
 `half_squared_error(prediction,target)`（特征均值）及 `categorical_logits(logits,target)`
 （类别加权负对数似然之和），均返回 f32[1]。target 分布条件由调用方保证，不动态验证。
 库不创建权重或训练状态，支持 CPU 梯度及 AOT；标准源内嵌、未知 std 路径报错。
-完整数学定义、限制、旧图模块能力表与可执行例子见[标准库](standard-library.md)。
+普通 `std/openresponses/harness` 模块提供 async `next(session,profile)`、
+`submit(session,results)`（返回 null）与 `finished(step)`（返回 `step.status != "tools"`）；
+参数必填，只能在普通脚本调用，工具映射和执行由调用方显式编写，finished 不等于响应成功。
+内部 `/operators` 源码路径不是公共导入名；未知 std 名称、重复别名及跨上下文调用明确拒绝。
+完整数学定义、形状、状态边界与可执行示例见[标准库](standard-library.md)。
 
 ## 编译单元与入口
 
@@ -196,6 +223,12 @@ checkpoint 使用保存的优化器。值、路径各求值一次；相对路径
 默认拒绝覆盖，显式 overwrite 只原子替换普通可写文件；每文件最多 64 MiB，按编码字节消耗 operation budget。
 宿主策略模式拒绝直接路径 IO，须用授权 capability。模型与断点不能混用，load 不执行 main 或训练。
 `reload model TARGET from PATH using OPTIMIZER;` / `reload checkpoint TARGET from PATH;` 在同句柄中原子替换同结构模型状态，所有别名可见；model重新初始化优化器，checkpoint恢复保存状态与步数，运行时revision递增并使旧梯度失效。结构不匹配或候选失败保留旧状态。
+`save weights NET to PATH [overwrite];` 导出标准 safetensors 独立参数；
+`reload weights NET from PATH using OPTIMIZER;` 将权重绑定到已显式构造的同结构模型。
+仅支持有限 F32、精确 name/shape 和 C row-major little-endian，不猜图、不自动改名/转置/下载/训练。
+成功原子替换，模型句柄别名保留，重置优化器、步数与自定义状态；失败保留原状态和 revision。
+顺序模型 view/add 关系保留，只保存独立参数；forward 可用 none/sgd/adam，顺序模型用 sgd/adam，using 必填。
+文件不含图或训练状态，不能作为 checkpoint 或直接 load weights；完整边界见[权重与训练](native-training.md)。
 `assert CONDITION;` 或 `assert CONDITION, MESSAGE;` 要求严格 bool，只失败才求字符串消息，默认 `assertion failed`。解释/AOT 相同，错误含语句行号。
 完整签名、格式、安全发布和 JSON 限制见[文件与断言语法](file-io.md)。
 
@@ -365,12 +398,12 @@ CPU `forward` 模型可用 `differentiate(model,inputs,targets)` 显式求 `fn l
 
 ## 实现与验证依据
 
-- 编译单元和静态图计划：`crates/wgt-runtime/src/source.rs`。
-- 共用函数语法：`crates/wgt-runtime/src/script/parse.rs`。
-- 模型构造与普通函数运行：`crates/wgt-runtime/src/script.rs`。
-- forward 降低、事务及梯度：`crates/wgt-runtime/src/adaptive/`。
-- 原生代码生成：`crates/wgt-runtime/src/script/codegen.rs`。
-- 回归：`tests/unified.rs`、`tests/adaptive*.rs`、`tests/script.rs`（runtime crate），
+- 编译单元和静态图计划：`crates/wgt-language/src/source.rs`。
+- 共用函数语法：`crates/wgt-language/src/script/parse.rs`。
+- 模型构造与普通函数运行：`crates/wgtime-core/src/script.rs`；源入口和 AST 在 `crates/wgt-language/src/script.rs`。
+- 静态 forward IR：`crates/wgt-language/src/adaptive.rs`；执行、事务及梯度：`crates/wgtime-core/src/adaptive/`。
+- 原生代码生成：`crates/wgtime-core/src/script/codegen.rs`。
+- 回归：`crates/wgtime-core/tests/unified.rs`、`adaptive*.rs`、`script.rs`，
   `crates/wgt/tests/script_compiler.rs` 验证解释/AOT 的结果和操作数一致。
 
 保留模型和实验在 `weights/`，不因升级版本头自动迁移或覆盖。详见[存储规范](storage.md)。
@@ -415,7 +448,7 @@ WGT 0.5 提供 `device_submit(model,input,alias)`、`device_wait(alias,job,timeo
 WGT 0.5 新增 `rsqrt(x)`、`fma(x,y,z)`、`hypot(x,y)`、`expm1(x)`、
 `log1p(x)`、`sigmoid(x)`、`softplus(x)`、`silu(x)`，全部参数必填且为有限 f64。
 原生直接调用、解释/AOT 共用实现；不表示同名图算子或张量自动微分已支持。
-完整定义、定义域、硬件边界及分类示例见[标准库](standard-library.md)。
+完整签名与上下文以 [std/prelude.wgt](../std/prelude.wgt) 为准；这些普通函数无需导入，不表示 forward/loss 支持同名张量计算。模块边界见[标准库](standard-library.md)。
 
 向量标准库新增 `dot(x,y)`、`norm(x)`、`mean(x)`、`softmax(x)`、
 `log_softmax(x)`、`logsumexp(x)`、`l2_normalize(x,eps)`、`mse(x,y)`、

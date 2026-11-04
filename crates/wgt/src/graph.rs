@@ -600,12 +600,19 @@ impl Graph {
         let mut value = serde_json::to_value(self)?;
         value["tensor_data"] = serde_json::to_value(&self.tensor_data)?;
         let data = serde_json::to_string(&value)?.replace('<', "\\u003c");
+        let locales = serde_json::json!({
+            "zh-CN": serde_json::from_str::<Value>(include_str!("../../../web/viewer/locales/zh-CN.json"))
+                .context("parse zh-CN viewer locale")?,
+            "en": serde_json::from_str::<Value>(include_str!("../../../web/viewer/locales/en.json"))
+                .context("parse English viewer locale")?,
+        });
+        let locales = serde_json::to_string(&locales)?.replace('<', "\\u003c");
         let css = include_str!("../../../web/viewer/viewer.css");
         let script = include_str!("../../../web/viewer/viewer.js");
         let custom = custom.replace('<', "\\3c ");
         Ok(format!(
             r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>{} — WeightLang</title><style>body{{margin:0}}{css}
-{custom}</style><weightlang-viewer></weightlang-viewer><script type="application/json" id="model-data">{data}</script><script type="module">{script}
+{custom}</style><weightlang-viewer></weightlang-viewer><script>globalThis.__WEIGHTLANG_LOCALES__={locales};</script><script type="application/json" id="model-data">{data}</script><script type="module">{script}
 document.querySelector('weightlang-viewer').load(JSON.parse(document.getElementById('model-data').textContent));</script></html>
 "#,
             escape(&self.model)

@@ -23,8 +23,10 @@ pub fn plain_result(value: Value) -> Result<Value, TaskError> {
 }
 impl Runtime {
     pub fn cold_call(&mut self, name: &str, args: Vec<Value>) -> Result<Value> {
+        // A harness session may be borrowed by nested await on this runtime.
+        // Crossing into another worker is checked separately at spawn_future.
         for arg in &args {
-            arg.data()?;
+            ensure!(matches!(arg, Value::Data(_) | Value::Harness(_)), "async argument must be plain data or a local harness session");
         }
         self.cold_internal(name, args)
     }
@@ -93,6 +95,11 @@ impl Runtime {
             .len()
             .checked_sub(1)
             .context("spawn requires tasks")?;
+        // Handles belong to the originating runtime, including harness sessions.
+        // Validate before reconnecting or scheduling any worker work.
+        for arg in &args {
+            arg.data().context("spawn arguments must be plain data; resource handles cannot cross workers")?;
+        }
         let mut child = self.async_child()?;
         let task = self.async_state.scopes[index].spawn(name.clone(), move |cx| async move {
             child.async_state.context = Some(cx);

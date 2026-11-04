@@ -108,7 +108,7 @@ fn native_release_roundtrip_verifies_source_weights_checkpoint_and_lock() {
         "wgt 0.5\nfn main() {{ let m = model({:?}, \"sgd\"); return m([0]); }}",
         cached.join("model.json").to_str().unwrap()
     );
-    let result = weightlang_runtime::script::run(&source, Path::new("."), 1000).unwrap();
+    let result = wgtime_core::script::run(&source, Path::new("."), 1000).unwrap();
     assert!((result.result[0].as_f64().unwrap() - 0.2).abs() < 1e-6);
     fs::write(cached.join("checkpoint.json"), "{}").unwrap();
     assert!(registry::verify(&manifest, &lock, &cache).is_err());

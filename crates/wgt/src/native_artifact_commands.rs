@@ -2,12 +2,6 @@
 use crate::package_artifact::{Info, NATIVE_FORMAT};
 use anyhow::{ensure, Context, Result};
 use std::{fs, path::Path};
-use weightlang_runtime::{
-    training::{Optimizer, Trainer},
-    Model, Value,
-};
-
-const BUDGET: usize = 256 * 1024 * 1024;
 
 fn regular(path: &Path) -> Result<()> {
     ensure!(
@@ -17,21 +11,20 @@ fn regular(path: &Path) -> Result<()> {
     );
     Ok(())
 }
-fn self_contained(path: &Path) -> Result<Model> {
+fn self_contained(path: &Path) -> Result<()> {
     regular(path)?;
-    let model: Model = serde_json::from_slice(&fs::read(path)?).context(
+    let model: serde_json::Value = serde_json::from_slice(&fs::read(path)?).context(
         "expected native inference model IR; checkpoints and source are not inference models",
     )?;
-    for parameter in &model.parameters {
+    for parameter in model.get("parameters").and_then(|v| v.as_array()).context("missing model parameters")? {
         ensure!(
-            !matches!(
-                parameter.value,
-                Value::File { .. } | Value::ResidentFile { .. } | Value::PackedFile { .. }
-            ),
+            !matches!(parameter["kind"].as_str(), Some("file" | "resident_file" | "packed_file")),
             "external parameter files are not supported by native package/export"
         );
     }
-    Ok(model)
+    // The service validates shapes, graph operators and parameter storage semantics.
+    wgtime_control::persistence::inspect_artifact(path, false)?;
+    Ok(())
 }
 fn verified(path: &Path) -> Result<Info> {
     ensure!(
@@ -75,11 +68,9 @@ pub fn export(input: &Path, output: &Path) -> Result<()> {
     } else {
         input.to_path_buf()
     };
-    let model = self_contained(&model_path)?;
-    let mut trainer = Trainer::new(model, Path::new("."), BUDGET, Optimizer::Sgd)?;
+    self_contained(&model_path)?;
     destination(output)?;
-    // Reuses the existing atomic no-clobber inference writer. No optimizer state is saved.
-    trainer.export(output)
+    wgtime_control::persistence::export_model(&model_path, output)
 }
 
 /// Copy a verified native artifact into a new directory, preserving model/checkpoint separation.

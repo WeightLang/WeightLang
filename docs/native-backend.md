@@ -1,15 +1,80 @@
-# WGT 推理运行时架构（目标设计，尚未实现）
+# Rust 主程序与 WGT 模型契约
 
-目标运行时命名为 `wgtime`，职责是加载权重与计算结构、接收显式张量输入并执行推理。
-它将以可复用 Rust 库实现，由机器级唯一 `wgtime` 服务进程宿主；多用户共享同一服务，进程并发启动必须互斥并连接已运行服务。
-WGT 编译程序只链接轻量 IPC 客户端，不嵌入推理核心、不独立加载权重、不创建 GPU context。连接失败必须明确报错，不得静默回退到进程内执行。
+Rust 控制应用、数据准备、I/O、调度和训练循环；WGT 只描述模型结构、模型内部计算及可选的可微 loss。Rust 库提供内嵌源码、编译期文件和运行期文件三个入口，共用一个模型定义类型和解析器。模型执行、参数与优化器状态由机器级唯一 `wgtime` 服务持有；应用只持 IPC 连接和实例句柄，连接失败明确报错，不回退到进程内核心。
 
-下述 NativeSession、IR 与资源管理章节描述当前本地实现能力，不代表上述单服务架构已落地。服务 IPC 鉴权、跨用户隔离、模型实例复用键、可变会话状态隔离、资源预算和崩溃清理仍待设计与验证。训练/优化器及 harness 的调用路径和状态归属也待确定；模型加载继续与显式训练分离，不隐式训练。
-当前本地检查/原生 CLI 命令仍是 `weightc check FILE.wgt` 与 `wgt run FILE.wgt`；尚无公开 `wgtime` 进程入口，亦未完成后续去重 `wgt-native` 的合并。
+## 当前实现与本轮目标
+
+当前源码已拆成 `wgt-language` 静态解析库、`wgtime-core` 执行库、`wgtime` IPC 协议及客户端、`wgtime-control` 脚本客户端和 `wgtime-service` 服务。生产 CLI 不依赖 core，旧脚本控制路径仍保留在源码中，不能将其视为新模型 API。下文区分已实现的静态定义/宏与正在接入验收的 Rust 客户端接口；均不是已发布能力，验证状态见下文。
+
+可复用入口是 `wgt_language::source::{split,graph}`、`adaptive::{parse,parse_with_functions}` 和共用函数 AST。当前 `adaptive::Program` 已包含参数 `data`，`source::Graph` 包含初始化 seed；它们是 lowering 产物，不能直接等同于不持有运行权重的模型定义。`ModelDefinition` 必须把结构、参数 schema 和初始化说明，与服务中的已初始化/已加载实例区分开。
+
+## 共享定义与 crate 边界
+
+| crate | 职责与依赖 |
+|---|---|
+| `wgt-language` | 新增 `model` 模块；拥有 `ModelDefinition`、接口和参数 schema、初始化说明、模型专用解析与 lowering；不依赖服务或 core，不创建会话 |
+| `wgt-model`（新增） | Rust 公共库；重导出共享定义，提供 `Client`、`Model`、加载/初始化/forward/训练 API；仅依赖 language、轻 IPC 与文件传输，不依赖 core |
+| `wgt-model-macros`（新增） | proc-macro；仅依赖 language 和宏处理库，复用模型解析器并产生诊断与定义表达式；不连服务、不读权重、不初始化模型 |
+| `wgtime` / `wgtime-control` | wire、鉴权连接、有界 FD 与模型 lease 传输；复用底层设施，不要求公共模型 API 构造脚本 `Runtime`、`Env` 或动态 `Value` |
+| `wgtime-core` / `wgtime-service` | 仅服务生产路径持有核心、执行计划、参数、优化器和设备资源；core 单向依赖 language |
+
+`ModelDefinition` 是可重复使用的静态值，至少含模型名、语言/IR 版本、单输入/输出合同、可选 loss target、参数 schema、计算计划和声明的初始化说明。字段通过受校验构造器建立；宏和运行期解析不能各自维护一套语义。定义可包含声明的初始化常量，但没有已训练状态、优化器状态或活跃设备资源；复制定义不复制服务模型。首期只承诺当前已实现的单个 f32 向量输入，保留输出 logits/probabilities 类型；不据此宣称多输入、batch forward、cache 或任意 dtype 支持。
+
+`ModelDefinition::parse(source: &str) -> Result<Self>` 与 `ModelDefinition::from_file(path: impl AsRef<Path>) -> Result<Self>` 已在 language 库实现并通过定点测试。二者只解析和检查；首期所有入口一致拒绝 import，不解析本地或包模块。源码上限 1 MiB，单个参数和模型总参数上限 16,777,216 个元素，shape 为 1..8 个正整数轴；乘法溢出、长度不匹配和非有限初始化值均拒绝。参数初始化列表以流式方式检查，不在定义中构造权重向量。模型专用入口复用现有 parser，但拒绝 `fn main`、agent/environment、应用 I/O、tasks、训练/保存语句和宿主控制函数；允许模型 forward/loss 及现 lowering 能接受的纯张量辅助函数。不得仅解析成功就声称 forward 已执行。
+
+## 三种 Rust 入口
+
+模型库正在接入服务；以下使用当前已写入的公共接口，真实服务验收仍由模型库测试完成。宏基础解析/展开测试已通过，完整消费 crate 编译测试尚待串行执行；不恢复已删除的 examples：
+
+```rust,ignore
+use wgt::{Client, InstanceOptions, ModelDefinition, model, include_model};
+
+let inline = model!(r#"wgt 0.5
+model Scale
+input x: f32[1]
+output y: f32[1]
+parameter gain: f32[1] = [2]
+fn forward(x) { return x * gain; }
+"#);
+let compiled_file = include_model!("fixtures/scale/model.wgt");
+let runtime_file = ModelDefinition::from_file("models/scale/model.wgt")?;
+let client = Client::connect()?;
+let model = client.initialize(&inline, InstanceOptions { memory_bytes: 1024 * 1024, optimizer: None })?;
+let output = model.forward(&[3.0])?;
+assert_eq!(output, vec![6.0]);
+```
+
+`model!` 首期接受 Rust 字符串字面量，避免 Rust token 重排改变 WGT 换行/注释语义；token 形式不是首批承诺。`include_model!` 接受相对消费 crate `CARGO_MANIFEST_DIR` 的路径，生成 `include_str!` 引用以跟踪源码重编译。两个宏编译时复用同一解析器验证，展开式首次构造时仍调用纯 `ModelDefinition::parse`，不是预生成静态 IR；均不在编译期间连接服务、执行 forward 或创建制品。宏默认使用 `::wgt` 公共库路径，依赖改名可用 `crate = alias` 显式指定。运行期文件入口允许部署后更换定义；所有入口拒绝 import。
+
+## 显式生命周期与训练
+
+| 当前接口或后续边界 | 必须满足的行为 |
+|---|---|
+| `Client::connect() -> Result<Client>`；`connect_to(&Path)` | 连接已有服务并验证当前 UID/协议；不隐式启动另一个执行核心 |
+| `Client::initialize(&ModelDefinition, InstanceOptions) -> Result<Model>` | 显式应用声明的初始化；options 含字节预算和可选 SGD/Adam；缺省预算 64 MiB、无优化器，状态是未训练 |
+| `Model::load_weights(&Path, Option<Optimizer>) -> Result<()>` | 显式向既有架构实例绑定 safetensors F32 权重；完整校验名称、shape、有限值、字节及内存预算；失败保持原实例，成功重置优化器；不训练、不保存文件 |
+| `Model::forward(&self, input: &[f32]) -> Result<Vec<f32>>` | 服务端执行并校验输入合同；首期返回拥有数据的结果，不承诺跨 IPC 的零分配或借用 core 缓冲 |
+| 优化器选择 | 当前通过初始化或权重绑定显式选择 SGD/Adam，未提供单独 `configure_optimizer`；不得把加载权重当作恢复优化器 |
+| `Model::train(&self, inputs, Targets, TrainOptions) -> Result<f32>` | Rust 发起单步批训练，返回 loss；options 显式选择 loss、正有限学习率和可选正有限裁剪；服务执行原子更新，Rust 控制循环；不自动训练 |
+| `Model::save_weights(&Path) -> Result<()>` | 显式写入 safetensors，默认拒绝覆盖；本轮公共库未提供 checkpoint 保存/恢复 API，不把权重互通称为 PyTorch 完整续训兼容 |
+
+`Model` 是绑定连接的 lease，不提供无说明的深拷贝；显式关闭和连接断开释放实例，服务重启使旧句柄失效。首期不自动重连并重建有状态实例。训练输入首期对应已有 `Vec<Vec<f32>>` 批，目标通过 typed enum 区分 MSE 向量、交叉熵类别和声明 loss target，公共 API 不要求用户手填 JSON。无优化器实例调用训练必须报错；失败更新不能改变参数、优化器或步数。是否共享/克隆模型须后续单独设计，不能把定义复用等同于可变状态共享。
+
+现有 `CreateGraph` 只接受 SGD/Adam，`CreateTrainingProgram` 会在构造时设置优化器；`LoadFd`/`BindWeightsFd` 也不是定义与权重原子创建的完整替代。本轮服务通过定义创建请求实现无优化器初始化，权重绑定沿用有界 FD；单独从定义与权重原子创建实例、显式独立 optimizer 配置尚非本轮公共接口。所有者校验、预算与失联清理仍适用。服务负责最终校验，不能信任宏已检查过来源。
+
+## 实现与验收分工
+
+1. 前端 owner：新增 `crates/wgt-language/src/model.rs`，修改其 `lib.rs`，必要时只抽取 `source.rs`、`adaptive/source.rs` 的静态验证；新增 `tests/model_definition.rs`。覆盖拒绝应用逻辑、三入口共用语义、路径诊断及定义检查无执行。
+2. 服务 owner：修改 `crates/wgtime/src/lib.rs`、`crates/wgtime-service/src/main.rs` 与必要 core 初始化/optimizer API；新增服务合同测试，覆盖无优化器推理、原子权重加载、身份/预算、错误状态不变和断连释放。保留已有未提交实现。
+3. Rust API owner：新增 `crates/wgt-model/{Cargo.toml,src/lib.rs,tests/model_api.rs}`，公共类型/lease/typed train options；必要时抽取 control 的纯 FD 传输，不能通过构造脚本 Runtime 模拟 API。模型与应用循环测试使用最小 fixture。
+4. 宏 owner：新增 `crates/wgt-model-macros/{Cargo.toml,src/lib.rs}` 及编译正负 fixture；使用 language API，禁止复制 parser。Rust API 通过可选 re-export 暴露宏，宏展开引用消费方的公共库路径并处理依赖改名。
+5. 集成 owner：最后统一 workspace/lock、本文/中文参考/技能边界及本地定点验证；分别证明模型库和生成宏消费者的 normal/build 依赖树不含 core。三种入口均须验证真实 forward；加载检查无训练、显式训练与 checkpoint 分别验证，不以旧通用脚本测试代替。
+
+以下章节描述既有 core 的 IR 与内存实现，供服务实现复用，不是让 Rust 应用直接链接执行核心的公共入口。
 
 ```sh
-# 当前本地实现的诊断入口，不代表目标 wgtime service 已实现：
-cargo test -p weightlang-runtime
+cargo test -p wgtime-core
+cargo test -p wgt-language
 ```
 
 ## 原生 IR v1
@@ -80,4 +145,4 @@ CPU 常驻 linear 使用 AVX2/FMA（不支持时标量回退），直接读取�
 GPU linear 使用工作组并行归约，文件 I/O 尚未与计算重叠。
 不能把此阶段描述为完整 PyTorch 替代。所有能力为本地源码实现，尚未发布。
 
-验证原生运行时：`cargo test -p weightlang-runtime`。GPU 能力须在目标设备单独验证。
+验证执行核心：`cargo test -p wgtime-core`。GPU 能力须在目标设备单独验证。

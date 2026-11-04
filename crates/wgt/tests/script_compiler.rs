@@ -1,5 +1,5 @@
 use std::{fs, path::Path, process::Command};
-use weightlang_runtime::script;
+use wgtime_core::script;
 use weightlang_wgt::script_compiler;
 
 #[cfg(feature = "gpu")]
@@ -12,11 +12,44 @@ fn compiled_gpu_and_wgsl() {
     for (name, text) in [
         (
             "gpu",
-            include_str!("../../../examples/native_training/gpu/model.wgt"),
+            r#"wgt 0.5
+model Regression
+input x: f32[1]
+output y: f32[1]
+layer output: linear(out=1)
+init seed=42
+fn main() {
+    let hardware = devices();
+    assert(len(hardware) > 1, "a hardware GPU and a --features gpu build are required");
+    let model = Regression("adam");
+    training_device(model, hardware[1]["id"], 67108864, 4);
+    let initial = 0;
+    let final = 0;
+    for step in range(0, 100) {
+        final = fit(model, [[0], [1]], [[1], [3]], 0.05, "mse");
+        if step == 0 { initial = final; }
+    }
+    assert(final < initial * 0.05, "GPU regression did not converge");
+    metric("training", training_status(model));
+    metric("initial_loss", initial);
+    metric("final_loss", final);
+    return model([1]);
+}
+"#,
         ),
         (
             "wgsl",
-            include_str!("../../../examples/native_training/wgsl/model.wgt"),
+            r#"wgt 0.5
+fn main() {
+    let hardware = devices();
+    assert(len(hardware) > 1, "a hardware GPU and a --features gpu build are required");
+    let source = "@group(0) @binding(0) var<storage, read> x: array<f32>; @group(0) @binding(1) var<storage, read_write> y: array<f32>; @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3<u32>) { if id.x < arrayLength(&x) && id.x < arrayLength(&y) { y[id.x] = x[id.x] * 2.0; } }";
+    let kernel = wgsl_kernel(source, "main", hardware[1]["id"], 1048576);
+    let result = wgsl_run(kernel, [1, 2, 3, 4], 4, [1, 1, 1]);
+    assert(result == [2, 4, 6, 8], "WGSL result mismatch");
+    return result;
+}
+"#,
         ),
     ] {
         let text = text.replace("return model([1]);", r#"
@@ -166,13 +199,45 @@ fn main() {
 
 #[test]
 fn compiled_cli_runs_existing_reinforcement_script() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/native_training/reinforce/model.wgt");
-    let reference = script::run_file(&source, 10_000_000).unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/weightlang/aot-tests");
+    fs::create_dir_all(&root).unwrap();
+    let dir = tempfile::tempdir_in(root).unwrap();
+    let source = dir.path().join("model.wgt");
+    let text = r#"wgt 0.5
+fn environment(action) { if action == 1 { return 1; } return 0; }
+fn main() {
+    seed(7);
+    let policy = mlp([1, 2], "identity", 3, "adam");
+    let initial = predict(policy, [1]);
+    let average = 0;
+    for iteration in range(0, 80) {
+        let observations = [];
+        let actions = [];
+        let rewards = [];
+        for episode in range(0, 32) {
+            let action = sample(policy, [1]);
+            observations = append(observations, [1]);
+            actions = append(actions, action);
+            rewards = append(rewards, environment(action));
+        }
+        reinforce(policy, observations, actions, rewards, 0.05);
+        average = sum(rewards) / len(rewards);
+    }
+    let final = predict(policy, [1]);
+    metric("mean_reward_last_batch", average);
+    metric("initial_action_margin", initial[1] - initial[0]);
+    metric("final_action_margin", final[1] - final[0]);
+    assert(final[1] - final[0] > 3, "policy failed to favor rewarded action");
+    return average;
+}
+"#;
+    fs::write(&source, text).unwrap();
+    let reference = script::run(text, dir.path(), 10_000_000).unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_wgt"))
-        .arg("script")
+        .args(["script"])
         .arg(&source)
         .arg("--compiled")
+        .current_dir(dir.path())
         .output()
         .unwrap();
     assert!(
@@ -186,6 +251,7 @@ fn compiled_cli_runs_existing_reinforcement_script() {
         .arg("script")
         .arg(&source)
         .args(["--compiled", "--check"])
+        .current_dir(dir.path())
         .output()
         .unwrap();
     assert!(!result.status.success());
@@ -198,8 +264,68 @@ fn unified_model_and_forward_match_in_native_executables() {
     let dir = tempfile::tempdir_in(root).unwrap();
     for (name, text) in [
         ("graph", "wgt 0.5\nmodel Net\ninput x: f32[1]\noutput y: f32[1]\nlayer fc: linear(out=1)\ninit seed=7\nfn main() { let m = Net(\"sgd\"); for i in range(0, 100) { train m on [[0], [1]] against [[1], [3]] {rate:0.05;loss:mse;}; } return m([1]); }"),
-        ("forward", include_str!("../../../examples/self_modifying/model.wgt")),
-        ("working-memory", include_str!("../../../examples/native_training/working_memory/model.wgt")),
+        ("forward", r#"wgt 0.5
+model AdaptiveMemory
+input x: f32[2]
+output y: f32[1]
+parameter memory: f32[1,1] = [0]
+frozen updater: f32[1,1] = [0.5]
+frozen router: f32[1,1] = [1]
+fn forward(x) {
+    let observation = slice(x, 0, 1);
+    let query = slice(x, 1, 1);
+    let delta = linear(observation, updater);
+    let old = read(memory);
+    let next = add(old, delta);
+    write(memory, next);
+    let gate = linear(observation, router);
+    if positive(gate) { return linear(query, memory); }
+    return query;
+}
+fn main() {
+    let model = AdaptiveMemory("none");
+    assert(model([2, 3])[0] == 3, "first state update");
+    return model([4, 3]);
+}
+"#),
+        ("working-memory", r#"wgt 0.5
+model WorkingMemory
+input x: f32[2]
+output y: f32[2]
+parameter address_logits: f32[2] = [0,0]
+frozen first: f32[2] = [1,0]
+frozen second: f32[2] = [0,1]
+fn forward(x) {
+    let bank = memory_alloc(2,2);
+    memory_write(bank, first, x);
+    memory_write(bank, second, -x);
+    let result = memory_read(bank, softmax(address_logits));
+    memory_free(bank);
+    return result;
+}
+fn main() {
+    compute_budget(100000,65536,10,60000);
+    let m = WorkingMemory("adam");
+    let inputs = [[1,2],[-1,-2],[2,-1],[-2,1]];
+    let first_loss = fit(m,inputs,inputs,0.04,"mse");
+    for step in range(0,300) { fit(m,inputs,inputs,0.04,"mse"); }
+    let last_loss = fit(m,inputs,inputs,0.04,"mse");
+    assert(last_loss < first_loss * 0.01,"memory addressing did not learn");
+    let expected = predict(m,[3,-4]);
+    assert(mse(expected,[3,-4])<0.05,"held-out memory read failed");
+    execution_start(m,[3,-4],1000,65536);
+    let progress = execution_resume(m,2);
+    while !progress["done"] { progress = execution_resume(m,2); }
+    assert(progress["output"]==expected,"resumed execution differs");
+    assert(progress["peak_memory_bytes"]==16,"unexpected workspace peak");
+    metric("initial_loss",first_loss);
+    metric("final_loss",last_loss);
+    metric("held_out_mse",mse(expected,[3,-4]));
+    metric("execution_work",progress["work"]);
+    metric("peak_workspace_bytes",progress["peak_memory_bytes"]);
+    return true;
+}
+"#),
     ] {
         let source = dir.path().join(format!("{name}.wgt"));
         let executable = dir.path().join(name);
@@ -222,7 +348,56 @@ fn compiled_ppo_uses_native_training_syntax() {
     let dir = tempfile::tempdir_in(root).unwrap();
     let source = dir.path().join("model.wgt");
     let executable = dir.path().join("ppo");
-    let text = include_str!("../../../examples/native_training/ppo/model.wgt");
+    let text = r#"wgt 0.5
+model Policy
+input observation: f32[2]
+output logits: logits[2]
+parameter weights: f32[2,2] = [0,0,0,0]
+target trajectory: f32[4]
+fn forward(observation) { return linear(observation, weights); }
+fn loss(prediction, trajectory) {
+    let log_probs = log_softmax(prediction);
+    let selected = sum(log_probs * slice(trajectory, 0, 2));
+    let old_log_prob = detach(slice(trajectory, 2, 1));
+    let advantage = detach(slice(trajectory, 3, 1));
+    let ratio = exp(selected - old_log_prob);
+    let surrogate = minimum(ratio * advantage, clip(ratio, 0.8, 1.2) * advantage);
+    let negative_entropy = sum(softmax(prediction) * log_probs);
+    return -surrogate + [0.01] * negative_entropy;
+}
+fn environment(first, second) { if first == 1 && second == 1 { return 1; } return 0; }
+fn main() {
+    seed(7);
+    let policy = Policy("adam");
+    let critic = mlp([2, 8, 1], "tanh", 19, "adam");
+    let initial = policy([1,0]).probabilities[1] * policy([0,1]).probabilities[1];
+    for iteration in range(0, 40) {
+        let rollout = collect {
+            for episode in range(0, 24) {
+                let x0 = [1,0]; let x1 = [0,1];
+                let {action: a0, log_prob: lp0} = sample from policy(x0);
+                let {action: a1, log_prob: lp1} = sample from policy(x1);
+                let v0 = critic(x0)[0]; let v1 = critic(x1)[0];
+                let reward = environment(a0, a1);
+                let advantages = gae([0,reward], [v0,v1], [v1,0], [false,true], [false,false], 0.99, 0.95);
+                yield {observation: x0, target: concat(onehot[2] a0, [lp0, advantages[0]]), value_target: [advantages[0]+v0]};
+                yield {observation: x1, target: concat(onehot[2] a1, [lp1, advantages[1]]), value_target: [advantages[1]+v1]};
+            }
+        };
+        for epoch in range(0, 4) {
+            for minibatch in rollout size 16 {
+                train policy on (minibatch.observation, minibatch.target) rate 0.03 clip 0.5;
+            }
+        }
+        fit(critic, rollout.observation, rollout.value_target, 0.03, "mse");
+    }
+    let success = policy([1,0]).probabilities[1] * policy([0,1]).probabilities[1];
+    metric("initial_success_probability", initial);
+    metric("final_success_probability", success);
+    assert(success > 0.85, "PPO did not learn delayed reward");
+    return success;
+}
+"#;
     fs::write(&source, text).unwrap();
     let expected = script::run(text, dir.path(), 10_000_000).unwrap();
     script_compiler::compile(&source, &executable).unwrap();

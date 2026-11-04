@@ -37,10 +37,7 @@ fn source_operator_release_lock_install_train_and_tamper_detection() {
         "module github.com/example/operators\nwgt 0.5\n",
     )
     .unwrap();
-    let library = format!(
-        "{}\nfn smooth(x) {{ return swish(x); }}\n",
-        include_str!("../../../examples/native_training/custom_operators/ops.wgt")
-    );
+    let library = "wgt 0.5\noperators Activations\nfn swish(x) { return x * sigmoid(x); }\nfn smooth(x) { return swish(x); }\n".to_string();
     fs::write(project.join("ops.wgt"), &library).unwrap();
     for args in [
         vec!["init", "-q"],
@@ -115,9 +112,25 @@ fn source_operator_release_lock_install_train_and_tamper_detection() {
         weightlang_wgt::manifest::lock_text(&lock),
     )
     .unwrap();
-    let runnable = include_str!("../../../examples/native_training/custom_operators/model.wgt")
-        .replace("./ops.wgt", "github.com/example/operators/Activations")
-        .replace("activation.swish", "activation.smooth");
+    let runnable = r#"wgt 0.5
+import activation from "github.com/example/operators/Activations"
+model CustomOperators
+input x: f32[2]
+output y: f32[2]
+parameter gain: f32[2] = [1, 1]
+fn forward(x) { return activation.smooth(x * gain); }
+fn loss(prediction, target) { return square(prediction - target).mean; }
+fn main() {
+    let net = CustomOperators("adam");
+    let before = fit(net, [[-1, 2], [1, -2]], [[0, 0], [0, 0]], 0.03, "loss");
+    for step in range(0, 40) {
+        fit(net, [[-1, 2], [1, -2]], [[0, 0], [0, 0]], 0.03, "loss");
+    }
+    let after = fit(net, [[-1, 2], [1, -2]], [[0, 0], [0, 0]], 0.03, "loss");
+    assert after < before, "custom operator model should train";
+    return net([1, 2]);
+}
+"#;
     fs::write(consumer.join("model.wgt"), runnable).unwrap();
     let run_cli = || {
         Command::new(env!("CARGO_BIN_EXE_wgt"))
@@ -134,24 +147,40 @@ fn source_operator_release_lock_install_train_and_tamper_detection() {
         "{}",
         String::from_utf8_lossy(&cli.stderr)
     );
-    let source=include_str!("../../../examples/native_training/custom_operators/model.wgt")
-        .replace("./ops.wgt","github.com/example/operators/Activations")
-        .replace("return net([1, 2]);",r#"
-            save checkpoint net to "checkpoint.json"; save model net to "model.json";
-            let restored=load checkpoint from "checkpoint.json"; let loaded=load model from "model.json" using "none";
-            assert net([1,2])==loaded([1,2]), "portable model";
-            assert train net on [[1,2]] against [[0,0]] {rate:0.03;loss:loss;}==train restored on [[1,2]] against [[0,0]] {rate:0.03;loss:loss;}, "Adam restore";
-            return net([1,2]);
-        "#);
+    let source = r#"wgt 0.5
+import activation from "github.com/example/operators/Activations"
+model CustomOperators
+input x: f32[2]
+output y: f32[2]
+parameter gain: f32[2] = [1, 1]
+fn forward(x) { return activation.swish(x * gain); }
+fn loss(prediction, target) { return square(prediction - target).mean; }
+fn main() {
+    let net = CustomOperators("adam");
+    let before = fit(net, [[-1, 2], [1, -2]], [[0, 0], [0, 0]], 0.03, "loss");
+    for step in range(0, 40) {
+        fit(net, [[-1, 2], [1, -2]], [[0, 0], [0, 0]], 0.03, "loss");
+    }
+    let after = fit(net, [[-1, 2], [1, -2]], [[0, 0], [0, 0]], 0.03, "loss");
+    assert after < before, "custom operator model should train";
+    save checkpoint net to "checkpoint.json";
+    save model net to "model.json";
+    let restored = load checkpoint from "checkpoint.json";
+    let loaded = load model from "model.json" using "none";
+    assert net([1,2]) == loaded([1,2]), "portable model";
+    assert train net on [[1,2]] against [[0,0]] {rate:0.03;loss:loss;} == train restored on [[1,2]] against [[0,0]] {rate:0.03;loss:loss;}, "Adam restore";
+    return net([1,2]);
+}
+"#;
     let deps = BTreeMap::from([(
         "github.com/example/operators".into(),
         module.to_str().unwrap().into(),
     )]);
-    weightlang_runtime::script::run_with_dependencies(&source, dir.path(), 100000, deps).unwrap();
+    wgtime_core::script::run_with_dependencies(&source, dir.path(), 100000, deps).unwrap();
     // The model is self-contained after lowering; no source library is needed to load it.
     fs::remove_dir_all(module.join("Activations")).unwrap();
     let loaded = "wgt 0.5\nfn main() { return model(\"model.json\",\"none\")([1,2]); }";
-    weightlang_runtime::script::run(loaded, dir.path(), 10000).unwrap();
+    wgtime_core::script::run(loaded, dir.path(), 10000).unwrap();
     assert!(registry::verify(&manifest, &lock, &cache).is_err());
     registry::fetch(&manifest, &lock, &cache, true, &remote).unwrap();
     fs::write(module.join("Activations/source.wgt"), "tampered").unwrap();
@@ -165,16 +194,32 @@ fn compiled_operator_model_runs_without_source_library_or_toolchain() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/weightlang/aot-tests");
     fs::create_dir_all(&root).unwrap();
     let dir = tempfile::tempdir_in(root).unwrap();
-    let text = include_str!("../../../examples/native_training/custom_operators/model.wgt");
+    let text = r#"wgt 0.5
+import activation from "./ops.wgt"
+model CustomOperators
+input x: f32[2]
+output y: f32[2]
+parameter gain: f32[2] = [1, 1]
+fn forward(x) { return activation.swish(x * gain); }
+fn loss(prediction, target) { return square(prediction - target).mean; }
+fn main() {
+    let net = CustomOperators("adam");
+    let before = fit(net, [[-1, 2], [1, -2]], [[0, 0], [0, 0]], 0.03, "loss");
+    for step in range(0, 40) { fit(net, [[-1, 2], [1, -2]], [[0, 0], [0, 0]], 0.03, "loss"); }
+    let after = fit(net, [[-1, 2], [1, -2]], [[0, 0], [0, 0]], 0.03, "loss");
+    assert after < before, "custom operator model should train";
+    return net([1, 2]);
+}
+"#;
     let source = dir.path().join("model.wgt");
     let executable = dir.path().join("program");
     fs::write(&source, text).unwrap();
     fs::write(
         dir.path().join("ops.wgt"),
-        include_str!("../../../examples/native_training/custom_operators/ops.wgt"),
+        "wgt 0.5\noperators Activations\nfn swish(x) { return x * sigmoid(x); }\n"
     )
     .unwrap();
-    let expected = weightlang_runtime::script::run(text, dir.path(), 100000).unwrap();
+    let expected = wgtime_core::script::run(text, dir.path(), 100000).unwrap();
     script_compiler::compile(&source, &executable).unwrap();
     fs::remove_file(source).unwrap();
     fs::remove_file(dir.path().join("ops.wgt")).unwrap();

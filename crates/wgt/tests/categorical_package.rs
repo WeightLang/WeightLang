@@ -1,5 +1,5 @@
 use std::{fs, path::Path, process::Command};
-use weightlang_runtime::{Model, Session, categorical::VectorType};
+use wgtime_core::{Model, Session, categorical::VectorType};
 
 #[test]
 fn typed_native_build_package_and_export_preserve_contract() {

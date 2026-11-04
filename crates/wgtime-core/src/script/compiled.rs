@@ -1,0 +1,139 @@
+//! Shared execution support for generated Rust; no AST evaluation.
+use super::*;
+
+pub fn index(object: Value, index: Value) -> Result<Value> {
+    match object {
+        Value::List(v) | Value::CategoricalVector(_, v) => v
+            .get(index.integer()?)
+            .cloned()
+            .context("list index out of bounds"),
+        Value::RecordBatch(batch) => batch.rows.get(index.integer()?).cloned().context("record batch index out of bounds"),
+        Value::Object(v) => v
+            .get(index.text()?)
+            .cloned()
+            .context("missing object field"),
+        _ => bail!("index requires list or object"),
+    }
+}
+pub(crate) use wgt_language::script::compiled::slice_bounds;
+
+pub fn slice(object: Value, start: Option<Value>, end: Option<Value>) -> Result<Value> {
+    let values = object.list()?;
+    let (start, end) = slice_bounds(values.len(),
+        start.as_ref().map(Value::number).transpose()?,
+        end.as_ref().map(Value::number).transpose()?)?;
+    Ok(Value::List(values[start..end].to_vec()))
+}
+
+pub fn unary(op: &str, value: Value) -> Result<Value> {
+    if op == "!" {
+        Ok(Value::Bool(!value.boolean()?))
+    } else {
+        number(-value.number()?)
+    }
+}
+pub fn binary(op: &str, left: Value, right: Value) -> Result<Value> {
+    match op {
+        "&&" | "||" => Ok(Value::Bool(right.boolean()?)),
+        "==" => Ok(Value::Bool(left == right)),
+        "!=" => Ok(Value::Bool(left != right)),
+        "+" => match (&left, &right) {
+            (Value::Text(a), Value::Text(b)) => Ok(Value::Text(format!("{a}{b}"))),
+            _ => number(left.number()? + right.number()?),
+        },
+        "-" => number(left.number()? - right.number()?),
+        "*" => number(left.number()? * right.number()?),
+        "/" => number(left.number()? / right.number()?),
+        "%" => number(left.number()? % right.number()?),
+        "<" => Ok(Value::Bool(left.number()? < right.number()?)),
+        "<=" => Ok(Value::Bool(left.number()? <= right.number()?)),
+        ">" => Ok(Value::Bool(left.number()? > right.number()?)),
+        ">=" => Ok(Value::Bool(left.number()? >= right.number()?)),
+        _ => bail!("unknown operator"),
+    }
+}
+
+#[derive(Clone)]
+pub struct Function {
+    pub args: Vec<&'static str>,
+    pub body: fn(&mut Runtime, &mut Env) -> Result<Flow>,
+    pub async_body: Option<fn(std::rc::Rc<std::cell::RefCell<Runtime>>, Env) -> super::async_runtime::FutureValue>,
+}
+
+pub fn run(functions: Vec<(&'static str, Function)>, root: &Path, budget: u64) -> Result<Report> {
+    run_with_dependencies(functions, root, budget, BTreeMap::new())
+}
+pub fn run_with_dependencies(
+    functions: Vec<(&'static str, Function)>,
+    root: &Path,
+    budget: u64,
+    dependencies: BTreeMap<String, String>,
+) -> Result<Report> {
+    let (permissions, resources) = resources::Resources::from_env()?;
+    let mut runtime = Runtime {
+        permissions,
+        resources,
+        program: HashMap::new(),
+        compiled: functions.into_iter().map(|(n, f)| (n.into(), f)).collect(),
+        root: root.into(),
+        dependencies,
+        remaining: budget,
+        gpu_benchmark_restricted: false,
+        depth: 0,
+        models: Vec::new(),
+        adaptive: Vec::new(),
+        readers: Vec::new(),
+        gradients: super::optimization::Gradients::default(),
+        #[cfg(feature = "gpu")]
+        kernels: Vec::new(),
+        rng: 0,
+        metrics: BTreeMap::new(),
+        agents: Vec::new(), environments: Vec::new(),
+        async_state: super::async_runtime::AsyncState::default(),
+        harness: super::openresponses::Harness::default(),
+    };
+    let result = runtime.call("main", Vec::new())?.json()?;
+    Ok(Report {
+        result,
+        metrics: runtime.metrics,
+        operations: budget - runtime.remaining,
+    })
+}
+
+/// Generated executables resolve data against the original root unless relocated explicitly.
+pub fn entry(functions: Vec<(&'static str, Function)>, root: &str) -> Result<()> {
+    entry_with_dependencies(functions, root, Vec::new())
+}
+pub fn entry_with_dependencies(
+    functions: Vec<(&'static str, Function)>,
+    root: &str,
+    dependencies: Vec<(&str, &str)>,
+) -> Result<()> {
+    if let Some(status) = crate::isolation::supervise_current()? {
+        ensure!(status == 0, "isolated execution failed");
+        return Ok(());
+    }
+    let mut root = PathBuf::from(root);
+    let mut budget = 10_000_000;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--root" => root = PathBuf::from(args.next().context("--root needs a directory")?),
+            "--max-operations" => {
+                budget = args
+                    .next()
+                    .context("--max-operations needs a value")?
+                    .parse()?
+            }
+            _ => bail!("unknown argument: {arg}; accepts --root DIRECTORY --max-operations N"),
+        }
+    }
+    let dependencies = dependencies
+        .into_iter()
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect();
+    let report = run_with_dependencies(functions, &root, budget, dependencies)
+        .with_context(|| root.display().to_string())?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}

@@ -1,0 +1,10 @@
+wgt 0.5
+# Feature axis has two values; this model has no weights or training state.
+# Preserve punctuation in comments: "quoted", {braces}, ::, # and apostrophe '.
+model MacroProbe
+input x: f32[2]
+output y: f32[2]
+fn forward(x) {
+    let positive = relu(x), squared = square(positive);
+    return squared;
+}

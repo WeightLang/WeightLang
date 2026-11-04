@@ -1,5 +1,5 @@
 use std::{fs, process::Command};
-use weightlang_runtime::{Model, Session};
+use wgtime_core::{Model, Session};
 
 fn cli(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_weightc"))
@@ -44,7 +44,7 @@ fn build_train_reload_and_protect_without_python() {
     let mut session = Session::prepare(model, &output, 1048576).unwrap();
     assert!((session.run(&[0.25]).unwrap()[0] - 1.5).abs() < 0.15);
     assert!(
-        weightlang_runtime::training::Trainer::restore(&output.join("checkpoint.json"), 1048576)
+        wgtime_core::training::Trainer::restore(&output.join("checkpoint.json"), 1048576)
             .unwrap()
             .steps()
             > 0

@@ -1,0 +1,6 @@
+wgt 0.5
+model Double
+input x:f32[1]
+output y:f32[1]
+# One input/output feature; no weights and no optimizer required for inference.
+fn forward(x){return x+x;}

@@ -25,11 +25,26 @@ fn main() {
 }
 ```
 
-保存语句完整形式为 `save KIND VALUE to PATH [overwrite];`。KIND 只能是 `text`、`json`、`model` 或 `checkpoint`，属于上下文语法标记。VALUE 先求值一次，随后 PATH 求值一次。PATH 必须是字符串；绝对路径直接使用，相对路径按脚本根目录解析，AOT 沿用其 `--root` 契约。不会自动创建父目录。
+保存语句完整形式为 `save KIND VALUE to PATH [overwrite];`。KIND 只能是 `text`、`json`、`model`、`weights` 或 `checkpoint`，属于上下文语法标记。VALUE 先求值一次，随后 PATH 求值一次。PATH 必须是字符串；绝对路径直接使用，相对路径按脚本根目录解析，AOT 沿用其 `--root` 契约。不会自动创建父目录。
 
 读取表达式为 `load text from PATH`、`load json from PATH`、`load model from PATH using OPTIMIZER` 或 `load checkpoint from PATH`。PATH 和 OPTIMIZER 各求值一次。模型必填新优化器字符串：顺序模型允许 `sgd`/`adam`，forward 模型另允许 `none`；不会恢复原训练状态。checkpoint 恢复记录中的优化器、步数及状态，不接受 using。文件格式由显式类别验证，不靠扩展名猜测；加载不会执行原脚本 main 或训练。模型与训练断点分别使用 `save model` / `save checkpoint` 及对应 `load` 形式，不可互换。
 
 `reload model TARGET from PATH using OPTIMIZER;` 和 `reload checkpoint TARGET from PATH;` 原子更新已有模型句柄的状态；TARGET、PATH、OPTIMIZER 依次各求值一次。所有别名和 weightfs 挂载保留同一身份，成功后看到相同的新状态。候选先完整解析和验证，仅接受相同模型类别、结构、参数名/形状/冻结及概率属性、输出类型和计算程序；不支持任意架构热替换。model 显式重新创建优化器状态，checkpoint 恢复记录的状态和历史训练步数；运行时 revision 始终递增，因此旧梯度句柄过期。候选失败、结构不匹配或忙碌的分步执行会保留旧权重、优化器和 revision，不隐式训练或监听文件。此处 reload 不作用于普通文本/JSON，重新赋值 load 结果即可。
+
+`save weights NET to PATH [overwrite];` 写标准 safetensors，`reload weights NET from PATH using OPTIMIZER;` 显式绑定已有源码模型并重置优化器/步数/自定义状态。仅接受精确键集合与 shape 的有限 F32、little-endian C row-major；不改名、不转置、不猜图。顺序模型 view/add 别名保留，仅存独立参数；文件不含训练状态。没有 `load weights` 表达式。示例：
+
+```wgt
+wgt 0.5
+fn main() {
+    # 显式初始化；源码检查与编译不会执行这些语句。
+    let net = mlp([1,1], "identity", 4, "adam");
+    save weights net to "weights.safetensors";
+    let alias = net;
+    reload weights net from "weights.safetensors" using "sgd";
+    assert alias([1]) == net([1]);
+    return net([1]);
+}
+```
 
 text 只接受字符串，加载验证 UTF-8。JSON 支持有限数、字符串、bool、null、列表和对象；分类向量保存为数组，加载不恢复分类类型。模型、reader、kernel、gradient 等资源句柄不能偷偷序列化为 JSON。JSON 解析保留 serde_json 的默认深度限制，损坏输入或超出数值范围时报错。JSONL 继续使用 `jsonl`/`batch`/`close` 流式接口，不全量加载；本语法没有 bytes、任意二进制或隐式格式推断。
 

@@ -16,7 +16,8 @@ path = "src/main.rs"
 
 [dependencies]
 wgtime = { path = "../wgtime" }
-weightlang-runtime = { path = "../wgt-runtime", default-features = false }
+wgt-language = { path = "../wgt-language" }
+wgtime-core = { path = "../wgtime-core", default-features = false }
 anyhow = "1"
 serde_json = "1"
 libc = "0.2"

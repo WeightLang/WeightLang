@@ -61,16 +61,16 @@ pub fn prepare(source: &Path, offline: bool, locked: bool) -> Result<BTreeMap<St
     let text = fs::read_to_string(&source)?;
     let inline = metadata(&text)?;
     // Parse before any download or lock-file mutation.
-    let imports = weightlang_runtime::script::operators::imports(&text)?;
+    let imports = wgt_language::script::operators::imports(&text)?;
     if imports.iter().all(|(_, path)| path.starts_with("./") || path.starts_with("std/")) {
-        weightlang_runtime::script::parse_with_imports(
+        wgt_language::script::parse_with_imports(
             &text,
             source.parent().unwrap(),
             &BTreeMap::new(),
         )?;
     } else {
         // Package functions cannot be lowered until verified dependencies are available.
-        weightlang_runtime::source::split(&text)?;
+        wgt_language::source::split(&text)?;
     }
     let cache = registry::cache_root()?;
     let (manifest, project) = if let Some(inline) = inline {
@@ -133,7 +133,7 @@ mod tests {
             metadata(&source).unwrap().unwrap().dependencies["github.com/a/b"],
             "v1.2.3"
         );
-        let error = weightlang_runtime::script::run(&source, Path::new("."), 100).unwrap_err();
+        let error = wgtime_core::script::run(&source, Path::new("."), 100).unwrap_err();
         assert!(format!("{error:#}").contains("line 6"));
         for bad in [
             "# /// script\n# [dependencies]\n",

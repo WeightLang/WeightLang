@@ -8,7 +8,7 @@ use wgtime::{Client, Request};
 pub mod async_runtime;
 pub mod harness;
 pub mod openresponses;
-mod persistence;
+pub mod persistence;
 pub mod record_schema;
 pub mod records;
 pub mod tasks;
@@ -332,6 +332,9 @@ pub fn entry(functions: Vec<(&'static str, Function)>) -> Result<()> {
     entry_at(functions, ".")
 }
 pub fn entry_at(functions: Vec<(&'static str, Function)>, root: &str) -> Result<()> {
+    entry_named(functions, root, "main")
+}
+pub fn entry_named(functions: Vec<(&'static str, Function)>, root: &str, entry: &str) -> Result<()> {
     let endpoint =
         std::env::var("WGTIME_ENDPOINT").unwrap_or_else(|_| wgtime::DEFAULT_ENDPOINT.into());
     let client = Client::connect(Path::new(&endpoint), unsafe { libc::geteuid() })?;
@@ -346,19 +349,32 @@ pub fn entry_at(functions: Vec<(&'static str, Function)>, root: &str) -> Result<
         root: root.into(),
     };
     let mut args = std::env::args().skip(1);
+    let mut build_output = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--root" => { runtime.root = args.next().context("missing root")?.into(); }
+            "--build-output" => {
+                let path = std::path::PathBuf::from(args.next().context("missing build output")?);
+                ensure!(path.is_absolute(), "build output must be absolute");
+                build_output = Some(path);
+            }
             "--max-operations" => {
                 runtime.remaining = args.next().context("missing operations")?.parse()?;
             }
             _ => bail!("unknown client argument {arg}"),
         }
     }
-    let result = runtime.call("main", vec![])?;
-    println!(
-        "{}",
-        json!({"result":result.data()?,"metrics":runtime.metrics})
-    );
+    let result = runtime.call(entry, vec![])?;
+    if let Some(output) = build_output {
+        ensure!(matches!(result, Value::Model(_)), "build entry must return a model");
+        let model = output.join("model.json");
+        let checkpoint = output.join("checkpoint.json");
+        runtime.save_file("model", result.clone(), Value::Data(json!(model.to_str().context("UTF-8 build path required")?)), false)?;
+        runtime.save_file("checkpoint", result, Value::Data(json!(checkpoint.to_str().context("UTF-8 build path required")?)), false)?;
+        let build = persistence::inspect_artifact(&checkpoint, true)?;
+        println!("{}", json!({"result":null,"metrics":runtime.metrics,"build":build}));
+    } else {
+        println!("{}", json!({"result":result.data()?,"metrics":runtime.metrics}));
+    }
     Ok(())
 }

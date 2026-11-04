@@ -1,6 +1,6 @@
 use std::{fs, path::Path, process::Command};
 use weightlang_wgt::script_compiler;
-use weightlang_runtime::script;
+use wgtime_core::script;
 
 #[test]
 fn model_calls_match_interpreter_in_compiled_functions() {

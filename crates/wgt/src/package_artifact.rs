@@ -48,7 +48,7 @@ impl Info {
                 m["source_sha256"] == source_hash,
                 "operator source checksum mismatch"
             );
-            let name = weightlang_runtime::script::operators::library(&fs::read_to_string(
+            let name = wgt_language::script::operators::library(&fs::read_to_string(
                 path.join("source.wgt"),
             )?)?;
             ensure!(m["name"] == name, "operator library identity mismatch");
@@ -91,13 +91,12 @@ impl Info {
             );
         }
         let source = fs::read_to_string(path.join("source.wgt"))?;
-        weightlang_runtime::script::parse(&source)?;
-        let model = serde_json::from_slice(&fs::read(path.join("model.json"))?)?;
-        let session = weightlang_runtime::Session::prepare(model, path, 256 * 1024 * 1024)?;
+        wgt_language::script::parse(&source)?;
+        let model_report = wgtime_control::persistence::inspect_artifact(&path.join("model.json"), false)?;
         ensure!(
-            m["interface"]["input"]["shape"] == serde_json::json!([session.report().input])
+            m["interface"]["input"]["shape"] == serde_json::json!([model_report["input"].as_u64().context("missing input")?])
                 && m["interface"]["output"]["shape"]
-                    == serde_json::json!([session.report().output]),
+                    == serde_json::json!([model_report["output"].as_u64().context("missing output")?]),
             "native interface mismatch"
         );
         let checkpoint: serde_json::Value =
@@ -108,12 +107,9 @@ impl Info {
             checkpoint["model"] == inference,
             "checkpoint/model weights differ"
         );
-        let trainer = weightlang_runtime::training::Trainer::restore(
-            &path.join("checkpoint.json"),
-            256 * 1024 * 1024,
-        )?;
+        let checkpoint_report = wgtime_control::persistence::inspect_artifact(&path.join("checkpoint.json"), true)?;
         let steps = m["training_steps"].as_u64().context("training_steps")?;
-        ensure!(trainer.steps() == steps, "checkpoint step mismatch");
+        ensure!(checkpoint_report["steps"].as_u64().context("missing checkpoint steps")? == steps, "checkpoint step mismatch");
         Ok(Self {
             name,
             source_hash: m["source_sha256"].as_str().context("source hash")?.into(),

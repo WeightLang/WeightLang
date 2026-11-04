@@ -25,6 +25,7 @@ pub enum Request {
         optimizer: String,
         memory: usize,
     },
+    InitializeDefinition { source: String, memory: usize, optimizer: Option<String> },
     Predict {
         handle: u64,
         input: Vec<f32>,
@@ -64,6 +65,12 @@ pub enum Request {
     PersistFd {
         handle: u64,
         checkpoint: bool,
+    },
+    ExportWeightsFd { handle: u64 },
+    BindWeightsFd { handle: u64, optimizer: String },
+    InspectArtifactFd {
+        checkpoint: bool,
+        memory: usize,
     },
     LoadFd {
         checkpoint: bool,

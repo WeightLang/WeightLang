@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
-use weightlang_runtime::training::{mlp, Objective, Optimizer, Trainer};
+use wgtime_core::training::{mlp, Objective, Optimizer, Trainer};
 use wgtime::{Client, Request};
 
 struct Server {
@@ -265,7 +265,7 @@ fn real_process_isolation_atomic_training_and_baseline() -> Result<()> {
     assert!(predict(&mut third, handle, &input).is_err());
 
     let model = "wgt 0.5\nmodel Regression\ninput x: f32[1]\noutput y: f32[1]\nparameter w: f32[1,1] = [0]\nfn forward(x) { return linear(x,w); }\nfn loss(prediction,target) { return square(prediction-target).mean; }\n";
-    let program = weightlang_runtime::adaptive::parse(model)?;
+    let program = wgtime_core::adaptive::parse(model)?;
     let hosted = third.call(Request::CreateTrainingProgram {
         program: serde_json::to_value(program)?,
         memory: 1024 * 1024,

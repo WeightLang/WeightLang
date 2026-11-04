@@ -1,0 +1,15 @@
+[package]
+name = "wgt-model-macros"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Compile-time checked WGT model definitions for Rust programs"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+wgt-language = { path = "../wgt-language" }
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "parsing", "proc-macro"] }

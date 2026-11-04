@@ -1,9 +1,0 @@
-wgt 0.5
-# 输入沿 [时间] 轴排列。diff 输出 [N-1]，EMA 保持 [N]，有效滑窗均值输出 [N-window+1]。
-# EMA 初始状态等于第一个样本；状态仅属于本次函数调用，不跨调用共享或训练。
-fn main() {
-    assert(diff([1, 4, 9]) == [3, 5], "first differences");
-    assert(ema([0, 2, 4], 0.5) == [0, 1, 2.5], "causal smoothing");
-    assert(moving_mean([1, 2, 3, 4], 2) == [1.5, 2.5, 3.5], "valid windows");
-    return ema([1, 2, 3], 1);
-}

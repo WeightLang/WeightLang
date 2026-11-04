@@ -20,23 +20,119 @@ fn fixture(root: &Path, steps: u64, resume: bool, complete: bool) {
     for (name, text) in [
         (
             "model.wgt",
-            include_str!("../../../examples/lifecycle/model.wgt"),
+            r#"wgt 0.5
+model LifecycleRegression
+input x: f32[1]
+output y: f32[1]
+layer result: linear(out=1)
+init seed=42
+fn main() {
+    let config_reader = jsonl("run.jsonl");
+    let config = batch(config_reader, 1)[0];
+    close(config_reader);
+    let reader = jsonl("data.jsonl");
+    let inputs = [];
+    let targets = [];
+    let held_out = [];
+    let rows = batch(reader, 2);
+    while len(rows) > 0 {
+        for row in rows {
+            if row["split"] == "train" {
+                inputs = append(inputs, row["input"]);
+                targets = append(targets, row["target"]);
+            } else {
+                assert(row["split"] == "test", "unknown split");
+                held_out = append(held_out, row);
+            }
+        }
+        rows = batch(reader, 2);
+    }
+    close(reader);
+    assert(len(inputs) == 3 && len(held_out) == 2, "incorrect data split");
+    let net = LifecycleRegression("adam");
+    if config["resume"] { net = load_checkpoint("out/resume.json"); }
+    let initial = 0;
+    for i in range(0, len(inputs)) {
+        initial = initial + mse(net(inputs[i]), targets[i]);
+    }
+    initial = initial / len(inputs);
+    for step in range(0, config["steps"]) {
+        fit(net, inputs, targets, 0.05, "mse");
+    }
+    let final = 0;
+    for i in range(0, len(inputs)) {
+        final = final + mse(net(inputs[i]), targets[i]);
+    }
+    final = final / len(inputs);
+    assert(final < initial * 0.01, "loss must decrease by at least 99 percent");
+    let evaluation = 0;
+    for row in held_out {
+        evaluation = evaluation + mse(net(row["input"]), row["target"]);
+    }
+    evaluation = evaluation / len(held_out);
+    if config["complete"] { assert(evaluation < 0.000001, "held-out MSE too high"); }
+    metric("initial_loss", initial);
+    metric("final_loss", final);
+    metric("held_out_mse", evaluation);
+    metric("prediction", net([0.25]));
+    save_model(net, "out/model.json");
+    save_checkpoint(net, "out/checkpoint.json");
+    if config["build"] { return net; }
+    return net([0.25]);
+}
+"#,
         ),
         (
             "data.jsonl",
-            include_str!("../../../examples/lifecycle/data.jsonl"),
+            "{\"split\":\"train\",\"input\":[-1],\"target\":[-1]}\n{\"split\":\"test\",\"input\":[-0.5],\"target\":[0]}\n{\"split\":\"train\",\"input\":[0],\"target\":[1]}\n{\"split\":\"test\",\"input\":[0.25],\"target\":[1.5]}\n{\"split\":\"train\",\"input\":[1],\"target\":[3]}\n",
         ),
-        (
-            "wgt.mod",
-            include_str!("../../../examples/lifecycle/wgt.mod"),
-        ),
+        ("wgt.mod", "module github.com/example/lifecycle\nwgt 0.5\n"),
         (
             "tests/evaluation.wgt",
-            include_str!("../../../examples/lifecycle/tests/evaluation.wgt"),
+            r#"wgt 0.5
+fn test_held_out_loss() {
+    let net = load_model("../out/model.json", "adam");
+    let reader = jsonl("../data.jsonl");
+    let rows = batch(reader, 2);
+    let count = 0;
+    let loss = 0;
+    while len(rows) > 0 {
+        for row in rows {
+            if row["split"] == "test" {
+                loss = loss + mse(net(row["input"]), row["target"]);
+                count = count + 1;
+            }
+        }
+        rows = batch(reader, 2);
+    }
+    close(reader);
+    assert(count == 2, "held-out split must contain two rows");
+    metric("held_out_mse", loss / count);
+    assert(loss / count < 0.000001, "held-out MSE exceeds threshold");
+}
+fn test_cpu_benchmark() {
+    let net = load_model("../out/model.json", "adam");
+    let report = benchmark(net, [0.25], 2, 8, "cpu_forward", "cpu");
+    assert(report["device"] == "cpu", "CPU benchmark device");
+    assert(report["repeats"] == 8 && report["unit"] == "us", "benchmark contract");
+    assert(report["mean"] >= 0 && report["p95"] >= report["p50"], "invalid timing");
+    let training = benchmark(net, [[[0], [1]], [[1], [3]], 0.01, "mse"], 2, 8, "cpu_train", "train:cpu");
+    assert(training["device"] == "cpu" && training["mean"] >= 0, "training benchmark");
+}
+"#,
         ),
         (
             "gpu/model.wgt",
-            include_str!("../../../examples/lifecycle/gpu/model.wgt"),
+            r#"wgt 0.5
+fn main() {
+    let net = load_model("../out/model.json", "adam");
+    let report = benchmark(net, [0.25], 2, 8, "gpu_forward", "gpu");
+    assert(report["device"] != "cpu", "GPU benchmark must use hardware GPU");
+    assert(report["repeats"] == 8 && report["unit"] == "us", "benchmark contract");
+    assert(report["mean"] >= 0 && report["p95"] >= report["p50"], "invalid timing");
+    return report;
+}
+"#,
         ),
     ] {
         let path = root.join(name);
@@ -53,7 +149,6 @@ fn fixture(root: &Path, steps: u64, resume: bool, complete: bool) {
 fn command(binary: &str, root: &Path) -> Command {
     let mut cmd = Command::new(binary);
     cmd.current_dir(root)
-        .env("PATH", "/nonexistent")
         .env("WEIGHTLANG_CACHE", root.parent().unwrap().join("cli-cache"));
     cmd
 }
@@ -348,7 +443,9 @@ fn aot_matches_interpreter_and_runs_without_toolchain_or_python() {
     );
     fs::remove_file(compiled.join("model.wgt")).unwrap();
     let output = success(
-        command(executable.to_str().unwrap(), &compiled)
+        Command::new(executable.to_str().unwrap())
+            .current_dir(&compiled)
+            .env("PATH", "/nonexistent")
             .arg("--root")
             .arg(&compiled)
             .output()

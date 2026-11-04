@@ -87,5 +87,5 @@ wgt run examples/native_training/working_memory/model.wgt --compiled
 ```
 
 模型参数初始化与显式训练分开，示例不自动保存制品。
-行为检查见 `crates/wgt-runtime/tests/workspace.rs`，包括有限差分、读写与释放、内存上限、
+行为检查见 `crates/wgtime-core/tests/workspace.rs`，包括有限差分、读写与释放、内存上限、
 暂停/取消/错误事务、资源观测、训练、模型导出和 Adam 断点恢复。

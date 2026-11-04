@@ -1,8 +1,7 @@
 # 模型与数据存储
 
 模型源码入口必须为项目/模型目录下的 `model.wgt`；多个独立模型各建目录，不能用不同入口文件名区分。
-模型声明、forward、loss 和显式训练 main 可共存于该文件。`weights/` 中的推理制品、优化器断点与
-`source.wgt` 归档快照各有独立格式，不因入口命名规范而改名。模型示例组织见[示例目录](../examples/native_training/README.md)。
+模型声明、forward、loss 和显式训练 main 可共存于该文件。Rust 原生后端将 `.wgt` 作为静态模型定义：定义本身不持有运行权重；解析或加载定义不会初始化模型、执行训练或写出制品。运行权重属于显式初始化或加载后创建的实例。`weights/` 中的推理权重、包含优化器状态的 checkpoint 与 `source.wgt` 归档快照各有独立格式，不因入口命名规范而改名；加载权重不会恢复优化器状态或自动另存文件。模型示例组织见[示例目录](../examples/native_training/README.md)。
 
 完整模型放在 `weights/<model>/`；保留的实验基线、候选结果和报告放在 `weights/<experiment>/`，作为持久数据一起保留。不要将它们当缓存清理，也不要覆盖既有结果；只有提供显式 `--force` 或原生 `save ... overwrite;` 的操作才可以按其具体契约替换。原生构建和兼容保存函数仍拒绝已有目标；原生 save 语句默认拒绝覆盖，显式 overwrite 仅原子替换普通可写文件，拒绝目录和符号链接，详见[文件 IO](file-io.md)。
 

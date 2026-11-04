@@ -98,7 +98,7 @@ fn successful_native_json_fixture_and_wgt_share_one_summary() {
 
 #[test]
 fn evaluation_and_benchmark_share_interpreted_and_aot_semantics() {
-    use weightlang_runtime::script;
+    use wgtime_core::script;
     let cache = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../.cache/weightlang/native-test-task");
     fs::create_dir_all(&cache).unwrap();

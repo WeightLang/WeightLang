@@ -101,7 +101,7 @@ impl DeviceOptions {
 #[derive(clap::Args)]
 struct ExecutionOptions {
     /// Native inference runtime
-    #[arg(long, default_value = "weightlang-runtime", value_parser = ["weightlang-runtime"])]
+    #[arg(long, default_value = "wgtime", value_parser = ["wgtime"])]
     backend: String,
     /// Managed host and GPU buffer budget, in bytes
     #[arg(long, default_value_t = 536870912)]
@@ -134,7 +134,7 @@ impl ExecutionOptions {
             .clone()
             .or_else(|| config.and_then(|c| c.runtime.device.clone()));
         let mut devices = devices.with_config(config, project);
-        if self.backend == "weightlang-runtime" {
+        if self.backend == "wgtime" {
             devices.device = Some(native_device.unwrap_or_else(|| "auto".into()));
         }
         devices
@@ -198,7 +198,11 @@ enum Cmd {
     /// Download and verify a wgt version without selecting it
     Download { version: String },
     /// Fetch and verify every pinned dependency
-    Fetch,
+    Fetch {
+        /// Explicit weight attachment: MODULE=VARIANT (repeatable)
+        #[arg(long)]
+        weights: Vec<String>,
+    },
     /// Synchronize native model dependencies without installing host runtimes
     Sync {
         /// Deprecated compatibility flag; sync never installs a Python environment
@@ -374,12 +378,12 @@ enum Cmd {
         #[arg(long, conflicts_with = "output")]
         stdout: bool,
     },
-    /// Package prebuilt artifacts; no compiler or Python required
+    /// Prepare source-first GitHub Release attachments without executing source
     ReleaseAssets {
         #[arg(long)]
         version: String,
-        #[arg(long, default_value = "weights")]
-        artifacts: PathBuf,
+        #[arg(long)]
+        artifacts: Option<PathBuf>,
         #[arg(short, long, default_value = "dist")]
         output: PathBuf,
         #[arg(long)]
@@ -540,7 +544,7 @@ fn execute(cli: Cli) -> Result<u8> {
         Cmd::Script {
             source,
             check,
-            compiled,
+            compiled: _,
             max_operations,
         } => {
             let path = base.join(source);
@@ -548,31 +552,18 @@ fn execute(cli: Cli) -> Result<u8> {
                 weightlang_wgt::script_dependencies::metadata(&fs::read_to_string(&path)?)?;
                 let text = fs::read_to_string(&path)?;
                 if text.lines().any(|l| l.trim().starts_with("operators ")) {
-                    weightlang_runtime::script::operators::library(&text)?;
+                    wgt_language::script::operators::library(&text)?;
                 } else {
-                    weightlang_runtime::script::parse_with_imports(&text, path.parent().unwrap(), &Default::default())?;
+                    wgt_language::script::parse_with_imports(&text, path.parent().unwrap(), &Default::default())?;
                 }
                 println!("ok: native WGT script; no execution");
-            } else if compiled {
+            } else {
                 return weightlang_wgt::script_compiler::run_options(
                     &path,
                     max_operations,
                     cli.offline,
                     cli.locked,
                 );
-            } else {
-                if let Some(status) = weightlang_runtime::isolation::supervise_current()? {
-                    return Ok(status);
-                }
-                let dependencies =
-                    weightlang_wgt::script_dependencies::prepare(&path, cli.offline, cli.locked)?;
-                let report = weightlang_runtime::script::run_with_dependencies(
-                    &fs::read_to_string(&path)?,
-                    path.parent().unwrap(),
-                    max_operations,
-                    dependencies,
-                )?;
-                println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
         Cmd::Update {
@@ -1030,17 +1021,25 @@ fn execute(cli: Cli) -> Result<u8> {
                         manifest.dependencies.len()
                     );
                 }
-                Cmd::Fetch => {
+                Cmd::Fetch { weights } => {
                     let known = manifest::read_lock(&project.join("wgt.sum"))?;
+                    if cli.offline {
+                        for selection in &weights {
+                            let (module, variant) = selection.split_once('=').context("--weights expects MODULE=VARIANT")?;
+                            let version = manifest.dependencies.get(module).context("unknown dependency in --weights")?;
+                            ensure!(known.contains_key(&(module.into(), version.clone(), format!("weights/{variant}.safetensors"))), "selected weights are not locked; fetch them online first");
+                        }
+                    }
                     if cli.offline {
                         registry::verify(&manifest, &known, &cache)?;
                     } else {
-                        let lock = registry::fetch(
+                        let lock = registry::fetch_selected(
                             &manifest,
                             &known,
                             &cache,
                             cli.locked,
                             &registry::Github::new()?,
+                            &weights,
                         )?;
                         if !cli.locked {
                             manifest::atomic_write(
@@ -1306,12 +1305,10 @@ fn execute(cli: Cli) -> Result<u8> {
                     output,
                     allow_untrained,
                 } => {
-                    let index = registry::package(
-                        &project,
-                        &project.join(artifacts),
-                        &version,
-                        &project.join(output),
-                        allow_untrained,
+                    ensure!(!allow_untrained, "--allow-untrained is retired: source packages do not claim training; select explicit safetensors attachments with --artifacts");
+                    let artifacts = artifacts.map(|p| project.join(p));
+                    let index = weightlang_wgt::source_package::package(
+                        &project, artifacts.as_deref(), &version, &project.join(output),
                     )?;
                     println!(
                         "packaged {}@{} at {}",

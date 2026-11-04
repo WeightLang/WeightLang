@@ -16,10 +16,11 @@ path = "src/weightc.rs"
 
 [features]
 default = []
-gpu = ["weightlang-runtime/gpu"]
+gpu = []
 
 [dependencies]
-weightlang-runtime = { path = "../wgt-runtime", default-features = false }
+wgtime-control = { path = "../wgtime-control" }
+wgt-language = { path = "../wgt-language" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
@@ -29,3 +30,6 @@ serde_json = "1"
 sha2 = "0.10"
 tempfile = "3"
 toml_edit = { version = "0.22", features = ["serde"] }
+
+[dev-dependencies]
+wgtime-core = { path = "../wgtime-core", default-features = false }

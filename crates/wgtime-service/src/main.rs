@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use weightlang_runtime::training::{mlp, Objective, Optimizer, Trainer};
+use wgtime_core::training::{mlp, Objective, Optimizer, Trainer};
 use wgtime::{receive, send, Reply, Request, PROTOCOL};
 
 mod metrics;
@@ -86,7 +86,7 @@ struct Connection {
     ready: bool,
     tensors: HashMap<u64, wgtime::buffer::Mapping>,
     checkpoints: HashMap<u64, Vec<u8>>,
-    adaptive: HashMap<u64, (weightlang_runtime::adaptive::AdaptiveSession, usize)>,
+    adaptive: HashMap<u64, (wgtime_core::adaptive::AdaptiveSession, usize)>,
     strategies: HashMap<u64, wgtime_service::strategy::Strategy>,
 }
 impl Connection {
@@ -151,6 +151,38 @@ impl Connection {
                 self.reserved += memory;
                 Ok(serde_json::json!({"handle": handle}))
             }
+            Request::InitializeDefinition { source, memory, optimizer } => {
+                ensure!(source.len() <= 1024 * 1024, "definition exceeds 1 MiB");
+                ensure!(self.sessions.len()+self.adaptive.len()<64 && memory>0 && memory<=MAX_SESSION_BYTES && self.reserved.checked_add(memory).is_some_and(|n| n<=MAX_CONNECTION_BYTES), "definition admission budget exceeded");
+                ensure!(optimizer.as_deref().is_none_or(|s| matches!(s,"sgd"|"adam")), "unsupported optimizer");
+                // Re-parse untrusted source in the service; macro validation is not authority.
+                let definition = wgt_language::model::ModelDefinition::parse(&source)?;
+                // Reject an impossible parameter budget before materializing any values.
+                // Core preparation still checks activations, workspace and optimizer state.
+                let parameter_bytes = definition.parameters().iter().try_fold(0usize, |total, parameter| {
+                    let count = parameter.shape.iter().try_fold(1usize, |n, axis| n.checked_mul(*axis)).context("parameter shape overflow")?;
+                    total.checked_add(count.checked_mul(4).context("parameter byte overflow")?).context("parameter byte overflow")
+                })?;
+                ensure!(parameter_bytes <= memory, "definition parameter memory budget exceeded");
+                let handle = shared.next.fetch_add(1, Ordering::Relaxed);
+                match definition.instantiate_plan()? {
+                    wgt_language::model::ModelPlan::Graph(graph) => {
+                        let model = wgtime_core::source::Graph(graph).instantiate()?;
+                        let trainer = match optimizer.as_deref() {
+                            None => Trainer::inference(model, Path::new("."), memory)?,
+                            Some(name) => Trainer::new(model, Path::new("."), memory, if name=="adam" {Optimizer::Adam} else {Optimizer::Sgd})?,
+                        };
+                        self.sessions.insert(handle,(trainer,memory));
+                    }
+                    wgt_language::model::ModelPlan::Forward(program) => {
+                        let mut session = wgtime_core::adaptive::AdaptiveSession::prepare(program, memory)?;
+                        if let Some(name)=optimizer { session.set_optimizer(if name=="adam" {Optimizer::Adam} else {Optimizer::Sgd})?; }
+                        self.adaptive.insert(handle,(session,memory));
+                    }
+                }
+                self.reserved += memory;
+                Ok(serde_json::json!({"handle":handle}))
+            }
             Request::Predict { handle, input } => {
                 if let Some((session, _)) = self.adaptive.get_mut(&handle) {
                     return Ok(
@@ -169,7 +201,7 @@ impl Connection {
             Request::CreateTrainingProgram { program, memory, optimizer } => {
                 ensure!(self.adaptive.len()+self.sessions.len()<64 && memory>0 && memory<=MAX_SESSION_BYTES && self.reserved.checked_add(memory).is_some_and(|n| n<=MAX_CONNECTION_BYTES), "program admission budget exceeded");
                 ensure!(matches!(optimizer.as_str(), "none"|"sgd"|"adam"), "unknown optimizer");
-                let mut session = weightlang_runtime::adaptive::AdaptiveSession::prepare(serde_json::from_value(program)?, memory)?;
+                let mut session = wgtime_core::adaptive::AdaptiveSession::prepare(serde_json::from_value(program)?, memory)?;
                 match optimizer.as_str() { "sgd"=>session.set_optimizer(Optimizer::Sgd)?, "adam"=>session.set_optimizer(Optimizer::Adam)?, _=>{} }
                 let handle = shared.next.fetch_add(1, Ordering::Relaxed);
                 self.adaptive.insert(handle,(session,memory));
@@ -222,7 +254,7 @@ impl Connection {
                 self.reserved -= bytes;
                 Ok(serde_json::json!({"released": true}))
             }
-            Request::PersistFd { .. } | Request::LoadFd { .. } => {
+            Request::PersistFd { .. } | Request::LoadFd { .. } | Request::InspectArtifactFd { .. } | Request::ExportWeightsFd { .. } | Request::BindWeightsFd { .. } => {
                 bail!("file operation requires descriptor")
             }
             Request::CreateGraph {
@@ -240,7 +272,7 @@ impl Connection {
                             .is_some_and(|n| n <= MAX_CONNECTION_BYTES),
                     "graph admission budget exceeded"
                 );
-                let graph: weightlang_runtime::source::Graph = serde_json::from_value(graph)?;
+                let graph: wgtime_core::source::Graph = serde_json::from_value(graph)?;
                 let optimizer = match optimizer.as_str() {
                     "adam" => Optimizer::Adam,
                     "sgd" => Optimizer::Sgd,
@@ -383,7 +415,7 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                 Ok(request) => request,
                 Err(_) => break,
             };
-            if matches!(request, Request::PersistFd { .. } | Request::LoadFd { .. }) {
+            if matches!(request, Request::PersistFd { .. } | Request::LoadFd { .. } | Request::InspectArtifactFd { .. } | Request::ExportWeightsFd { .. } | Request::BindWeightsFd { .. }) {
                 use std::io::{Read, Seek, Write};
                 let mut file = wgtime::buffer::receive_file(&stream)?;
                 let result = (|| -> Result<serde_json::Value> {
@@ -392,6 +424,30 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                         "invalid persistence descriptor"
                     );
                     match request {
+                        Request::ExportWeightsFd { handle } => {
+                            ensure!(file.metadata()?.len() == 0, "destination must be empty staging file");
+                            let bytes = if let Some((session, _)) = state.adaptive.get(&handle) {
+                                session.weights_bytes(64 * 1024 * 1024)?
+                            } else {
+                                state.sessions.get_mut(&handle).context("unknown session or foreign owner")?.0.weights_bytes(64 * 1024 * 1024)?
+                            };
+                            file.write_all(&bytes)?;
+                            file.sync_all()?;
+                            Ok(serde_json::json!({"bytes":bytes.len()}))
+                        }
+                        Request::BindWeightsFd { handle, optimizer } => {
+                            ensure!(file.metadata()?.len() <= 64 * 1024 * 1024, "weights byte limit exceeded");
+                            file.rewind()?;
+                            let mut bytes = Vec::new();
+                            file.take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+                            ensure!(bytes.len() <= 64 * 1024 * 1024, "weights byte limit exceeded");
+                            if let Some((session, _)) = state.adaptive.get_mut(&handle) {
+                                session.bind_weights(&bytes, &optimizer)?;
+                            } else {
+                                state.sessions.get_mut(&handle).context("unknown session or foreign owner")?.0.bind_weights(&bytes, &optimizer)?;
+                            }
+                            Ok(serde_json::json!({}))
+                        }
                         Request::PersistFd { handle, checkpoint } => {
                             ensure!(
                                 file.metadata()?.len() == 0,
@@ -423,6 +479,22 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                             file.sync_all()?;
                             Ok(serde_json::json!({"bytes":bytes.len()}))
                         }
+                        Request::InspectArtifactFd { checkpoint, memory } => {
+                            ensure!(memory > 0 && memory <= MAX_SESSION_BYTES, "inspection memory budget exceeded");
+                            ensure!(file.metadata()?.len() <= 64 * 1024 * 1024, "artifact byte limit exceeded");
+                            file.rewind()?;
+                            let mut bytes = Vec::new();
+                            file.take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+                            ensure!(bytes.len() <= 64 * 1024 * 1024, "artifact byte limit exceeded");
+                            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+                            let trainer = if checkpoint {
+                                Trainer::restore_value(value, memory)?
+                            } else {
+                                Trainer::new(serde_json::from_value(value)?, Path::new("."), memory, Optimizer::Sgd)?
+                            };
+                            let report = trainer.session.report();
+                            Ok(serde_json::json!({"input":report.input,"output":report.output,"steps":trainer.steps()}))
+                        }
                         Request::LoadFd {
                             checkpoint,
                             optimizer,
@@ -450,6 +522,19 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                                 "checkpoint byte limit exceeded"
                             );
                             let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+                            let artifact_checkpoint = match value.get("format") {
+                                None => false,
+                                Some(tag) if matches!(tag.as_str(), Some(
+                                    "weightlang.forward-training.v1"
+                                        | "weightlang.forward-training.v2"
+                                        | "weightlang.native-training.v1"
+                                )) => true,
+                                Some(_) => bail!("unsupported checkpoint format"),
+                            };
+                            ensure!(
+                                checkpoint == artifact_checkpoint,
+                                "load format does not match model/checkpoint kind"
+                            );
                             let handle = shared.next.fetch_add(1, Ordering::Relaxed);
                             if value
                                 .get("format")
@@ -458,9 +543,9 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                                 || (!checkpoint && value.get("instructions").is_some())
                             {
                                 let mut session = if checkpoint {
-                                    weightlang_runtime::adaptive::AdaptiveSession::restore_checkpoint(value,memory)?
+                                    wgtime_core::adaptive::AdaptiveSession::restore_checkpoint(value,memory)?
                                 } else {
-                                    weightlang_runtime::adaptive::AdaptiveSession::prepare(
+                                    wgtime_core::adaptive::AdaptiveSession::prepare(
                                         serde_json::from_value(value)?,
                                         memory,
                                     )?

@@ -18,7 +18,7 @@
 
 provider HTTP、认证、会话历史、pending calls 和显式 WGT 工具循环归客户端控制层所有。工具调用权重模型时必须通过 `wgtime` IPC，不能转向客户端内嵌模型执行。网络/工具账本在客户端所有 worker 间共享；推理预算由服务另行计账，二者不是已经实现的统一总沙箱。失败 POST 与副作用工具不会因为 IPC 重连而自动重放。
 
-目标依赖方向是`wgtime-control` 客户端控制层依赖轻量 `wgtime` IPC client/wire crate；权重/设备执行核心只由 service 链接。协议核心已物理迁入 `wgtime-control`，旧 weightlang-runtime 仅重导出这一份实现。轻量控制 crate 独立测试通过，`cargo tree -p wgtime-control --depth 1` 不包含 runtime/service。控制层 async/tasks 已接线，双 worker harness 已通过默认编译与显式轻客户端 AOT 的无源码运行验证。`wgtime-control` 依赖树无 runtime/service，协议与纯任务调度均仅保留一份实现。模型执行的完整迁移范围仍以 wgtime 专题为准，禁止循环依赖。
+目标依赖方向是`wgtime-control` 客户端控制层依赖轻量 `wgtime` IPC client/wire crate；权重/设备执行核心只由 service 链接。协议核心已物理迁入 `wgtime-control`，`wgtime-core` 链接执行核心；`wgt-language` 提供其共享前端。轻量控制 crate 独立测试通过，`cargo tree -p wgtime-control --depth 1` 不包含 runtime/service。控制层 async/tasks 已接线，双 worker harness 已通过默认编译与显式轻客户端 AOT 的无源码运行验证。`wgtime-control` 依赖树无 runtime/service，协议与纯任务调度均仅保留一份实现。模型执行的完整迁移范围仍以 wgtime 专题为准，禁止循环依赖。
 
 无论最终归属如何，单个 harness 的子 worker 必须共享总额度，用户会话与 mutable state 必须隔离；共享权重注册/复用键不允许合并 harness 历史、工具权限、随机数或可变训练状态。不能将权重实例共享等同于会话共享。IPC 消息需要携带不可伪造的归属/租约信息并由 service 校验，不能仅信任客户端数据中的 user/parent/session 字段。
 
@@ -144,10 +144,10 @@ scope 错误取消兄弟任务，退出等待在途阻塞 HTTP 完成和计账�
 
 ## 验证状态
 
-首批独立 Rust 核心测试通过 5 项，包含 HTTP 工具结果往返、call_id 拒绝、terminal、schema 与共享 grant/预算。接入公共模块后重新执行 `cargo test -p weightlang-runtime --no-default-features openresponses --lib` 为 6 passed，`cargo test -p weightlang-runtime --no-default-features --test openresponses_core` 为 4 passed；`cargo check -p weightlang-runtime --no-default-features` 通过。
+首批独立 Rust 核心测试通过 5 项，包含 HTTP 工具结果往返、call_id 拒绝、terminal、schema 与共享 grant/预算。接入公共模块后重新执行 `cargo test -p wgtime-core --no-default-features openresponses --lib` 为 6 passed，`cargo test -p wgtime-core --no-default-features --test openresponses_core` 为 4 passed；`cargo check -p wgtime-core --no-default-features` 通过。
 
 `cargo test -p weightlang-wgt --test openresponses -- --nocapture` 已在构建脚本路径修复后通过 1 项：本地分块 SSE、双 worker、具名 WGT 工具执行、call_id 回传、共享请求/工具额度，以及移除 model.wgt、PATH=/nonexistent 后的真实 AOT。最终定向命令 `cargo test -p weightlang-wgt --test openresponses harness_interpreter -- --nocapture` 通过 1 项，覆盖解释、默认 compile（已切轻客户端）及显式 compile_client 三模式。两种编译都在源文件仍存在时完成，再移除 model.wgt，以 PATH=/nonexistent 运行产物；不是声称编译前无需源码。隔离 IPC 假服务只接受父任务与双 worker 的 Hello 握手，不接受任何模型执行请求。固定官方 ResponseResource fixture 已加入 roundtrip 测试。这些是功能验收，不是性能/吞吐验收。
 
-async 对象构造另修正为同步/异步共用借用字段校验、逐节点直接扣 ledger，验证后再 clone；失败前已访问节点照常收费。`record_callbacks` 定向测试通过，覆盖失败计费与两个线程竞争同一原子额度。纯 `record_schema` 与 callback inspect 已迁至 wgtime-control 单份实现，旧 runtime 使用 adapter/re-export；抽取相关回归为 runtime records 3 passed、control record_schema 5 passed。客户端完整 records/collect 分派由运行时主线接线，这里不宣称该迁移已经全部完成。
+async 对象构造另修正为同步/异步共用借用字段校验、逐节点直接扣 ledger，验证后再 clone；失败前已访问节点照常收费。`record_callbacks` 定向测试通过，覆盖失败计费与两个线程竞争同一原子额度。纯 `record_schema` 与 callback inspect 已迁至 wgtime-control 单份实现，执行核心通过共享前端 API 使用该实现；抽取相关回归为 runtime records 3 passed、control record_schema 5 passed。客户端完整 records/collect 分派由运行时主线接线，这里不宣称该迁移已经全部完成。
 
 官方 compliance runner 面向 provider 服务端，首期只复用固定官方 schema/fixtures/场景作本地客户端契约测试，不宣称通过服务端官方认证。不需要付费 API 或真实密钥。

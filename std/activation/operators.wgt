@@ -1,20 +1,25 @@
 wgt 0.5
-operators Activations
+operators Activation
 
-# f32[N] -> f32[N]：逐特征 SiLU 门；无参数、无隐含 batch 或广播。
-# sigmoid 是稳定原语，避免手写 exp 在大负输入溢出。
+# swish(x: f32[N]) -> f32[N]. N is a nonempty feature axis, not a batch.
+# The native sigmoid avoids overflow for large negative gates.
+# No parameters or mutable state are allocated; gradients flow through x.
 fn swish(x) {
-    return x * sigmoid(x);
+    let probability = sigmoid(x), gated = x * probability;
+    return gated;
 }
 
-# gate/value 均为 f32[N]。两路投影由调用模型提供，参数身份不在库内创建。
-# SiLU 门可为负数，不是概率门；各特征独立相乘，保持 N。
+# swiglu(gate: f32[N], value: f32[N]) -> f32[N]. Both inputs are required.
+# The caller supplies both projected branches and owns any shared weights.
+# Gate features modulate matching value features; there is no broadcasting.
 fn swiglu(gate, value) {
-    return swish(gate) * value;
+    let activated = swish(gate), output = activated * value;
+    return output;
 }
 
-# f32[N] -> f32[N]：ReLU 后平方；负半轴归零，正半轴保留二次响应。
-# 极大正输入的平方仍可能超出 f32，遵循原语的非有限结果错误。
+# squared_relu(x: f32[N]) -> f32[N]. Keeps the feature axis unchanged.
+# Negative and zero inputs have zero gradient; finite overflow is an error.
 fn squared_relu(x) {
-    return square(relu(x));
+    let positive_features = relu(x);
+    return square(positive_features);
 }

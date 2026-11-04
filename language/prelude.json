@@ -10,7 +10,7 @@
         "ordinary_function"
       ],
       "purpose": "Configure one execution-only OpenResponses harness and shared worker ledger.",
-      "implementation": "crates/wgt-runtime/src/script/openresponses.rs",
+      "implementation": "crates/wgtime-core/src/script/openresponses.rs",
       "documentation": "docs/openresponses.md",
       "signature": "responses_scope(limits,profiles,tools)",
       "defaults": {},
@@ -26,7 +26,7 @@
         "ordinary_function"
       ],
       "purpose": "Restrict inherited profile/tool grants before creating a session.",
-      "implementation": "crates/wgt-runtime/src/script/openresponses.rs",
+      "implementation": "crates/wgtime-core/src/script/openresponses.rs",
       "documentation": "docs/openresponses.md",
       "signature": "responses_restrict(profiles,tools)",
       "defaults": {},
@@ -42,7 +42,7 @@
         "ordinary_function"
       ],
       "purpose": "Create an owned OpenResponses conversation.",
-      "implementation": "crates/wgt-runtime/src/script/openresponses.rs",
+      "implementation": "crates/wgtime-core/src/script/openresponses.rs",
       "documentation": "docs/openresponses.md",
       "signature": "responses_session(request)",
       "defaults": {},
@@ -58,7 +58,7 @@
         "ordinary_function"
       ],
       "purpose": "Create an async request future; await it inside async fn.",
-      "implementation": "crates/wgt-runtime/src/script/openresponses.rs",
+      "implementation": "crates/wgtime-core/src/script/openresponses.rs",
       "documentation": "docs/openresponses.md",
       "signature": "responses_next(session,profile)",
       "defaults": {},
@@ -74,7 +74,7 @@
         "ordinary_function"
       ],
       "purpose": "Submit exactly one result for every pending call_id.",
-      "implementation": "crates/wgt-runtime/src/script/openresponses.rs",
+      "implementation": "crates/wgtime-core/src/script/openresponses.rs",
       "documentation": "docs/openresponses.md",
       "signature": "responses_submit(session,results)",
       "defaults": {},
@@ -90,7 +90,7 @@
         "ordinary_function"
       ],
       "purpose": "Close a local session and discard pending tool calls.",
-      "implementation": "crates/wgt-runtime/src/script/openresponses.rs",
+      "implementation": "crates/wgtime-core/src/script/openresponses.rs",
       "documentation": "docs/openresponses.md",
       "signature": "responses_cancel(session)",
       "defaults": {},
@@ -106,7 +106,7 @@
         "ordinary_function"
       ],
       "purpose": "Read aggregate harness usage across workers.",
-      "implementation": "crates/wgt-runtime/src/script/openresponses.rs",
+      "implementation": "crates/wgtime-core/src/script/openresponses.rs",
       "documentation": "docs/openresponses.md",
       "signature": "responses_usage()",
       "defaults": {},
@@ -122,7 +122,7 @@
         "ordinary_function"
       ],
       "purpose": "在临时参数上用首次梯度句柄保存的同批数据重新求一阶梯度，不写真实模型；返回新句柄，parameters/state/steps仍为原始提交基准，loss/gradients为临时点结果。共享句柄及内存预算，拒绝过期版本。",
-      "implementation": "crates/wgt-runtime/src/script/optimization.rs",
+      "implementation": "crates/wgtime-core/src/script/optimization.rs",
       "documentation": "docs/native-training.md",
       "signature": "differentiate_at(gradient,parameters)",
       "defaults": {},
@@ -138,7 +138,7 @@
         "ordinary_function"
       ],
       "purpose": "CPU forward 模型通过 fn loss 求批次平均损失和初始参数梯度，不提交；要求 optimizer none。返回梯度句柄，最多16个存活句柄，共享64MiB预算。",
-      "implementation": "crates/wgt-runtime/src/script/optimization.rs",
+      "implementation": "crates/wgtime-core/src/script/optimization.rs",
       "documentation": "docs/native-training.md",
       "signature": "differentiate(model,inputs,targets)",
       "defaults": {},
@@ -154,7 +154,7 @@
         "ordinary_function"
       ],
       "purpose": "读取梯度快照对象：loss、parameters、gradients、names、shapes、state、steps；参数按稳定顺序列出非冻结参数，数据为行优先扁平列表。",
-      "implementation": "crates/wgt-runtime/src/script/optimization.rs",
+      "implementation": "crates/wgtime-core/src/script/optimization.rs",
       "documentation": "docs/native-training.md",
       "signature": "gradient_snapshot(gradient)",
       "defaults": {},
@@ -170,7 +170,7 @@
         "ordinary_function"
       ],
       "purpose": "原子提交完整候选参数和用户优化器状态，返回更新前loss并释放句柄；拒绝过期快照、非有限f32、布局错误和资源状态。状态深度至多32、计量大小至多1MiB。",
-      "implementation": "crates/wgt-runtime/src/script/optimization.rs",
+      "implementation": "crates/wgtime-core/src/script/optimization.rs",
       "documentation": "docs/native-training.md",
       "signature": "commit_gradients(gradient,parameters,state)",
       "defaults": {},
@@ -186,7 +186,7 @@
         "ordinary_function"
       ],
       "purpose": "释放未提交梯度快照并返回null；重复释放或提交后的句柄报错。Runtime结束释放所有剩余句柄。",
-      "implementation": "crates/wgt-runtime/src/script/optimization.rs",
+      "implementation": "crates/wgtime-core/src/script/optimization.rs",
       "documentation": "docs/native-training.md",
       "signature": "release_gradient(gradient)",
       "defaults": {},
@@ -202,7 +202,7 @@
         "ordinary_function"
       ],
       "purpose": "返回设备对象列表，字段 id/name/backend/kind/memory_model；CPU 在首项，之后为硬件 GPU。CPU 构建仅返回 CPU。枚举不证明模型可执行；设备编号不代表永久身份。",
-      "implementation": "crates/wgt-runtime/src/script/training_device.rs",
+      "implementation": "crates/wgtime-core/src/script/training_device.rs",
       "documentation": "docs/wgsl.md",
       "signature": "devices()",
       "defaults": {},
@@ -218,7 +218,7 @@
         "ordinary_function"
       ],
       "purpose": "顺序模型（声明式或 mlp）显式选择训练设备，返回与 training_status 相同的对象。device 为 cpu 或 devices 返回的精确 GPU ID，不接受 auto/gpu/npu。后两项为正整数；GPU 用于数值内存预算和最大批次，CPU 接受但不使用这两个限制。失败保持原设备、权重和优化器状态。",
-      "implementation": "crates/wgt-runtime/src/script/training_device.rs",
+      "implementation": "crates/wgtime-core/src/script/training_device.rs",
       "documentation": "docs/wgsl.md",
       "signature": "training_device(model,device,memory_bytes,max_batch)",
       "defaults": {},
@@ -234,7 +234,7 @@
         "ordinary_function"
       ],
       "purpose": "返回 device、steps、inference_device、state。steps 是已提交优化步数；当前 inference_device 恒为 cpu、state 恒为 host_committed。只接受顺序模型。",
-      "implementation": "crates/wgt-runtime/src/script/training_device.rs",
+      "implementation": "crates/wgtime-core/src/script/training_device.rs",
       "documentation": "docs/wgsl.md",
       "signature": "training_status(model)",
       "defaults": {},
@@ -250,7 +250,7 @@
         "ordinary_function"
       ],
       "purpose": "source 是 1..1048576 字节 WGSL 字符串，entry 为非空计算入口名，device 为精确硬件 GPU ID，memory_bytes 为正整数。编译并返回不透明内核句柄，不调度。每个 WGT runtime 最多 64 个内核，退出时释放。",
-      "implementation": "crates/wgt-runtime/src/script/training_device.rs",
+      "implementation": "crates/wgtime-core/src/script/training_device.rs",
       "documentation": "docs/wgsl.md",
       "signature": "wgsl_kernel(source,entry,device,memory_bytes)",
       "defaults": {},
@@ -266,7 +266,7 @@
         "ordinary_function"
       ],
       "purpose": "input 为非空有限 f32 列表，output_count 正整数；workgroups 为三个正整数 [x,y,z]，每项不超过设备限制。同步调度并返回长度 output_count 的有限 f32 列表；输出初始为零。",
-      "implementation": "crates/wgt-runtime/src/script/training_device.rs",
+      "implementation": "crates/wgtime-core/src/script/training_device.rs",
       "documentation": "docs/wgsl.md",
       "signature": "wgsl_run(kernel,input,output_count,workgroups)",
       "defaults": {},
@@ -282,7 +282,7 @@
         "ordinary_function"
       ],
       "purpose": "输入为匹配模型宽度的有限 f32 向量；工作和字节参数为 1..1000000000 整数，分别收紧到 compute 余量和 workspace 上限；内存另不得超过原会话上限。准备独立事务，不执行 forward；返回 null。每次尝试消耗一个能力调用名额，工作额度须大于零，内存至少容纳模型的静态受管区。",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/working-memory.md",
       "signature": "execution_start(model,input,max_work,memory_bytes)",
       "defaults": {},
@@ -298,7 +298,7 @@
         "ordinary_function"
       ],
       "purpose": "instructions 为 1..1000000；最多执行这么多 VM 指令，同时受剩余计算工作量、生命周期工作上限和当前作用域约束。返回 `{done,output,work,memory_bytes,peak_memory_bytes}`。未完成 output=null，完成后是 f32 输出向量。work 为本任务累计工作量，内存字段仅为动态工作区字节。",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/working-memory.md",
       "signature": "execution_resume(model,instructions)",
       "defaults": {},
@@ -314,7 +314,7 @@
         "ordinary_function"
       ],
       "purpose": "取消活动事务并丢弃中间内存和权重写入；有任务返回 true，无任务返回 false。已完成工作不退款。",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/working-memory.md",
       "signature": "execution_cancel(model)",
       "defaults": {},
@@ -330,7 +330,7 @@
         "ordinary_function"
       ],
       "purpose": "每次运行只能设置一次。四个参数均为 [0,1000000000] 整数，calls 最大 10000。work 受当前解释器剩余操作额度约束；deadline 从此调用起计时。返回 null。",
-      "implementation": "crates/wgt-runtime/src/script/resources.rs",
+      "implementation": "crates/wgtime-core/src/script/resources.rs",
       "documentation": "docs/compute-budget.md",
       "signature": "compute_budget(work,workspace_bytes,calls,deadline_ms)",
       "defaults": {},
@@ -346,7 +346,7 @@
         "ordinary_function"
       ],
       "purpose": "返回 work_remaining、workspace_bytes、calls_remaining、deadline_remaining_ms 对象。",
-      "implementation": "crates/wgt-runtime/src/script/resources.rs",
+      "implementation": "crates/wgtime-core/src/script/resources.rs",
       "documentation": "docs/compute-budget.md",
       "signature": "compute_status()",
       "defaults": {},
@@ -362,7 +362,7 @@
         "ordinary_function"
       ],
       "purpose": "input 为列表；返回 `{ok,error,value,work}`。需要先设置预算。",
-      "implementation": "crates/wgt-runtime/src/script/resources.rs",
+      "implementation": "crates/wgtime-core/src/script/resources.rs",
       "documentation": "docs/compute-budget.md",
       "signature": "compute_call(name,input)",
       "defaults": {},
@@ -378,7 +378,7 @@
         "ordinary_function"
       ],
       "purpose": "返回本次运行的调用摘要列表：capability、input_length、work、ok、error。不记录输入内容。",
-      "implementation": "crates/wgt-runtime/src/script/resources.rs",
+      "implementation": "crates/wgtime-core/src/script/resources.rs",
       "documentation": "docs/compute-budget.md",
       "signature": "compute_trace()",
       "defaults": {},
@@ -394,7 +394,7 @@
         "ordinary_function"
       ],
       "purpose": "返回可用的版本化能力名列表：三个计算能力，以及宿主授权的 I/O 能力。不需要初始化预算。",
-      "implementation": "crates/wgt-runtime/src/script/resources.rs",
+      "implementation": "crates/wgtime-core/src/script/resources.rs",
       "documentation": "docs/compute-budget.md",
       "signature": "compute_capabilities()",
       "defaults": {},
@@ -410,7 +410,7 @@
         "ordinary_function"
       ],
       "purpose": "Return host policy counters or null without a policy.",
-      "implementation": "crates/wgt-runtime/src/script/resources.rs",
+      "implementation": "crates/wgtime-core/src/script/resources.rs",
       "signature": "compute_host_status()",
       "defaults": {},
       "arity": {
@@ -425,7 +425,7 @@
         "ordinary_function"
       ],
       "purpose": "Call a WGT function within a child resource budget.",
-      "implementation": "crates/wgt-runtime/src/script/resources.rs",
+      "implementation": "crates/wgtime-core/src/script/resources.rs",
       "signature": "compute_scope(function,args,limits)",
       "defaults": {},
       "arity": {
@@ -440,7 +440,7 @@
         "ordinary_function"
       ],
       "purpose": "Register a one-argument WGT function as a capability.",
-      "implementation": "crates/wgt-runtime/src/script/resources.rs",
+      "implementation": "crates/wgtime-core/src/script/resources.rs",
       "signature": "compute_register(name,function,limits)",
       "defaults": {},
       "arity": {
@@ -455,7 +455,7 @@
         "ordinary_function"
       ],
       "purpose": "model 为原生顺序 f32 模型句柄，不支持 adaptive 句柄；input 为与输入宽度相同的有限数值列表；alias 为授权别名。返回 `{ok,job,work,error}`，成功 job 为本设备池整数 ID；准入拒绝时 job=null、work=0。",
-      "implementation": "crates/wgt-runtime/src/script/resources.rs",
+      "implementation": "crates/wgtime-core/src/script/resources.rs",
       "documentation": "docs/accelerator-resources.md",
       "signature": "device_submit(model,input,alias)",
       "defaults": {},
@@ -471,7 +471,7 @@
         "ordinary_function"
       ],
       "purpose": "job 为该池提交返回的整数，timeout_ms 为 [0,1000000000]。返回 `{ok,output,error,execution_wall_us}`；output 为 f32 推理结果列表。等待期限同时受当前计算预算与宿主剩余期限限制。",
-      "implementation": "crates/wgt-runtime/src/script/resources.rs",
+      "implementation": "crates/wgtime-core/src/script/resources.rs",
       "documentation": "docs/accelerator-resources.md",
       "signature": "device_wait(alias,job,timeout_ms)",
       "defaults": {},
@@ -487,7 +487,7 @@
         "ordinary_function"
       ],
       "purpose": "返回实际设备 ID、kind（Gpu/Npu）、active、ready、queued、并发/队列上限、受管内存额度、每任务额度、提交计数/余量、计算量/余量。未经授权的别名报错。",
-      "implementation": "crates/wgt-runtime/src/script/resources.rs",
+      "implementation": "crates/wgtime-core/src/script/resources.rs",
       "documentation": "docs/accelerator-resources.md",
       "signature": "device_status(alias)",
       "defaults": {},
@@ -503,7 +503,7 @@
         "ordinary_function"
       ],
       "purpose": "Resolve an explicitly locked dependency to its local artifact path.",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "signature": "dependency(name)",
       "defaults": {},
       "arity": {
@@ -518,7 +518,7 @@
         "ordinary_function"
       ],
       "purpose": "列表长度",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/native-training.md",
       "signature": "len(list)",
       "defaults": {},
@@ -534,7 +534,7 @@
         "ordinary_function"
       ],
       "purpose": "非负整数半开区间；end >= start，最多 1000000 项",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/native-training.md",
       "signature": "range(start,end)",
       "defaults": {},
@@ -550,7 +550,7 @@
         "ordinary_function"
       ],
       "purpose": "返回追加后的新列表，不原地改动；最多 1000000 项",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/native-training.md",
       "signature": "append(list,value)",
       "defaults": {},
@@ -566,7 +566,7 @@
         "ordinary_function"
       ],
       "purpose": "从对象列表逐行提取字段，缺失即报错",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/native-training.md",
       "signature": "column(rows,key)",
       "defaults": {},
@@ -582,7 +582,7 @@
         "ordinary_function"
       ],
       "purpose": "Sum a finite nonempty numeric list to a scalar; reject nonfinite results.",
-      "implementation": "crates/wgt-runtime/src/script/math/mod.rs",
+      "implementation": "crates/wgtime-core/src/script/math/mod.rs",
       "documentation": "docs/standard-library.md",
       "signature": "sum(x)",
       "defaults": {},
@@ -598,7 +598,7 @@
         "ordinary_function"
       ],
       "purpose": "Scalar square root; reject nonfinite results.",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "signature": "sqrt(x)",
       "defaults": {},
       "arity": {
@@ -613,7 +613,7 @@
         "ordinary_function"
       ],
       "purpose": "`1/sqrt(x)`，x > 0；精确平方根再取倒数，未使用低精度快速近似",
-      "implementation": "crates/wgt-runtime/src/script/math/mod.rs",
+      "implementation": "crates/wgtime-core/src/script/math/mod.rs",
       "documentation": "docs/standard-library.md",
       "signature": "rsqrt(x)",
       "defaults": {},
@@ -629,7 +629,7 @@
         "ordinary_function"
       ],
       "purpose": "融合乘加 x*y+z，只舍入一次",
-      "implementation": "crates/wgt-runtime/src/script/math/mod.rs",
+      "implementation": "crates/wgtime-core/src/script/math/mod.rs",
       "documentation": "docs/standard-library.md",
       "signature": "fma(x,y,z)",
       "defaults": {},
@@ -645,7 +645,7 @@
         "ordinary_function"
       ],
       "purpose": "欧氏长度，避免直接平方造成中间溢出/下溢",
-      "implementation": "crates/wgt-runtime/src/script/math/mod.rs",
+      "implementation": "crates/wgtime-core/src/script/math/mod.rs",
       "documentation": "docs/standard-library.md",
       "signature": "hypot(x,y)",
       "defaults": {},
@@ -661,7 +661,7 @@
         "ordinary_function"
       ],
       "purpose": "exp(x)-1，保留接近零的小量精度",
-      "implementation": "crates/wgt-runtime/src/script/math/mod.rs",
+      "implementation": "crates/wgtime-core/src/script/math/mod.rs",
       "documentation": "docs/standard-library.md",
       "signature": "expm1(x)",
       "defaults": {},
@@ -677,7 +677,7 @@
         "ordinary_function"
       ],
       "purpose": "log(1+x)，x > -1，保留接近零的小量精度",
-      "implementation": "crates/wgt-runtime/src/script/math/mod.rs",
+      "implementation": "crates/wgtime-core/src/script/math/mod.rs",
       "documentation": "docs/standard-library.md",
       "signature": "log1p(x)",
       "defaults": {},
@@ -693,7 +693,7 @@
         "ordinary_function"
       ],
       "purpose": "logistic，按正负分支避免指数溢出",
-      "implementation": "crates/wgt-runtime/src/script/math/mod.rs",
+      "implementation": "crates/wgtime-core/src/script/math/mod.rs",
       "documentation": "docs/standard-library.md",
       "signature": "sigmoid(x)",
       "defaults": {},
@@ -709,7 +709,7 @@
         "ordinary_function"
       ],
       "purpose": "max(x,0)+log1p(exp(-abs(x)))，避免大正数指数溢出",
-      "implementation": "crates/wgt-runtime/src/script/math/mod.rs",
+      "implementation": "crates/wgtime-core/src/script/math/mod.rs",
       "documentation": "docs/standard-library.md",
       "signature": "softplus(x)",
       "defaults": {},
@@ -725,7 +725,7 @@
         "ordinary_function"
       ],
       "purpose": "x*sigmoid(x)，使用稳定 sigmoid",
-      "implementation": "crates/wgt-runtime/src/script/math/mod.rs",
+      "implementation": "crates/wgtime-core/src/script/math/mod.rs",
       "documentation": "docs/standard-library.md",
       "signature": "silu(x)",
       "defaults": {},
@@ -741,7 +741,7 @@
         "ordinary_function"
       ],
       "purpose": "标量内积；长度相同，顺序 FMA 累加",
-      "implementation": "crates/wgt-runtime/src/script/math/vector.rs",
+      "implementation": "crates/wgtime-core/src/script/math/vector.rs",
       "documentation": "docs/standard-library.md",
       "signature": "dot(x,y)",
       "defaults": {},
@@ -757,7 +757,7 @@
         "ordinary_function"
       ],
       "purpose": "标量 L2 长度；逐步 hypot 避免直接平方溢出",
-      "implementation": "crates/wgt-runtime/src/script/math/vector.rs",
+      "implementation": "crates/wgtime-core/src/script/math/vector.rs",
       "documentation": "docs/standard-library.md",
       "signature": "norm(x)",
       "defaults": {},
@@ -773,7 +773,7 @@
         "ordinary_function"
       ],
       "purpose": "标量均值；先除 N 再求和以减少求和溢出；后缀无参数，语义及预算相同",
-      "implementation": "crates/wgt-runtime/src/script/math/vector.rs",
+      "implementation": "crates/wgtime-core/src/script/math/vector.rs",
       "documentation": "docs/standard-library.md",
       "signature": "mean(x)",
       "defaults": {},
@@ -789,7 +789,7 @@
         "ordinary_function"
       ],
       "purpose": "`[N]` 概率；减最大值后指数归一化",
-      "implementation": "crates/wgt-runtime/src/script/math/vector.rs",
+      "implementation": "crates/wgtime-core/src/script/math/vector.rs",
       "documentation": "docs/standard-library.md",
       "signature": "softmax(x)",
       "defaults": {},
@@ -805,7 +805,7 @@
         "ordinary_function"
       ],
       "purpose": "`[N]` 对数概率；直接在对数域计算，避免概率下溢后取 log",
-      "implementation": "crates/wgt-runtime/src/script/math/vector.rs",
+      "implementation": "crates/wgtime-core/src/script/math/vector.rs",
       "documentation": "docs/standard-library.md",
       "signature": "log_softmax(x)",
       "defaults": {},
@@ -821,7 +821,7 @@
         "ordinary_function"
       ],
       "purpose": "标量 log(sum(exp(x)))；减最大值稳定计算",
-      "implementation": "crates/wgt-runtime/src/script/math/vector.rs",
+      "implementation": "crates/wgtime-core/src/script/math/vector.rs",
       "documentation": "docs/standard-library.md",
       "signature": "logsumexp(x)",
       "defaults": {},
@@ -837,7 +837,7 @@
         "ordinary_function"
       ],
       "purpose": "`[N]`，x/max(norm(x),eps)；eps 有限且 >0；缩放后求范数，零向量返回零",
-      "implementation": "crates/wgt-runtime/src/script/math/vector.rs",
+      "implementation": "crates/wgtime-core/src/script/math/vector.rs",
       "documentation": "docs/standard-library.md",
       "signature": "l2_normalize(x,eps)",
       "defaults": {},
@@ -853,7 +853,7 @@
         "ordinary_function"
       ],
       "purpose": "标量均方误差；等长，均值取全部 N 个元素",
-      "implementation": "crates/wgt-runtime/src/script/math/vector.rs",
+      "implementation": "crates/wgtime-core/src/script/math/vector.rs",
       "documentation": "docs/standard-library.md",
       "signature": "mse(x,y)",
       "defaults": {},
@@ -869,7 +869,7 @@
         "ordinary_function"
       ],
       "purpose": "标量平均绝对误差；等长",
-      "implementation": "crates/wgt-runtime/src/script/math/vector.rs",
+      "implementation": "crates/wgtime-core/src/script/math/vector.rs",
       "documentation": "docs/standard-library.md",
       "signature": "mae(x,y)",
       "defaults": {},
@@ -885,7 +885,7 @@
         "ordinary_function"
       ],
       "purpose": "单样本标量负对数似然；target 为 0..N-1 的整数，不接受概率标签",
-      "implementation": "crates/wgt-runtime/src/script/math/vector.rs",
+      "implementation": "crates/wgtime-core/src/script/math/vector.rs",
       "documentation": "docs/standard-library.md",
       "signature": "cross_entropy(logits,target)",
       "defaults": {},
@@ -901,7 +901,7 @@
         "ordinary_function"
       ],
       "purpose": "标量最小/最大值",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "min(x)",
       "defaults": {},
@@ -917,7 +917,7 @@
         "ordinary_function"
       ],
       "purpose": "标量最小/最大值",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "max(x)",
       "defaults": {},
@@ -933,7 +933,7 @@
         "ordinary_function"
       ],
       "purpose": "极值首次出现的索引，数值相等的正负零也按首次处理",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "argmin(x)",
       "defaults": {},
@@ -949,7 +949,7 @@
         "ordinary_function"
       ],
       "purpose": "极值首次出现的索引，数值相等的正负零也按首次处理",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "argmax(x)",
       "defaults": {},
@@ -965,7 +965,7 @@
         "ordinary_function"
       ],
       "purpose": "标量方差，分母 N-ddof；ddof 为整数且 0<=ddof<N；0 是总体方差、1 是样本方差",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "variance(x,ddof)",
       "defaults": {},
@@ -981,7 +981,7 @@
         "ordinary_function"
       ],
       "purpose": "同一方差定义的标准差；先缩放和中心化，避免直接平方溢出",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "stddev(x,ddof)",
       "defaults": {},
@@ -997,7 +997,7 @@
         "ordinary_function"
       ],
       "purpose": "排序后中位数；偶数长度取中间两数平均",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "median(x)",
       "defaults": {},
@@ -1013,7 +1013,7 @@
         "ordinary_function"
       ],
       "purpose": "q 为 [0,1] 数值；对升序序列位置 q*(N-1) 做线性插值，单元素返回该元素",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "quantile(x,q)",
       "defaults": {},
@@ -1029,7 +1029,7 @@
         "ordinary_function"
       ],
       "purpose": "升序 `[N]`，稳定排序；不修改原列表",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "sort(x)",
       "defaults": {},
@@ -1045,7 +1045,7 @@
         "ordinary_function"
       ],
       "purpose": "升序对应的原始索引 `[N]`，相等元素保持原顺序",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "argsort(x)",
       "defaults": {},
@@ -1061,7 +1061,7 @@
         "ordinary_function"
       ],
       "purpose": "包含当前元素的顺序前缀和 `[N]`；任何中间和溢出均报错",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "cumsum(x)",
       "defaults": {},
@@ -1077,7 +1077,7 @@
         "ordinary_function"
       ],
       "purpose": "标量余弦相似度，等长且两个向量均非零；分别缩放后求内积与范数，最终裁剪到 [-1,1]",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "cosine_similarity(x,y)",
       "defaults": {},
@@ -1093,7 +1093,7 @@
         "ordinary_function"
       ],
       "purpose": "逐元素裁剪到闭区间，同形返回；两边界有限且 lower<=upper",
-      "implementation": "crates/wgt-runtime/src/script/math/algorithms.rs",
+      "implementation": "crates/wgtime-core/src/script/math/algorithms.rs",
       "documentation": "docs/standard-library.md",
       "signature": "clip(x,lower,upper)",
       "defaults": {},
@@ -1109,7 +1109,7 @@
         "ordinary_function"
       ],
       "purpose": "标量 max(x,0)",
-      "implementation": "crates/wgt-runtime/src/script/math/activation.rs",
+      "implementation": "crates/wgtime-core/src/script/math/activation.rs",
       "documentation": "docs/standard-library.md",
       "signature": "relu(x)",
       "defaults": {},
@@ -1125,7 +1125,7 @@
         "ordinary_function"
       ],
       "purpose": "x>=0 时 x，否则 alpha*x；alpha 有限且 >=0",
-      "implementation": "crates/wgt-runtime/src/script/math/activation.rs",
+      "implementation": "crates/wgtime-core/src/script/math/activation.rs",
       "documentation": "docs/standard-library.md",
       "signature": "leaky_relu(x,alpha)",
       "defaults": {},
@@ -1141,7 +1141,7 @@
         "ordinary_function"
       ],
       "purpose": "x>=0 时 x，否则 alpha*expm1(x)；alpha 有限且 >=0",
-      "implementation": "crates/wgt-runtime/src/script/math/activation.rs",
+      "implementation": "crates/wgtime-core/src/script/math/activation.rs",
       "documentation": "docs/standard-library.md",
       "signature": "elu(x,alpha)",
       "defaults": {},
@@ -1157,7 +1157,7 @@
         "ordinary_function"
       ],
       "purpose": "标量 clamp(x/6+0.5,0,1)，端点 -3 与 3",
-      "implementation": "crates/wgt-runtime/src/script/math/activation.rs",
+      "implementation": "crates/wgtime-core/src/script/math/activation.rs",
       "documentation": "docs/standard-library.md",
       "signature": "hard_sigmoid(x)",
       "defaults": {},
@@ -1173,7 +1173,7 @@
         "ordinary_function"
       ],
       "purpose": "标量 x*hard_sigmoid(x)，分段计算避免中间溢出",
-      "implementation": "crates/wgt-runtime/src/script/math/activation.rs",
+      "implementation": "crates/wgtime-core/src/script/math/activation.rs",
       "documentation": "docs/standard-library.md",
       "signature": "hard_swish(x)",
       "defaults": {},
@@ -1189,7 +1189,7 @@
         "ordinary_function"
       ],
       "purpose": "等长 `[N]` → 标量均值二元交叉熵；targets 每项在 [0,1]，支持软标签；输入为 logits 而非概率",
-      "implementation": "crates/wgt-runtime/src/script/math/loss.rs",
+      "implementation": "crates/wgtime-core/src/script/math/loss.rs",
       "documentation": "docs/standard-library.md",
       "signature": "bce_logits(logits,targets)",
       "defaults": {},
@@ -1205,7 +1205,7 @@
         "ordinary_function"
       ],
       "purpose": "等长 `[N]` → 标量均值；delta 有限且 >0；绝对残差 d<=delta 时 0.5*d²，否则 delta*(d-0.5*delta)",
-      "implementation": "crates/wgt-runtime/src/script/math/loss.rs",
+      "implementation": "crates/wgtime-core/src/script/math/loss.rs",
       "documentation": "docs/standard-library.md",
       "signature": "huber(x,y,delta)",
       "defaults": {},
@@ -1221,7 +1221,7 @@
         "ordinary_function"
       ],
       "purpose": "等长 `[N]` → 标量均值 log(cosh(x-y))，小残差用 log1p，大残差在对数域计算",
-      "implementation": "crates/wgt-runtime/src/script/math/loss.rs",
+      "implementation": "crates/wgtime-core/src/script/math/loss.rs",
       "documentation": "docs/standard-library.md",
       "signature": "log_cosh(x,y)",
       "defaults": {},
@@ -1237,7 +1237,7 @@
         "ordinary_function"
       ],
       "purpose": "`[N]` → `[N-1]`，输出 x[i+1]-x[i]；N>=2",
-      "implementation": "crates/wgt-runtime/src/script/math/signal.rs",
+      "implementation": "crates/wgtime-core/src/script/math/signal.rs",
       "documentation": "docs/standard-library.md",
       "signature": "diff(x)",
       "defaults": {},
@@ -1253,7 +1253,7 @@
         "ordinary_function"
       ],
       "purpose": "`[N]` → `[N]`；y[0]=x[0]，y[t]=(1-alpha)*y[t-1]+alpha*x[t]；0<alpha<=1",
-      "implementation": "crates/wgt-runtime/src/script/math/signal.rs",
+      "implementation": "crates/wgtime-core/src/script/math/signal.rs",
       "documentation": "docs/standard-library.md",
       "signature": "ema(x,alpha)",
       "defaults": {},
@@ -1269,7 +1269,7 @@
         "ordinary_function"
       ],
       "purpose": "`[N]` → `[N-window+1]`，仅有效窗口、不填充；window 是 1..N 的整数",
-      "implementation": "crates/wgt-runtime/src/script/math/signal.rs",
+      "implementation": "crates/wgtime-core/src/script/math/signal.rs",
       "documentation": "docs/standard-library.md",
       "signature": "moving_mean(x,window)",
       "defaults": {},
@@ -1285,7 +1285,7 @@
         "ordinary_function"
       ],
       "purpose": "长度 count 的全零列表，count 为 0..1,000,000 的整数",
-      "implementation": "crates/wgt-runtime/src/script/math/data.rs",
+      "implementation": "crates/wgtime-core/src/script/math/data.rs",
       "documentation": "docs/standard-library.md",
       "signature": "zeros(count)",
       "defaults": {},
@@ -1301,7 +1301,7 @@
         "ordinary_function"
       ],
       "purpose": "同上，填充 1",
-      "implementation": "crates/wgt-runtime/src/script/math/data.rs",
+      "implementation": "crates/wgtime-core/src/script/math/data.rs",
       "documentation": "docs/standard-library.md",
       "signature": "ones(count)",
       "defaults": {},
@@ -1317,7 +1317,7 @@
         "ordinary_function"
       ],
       "purpose": "同上，填充有限 f64 value；即使 count=0 也验证 value",
-      "implementation": "crates/wgt-runtime/src/script/math/data.rs",
+      "implementation": "crates/wgtime-core/src/script/math/data.rs",
       "documentation": "docs/standard-library.md",
       "signature": "full(count,value)",
       "defaults": {},
@@ -1333,7 +1333,7 @@
         "ordinary_function"
       ],
       "purpose": "等间距列表，含两端点；start/end 有限，count 为 1..1,000,000 整数；count=1 仅返回 start，支持降序",
-      "implementation": "crates/wgt-runtime/src/script/math/data.rs",
+      "implementation": "crates/wgtime-core/src/script/math/data.rs",
       "documentation": "docs/standard-library.md",
       "signature": "linspace(start,end,count)",
       "defaults": {},
@@ -1349,7 +1349,7 @@
         "ordinary_function"
       ],
       "purpose": "拼接 `[N]` 与 `[M]` 为 `[N+M]`，总长度不超过上限",
-      "implementation": "crates/wgt-runtime/src/script/math/data.rs",
+      "implementation": "crates/wgtime-core/src/script/math/data.rs",
       "documentation": "docs/standard-library.md",
       "signature": "concat(x,y)",
       "defaults": {},
@@ -1365,7 +1365,7 @@
         "ordinary_function"
       ],
       "purpose": "左闭右开 `[start,end)`，要求整数 0<=start<=end<=N；输出 `[end-start]`，不支持步长或负索引",
-      "implementation": "crates/wgt-runtime/src/script/math/data.rs",
+      "implementation": "crates/wgtime-core/src/script/math/data.rs",
       "documentation": "docs/standard-library.md",
       "signature": "vector_slice(x,start,end)",
       "defaults": {},
@@ -1381,7 +1381,7 @@
         "ordinary_function"
       ],
       "purpose": "按整数索引列表顺序取值，输出长度等于索引数；允许重复，全部索引须在 0..N-1，空 indices 合法",
-      "implementation": "crates/wgt-runtime/src/script/math/data.rs",
+      "implementation": "crates/wgtime-core/src/script/math/data.rs",
       "documentation": "docs/standard-library.md",
       "signature": "gather(x,indices)",
       "defaults": {},
@@ -1397,7 +1397,7 @@
         "ordinary_function"
       ],
       "purpose": "mask 是等长 bool 列表，仅保留 true 位置且保持顺序；不将 0/1 隐式转为 bool；全 false 返回空列表",
-      "implementation": "crates/wgt-runtime/src/script/math/data.rs",
+      "implementation": "crates/wgtime-core/src/script/math/data.rs",
       "documentation": "docs/standard-library.md",
       "signature": "compress(x,mask)",
       "defaults": {},
@@ -1413,7 +1413,7 @@
         "ordinary_function"
       ],
       "purpose": "`[classes]`，index 位置为 1，其余为 0；classes 是 1..1,000,000 整数，index 是 0..classes-1 整数",
-      "implementation": "crates/wgt-runtime/src/script/one_hot.rs",
+      "implementation": "crates/wgtime-core/src/script/one_hot.rs",
       "documentation": "docs/standard-library.md",
       "signature": "one_hot(index,classes)",
       "defaults": {},
@@ -1429,7 +1429,7 @@
         "ordinary_function"
       ],
       "purpose": "返回倒序的新 `[N]` 列表",
-      "implementation": "crates/wgt-runtime/src/script/math/data.rs",
+      "implementation": "crates/wgtime-core/src/script/math/data.rs",
       "documentation": "docs/standard-library.md",
       "signature": "reverse(x)",
       "defaults": {},
@@ -1445,7 +1445,7 @@
         "ordinary_function"
       ],
       "purpose": "标量 Shannon 熵 `-sum(p*log(p))`，零概率项贡献为 0",
-      "implementation": "crates/wgt-runtime/src/script/math/probability.rs",
+      "implementation": "crates/wgtime-core/src/script/math/probability.rs",
       "documentation": "docs/standard-library.md",
       "signature": "entropy(p)",
       "defaults": {},
@@ -1461,7 +1461,7 @@
         "ordinary_function"
       ],
       "purpose": "非负权重、至少一项>0；先除最大值再归一化，返回同形概率列表，避免直接求和溢出",
-      "implementation": "crates/wgt-runtime/src/script/math/probability.rs",
+      "implementation": "crates/wgtime-core/src/script/math/probability.rs",
       "documentation": "docs/standard-library.md",
       "signature": "normalize_probabilities(weights)",
       "defaults": {},
@@ -1477,7 +1477,7 @@
         "ordinary_function"
       ],
       "purpose": "等长分布，标量 `sum(p*(log(p)-log(q)))`；方向是目标 p 相对参考 q，不对称",
-      "implementation": "crates/wgt-runtime/src/script/math/probability.rs",
+      "implementation": "crates/wgtime-core/src/script/math/probability.rs",
       "documentation": "docs/standard-library.md",
       "signature": "kl_divergence(p,q)",
       "defaults": {},
@@ -1493,7 +1493,7 @@
         "ordinary_function"
       ],
       "purpose": "等长分布，标量 `(KL(p,m)+KL(q,m))/2`，m=(p+q)/2；对称，精确值在 [0,log(2)]",
-      "implementation": "crates/wgt-runtime/src/script/math/probability.rs",
+      "implementation": "crates/wgtime-core/src/script/math/probability.rs",
       "documentation": "docs/standard-library.md",
       "signature": "js_divergence(p,q)",
       "defaults": {},
@@ -1509,7 +1509,7 @@
         "ordinary_function"
       ],
       "purpose": "等长分布，标量 `-sum(p*log(q))`；p 是目标分布，q 是预测概率；不同于接受 logits 和类别编号的 `cross_entropy`",
-      "implementation": "crates/wgt-runtime/src/script/math/probability.rs",
+      "implementation": "crates/wgtime-core/src/script/math/probability.rs",
       "documentation": "docs/standard-library.md",
       "signature": "cross_entropy_probs(p,q)",
       "defaults": {},
@@ -1525,7 +1525,7 @@
         "ordinary_function"
       ],
       "purpose": "正且有限的温度；同形输出 softmax(logits/temperature)，温度 1 对应普通 softmax",
-      "implementation": "crates/wgt-runtime/src/script/math/probability.rs",
+      "implementation": "crates/wgtime-core/src/script/math/probability.rs",
       "documentation": "docs/standard-library.md",
       "signature": "temperature_softmax(logits,temperature)",
       "defaults": {},
@@ -1541,7 +1541,7 @@
         "ordinary_function"
       ],
       "purpose": "Scalar natural logarithm; reject nonfinite results.",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "signature": "log(x)",
       "defaults": {},
       "arity": {
@@ -1556,7 +1556,7 @@
         "ordinary_function"
       ],
       "purpose": "Scalar exponential; reject nonfinite results.",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "signature": "exp(x)",
       "defaults": {},
       "arity": {
@@ -1571,7 +1571,7 @@
         "ordinary_function"
       ],
       "purpose": "按名称保存 JSON 指标；同名覆盖，只保留最后值，不自动平均或 detach",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/native-training.md",
       "signature": "metric(name,value)",
       "defaults": {},
@@ -1587,7 +1587,7 @@
         "ordinary_function"
       ],
       "purpose": "设置脚本局部采样 RNG；整数范围 [0,1000000000]",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/native-training.md",
       "signature": "seed(integer)",
       "defaults": {},
@@ -1603,7 +1603,7 @@
         "ordinary_function"
       ],
       "purpose": "确定性 SplitMix64 流，返回 [0,1)；不影响模型初始化 RNG",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/native-training.md",
       "signature": "random()",
       "defaults": {},
@@ -1619,7 +1619,7 @@
         "ordinary_function"
       ],
       "purpose": "新建 CPU f32 顺序网络；widths 是包括输入输出的 2..64 个整数，每个 1..16384，最多 4000000 参数；隐藏层 activation 为 relu/tanh/sigmoid/identity，输出层始终 linear；optimizer 为 sgd/adam",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/native-training.md",
       "signature": "mlp(widths,activation,seed,optimizer)",
       "defaults": {},
@@ -1635,7 +1635,7 @@
         "ordinary_function"
       ],
       "purpose": "一批观测的策略梯度更新，返回更新前的 mean(-advantage*log pi(action))",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/native-training.md",
       "signature": "reinforce(model,observations,actions,advantages,lr)",
       "defaults": {},
@@ -1651,7 +1651,7 @@
         "ordinary_function"
       ],
       "purpose": "同长度一维列表；后两种标记是 bool，gamma/lambda 在 [0,1]；返回优势列表",
-      "implementation": "crates/wgt-runtime/src/script.rs",
+      "implementation": "crates/wgtime-core/src/script.rs",
       "documentation": "docs/native-training.md",
       "signature": "gae(rewards,values,next_values,terminated,truncated,gamma,lambda)",
       "defaults": {},
@@ -1667,7 +1667,7 @@
         "ordinary_function"
       ],
       "purpose": "打开 UTF-8 JSON Lines 数据流；每行一个 JSON 值，不允许空行",
-      "implementation": "crates/wgt-runtime/src/script/dataset.rs",
+      "implementation": "crates/wgtime-core/src/script/dataset.rs",
       "documentation": "docs/native-training.md",
       "signature": "jsonl(path)",
       "defaults": {},
@@ -1683,7 +1683,7 @@
         "ordinary_function"
       ],
       "purpose": "Rust 原生 Hugging Face 分页数据流；全部参数必填，首次 batch 联网；HF_TOKEN 可选，详见 [数据集契约](datasets.md#原生数据集加载器wgt-05当前源码)",
-      "implementation": "crates/wgt-runtime/src/script/dataset.rs",
+      "implementation": "crates/wgtime-core/src/script/dataset.rs",
       "documentation": "docs/native-training.md",
       "signature": "hf_dataset(dataset,config,split)",
       "defaults": {},
@@ -1699,7 +1699,7 @@
         "ordinary_function"
       ],
       "purpose": "count 在 1..65536；返回最多 count 行；尾批保留，到 EOF 返回 []；单行 <=1MiB、单批 <=16MiB",
-      "implementation": "crates/wgt-runtime/src/script/dataset.rs",
+      "implementation": "crates/wgtime-core/src/script/dataset.rs",
       "documentation": "docs/native-training.md",
       "signature": "batch(reader,count)",
       "defaults": {},
@@ -1715,7 +1715,7 @@
         "ordinary_function"
       ],
       "purpose": "关闭流，重复关闭无操作；关闭后 batch 报错",
-      "implementation": "crates/wgt-runtime/src/script/dataset.rs",
+      "implementation": "crates/wgtime-core/src/script/dataset.rs",
       "documentation": "docs/native-training.md",
       "signature": "close(reader)",
       "defaults": {},
@@ -1731,7 +1731,7 @@
         "ordinary_function"
       ],
       "purpose": "mode 默认 cpu；支持同步 GPU 前向和 train:cpu MSE 训练步；warmup 0..10000，repeats 1..100000；完整契约见[原生测试](native-testing.md#benchmark)",
-      "implementation": "crates/wgt-runtime/src/script/benchmark.rs",
+      "implementation": "crates/wgtime-core/src/script/benchmark.rs",
       "documentation": "docs/native-training.md",
       "signature": "benchmark(model,workload,warmup,repeats,name,mode = \"cpu\")",
       "defaults": {
@@ -1750,7 +1750,7 @@
         "tensor_loss"
       ],
       "purpose": "Stop the input gradient.",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "detach(x)",
@@ -1764,7 +1764,7 @@
         "tensor_loss"
       ],
       "purpose": "Elementwise exponential.",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "exp(x)",
@@ -1778,7 +1778,7 @@
         "tensor_loss"
       ],
       "purpose": "Elementwise natural logarithm.",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "log(x)",
@@ -1792,7 +1792,7 @@
         "tensor_loss"
       ],
       "purpose": "Stable vector log probabilities.",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "log_softmax(x)",
@@ -1806,7 +1806,7 @@
         "tensor_loss"
       ],
       "purpose": "Elementwise minimum; ties split gradients equally.",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "minimum(a,b)",
@@ -1820,7 +1820,7 @@
         "tensor_loss"
       ],
       "purpose": "Elementwise clamp using signed literal bounds; zero gradient at endpoints.",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "clip(x,low,high)",
@@ -1834,7 +1834,7 @@
         "tensor_loss"
       ],
       "purpose": "Reduce f32[N] to f32[1].",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "sum(x)",
@@ -1848,7 +1848,7 @@
         "tensor_loss"
       ],
       "purpose": "f32[3]：剩余前向工作量、剩余工作区字节、存活工作区字节；无梯度",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "resource_state()",
@@ -1862,7 +1862,7 @@
         "tensor_loss"
       ],
       "purpose": "address:f32[N] 每项在 [0,1]，返回加权读取的 f32[D]；不隐式归一化，支持内存和地址梯度",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "memory_read(bank,address)",
@@ -1876,7 +1876,7 @@
         "tensor_loss"
       ],
       "purpose": "读取参数当前值，结果为扁平向量；直接引用参数也会读取",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "read(parameter)",
@@ -1890,7 +1890,7 @@
         "tensor_loss"
       ],
       "purpose": "Affine tensor transform x by weight, with optional bias vector; output width is weight row count.",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "linear(x,weight,bias = \"absent (no bias)\")",
@@ -1906,7 +1906,7 @@
         "tensor_loss"
       ],
       "purpose": "等长逐元素运算，无广播",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "add(a,b)",
@@ -1920,7 +1920,7 @@
         "tensor_loss"
       ],
       "purpose": "等长逐元素运算，无广播",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "mul(a,b)",
@@ -1934,7 +1934,7 @@
         "tensor_loss"
       ],
       "purpose": "Reduce f32[N] to f32[1]; also x.mean.",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "mean(x)",
@@ -1948,7 +1948,7 @@
         "tensor_loss"
       ],
       "purpose": "Elementwise square.",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "square(x)",
@@ -1962,7 +1962,7 @@
         "tensor_loss"
       ],
       "purpose": "返回 p*x；x 为 f32[N]，p 为 f32[1] 或 f32[N]，每项须在 [0,1]；标量门广播；推理时 p 全为 0 跳过 x 表达式",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "gate(p,x)",
@@ -1976,7 +1976,7 @@
         "tensor_loss"
       ],
       "purpose": "返回 p*a+(1-p)*b；a/b 同为 f32[N]，p 为 f32[1] 或 f32[N] 且在 [0,1]；推理时 p 全为 1 只求值 a，全为 0 只求值 b，否则计算两边",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "route(p,a,b)",
@@ -1990,7 +1990,7 @@
         "tensor_loss"
       ],
       "purpose": "等长逐元素运算",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "relu(x)",
@@ -2004,7 +2004,7 @@
         "tensor_loss"
       ],
       "purpose": "等长逐元素运算",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "tanh(x)",
@@ -2018,7 +2018,7 @@
         "tensor_loss"
       ],
       "purpose": "等长逐元素运算",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "sigmoid(x)",
@@ -2032,7 +2032,7 @@
         "tensor_loss"
       ],
       "purpose": "f32[N] 沿唯一向量轴归一化，返回 f32[N]；稳定指数实现，支持一阶梯度",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "softmax(x)",
@@ -2046,7 +2046,7 @@
         "tensor_loss"
       ],
       "purpose": "Slice fixed tensor using literal zero-based start and positive length; no default arguments.",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "slice(x,start,length)",
@@ -2060,7 +2060,7 @@
         "tensor_loss"
       ],
       "purpose": "Condition only: f32[1] strictly greater than zero.",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "condition",
       "signature": "positive(x)",
@@ -2074,7 +2074,7 @@
         "tensor_loss"
       ],
       "purpose": "两个 1..16384 的整数常量，分配零初始化 f32[N,D] 工作区并返回专用句柄；禁止复制或当作张量",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "binding",
       "signature": "memory_alloc(slots,width)",
@@ -2088,7 +2088,7 @@
         "tensor_loss"
       ],
       "purpose": "全量替换非冻结参数，元素数须相同",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "statement",
       "signature": "write(parameter,value)",
@@ -2102,7 +2102,7 @@
         "tensor_loss"
       ],
       "purpose": "释放工作区；未分配、重复释放或释放后访问报错",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "statement",
       "signature": "memory_free(bank)",
@@ -2116,7 +2116,7 @@
         "tensor_loss"
       ],
       "purpose": "value:f32[D]，每槽更新为 `(1-address[i])*旧值+address[i]*value`；支持地址、旧值和新值梯度",
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
       "position": "statement",
       "signature": "memory_write(bank,address,value)",
@@ -2132,7 +2132,7 @@
       "purpose": "声明专用agent构造计划，显式模型别名及可选默认二参learner，不训练。",
       "defaults": {},
       "documentation": "docs/agents-environments.md",
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "environment",
@@ -2144,7 +2144,7 @@
       "purpose": "声明同步WGT环境状态与reset/step schema；实例构造reset一次。",
       "defaults": {},
       "documentation": "docs/agents-environments.md",
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "learn",
@@ -2156,7 +2156,7 @@
       "purpose": "整批collect成功后释放目标policy保护并调用一次具名同步二参learner。",
       "defaults": {},
       "documentation": "docs/agents-environments.md",
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "__agent",
@@ -2171,7 +2171,7 @@
         "max": 3
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+      "implementation": "crates/wgtime-core/src/script/agents.rs"
     },
     {
       "name": "__environment",
@@ -2186,7 +2186,7 @@
         "max": 3
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+      "implementation": "crates/wgtime-core/src/script/agents.rs"
     },
     {
       "name": "__record",
@@ -2201,7 +2201,7 @@
         "max": 512
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+      "implementation": "crates/wgtime-core/src/script/agents.rs"
     },
     {
       "name": "async",
@@ -2213,7 +2213,7 @@
       "purpose": "创建冷用户future；显式纯数据参数与返回值；第一阶段拒绝资源/模型异步执行。",
       "defaults": {},
       "documentation": "docs/async-tasks.md",
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "tasks",
@@ -2225,7 +2225,7 @@
       "purpose": "同步函数内有界任务作用域，正常join、失败取消并等待在途IO；首期不支持嵌套。",
       "defaults": {},
       "documentation": "docs/async-tasks.md",
-      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+      "implementation": "crates/wgtime-core/src/script/async_runtime.rs"
     },
     {
       "name": "await",
@@ -2237,7 +2237,7 @@
       "purpose": "驱动冷future或等待作用域task，拒绝任意同步值。",
       "defaults": {},
       "documentation": "docs/async-tasks.md",
-      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+      "implementation": "crates/wgtime-core/src/script/async_runtime.rs"
     },
     {
       "name": "spawn",
@@ -2249,7 +2249,7 @@
       "purpose": "在tasks内启动作用域子任务，禁止默认脱离。",
       "defaults": {},
       "documentation": "docs/async-tasks.md",
-      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+      "implementation": "crates/wgtime-core/src/script/async_runtime.rs"
     },
     {
       "name": "sleep",
@@ -2261,7 +2261,7 @@
       "purpose": "仅async fn：固定阻塞池等待0..30000整数毫秒，返回null；不是定时器reactor。",
       "defaults": {},
       "documentation": "docs/async-tasks.md",
-      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+      "implementation": "crates/wgtime-core/src/script/async_runtime.rs"
     },
     {
       "name": "reload",
@@ -2273,7 +2273,7 @@
       "purpose": "同句柄同结构原子重载；model新优化器，checkpoint恢复状态，运行时revision递增并使旧梯度失效。",
       "documentation": "docs/file-io.md",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+      "implementation": "crates/wgtime-core/src/script/persistence.rs"
     },
     {
       "name": "save",
@@ -2287,7 +2287,7 @@
       "defaults": {
         "overwrite": false
       },
-      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+      "implementation": "crates/wgtime-core/src/script/persistence.rs"
     },
     {
       "name": "load",
@@ -2299,7 +2299,7 @@
       "purpose": "读取 model/checkpoint/json/text；model必填using新优化器，checkpoint恢复已记录优化器，不执行训练或main。",
       "documentation": "docs/file-io.md",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+      "implementation": "crates/wgtime-core/src/script/persistence.rs"
     },
     {
       "name": "assert",
@@ -2313,7 +2313,7 @@
       "defaults": {
         "message": "assertion failed"
       },
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "__record_field",
@@ -2328,7 +2328,7 @@
         "max": 2
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     },
     {
       "name": "__probabilities",
@@ -2343,7 +2343,7 @@
         "max": 1
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     },
     {
       "name": "__graph",
@@ -2358,7 +2358,7 @@
         "max": 2
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     },
     {
       "name": "__adaptive",
@@ -2373,7 +2373,7 @@
         "max": 2
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     },
     {
       "name": "true",
@@ -2385,7 +2385,7 @@
       "signature": "true",
       "purpose": "Boolean literal.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "false",
@@ -2397,7 +2397,7 @@
       "signature": "false",
       "purpose": "Boolean literal.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "null",
@@ -2408,7 +2408,7 @@
       "signature": "null",
       "purpose": "Null value; also the implicit function return.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "f32",
@@ -2419,7 +2419,7 @@
       "signature": "f32[N] / f32[O,I]",
       "purpose": "Fixed-shape 32-bit floating-point tensor; supported ranks depend on declaration.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "logits",
@@ -2430,7 +2430,7 @@
       "signature": "output scores: logits[N]",
       "purpose": "Finite, nonempty mutually exclusive category scores. Explicit output metadata survives model persistence and function values. .probabilities applies stable softmax along the category axis. Output declarations only; no binary logit type.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/categorical.rs"
+      "implementation": "crates/wgt-language/src/categorical.rs"
     },
     {
       "name": "probabilities",
@@ -2441,7 +2441,7 @@
       "signature": "output choices: probabilities[N] / value.probabilities",
       "purpose": "Finite mutually exclusive category vector, each value strictly in [0,1], sum within absolute 1e-5 of 1. Conversion validates and preserves values; no renormalization. Sampling scales by actual total mass and skips zero-mass entries. CPU native implementation; GPU categorical path not verified.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/categorical.rs"
+      "implementation": "crates/wgt-language/src/categorical.rs"
     },
     {
       "name": "prob",
@@ -2452,7 +2452,7 @@
       "signature": "prob",
       "purpose": "Probability parameter represented by a logit; trainable initial value strictly in (0,1), frozen permits endpoints; reads f32[1]. Initializer required.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs"
+      "implementation": "crates/wgt-language/src/adaptive/source.rs"
     },
     {
       "name": "linear",
@@ -2466,7 +2466,7 @@
         "in": "previous width",
         "bias": 1
       },
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "relu",
@@ -2477,7 +2477,7 @@
       "signature": "relu",
       "purpose": "Sequential activation preserving vector width.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "tanh",
@@ -2488,7 +2488,7 @@
       "signature": "tanh",
       "purpose": "Sequential activation preserving vector width.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "sigmoid",
@@ -2499,7 +2499,7 @@
       "signature": "sigmoid",
       "purpose": "Sequential activation preserving vector width.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "identity",
@@ -2510,7 +2510,7 @@
       "signature": "identity",
       "purpose": "Sequential activation preserving vector width.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "__predict",
@@ -2526,7 +2526,7 @@
         "max": 2
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     },
     {
       "name": "__train_step",
@@ -2541,7 +2541,7 @@
       },
       "purpose": "Compiler-only train block lowering; source __ calls rejected.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     }
   ]
 }

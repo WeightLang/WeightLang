@@ -16,11 +16,14 @@ async fn worker(label) {
     let session = responses_session({model:"fake", input:label, stream:true, tools:[{type:"function", name:"sum", strict:true, parameters:{type:"object", properties:{x:{type:"integer"}, y:{type:"integer"}}, required:["x","y"], additionalProperties:false}}]});
     let step = await harness.next(session, "fake");
     assert step.status == "tools";
+    assert !harness.finished(step);
     let call = step.calls[0];
     assert call.name == "sum";
-    responses_submit(session, [{call_id:call.call_id, output:add_values(call.arguments)}]);
+    harness.submit(session, [{call_id:call.call_id, output:add_values(call.arguments)}]);
     let final = await harness.next(session, "fake");
     assert final.status == "completed";
+    assert harness.finished(final);
+    assert harness.finished({status:"incomplete"});
     responses_cancel(session);
     return final.response.output[0].content[0].text;
 }
@@ -67,7 +70,8 @@ fn harness_interpreter_and_source_free_aot_share_worker_budget() {
         let socket = ipc_dir.path().join("s.sock");
         let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
         let ipc = std::thread::spawn(move || {
-            if mode > 0 {
+            {
+                // Every execution mode now uses the same IPC client contract.
                 for _ in 0..3 {
                     let (mut stream, _) = listener.accept().unwrap();
                     let mut header = [0u8; 4];
@@ -161,12 +165,14 @@ fn harness_interpreter_and_source_free_aot_share_worker_budget() {
             c.arg("run").arg(&source);
             c
         };
+        if compiled {
+            command.env("PATH", "/nonexistent");
+        }
         let output = command
             .env("WGTIME_ENDPOINT", &socket)
             .env("WGT_RESPONSES_PROFILES", &profile)
             .env("WGT_TEST_RESPONSE_AUTH", "Bearer test-only")
             .env_remove("WGT_HOST_POLICY")
-            .env("PATH", "/nonexistent")
             .output()
             .unwrap();
         assert!(
@@ -199,13 +205,51 @@ fn worker_cannot_escalate_reset_budget_or_forge_session() {
         ("responses_scope({requests:9,bytes:999,tools:9,rounds:9,concurrency:1,deadline_ms:1000},[\"fake\"],[]);","configured once"),
         ("let s = responses_session({model:\"fake\",input:\"hi\"}); let step=await responses_next(0,\"fake\");","expected response session"),
     ];
-    for (body, error) in cases {
+    let mut programs = cases
+        .into_iter()
+        .map(|(body, error)| {
         let text=format!("wgt 0.5\nasync fn work(){{{body}return null;}}\nfn main(){{responses_scope({{requests:1,bytes:1000,tools:0,rounds:1,concurrency:1,deadline_ms:1000}},[\"fake\"],[]);tasks{{let t=spawn work();return await t;}}}}");
+        (text, error, 2)
+    }).collect::<Vec<_>>();
+    programs.push((
+        "wgt 0.5\nasync fn work(session){return null;}\nfn main(){responses_scope({requests:1,bytes:1000,tools:0,rounds:1,concurrency:1,deadline_ms:1000},[\"fake\"],[]);let session=responses_session({model:\"fake\",input:\"hi\"});tasks{let t=spawn work(session);return await t;}}".into(),
+        "resource handles cannot cross workers",
+        1,
+    ));
+    for (text, error, handshakes) in programs {
         let source = temp.path().join("model.wgt");
         fs::write(&source, text).unwrap();
+        let ipc_root = std::env::var_os("CLAUDE_JOB_DIR")
+            .map(PathBuf::from)
+            .map(|p| p.join("tmp"))
+            .unwrap_or_else(|| PathBuf::from("/tmp/weightlang"));
+        fs::create_dir_all(&ipc_root).unwrap();
+        let ipc_dir = tempfile::tempdir_in(ipc_root).unwrap();
+        let socket = ipc_dir.path().join("s.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let ipc = std::thread::spawn(move || {
+            // Parent and worker authenticate even when the harness rejects
+            // the operation before making an HTTP request.
+            for _ in 0..handshakes {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut header = [0u8; 4];
+                stream.read_exact(&mut header).unwrap();
+                let mut frame = vec![0; u32::from_le_bytes(header) as usize];
+                stream.read_exact(&mut frame).unwrap();
+                let request: serde_json::Value = serde_json::from_slice(&frame).unwrap();
+                assert_eq!(request["Hello"]["protocol"], 1);
+                let reply =
+                    serde_json::to_vec(&json!({"value":{"protocol":1},"error":null})).unwrap();
+                stream
+                    .write_all(&(reply.len() as u32).to_le_bytes())
+                    .unwrap();
+                stream.write_all(&reply).unwrap();
+            }
+        });
         let output = Command::new(env!("CARGO_BIN_EXE_wgt"))
             .arg("run")
             .arg(&source)
+            .env("WGTIME_ENDPOINT", &socket)
             .env("WGT_RESPONSES_PROFILES", &profile)
             .env_remove("WGT_HOST_POLICY")
             .output()
@@ -213,5 +257,6 @@ fn worker_cannot_escalate_reset_budget_or_forge_session() {
         assert!(!output.status.success());
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains(error), "{stderr}");
+        ipc.join().unwrap();
     }
 }

@@ -1,7 +1,7 @@
 //! First explicit client-only compilation slice. Unsupported constructs fail before Cargo.
 use anyhow::{bail, ensure, Context, Result};
 use std::path::Path;
-use weightlang_runtime::script::{Expr, Statement, Stmt};
+use wgt_language::script::{Expr, Statement, Stmt};
 fn expression(e: &Expr) -> Result<String> {
     let value = match e {
         Expr::Number(n)=>format!("number({n:?})?"),
@@ -9,7 +9,7 @@ fn expression(e: &Expr) -> Result<String> {
         Expr::Bool(b)=>format!("Value::Data(json!({b}))"),
         Expr::Null=>"Value::Data(serde_json::Value::Null)".into(),
         Expr::Name(n)=>format!("env.get({n:?}).cloned().context(\"undefined variable\")?"),
-        Expr::List(values)=>format!("{{let values=vec![{}];Value::Data(serde_json::Value::Array(values.iter().map(|v:&Value|v.data().cloned()).collect::<Result<Vec<_>>>()?))}}",values.iter().map(expression).collect::<Result<Vec<_>>>()?.join(",")),
+        Expr::List(values)=>format!("{{let values:Vec<Value>=vec![{}];Value::Data(serde_json::Value::Array(values.iter().map(|v:&Value|v.data().cloned()).collect::<Result<Vec<_>>>()?))}}",values.iter().map(expression).collect::<Result<Vec<_>>>()?.join(",")),
         Expr::BuiltinCall(name,args) if name=="__load_model"||name=="__load_checkpoint" => format!("{{let path={};let optimizer={};rt.load_file({:?},path,optimizer)?}}",expression(&args[0])?,if args.len()>1{format!("Some({})",expression(&args[1])?)}else{"None".into()},if name=="__load_checkpoint"{"checkpoint"}else{"model"}),
         Expr::BuiltinCall(name,args) if name=="__await"||name=="__spawn" => format!("{{let value={};rt.{}(value)?}}",expression(&args[0])?,if name=="__await"{"await_value"}else{"spawn_future"}),
         Expr::BuiltinCall(name,args)=>format!("{{let args=vec![{}];rt.call({name:?},args)?}}",args.iter().map(expression).collect::<Result<Vec<_>>>()?.join(",")),
@@ -32,6 +32,7 @@ fn block(statements: &[Statement]) -> Result<String> {
     for statement in statements {
         code.push_str("rt.tick()?;");
         code.push_str(&match &statement.kind {
+            Stmt::Reload(kind,target,path,optimizer)=>format!("let target={};let path={};let optimizer={};rt.reload_file({kind:?},target,path,optimizer)?;",expression(target)?,expression(path)?,optimizer.as_ref().map(|e| expression(e).map(|s|format!("Some({s})"))).transpose()?.unwrap_or_else(||"None".into())),
             Stmt::Save(kind,value,path,overwrite)=>format!("let value={};let path={};rt.save_file({kind:?},value,path,{overwrite})?;",expression(value)?,expression(path)?),
             Stmt::Tasks(body)=>{
                 format!("rt.enter_tasks()?;let result=(||->Result<Flow>{{{}Ok(Flow::Next)}})();let cleanup=rt.leave_tasks(result.is_ok());let flow=result?;cleanup?;if !matches!(flow,Flow::Next){{return Ok(flow);}}",block(body)?)
@@ -45,7 +46,7 @@ fn block(statements: &[Statement]) -> Result<String> {
             Stmt::Return(e)=>format!("return Ok(Flow::Return({}));",expression(e)?),
             Stmt::Break=>"return Ok(Flow::Break);".into(),
             Stmt::Continue=>"return Ok(Flow::Continue);".into(),
-            Stmt::Assert(e,message)=>format!("if !{}.boolean()?{{anyhow::bail!(\"{{}}\",{}.text()?);}}",expression(e)?,message.as_ref().map(expression).transpose()?.unwrap_or_else(||"Value::Data(json!(\"assertion failed\"))".into())),
+            Stmt::Assert(e,message)=>format!("if !{}.boolean()?{{anyhow::bail!(\"line {}: {{}}\",{}.text()?);}}",expression(e)?,statement.line,message.as_ref().map(expression).transpose()?.unwrap_or_else(||"Value::Data(json!(\"assertion failed\"))".into())),
             Stmt::If(e,a,b)=>format!("if {}.boolean()?{{{}}}else{{{}}}",expression(e)?,block(a)?,block(b)?),
             Stmt::For(n,e,body)=>format!("let items={}.data()?.as_array().context(\"expected list\")?.clone();for value in items{{rt.tick()?;env.insert({n:?}.into(),Value::Data(value));match (||->Result<Flow>{{{}Ok(Flow::Next)}})()?{{Flow::Next|Flow::Continue=>{{}},Flow::Break=>break,Flow::Return(v)=>return Ok(Flow::Return(v))}}}}",expression(e)?,block(body)?),
             Stmt::While(e,body)=>format!("while {}.boolean()?{{rt.tick()?;match (||->Result<Flow>{{{}Ok(Flow::Next)}})()?{{Flow::Next|Flow::Continue=>{{}},Flow::Break=>break,Flow::Return(v)=>return Ok(Flow::Return(v))}}}}",expression(e)?,block(body)?),
@@ -55,11 +56,17 @@ fn block(statements: &[Statement]) -> Result<String> {
     Ok(code)
 }
 pub fn source(source: &str, root: &Path) -> Result<String> {
+    source_entry(source, root, "main")
+}
+pub fn source_entry(source: &str, root: &Path, entry: &str) -> Result<String> {
+    source_entry_with_dependencies(source, root, entry, &Default::default())
+}
+pub fn source_entry_with_dependencies(source: &str, root: &Path, entry: &str, dependencies: &std::collections::BTreeMap<String, String>) -> Result<String> {
     let program =
-        weightlang_runtime::script::parse_with_imports(source, root, &Default::default())?;
+        wgt_language::script::parse_with_imports(source, root, dependencies)?;
     ensure!(
-        program.contains_key("main"),
-        "client compilation requires main"
+        program.contains_key(entry),
+        "client compilation requires entry {entry}"
     );
     let mut entries = Vec::new();
     let mut code="#![allow(unused_imports,unused_variables,unreachable_code)]\nuse anyhow::{Result,Context,ensure};use serde_json::json;use wgtime_control::{Runtime,Env,Value,Function,number,binary};\n".to_owned();
@@ -161,7 +168,7 @@ pub fn source(source: &str, root: &Path) -> Result<String> {
         ));
     }
     code.push_str(&format!(
-        "fn main()->Result<()>{{wgtime_control::entry_at(vec![{}],{:?})}}",
+        "fn main()->Result<()>{{wgtime_control::entry_named(vec![{}],{:?},{entry:?})}}",
         entries.join(","),
         root.to_str().context("root must be UTF8")?
     ));

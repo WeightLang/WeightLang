@@ -1,0 +1,174 @@
+use std::path::Path;
+use wgtime_core::script::{parse, run, run_file};
+fn execute(body: &str) -> serde_json::Value {
+    run(&format!("wgt 0.5\n{body}"), Path::new("."), 100_000)
+        .unwrap()
+        .result
+}
+#[test]
+fn control_flow_functions_short_circuit_and_scope() {
+    assert_eq!(
+        execute(
+            r#"
+fn twice(x) { return x*2; }
+fn main() {
+ let sum=0;
+ for i in range(0,10) {
+  if i==2 {continue;}
+  if i==5 {break;}
+  sum=sum+twice(i);
+ }
+ while sum<20 {sum=sum+1;}
+ assert false && missing() == 0 || true, "short circuit";
+ return sum;
+}"#
+        ),
+        20.
+    );
+}
+#[test]
+fn errors_are_bounded_and_located() {
+    for source in [
+        "fn main(){ while true {} }",
+        "fn main(){ return main(); }",
+        "fn main(){ return [1][2]; }",
+        "fn main(){ if 1 {return 2;} }",
+        "fn main(){ return 1/0; }",
+        "fn main(){ unknown=1; }",
+    ] {
+        assert!(run(&format!("wgt 0.5\n{source}"), Path::new("."), 100).is_err());
+    }
+    assert!(parse("wgt 0.5\nfn main(){break;}").is_err());
+    assert!(parse("wgt 0.5\nfn main(){} fn main(){}").is_err());
+    let err = run(
+        "wgt 0.5\nfn main(){ return unknown(); }",
+        Path::new("."),
+        100,
+    )
+    .unwrap_err();
+    assert!(format!("{err:#}").contains("line 2"));
+}
+#[test]
+fn gae_distinguishes_termination_and_truncation() {
+    // Time-limit truncation bootstraps from final observation but must stop the trace.
+    assert_eq!(execute("fn main(){return gae([1,2,3],[0,0,0],[10,10,10],[false,true,false],[true,false,false],0.5,1);}"),serde_json::json!([6.,2.,8.]));
+}
+#[test]
+fn examples_train_without_python_and_benchmark_reports_scope() {
+    let root = std::env::temp_dir().join(format!("weightlang-native-script-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let supervised_path = root.join("supervised.wgt");
+    let supervised_source = r#"wgt 0.5
+fn main() { let m=mlp([1,1],"identity",7,"adam"); for i in range(0,200) { train m on [[1],[2],[3]] against [[2],[4],[6]] {rate:0.05;loss:mse;}; } let loss=mean(square(m([1])- [2])); metric("final_batch_loss",loss); metric("inference", {"device":"cpu"}); return loss; }
+"#;
+    std::fs::write(&supervised_path, supervised_source).unwrap();
+    let supervised = run_file(&supervised_path, 10_000_000).unwrap();
+    assert!(supervised.metrics["final_batch_loss"].as_f64().unwrap() < 0.01);
+    assert_eq!(supervised.metrics["inference"]["device"], "cpu");
+    let rl_source = r#"wgt 0.5
+fn main() { let m=mlp([1,2],"identity",11,"adam"); for i in range(0,200) { reinforce(m,[[1]],[1],[1],0.05); } return softmax(m([1]))[1]; }
+"#;
+    let rl_path=root.join("reinforce.wgt"); std::fs::write(&rl_path,rl_source).unwrap();
+    let rl = run_file(&rl_path, 10_000_000).unwrap();
+    assert!(rl.result.as_f64().unwrap() > 0.9);
+    // The actual executable has no interpreter available on PATH.
+    let output = std::process::Command::new(transport_test_executable())
+        .args(["script", supervised_path.to_str().unwrap()])
+        .env("PATH", "/nonexistent")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+#[test]
+fn check_does_not_open_data_or_run_side_effects() {
+    parse("wgt 0.5\nfn main(){ let data=jsonl(\"absent-file\"); }").unwrap();
+}
+
+#[test]
+fn stream_errors_and_checkpoint_export_round_trip() {
+    let parent = std::env::temp_dir().join("weightlang");
+    std::fs::create_dir_all(&parent).unwrap();
+    let root = parent.join(format!("native-script-{}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("data.jsonl"), "{\"input\":[1],\"target\":[3]}\n").unwrap();
+    let source = r#"wgt 0.5
+fn main() {
+ let m=mlp([1,1],"identity",4,"adam");
+ let stream=jsonl("data.jsonl");
+ let rows=batch(stream,8);
+ assert len(rows)==1, "tail batch";
+ assert len(batch(stream,8))==0, "EOF";
+ close(stream);
+ for i in range(0,20) {train m on column(rows,"input") against column(rows,"target") {rate:0.1;loss:mse;};}
+ save checkpoint m to "checkpoint.json";
+ save model m to "model.json";
+ let restored=load checkpoint from "checkpoint.json";
+ let inference=load model from "model.json" using "sgd";
+ assert m([1])==restored([1]), "checkpoint weights";
+ assert m([1])==inference([1]), "inference weights";
+ train m on [[1]] against [[3]] {rate:0.1;loss:mse;};
+ train restored on [[1]] against [[3]] {rate:0.1;loss:mse;};
+ assert m([1])==restored([1]), "optimizer resume";
+ return true;
+}"#;
+    assert_eq!(run(source, &root, 100000).unwrap().result, true);
+    assert!(run(source, &root, 100000).is_err()); // Save must not replace earlier checkpoint.
+    let record: wgtime_core::Model =
+        serde_json::from_slice(&std::fs::read(root.join("model.json")).unwrap()).unwrap();
+    let mut session = wgtime_core::Session::prepare(record, &root, 100000).unwrap();
+    assert!(session.run(&[1.]).unwrap()[0].is_finite());
+    for body in [
+        "let d=jsonl(\"data.jsonl\");close(d);batch(d,1);",
+        "let d=jsonl(\"data.jsonl\");batch(d,0);",
+        "let d=jsonl(\"bad.jsonl\");batch(d,1);",
+    ] {
+        std::fs::write(root.join("bad.jsonl"), "not JSON\n").unwrap();
+        assert!(run(&format!("wgt 0.5\nfn main(){{{body}}}"), &root, 100).is_err());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn deeply_chained_expressions_fail_before_execution() {
+    let expression = vec!["1"; 200].join("+");
+    assert!(parse(&format!("wgt 0.5\nfn main(){{return {expression};}}")).is_err());
+}
+
+#[test]
+fn huggingface_handles_validate_without_network() {
+    assert_eq!(
+        execute(
+            r#"fn main() {
+            let data=hf_dataset("test/data","default","train");
+            close(data);
+            close(data);
+            return true;
+        }"#
+        ),
+        true
+    );
+    for body in [
+        r#"hf_dataset("test/data","train");"#,
+        r#"hf_dataset("","default","train");"#,
+        r#"hf_dataset("test/data",1,"train");"#,
+        r#"let d=hf_dataset("test/data","default","train"); close(d); batch(d,1);"#,
+        r#"let d=hf_dataset("test/data","default","train"); batch(d,0);"#,
+    ] {
+        assert!(run(
+            &format!("wgt 0.5\nfn main(){{ {body} }}"),
+            Path::new("."),
+            1000
+        )
+        .is_err());
+    }
+}
+
+fn transport_test_executable() -> std::path::PathBuf {
+    let path = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("examples").join(format!("core-transport-test{}",std::env::consts::EXE_SUFFIX));
+    assert!(path.is_file(), "build the private process harness with cargo build -p wgtime-core --example core-transport-test before running this test");
+    path
+}

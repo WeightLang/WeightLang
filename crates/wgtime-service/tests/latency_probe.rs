@@ -5,7 +5,7 @@ use std::{
     process::{Child, Command},
     time::{Duration, Instant},
 };
-use weightlang_runtime::training::{mlp, Optimizer, Trainer};
+use wgtime_core::training::{mlp, Optimizer, Trainer};
 use wgtime::{Client, Request};
 struct Server(Child, PathBuf);
 impl Drop for Server {

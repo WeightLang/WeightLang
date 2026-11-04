@@ -10,6 +10,7 @@
   "files": [
     "viewer.js",
     "viewer.css",
+    "locales/",
     "README.md",
     "LICENSE"
   ],

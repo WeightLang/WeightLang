@@ -534,6 +534,8 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -1396,6 +1398,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "safetensors"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79b079b829cb27a1c3c374341345ed2e8b2c0c839034522cee576c140bd7f846"
+dependencies = [
+ "hashbrown 0.16.1",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1915,22 +1930,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "weightlang-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "fuser",
- "libc",
- "pollster",
- "reqwest",
- "serde",
- "serde_json",
- "wgpu",
- "wgtime-control",
-]
-
-[[package]]
 name = "weightlang-wgt"
 version = "0.1.2"
 dependencies = [
@@ -1943,7 +1942,9 @@ dependencies = [
  "sha2",
  "tempfile",
  "toml_edit",
- "weightlang-runtime",
+ "wgt-language",
+ "wgtime-control",
+ "wgtime-core",
 ]
 
 [[package]]
@@ -2100,6 +2101,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "wgt-language"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "safetensors",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "wgt-model"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "serde_json",
+ "tempfile",
+ "wgt-language",
+ "wgt-model-macros",
+ "wgtime",
+]
+
+[[package]]
+name = "wgt-model-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "wgt-language",
+]
+
+[[package]]
 name = "wgtime"
 version = "0.1.0"
 dependencies = [
@@ -2122,14 +2156,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "wgtime-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "fuser",
+ "libc",
+ "pollster",
+ "reqwest",
+ "safetensors",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "wgpu",
+ "wgt-language",
+ "wgtime-control",
+]
+
+[[package]]
 name = "wgtime-service"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "libc",
  "serde_json",
- "weightlang-runtime",
+ "wgt-language",
  "wgtime",
+ "wgtime-core",
 ]
 
 [[package]]

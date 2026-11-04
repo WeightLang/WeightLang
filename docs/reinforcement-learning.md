@@ -94,7 +94,7 @@ PPO 比率裁剪、熵项、四轮小批次更新和全局梯度裁剪。模型�
 这是有限状态合成环境，不证明真实任务泛化或大模型 RL 能力；小批次顺序固定，未实现并行环境。
 
 ```sh
-cargo test --locked --offline -p weightlang-runtime --no-default-features --test rl_syntax
+cargo test --locked --offline -p wgtime-core --no-default-features --test rl_syntax
 cargo test --locked --offline -p weightlang-wgt --no-default-features --test script_compiler compiled_ppo_uses_native_training_syntax
 cargo run --locked --offline -p weightlang-wgt --bin wgt -- run examples/native_training/ppo/model.wgt
 ```

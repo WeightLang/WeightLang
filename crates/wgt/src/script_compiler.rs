@@ -20,18 +20,29 @@ pub fn compile_client(source: &Path, output: &Path, offline: bool, locked: bool)
         output.display()
     );
     let source = source.canonicalize()?;
-    crate::script_dependencies::prepare(&source, offline, locked)?;
-    let code = crate::client_compiler::source(
-        &fs::read_to_string(&source)?,
-        source.parent().unwrap(),
-    )?;
-    let runtime = std::env::var_os("WEIGHTLANG_RUNTIME_SOURCE")
+    let dependencies = crate::script_dependencies::prepare(&source, offline, locked)?;
+    compile_text_entry_with_dependencies(&fs::read_to_string(&source)?, source.parent().unwrap(), output, "main", &dependencies)
+}
+
+/// Compile supplied source using its original import and data root; never executes it.
+pub fn compile_text(source: &str, root: &Path, output: &Path) -> Result<()> {
+    ensure!(output.symlink_metadata().is_err(), "output already exists: {}", output.display());
+    compile_text_entry(source, root, output, "main")
+}
+
+pub fn compile_text_entry(source: &str, root: &Path, output: &Path, entry: &str) -> Result<()> {
+    ensure!(output.symlink_metadata().is_err(), "output already exists: {}", output.display());
+    compile_text_entry_with_dependencies(source, root, output, entry, &Default::default())
+}
+
+pub fn compile_text_entry_with_dependencies(source: &str, root: &Path, output: &Path, entry: &str, dependencies: &std::collections::BTreeMap<String,String>) -> Result<()> {
+    ensure!(output.symlink_metadata().is_err(), "output already exists: {}", output.display());
+    let code = crate::client_compiler::source_entry_with_dependencies(source, root, entry, dependencies)?;
+    let control = std::env::var_os("WGT_CONTROL_SOURCE")
         .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../wgt-runtime"))
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../wgtime-control"))
         .canonicalize()
-        .context(
-            "runtime source missing; set WEIGHTLANG_RUNTIME_SOURCE to the matching crate directory",
-        )?;
+        .context("control source missing; set WGT_CONTROL_SOURCE to the matching wgtime-control crate directory")?;
     let cache = PathBuf::from(".cache/weightlang/aot");
     fs::create_dir_all(&cache)?;
     let cache = cache.canonicalize()?;
@@ -48,10 +59,6 @@ pub fn compile_client(source: &Path, output: &Path, offline: bool, locked: bool)
     manifest["workspace"] = toml_edit::Item::Table(toml_edit::Table::new());
     manifest["dependencies"] = toml_edit::Item::Table(toml_edit::Table::new());
     manifest["dependencies"]["anyhow"] = toml_edit::value("1");
-    let control = runtime
-        .parent()
-        .context("runtime parent missing")?
-        .join("wgtime-control");
     manifest["dependencies"]["wgtime-control"]["path"] =
         toml_edit::value(control.to_str().context("control path must be UTF-8")?);
     manifest["dependencies"]["serde_json"] = toml_edit::value("1");
@@ -96,6 +103,27 @@ pub fn compile_client(source: &Path, output: &Path, offline: bool, locked: bool)
         .map_err(|e| e.error)
         .context("publish executable without replacing existing files")?;
     Ok(())
+}
+
+/// Execute a generated lightweight client and return its structured report.
+pub fn run_text(source: &str, root: &Path, max_operations: u64) -> Result<serde_json::Value> {
+    run_text_entry(source, root, max_operations, "main")
+}
+
+pub fn run_text_entry(source: &str, root: &Path, max_operations: u64, entry: &str) -> Result<serde_json::Value> {
+    run_text_entry_with_dependencies(source, root, max_operations, entry, &Default::default())
+}
+
+pub fn run_text_entry_with_dependencies(source: &str, root: &Path, max_operations: u64, entry: &str, dependencies: &std::collections::BTreeMap<String,String>) -> Result<serde_json::Value> {
+    let root = root.canonicalize()?;
+    let cache = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/weightlang/aot");
+    fs::create_dir_all(&cache)?;
+    let run = tempfile::Builder::new().prefix("entry-").tempdir_in(cache)?;
+    let executable = run.path().join(format!("client{}", std::env::consts::EXE_SUFFIX));
+    compile_text_entry_with_dependencies(source, &root, &executable, entry, dependencies)?;
+    let output = Command::new(&executable).arg("--max-operations").arg(max_operations.to_string()).arg("--root").arg(root).output()?;
+    ensure!(output.status.success(), "wgtime client failed: {}", String::from_utf8_lossy(&output.stderr));
+    serde_json::from_slice(&output.stdout).context("invalid wgtime client report")
 }
 
 pub fn run(source: &Path, max_operations: u64) -> Result<u8> {

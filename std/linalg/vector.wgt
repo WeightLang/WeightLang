@@ -1,7 +1,0 @@
-wgt 0.5
-# 单条特征轴 [N]，无批次和权重；dot 消去特征轴，norm 返回标量。
-fn main() {
-    assert(dot([1, 2, 3], [4, 5, 6]) == 32, "dot");
-    assert(norm([3, 4]) == 5, "norm");
-    return dot([1, 2], [3, 4]);
-}

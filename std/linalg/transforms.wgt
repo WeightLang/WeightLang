@@ -1,8 +1,0 @@
-wgt 0.5
-# [特征] 轴逐元素裁剪；余弦相似度将两个等长非零向量归约成一个标量。
-# 先按最大绝对值缩放以避免平方溢出；不创建权重或梯度。
-fn main() {
-    assert(clip([-2, 0, 3], -1, 1) == [-1, 0, 1], "clip");
-    assert(cosine_similarity([1, 0], [0, 1]) == 0, "orthogonal");
-    return cosine_similarity([1e308, 1e308], [1e308, 1e308]);
-}

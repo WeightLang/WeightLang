@@ -6,6 +6,16 @@ description: 编写和验证本仓库当前原生 WGT 0.5 模型、训练与概�
 模型源码入口必须命名为 `model.wgt`。每个独立模型/训练示例一个目录，使用 `<模型或示例名>/model.wgt`，不要创建 `main.wgt`、`train.wgt` 或功能命名的模型入口。`fn main()` 是执行函数，不是入口文件名。迁移或移动入口时同步命令、文档链接、测试引用及相对数据/保存路径；标准库模块和制品的 `source.wgt` 快照不改名。
 
 以 docs/reference.zh-CN.md、docs/differentiable-programs.md 和 Rust 实现为准；不是已发布功能承诺。
+
+## 架构迁移方向
+
+新模型工作流由 Rust 应用控制，WGT 专注描述模型结构、模型内部计算及可选的可微 loss。Rust 负责数据准备、I/O、调度、训练循环和服务连接。不要继续扩展旧的通用 WGT 脚本控制路径来实现新的 Rust 模型 API；旧语法和参考保留为当前实现/迁移历史，仍按已有 parser/runtime 契约描述，不代表新工作流的目标接口。
+
+`wgt-model` facade 的 Rust 库名为 `wgt`，当前提供 `model!`、`include_model!` 字符串宏以及 `ModelDefinition::parse`、`ModelDefinition::from_file`。内嵌源码、编译期文件和运行期文件入口共享模型定义解析语义。上述能力已在本地实现并通过定点验证，尚未发布。不要把 Rust 宏形式加入 WGT 语法说明，也不要用解析成功推断 forward 已执行；宏和定义解析只构造/检查定义，不连接服务、不执行模型。
+
+当前模型输入合同仅支持单个 f32 向量；三个定义入口均拒绝 `import`。不要宣称多输入、batch forward、cache、任意 dtype 或模块导入支持。模型定义与服务中初始化/加载的实例、训练权重和优化器检查点是不同对象；加载定义不得隐式执行训练或创建运行状态。准确接口及其余边界以 [docs/native-backend.md](../../../docs/native-backend.md) 为权威。
+
+权重互通：`save weights net to "weights.safetensors";` 与 `reload weights net from "weights.safetensors" using "sgd";`；绑定显式构造的源模型，标准safetensors仅有限F32精确name/shape/C-row-major，不猜图/改名/转置/下载。成功保留句柄别名、重置优化器/步数/自定义状态，失败原子保留。view/add只存独立参数；weights不含图或checkpoint训练状态，不宣称torch.load完整兼容。示例与限制见docs/file-io.md。
 只接受 wgt 0.5，模型、forward、loss 和 main 可在同文件；执行不得依赖 Python。
 原生`agent Actor {policy; [critic;] learner:update;}`显式模型别名；`learn actor {...yield record;}`整批后一次静态同步二参learner(actor,batch)，using可覆盖，无默认报错，普通model必须using。采集按policy identity拒绝所有写/重载/optimizer reset，错误/return释放且不调用learner；learner前释放，可自行多步更新。
 原生environment声明observation/action/feedback固定f32宽度及reset/step；Ctor(state,seed)构造reset一次，reset->{state,observation}，step->{state,observation,feedback,terminated,truncated}；同步纯WGT，state固定schema，有界有限记录字面量，全部验证后state/RNG原子提交。结束后拒step至reset，实例RNG隔离，reset重放seed，不影响host RNG。actor.act仅类别sample，logprob先取actor.policy局部变量。资源递归拒save json/async，无agent/env整实例checkpoint，仅显式policy checkpoint。完整签名/限制docs/agents-environments.md，真实例子examples/native_training/agent_environment/model.wgt。
@@ -37,9 +47,9 @@ examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原�
 普通函数中保存推理模型用 `save model VALUE to PATH;`，读取用 `load model from PATH using OPTIMIZER` 创建新优化器；
 保存训练断点用 `save checkpoint VALUE to PATH;`，读取用 `load checkpoint from PATH` 恢复原优化器状态。
 旧 model/save/restore 仅为 legacy 别名，新例子使用新名；所有参数必填，保存拒绝已有目标。
-本地运行 cargo test -p weightlang-runtime --test source_conformance 与 node scripts/test_source_conformance.cjs。
+本地运行 `cargo test -p wgtime-core --test source_conformance` 与 `node scripts/test_source_conformance.cjs`。
 
-普通脚本模块与纯张量算子是两种独立导入机制。普通脚本可导入固定逻辑名 `std/openresponses/harness`，或本地开发路径 `./module.wgt`；模块声明 `module NAME`，导出普通及 async 函数，只能在普通脚本调用，不能用于 forward/loss。harness 提供 `next(session,profile)`、`submit(session,results)`、`finished(step)` 协议辅助，工具映射与循环由 WGT 显式编写。解释执行、默认编译及显式轻客户端 AOT 的双 worker 闭环测试通过；AOT 测试移除模型源码并清空工具链 PATH。性能与吞吐尚未验收，完整模型执行迁移仍按 docs/openresponses.md 的范围说明。候选循环示例 examples/openresponses/addition/model.wgt。
+普通脚本模块与纯张量算子是两种独立导入机制。普通脚本可导入固定逻辑名 `std/openresponses/harness`，或本地开发路径 `./module.wgt`；模块声明 `module NAME`，导出普通及 async 函数，只能在普通脚本调用，不能用于 forward/loss。harness 提供 async `next(session,profile)`、`submit(session,results)`（null）、`finished(step)`（bool，status不等于tools）协议辅助，全部参数必填，finished不表示响应成功；工具映射与循环由 WGT 显式编写。解释执行、默认编译及显式轻客户端 AOT 的双 worker 闭环测试通过；AOT 测试移除模型源码并清空工具链 PATH。性能与吞吐尚未验收，完整模型执行迁移仍按 docs/openresponses.md 的范围说明。候选循环示例 examples/openresponses/addition/model.wgt。
 
 纯张量自定义算子：forward/loss 可调用只含不可重复 let 和最终 return 的 fn；参数全部必填且显式传入，
 不可捕获模型参数/局部变量，不允许递归、状态写入、I/O 或宿主回调。`operators NAME` 声明独立库，
@@ -81,13 +91,13 @@ examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原�
 公共语言变更同步主参考、专题文档和此技能；运行 git diff --check。
 模型构造/加载与训练分离；保留模型放 weights/，不覆盖已有产物。遵循 docs/storage.md。
 
-普通脚本标准库另见 docs/standard-library.md；不要把列表函数当作 forward/loss 张量算子。
+标准库完整契约见 docs/standard-library.md。std/ 只保留真实声明和可导入模块，旧图占位与带 main 的分类演示已删除，不要恢复它们来证明执行支持。纯张量逻辑模块 std/activation 导出 swish(x)、swiglu(gate,value)、squared_relu(x)，非空同形 f32[N] 到 f32[N]；std/loss 导出 squared_error(prediction,target)、half_squared_error(prediction,target)、categorical_logits(logits,target)，同形 f32[N] 到 f32[1]，前两项特征均值、最后一项类别加权负对数似然之和。全部参数必填，无默认值/广播/隐含batch；不创建权重或状态，target分布由调用方保证，CPU梯度继承展开原语。使用逻辑名导入，不暴露内部 /operators 路径。普通列表原生函数无需import，不能据此用于forward/loss。
 数据接口：zeros(count)、ones(count)、full(count,value)、linspace(start,end,count)、
 one_hot(index,classes)、concat(x,y)、vector_slice(x,start,end)、gather(x,indices)、
 compress(x,mask)、reverse(x)。参数全部必填；有限 f64 一维列表，允许空列表；
 mask 必须 bool，索引为合法零起始整数，切片左闭右开；输出上限 100 万项。
 linspace 含端点，count=1 只给起点；独热 classes>=1。预算在输出分配前检查。
-完整可运行例子：std/data/construction.wgt、std/data/indexing.wgt。
+这些是普通脚本原生函数；完整签名以 std/prelude.wgt 和 docs/reference.zh-CN.md 为准，std/data 下旧演示已删除。
 
 独热编码使用 `onehot[N] index`（N 为 1..1000000 字面量），例如 `onehot[4] 2`。
 复杂索引用括号；等价 `one_hot(index,classes)` 支持动态类别数。只限普通函数，不对索引求导。
@@ -98,7 +108,7 @@ js_divergence(p,q)、cross_entropy_probs(p,q)、temperature_softmax(logits,tempe
 全部参数必填，非空有限 f64 一维列表，双分布等长；分布项 [0,1]、总和绝对误差<=1e-9，
 通过后修正总和；权重归一化要求非负且有正质量，温度有限且>0。单位 nat。
 KL/交叉熵 p>0 且 q=0 报错，JS 支持不相交分布。无张量梯度或新增 fit 目标。
-例子 std/probability/distributions.wgt、temperature.wgt；完整契约见 docs/standard-library.md。
+这些是无需导入的普通原生函数；旧 std/probability 演示已删除，完整签名与限制见 std/prelude.wgt 和 docs/reference.zh-CN.md。
 
 更新既有代码时，route 可等价改写为 mix；独立标量 logit=0 的门可用 prob=0.5 并去掉读取处的 sigmoid。输入相关的 sigmoid(linear(...)) 保留。固定类别独热使用 onehot[N]；模型类别采样目标语法为 decode，待实现后迁移示例。
 

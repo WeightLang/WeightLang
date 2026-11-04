@@ -1,11 +1,11 @@
 //! Compile native client futures; no embedded AST or model executor.
 use anyhow::{bail, Result};
-use weightlang_runtime::script::{Expr, Statement, Stmt};
+use wgt_language::script::{Expr, Statement, Stmt};
 fn expression(e: &Expr) -> Result<String> {
     let value=match e {
         Expr::Number(n)=>format!("number({n:?})?"),Expr::Text(s)=>format!("Value::Data(json!({s:?}))"),Expr::Bool(b)=>format!("Value::Data(json!({b}))"),Expr::Null=>"Value::Data(serde_json::Value::Null)".into(),
         Expr::Name(n)=>format!("env.get({n:?}).cloned().context(\"undefined async variable\")?"),
-        Expr::List(values)=>format!("{{let values=vec![{}];Value::Data(serde_json::Value::Array(values.iter().map(|v|v.data().cloned()).collect::<Result<Vec<_>>>()?))}}",values.iter().map(expression).collect::<Result<Vec<_>>>()?.join(",")),
+        Expr::List(values)=>format!("{{let values:Vec<Value>=vec![{}];Value::Data(serde_json::Value::Array(values.iter().map(|v|v.data().cloned()).collect::<Result<Vec<_>>>()?))}}",values.iter().map(expression).collect::<Result<Vec<_>>>()?.join(",")),
         Expr::BuiltinCall(name,args) if name=="__await"=>format!("{{let value={};wgtime_control::async_runtime::await_local(rt.clone(),value).await?}}",expression(&args[0])?),
         Expr::BuiltinCall(name,_) if name=="__spawn"=>bail!("spawn inside async unavailable"),
         Expr::Call(name,args)|Expr::BuiltinCall(name,args)=>format!("{{let args=vec![{}];let value=rt.borrow_mut().call_in_env({name:?},args,&env)?;value}}",args.iter().map(expression).collect::<Result<Vec<_>>>()?.join(",")),

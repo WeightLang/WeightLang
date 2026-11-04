@@ -177,6 +177,12 @@ fn record(lock: &mut Lock, known: &Lock, m: &str, v: &str, k: &str, value: Strin
 pub fn verify(manifest: &Manifest, lock: &Lock, cache: &Path) -> Result<Vec<Value>> {
     let mut result = Vec::new();
     for (m, v) in &manifest.dependencies {
+        let source_dir = module_dir(cache, m, v);
+        if source_dir.join("wgt.index.json").is_file() {
+            crate::source_package::verify(m, v, lock, &source_dir)?;
+            result.push(json!({"module":m,"version":v,"path":source_dir}));
+            continue;
+        }
         ensure!(
             lock.contains_key(&(m.clone(), v.clone(), "commit".into()))
                 && lock.contains_key(&(m.clone(), v.clone(), "wgt.index.json".into())),
@@ -222,6 +228,25 @@ pub fn fetch(
     locked: bool,
     remote: &dyn Remote,
 ) -> Result<Lock> {
+    fetch_selected(manifest, known, cache, locked, remote, &[])
+}
+pub fn fetch_selected(
+    manifest: &Manifest,
+    known: &Lock,
+    cache: &Path,
+    locked: bool,
+    remote: &dyn Remote,
+    selections: &[String],
+) -> Result<Lock> {
+    for selection in selections {
+        let (module, variant) = selection
+            .split_once('=')
+            .context("--weights expects MODULE=VARIANT")?;
+        ensure!(
+            manifest.dependencies.contains_key(module) && manifest::identifier(variant),
+            "unknown dependency or invalid weight variant: {selection}"
+        );
+    }
     let mut all: Lock = known
         .iter()
         .filter(|((m, v, k), _)| {
@@ -263,7 +288,8 @@ pub fn fetch(
         )?;
         let index: Value = serde_json::from_slice(&bytes)?;
         ensure!(
-            index["format"] == "weightlang.package-index" && index["format_version"] == 1,
+            index["format"] == "weightlang.package-index"
+                && [json!(1), json!(2)].contains(&index["format_version"]),
             "unsupported package index"
         );
         ensure!(
@@ -273,64 +299,77 @@ pub fn fetch(
                 && index["tag"] == tag(m, v)?,
             "package identity mismatch"
         );
-        let artifacts = index["artifacts"]
-            .as_object()
-            .context("missing artifacts")?;
-        ensure!(!artifacts.is_empty(), "empty package");
         let dest = module_dir(cache, m, v);
         let parent = dest.parent().context("no cache parent")?;
         fs::create_dir_all(parent)?;
         let stage = tempfile::tempdir_in(parent)?;
-        for (name, art) in artifacts {
-            ensure!(manifest::identifier(name), "invalid artifact name");
-            let dir = stage.path().join(name);
-            fs::create_dir(&dir)?;
-            for file in index_files(art)? {
-                let meta = &art["files"][*file];
-                let asset = meta["asset"].as_str().context("missing asset")?;
-                manifest::relative_file(asset)?;
-                ensure!(!asset.contains('/'), "asset must be a filename");
-                let size = meta["size"].as_u64().context("missing size")?;
-                ensure!(size <= 2 * 1024 * 1024 * 1024, "unreasonable asset size");
-                let bytes = remote.download(&format!("{base}/{asset}"), size)?;
-                ensure!(
-                    bytes.len() as u64 == size
-                        && hash(&bytes) == meta["sha256"].as_str().context("missing hash")?,
-                    "asset size/hash mismatch: {asset}"
-                );
-                record(
-                    &mut entries,
-                    known,
-                    m,
-                    v,
-                    &format!("{name}/{file}"),
-                    format!("sha256:{}", hash(&bytes)),
-                )?;
-                fs::write(dir.join(file), bytes)?;
-            }
-            let source = art["source_path"].as_str().context("missing source_path")?;
-            manifest::relative_file(source)?;
-            let sub = if parts.len() > 3 {
-                format!("{}/", parts[3..].join("/"))
-            } else {
-                String::new()
-            };
-            let bytes = remote.download(
-                &format!(
-                    "https://raw.githubusercontent.com/{}/{}/{commit}/{sub}{source}",
-                    parts[1], parts[2]
-                ),
-                16 * 1024 * 1024,
+        if index["format_version"] == 2 {
+            crate::source_package::install(
+                &index,
+                &base,
+                stage.path(),
+                known,
+                &mut entries,
+                remote,
+                selections,
             )?;
-            ensure!(
-                hash(&bytes) == art["files"]["source.wgt"]["sha256"],
-                "tagged source does not match artifact"
-            );
-            let artifact = Info::read(&dir)?;
-            ensure!(
-                artifact.name == *name && artifact.files() == index_files(art)?,
-                "artifact model differs from index"
-            );
+            fs::write(stage.path().join("wgt.index.json"), &bytes)?;
+        } else {
+            let artifacts = index["artifacts"]
+                .as_object()
+                .context("missing artifacts")?;
+            ensure!(!artifacts.is_empty(), "empty package");
+            for (name, art) in artifacts {
+                ensure!(manifest::identifier(name), "invalid artifact name");
+                let dir = stage.path().join(name);
+                fs::create_dir(&dir)?;
+                for file in index_files(art)? {
+                    let meta = &art["files"][*file];
+                    let asset = meta["asset"].as_str().context("missing asset")?;
+                    manifest::relative_file(asset)?;
+                    ensure!(!asset.contains('/'), "asset must be a filename");
+                    let size = meta["size"].as_u64().context("missing size")?;
+                    ensure!(size <= 2 * 1024 * 1024 * 1024, "unreasonable asset size");
+                    let bytes = remote.download(&format!("{base}/{asset}"), size)?;
+                    ensure!(
+                        bytes.len() as u64 == size
+                            && hash(&bytes) == meta["sha256"].as_str().context("missing hash")?,
+                        "asset size/hash mismatch: {asset}"
+                    );
+                    record(
+                        &mut entries,
+                        known,
+                        m,
+                        v,
+                        &format!("{name}/{file}"),
+                        format!("sha256:{}", hash(&bytes)),
+                    )?;
+                    fs::write(dir.join(file), bytes)?;
+                }
+                let source = art["source_path"].as_str().context("missing source_path")?;
+                manifest::relative_file(source)?;
+                let sub = if parts.len() > 3 {
+                    format!("{}/", parts[3..].join("/"))
+                } else {
+                    String::new()
+                };
+                let bytes = remote.download(
+                    &format!(
+                        "https://raw.githubusercontent.com/{}/{}/{commit}/{sub}{source}",
+                        parts[1], parts[2]
+                    ),
+                    16 * 1024 * 1024,
+                )?;
+                ensure!(
+                    hash(&bytes) == art["files"]["source.wgt"]["sha256"],
+                    "tagged source does not match artifact"
+                );
+                let artifact = Info::read(&dir)?;
+                ensure!(
+                    artifact.name == *name && artifact.files() == index_files(art)?,
+                    "artifact model differs from index"
+                );
+            }
         }
         if locked {
             for (k, v) in &entries {
@@ -372,7 +411,7 @@ pub fn prepare(
             || known
                 .keys()
                 .filter(|(a, b, k)| a == m && b == v && k.contains('/'))
-                .any(|(_, _, k)| !module_dir(cache, m, v).join(k).is_file())
+                .any(|(_, _, k)| !module_dir(cache, m, v).join(k.strip_prefix("source/").unwrap_or(k)).is_file())
     });
     if missing && !offline {
         let new = fetch(manifest, &known, cache, locked, &Github::new()?)?;
@@ -396,166 +435,15 @@ pub fn package(
     output: &Path,
     allow_untrained: bool,
 ) -> Result<Value> {
-    manifest::version(version)?;
-    let m = Manifest::read(&manifest::manifest_path(project)?)?;
-    let parts = manifest::module_parts(&m.module)?;
-    ensure!(
-        m.dependencies.is_empty(),
-        "publishing packages with dependencies is not supported yet"
-    );
-    let top = PathBuf::from(git(project, &["rev-parse", "--show-toplevel"])?);
-    let rel = project
-        .canonicalize()?
-        .strip_prefix(top.canonicalize()?)?
-        .to_string_lossy()
-        .replace('\\', "/");
-    ensure!(
-        rel == parts[3..].join("/"),
-        "module path does not match repository subdirectory"
-    );
-    ensure!(
-        git(project, &["status", "--porcelain", "--", "."])?.is_empty(),
-        "commit project changes before packaging"
-    );
-    let commit = git(project, &["rev-parse", "HEAD"])?;
-    ensure!(
-        !output.exists() || fs::read_dir(output)?.next().is_none(),
-        "output directory must be empty"
-    );
-    let parent = output.parent().context("output has no parent")?;
-    fs::create_dir_all(parent)?;
-    let stage = tempfile::tempdir_in(parent)?;
-    let mut records = serde_json::Map::new();
-    // Git enumerates committed package sources recursively without descending
-    // into caches or following directory symlinks. Preserve relative paths when
-    // several model directories each contain a model.wgt entrypoint.
-    let tracked = git(project, &["ls-files", "-z", "--", "*.wgt"])?;
-    let mut sources = Vec::new();
-    for name in tracked.split('\0').filter(|name| !name.is_empty()) {
-        manifest::relative_file(name)?;
-        let source = project.join(name);
-        ensure!(
-            fs::symlink_metadata(&source)?.file_type().is_file(),
-            "source must be a regular file: {name}"
-        );
-        sources.push(source);
-    }
-    for entry in if artifacts.exists() {
-        Some(fs::read_dir(artifacts)?)
-    } else {
-        None
-    }
-    .into_iter()
-    .flatten()
-    {
-        let path = entry?.path();
-        if !path.join("manifest.json").is_file() {
-            continue;
-        }
-        let art = Info::read(&path)?;
-        let name = art.name.as_str();
-        ensure!(
-            allow_untrained || art.untrained.is_empty(),
-            "{name}: untrained tensors; use --allow-untrained only for explicit experiments"
-        );
-        let hash = &art.source_hash;
-        let source = sources
-            .iter()
-            .find(|p| hash_file(p).is_ok_and(|h| &h == hash))
-            .with_context(|| format!("{name}: no matching source in package"))?;
-        let mut files = serde_json::Map::new();
-        for file in art.files() {
-            let asset = format!("{name}.{file}");
-            fs::copy(path.join(file), stage.path().join(&asset))?;
-            files.insert((*file).into(),json!({"asset":asset,"sha256":hash_file(&path.join(file))?,"size":fs::metadata(path.join(file))?.len()}));
-        }
-        ensure!(!records.contains_key(name), "duplicate model {name}");
-        let source_path = source
-            .strip_prefix(project)?
-            .to_str()
-            .context("non-UTF8 source")?
-            .replace('\\', "/");
-        records.insert(name.into(),json!({"source_path":source_path,"format":if art.operator { crate::package_artifact::OPERATOR_FORMAT } else if art.native { "weightlang.native-build.v1" } else { "weightlang.artifact" },"untrained_tensors":art.untrained,"files":files}));
-    }
-    // Pure source libraries have no initialized parameters, checkpoints or training entrypoint.
-    for source in &sources {
-        let text = fs::read_to_string(source)?;
-        if !text.lines().any(|l| l.trim().starts_with("operators ")) {
-            continue;
-        }
-        let unit = weightlang_runtime::source::split(&text)?;
-        if !unit
-            .declarations
-            .lines()
-            .any(|l| l.trim().starts_with("operators "))
-        {
-            continue;
-        }
-        let name = weightlang_runtime::script::operators::library(&text)?;
-        ensure!(
-            !records.contains_key(&name),
-            "duplicate artifact name: {name}"
-        );
-        let metadata = json!({"format":crate::package_artifact::OPERATOR_FORMAT,"edition":"0.5","name":name,
-            "source":"source.wgt","source_sha256":hash(text.as_bytes())});
-        let payloads = [
-            ("manifest.json", serde_json::to_vec_pretty(&metadata)?),
-            ("source.wgt", text.into_bytes()),
-        ];
-        let mut files = serde_json::Map::new();
-        for (file, bytes) in payloads {
-            let asset = format!("{name}.{file}");
-            fs::write(stage.path().join(&asset), &bytes)?;
-            files.insert(
-                file.into(),
-                json!({"asset":asset,"sha256":hash(&bytes),"size":bytes.len()}),
-            );
-        }
-        let source_path = source
-            .strip_prefix(project)?
-            .to_str()
-            .context("non-UTF8 operator source")?
-            .replace('\\', "/");
-        records.insert(name,json!({"source_path":source_path,"format":crate::package_artifact::OPERATOR_FORMAT,"untrained_tensors":[],"files":files}));
-    }
-    ensure!(
-        !records.is_empty(),
-        "no prebuilt model artifacts or operator libraries"
-    );
-    for source in &sources {
-        let text = fs::read_to_string(source)?;
-        let is_model = text.lines().any(|line| {
-            line.split('#')
-                .next()
-                .unwrap_or("")
-                .split_whitespace()
-                .next()
-                == Some("model")
-        });
-        if is_model {
-            let name = source
-                .strip_prefix(project)?
-                .to_str()
-                .context("non-UTF8 source")?
-                .replace('\\', "/");
-            ensure!(
-                records.values().any(|r| r["source_path"] == name),
-                "missing prebuilt artifact for {name}; run wgt build"
-            );
-        }
-    }
-    let index = json!({"format":"weightlang.package-index","format_version":1,"module":m.module,"version":version,
-        "tag":tag(&m.module,version)?,"commit":commit,"artifacts":records});
-    fs::write(
-        stage.path().join("wgt.index.json"),
-        serde_json::to_vec_pretty(&index)?,
-    )?;
-    if output.exists() {
-        fs::remove_dir(output)?;
-    }
-    fs::rename(stage.path(), output)?;
-    Ok(index)
+    let _ = allow_untrained;
+    crate::source_package::package(
+        project,
+        artifacts.exists().then_some(artifacts),
+        version,
+        output,
+    )
 }
+
 pub fn publish(index: &Value, output: &Path, dry_run: bool) -> Result<()> {
     let module = index["module"].as_str().context("module")?;
     let p = manifest::module_parts(module)?;
@@ -597,13 +485,8 @@ pub fn publish(index: &Value, output: &Path, dry_run: bool) -> Result<()> {
         "--",
         tag,
     ]);
-    for art in index["artifacts"]
-        .as_object()
-        .context("artifacts")?
-        .values()
-    {
-        for file in index_files(art)? {
-            let meta = &art["files"][*file];
+    if index["format_version"] == 2 {
+        for meta in crate::source_package::assets(index)? {
             let asset = meta["asset"].as_str().context("asset")?;
             manifest::relative_file(asset)?;
             ensure!(!asset.contains('/'), "invalid asset");
@@ -613,6 +496,25 @@ pub fn publish(index: &Value, output: &Path, dry_run: bool) -> Result<()> {
                 "asset changed since packaging"
             );
             cmd.arg(path);
+        }
+    } else {
+        for art in index["artifacts"]
+            .as_object()
+            .context("artifacts")?
+            .values()
+        {
+            for file in index_files(art)? {
+                let meta = &art["files"][*file];
+                let asset = meta["asset"].as_str().context("asset")?;
+                manifest::relative_file(asset)?;
+                ensure!(!asset.contains('/'), "invalid asset");
+                let path = output.join(asset);
+                ensure!(
+                    hash_file(&path)? == meta["sha256"],
+                    "asset changed since packaging"
+                );
+                cmd.arg(path);
+            }
         }
     }
     cmd.arg(output.join("wgt.index.json"));

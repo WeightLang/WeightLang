@@ -1,9 +1,0 @@
-wgt 0.5
-# 输入 [类别] 的 logits，输出同形概率；先减最大值避免指数溢出。
-# 没有权重或训练，log_softmax 直接在对数域计算而不是 log(softmax)。
-fn main() {
-    assert(softmax([1000, 1000]) == [0.5, 0.5], "probabilities");
-    assert(log_softmax([1000, -1000])[1] == -2000, "log domain");
-    assert(logsumexp([1000]) == 1000, "log partition");
-    return softmax([1, 2, 3]);
-}

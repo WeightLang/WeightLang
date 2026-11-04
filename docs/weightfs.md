@@ -107,8 +107,8 @@ JSON 浏览与文件编辑会分配内存；底层未封装的 CPU 前向仍保�
 ## 验证
 
 ```sh
-WGT_WEIGHTFS=on cargo test -p weightlang-runtime --no-default-features --test weightfs -- --ignored
-WGT_WEIGHTFS=off cargo test -p weightlang-runtime --no-default-features --test training --test script --test unified
+WGT_WEIGHTFS=on cargo test -p wgtime-core --no-default-features --test weightfs -- --ignored
+WGT_WEIGHTFS=off cargo test -p wgtime-core --no-default-features --test training --test script --test unified
 ```
 
 真实挂载测试显式标为 ignored，避免在没有 FUSE 的构建容器中伪报通过；上述第一条明确运行它们。

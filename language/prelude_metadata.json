@@ -13,7 +13,7 @@
       "purpose": "声明专用agent构造计划，显式模型别名及可选默认二参learner，不训练。",
       "defaults": {},
       "documentation": "docs/agents-environments.md",
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "environment",
@@ -25,7 +25,7 @@
       "purpose": "声明同步WGT环境状态与reset/step schema；实例构造reset一次。",
       "defaults": {},
       "documentation": "docs/agents-environments.md",
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "learn",
@@ -37,7 +37,7 @@
       "purpose": "整批collect成功后释放目标policy保护并调用一次具名同步二参learner。",
       "defaults": {},
       "documentation": "docs/agents-environments.md",
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "__agent",
@@ -52,7 +52,7 @@
         "max": 3
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+      "implementation": "crates/wgtime-core/src/script/agents.rs"
     },
     {
       "name": "__environment",
@@ -67,7 +67,7 @@
         "max": 3
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+      "implementation": "crates/wgtime-core/src/script/agents.rs"
     },
     {
       "name": "__record",
@@ -82,7 +82,7 @@
         "max": 512
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+      "implementation": "crates/wgtime-core/src/script/agents.rs"
     },
     {
       "name": "async",
@@ -94,7 +94,7 @@
       "purpose": "创建冷用户future；显式纯数据参数与返回值；第一阶段拒绝资源/模型异步执行。",
       "defaults": {},
       "documentation": "docs/async-tasks.md",
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "tasks",
@@ -106,7 +106,7 @@
       "purpose": "同步函数内有界任务作用域，正常join、失败取消并等待在途IO；首期不支持嵌套。",
       "defaults": {},
       "documentation": "docs/async-tasks.md",
-      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+      "implementation": "crates/wgtime-core/src/script/async_runtime.rs"
     },
     {
       "name": "await",
@@ -118,7 +118,7 @@
       "purpose": "驱动冷future或等待作用域task，拒绝任意同步值。",
       "defaults": {},
       "documentation": "docs/async-tasks.md",
-      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+      "implementation": "crates/wgtime-core/src/script/async_runtime.rs"
     },
     {
       "name": "spawn",
@@ -130,7 +130,7 @@
       "purpose": "在tasks内启动作用域子任务，禁止默认脱离。",
       "defaults": {},
       "documentation": "docs/async-tasks.md",
-      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+      "implementation": "crates/wgtime-core/src/script/async_runtime.rs"
     },
     {
       "name": "sleep",
@@ -142,7 +142,7 @@
       "purpose": "仅async fn：固定阻塞池等待0..30000整数毫秒，返回null；不是定时器reactor。",
       "defaults": {},
       "documentation": "docs/async-tasks.md",
-      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+      "implementation": "crates/wgtime-core/src/script/async_runtime.rs"
     },
     {
       "name": "reload",
@@ -154,7 +154,7 @@
       "purpose": "同句柄同结构原子重载；model新优化器，checkpoint恢复状态，运行时revision递增并使旧梯度失效。",
       "documentation": "docs/file-io.md",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+      "implementation": "crates/wgtime-core/src/script/persistence.rs"
     },
     {
       "name": "save",
@@ -168,7 +168,7 @@
       "defaults": {
         "overwrite": false
       },
-      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+      "implementation": "crates/wgtime-core/src/script/persistence.rs"
     },
     {
       "name": "load",
@@ -180,7 +180,7 @@
       "purpose": "读取 model/checkpoint/json/text；model必填using新优化器，checkpoint恢复已记录优化器，不执行训练或main。",
       "documentation": "docs/file-io.md",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+      "implementation": "crates/wgtime-core/src/script/persistence.rs"
     },
     {
       "name": "assert",
@@ -194,7 +194,7 @@
       "defaults": {
         "message": "assertion failed"
       },
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "__record_field",
@@ -209,7 +209,7 @@
         "max": 2
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     },
     {
       "name": "__probabilities",
@@ -224,7 +224,7 @@
         "max": 1
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     },
     {
       "name": "__graph",
@@ -239,7 +239,7 @@
         "max": 2
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     },
     {
       "name": "__adaptive",
@@ -254,7 +254,7 @@
         "max": 2
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     },
     {
       "name": "true",
@@ -266,7 +266,7 @@
       "signature": "true",
       "purpose": "Boolean literal.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "false",
@@ -278,7 +278,7 @@
       "signature": "false",
       "purpose": "Boolean literal.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "null",
@@ -289,7 +289,7 @@
       "signature": "null",
       "purpose": "Null value; also the implicit function return.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "implementation": "crates/wgt-language/src/script/parse.rs"
     },
     {
       "name": "f32",
@@ -300,7 +300,7 @@
       "signature": "f32[N] / f32[O,I]",
       "purpose": "Fixed-shape 32-bit floating-point tensor; supported ranks depend on declaration.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "logits",
@@ -311,7 +311,7 @@
       "signature": "output scores: logits[N]",
       "purpose": "Finite, nonempty mutually exclusive category scores. Explicit output metadata survives model persistence and function values. .probabilities applies stable softmax along the category axis. Output declarations only; no binary logit type.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/categorical.rs"
+      "implementation": "crates/wgt-language/src/categorical.rs"
     },
     {
       "name": "probabilities",
@@ -322,7 +322,7 @@
       "signature": "output choices: probabilities[N] / value.probabilities",
       "purpose": "Finite mutually exclusive category vector, each value strictly in [0,1], sum within absolute 1e-5 of 1. Conversion validates and preserves values; no renormalization. Sampling scales by actual total mass and skips zero-mass entries. CPU native implementation; GPU categorical path not verified.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/categorical.rs"
+      "implementation": "crates/wgt-language/src/categorical.rs"
     },
     {
       "name": "prob",
@@ -333,7 +333,7 @@
       "signature": "prob",
       "purpose": "Probability parameter represented by a logit; trainable initial value strictly in (0,1), frozen permits endpoints; reads f32[1]. Initializer required.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/adaptive/source.rs"
+      "implementation": "crates/wgt-language/src/adaptive/source.rs"
     },
     {
       "name": "linear",
@@ -347,7 +347,7 @@
         "in": "previous width",
         "bias": 1
       },
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "relu",
@@ -358,7 +358,7 @@
       "signature": "relu",
       "purpose": "Sequential activation preserving vector width.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "tanh",
@@ -369,7 +369,7 @@
       "signature": "tanh",
       "purpose": "Sequential activation preserving vector width.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "sigmoid",
@@ -380,7 +380,7 @@
       "signature": "sigmoid",
       "purpose": "Sequential activation preserving vector width.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "identity",
@@ -391,7 +391,7 @@
       "signature": "identity",
       "purpose": "Sequential activation preserving vector width.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/source.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "__predict",
@@ -407,7 +407,7 @@
         "max": 2
       },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     },
     {
       "name": "__train_step",
@@ -422,7 +422,7 @@
       },
       "purpose": "Compiler-only train block lowering; source __ calls rejected.",
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
+      "implementation": "crates/wgtime-core/src/script.rs"
     }
   ]
 }

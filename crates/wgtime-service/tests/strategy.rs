@@ -1,7 +1,76 @@
-use weightlang_runtime::adaptive::{parse, AdaptiveSession};
+use wgtime_core::adaptive::{parse, AdaptiveSession};
 use wgtime_service::strategy::Strategy;
 const MODEL: &str = "wgt 0.5\nmodel Regression\ninput x: f32[1]\noutput y: f32[1]\nparameter w: f32[1,1] = [0]\nfn forward(x) { return linear(x,w); }\nfn loss(prediction,target) { return square(prediction-target).mean; }\n";
 const STEP: &str = "fn step(net,inputs,targets) { let g=differentiate(net,inputs,targets); let s=gradient_snapshot(g); return commit_gradients(g, [[s[\"parameters\"][0][0]-0.1*s[\"gradients\"][0][0]]], [1]); }";
+const SAM: &str = r#"wgt 0.5
+model Regression
+input x: f32[1]
+output y: f32[1]
+parameter w: f32[1,1] = [0]
+fn forward(x) { return linear(x, w); }
+fn loss(prediction, target) { return square(prediction-target).mean; }
+fn sam_step(net, inputs, targets, rate, rho, beta) {
+    let first = differentiate(net, inputs, targets);
+    let original = gradient_snapshot(first);
+    let squared_norm = 0;
+    for gradient in original["gradients"] {
+        for g in gradient { squared_norm = squared_norm + g*g; }
+    }
+    let scale = rho / (sqrt(squared_norm) + 0.00000001);
+    let perturbed = [];
+    for p in range(0, len(original["parameters"])) {
+        let values = [];
+        for j in range(0, len(original["parameters"][p])) {
+            values = append(values, original["parameters"][p][j] + scale*original["gradients"][p][j]);
+        }
+        perturbed = append(perturbed, values);
+    }
+    let second = differentiate_at(first, perturbed);
+    let sharp = gradient_snapshot(second);
+    let previous = [];
+    if sharp["state"] != null {
+        assert sharp["state"][0] == 1, "SAM momentum state version";
+        previous = sharp["state"][1];
+    }
+    let candidates = [];
+    let velocities = [];
+    for p in range(0, len(sharp["parameters"])) {
+        let values = [];
+        let velocity = [];
+        for j in range(0, len(sharp["parameters"][p])) {
+            let old = 0;
+            if sharp["state"] != null { old = previous[p][j]; }
+            let v = beta*old + sharp["gradients"][p][j];
+            values = append(values, sharp["parameters"][p][j] - rate*v);
+            velocity = append(velocity, v);
+        }
+        candidates = append(candidates, values);
+        velocities = append(velocities, velocity);
+    }
+    release_gradient(first);
+    return commit_gradients(second, candidates, [1, velocities]);
+}
+fn main() {
+    let net = Regression("none");
+    let inputs = [[1], [2]];
+    let targets = [[2], [4]];
+    sam_step(net, inputs, targets, 0.1, 0.1, 0);
+    let g = differentiate(net, inputs, targets);
+    let s = gradient_snapshot(g);
+    assert s["steps"] == 1, "SAM commits once";
+    let error = s["parameters"][0][0] - 1.05;
+    assert error*error < 0.000000000001, "SAM updates original base";
+    release_gradient(g);
+    save checkpoint net to "../../../weights/custom_sam/step1.json";
+    let resumed = load checkpoint from "../../../weights/custom_sam/step1.json";
+    for epoch in range(0, 5) {
+        sam_step(net, inputs, targets, 0.1, 0.1, 0.9);
+        sam_step(resumed, inputs, targets, 0.1, 0.1, 0.9);
+    }
+    assert net([3]) == resumed([3]), "SAM checkpoint resume";
+    return net([3]);
+}
+"#;
 fn session() -> AdaptiveSession {
     AdaptiveSession::prepare(parse(MODEL).unwrap(), 1024 * 1024).unwrap()
 }
@@ -103,13 +172,13 @@ fn stale_handles_and_budgets_do_not_commit() {
 }
 #[test]
 fn existing_sam_is_resident_and_matches_direct_wgt() {
-    let original = include_str!("../../..//examples/native_training/custom_sam/model.wgt");
-    let wrapped=format!("{original}\nfn strategy(net,inputs,targets){{return sam_step(net,inputs,targets,0.1,0.1,0.9);}}");
+    let original = SAM;
+    let wrapped=format!("{}\nfn strategy(net,inputs,targets){{return sam_step(net,inputs,targets,0.1,0.1,0.9);}}", original.split("fn main()").next().unwrap());
     let strategy = Strategy::compile(&wrapped).unwrap();
     let mut m = session();
     // Execute the same source directly without its checkpoint filesystem side effects.
     let direct=format!("{}\nfn main(){{let net=Regression(\"none\");let inputs=[[1],[2]];let targets=[[2],[4]];for epoch in range(0,6){{sam_step(net,inputs,targets,0.1,0.1,0.9);}}return net([3]);}}",original.split("fn main()").next().unwrap());
-    let report = weightlang_runtime::script::run(
+    let report = wgtime_core::script::run(
         &direct,
         std::path::Path::new("/tmp/weightlang"),
         10_000_000,
@@ -201,13 +270,13 @@ fn configured_strategy_checkpoint_resume() {
 #[test]
 #[ignore = "explicit release timing probe; not a performance gate"]
 fn resident_sam_timing_probe() {
-    let original = include_str!("../../../examples/native_training/custom_sam/model.wgt");
+    let original = SAM;
     let iterations = 100;
     let direct=format!("{}\nfn strategy(net,inputs,targets){{sam_step(net,inputs,targets,0.01,0.1,0.9);}}\nfn main(){{let net=Regression(\"none\");let inputs=[[1],[2]];let targets=[[2],[4]];for i in range(0,{iterations}){{strategy(net,inputs,targets);}} return net([3]);}}",original.split("fn main()").next().unwrap());
     let strategy = Strategy::compile(&direct).unwrap();
     for round in 0..5 {
         let now = std::time::Instant::now();
-        let report = weightlang_runtime::script::run(
+        let report = wgtime_core::script::run(
             &direct,
             std::path::Path::new("/tmp/weightlang"),
             100_000_000,

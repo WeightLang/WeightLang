@@ -8,11 +8,12 @@ GPU 后端使用现有原生 Vulkan / Metal / DX12 执行器。NPU 通过宿主�
 
 ```sh
 cargo build -p weightlang-wgt --features gpu --bin wgt --bin weightc
-cargo run -p weightlang-runtime --bin wgt-native -- --devices
 ```
 
+历史 `wgt-native --devices` 入口已移除；当前 `wgtime` 服务 CLI 不提供设备枚举命令。
+
 wgt 的 gpu 特性默认关闭；启用后，`wgt run --compiled` 生成的可执行文件也启用 GPU。
-运行时 crate 默认启用 gpu，`--no-default-features` 构建仍可使用宿主注册的原生 NPU 后端。
+执行核心 crate 默认启用 gpu，`--no-default-features` 构建仍可使用宿主注册的原生 NPU 后端。
 检查与编译不运行模型、不创建设备任务。明确执行时才读取 WGT_HOST_POLICY；模型制品不携带授权。
 
 示例策略（按本机 `--devices` 输出填写 device）：
@@ -90,7 +91,7 @@ execution_wall_us 为工作线程执行墙钟时间，包含会话准备与同�
 
 ## NPU 宿主扩展
 
-原生 Rust API 位于 `weightlang_runtime::accelerator`：
+原生 Rust API 位于 `wgtime_core::accelerator`：
 
 - `AcceleratorBackend`：提供 device()、kind() 和 run(model,input,memory_bytes)。
 - `register_backend(Arc<dyn AcceleratorBackend>)`：宿主在创建 WGT runtime 前注册可信原生后端；同 ID 不可覆盖。
@@ -120,8 +121,8 @@ NPU 测试使用明确标记的模拟原生后端，覆盖注册到 WGT 的链�
 测试命令：
 
 ```sh
-cargo test -p weightlang-runtime --no-default-features --test accelerator
-cargo test -p weightlang-runtime --test accelerator hardware_gpu_inference_and_memory_quota -- --ignored --nocapture
+cargo test -p wgtime-core --no-default-features --test accelerator
+cargo test -p wgtime-core --test accelerator hardware_gpu_inference_and_memory_quota -- --ignored --nocapture
 ```
 
 一次本地验证中，105 项无 GPU 特性的运行时测试通过（4 项既有 FUSE 测试按标记忽略）；该数量对应当时的源码快照，
