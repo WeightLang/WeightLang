@@ -12,7 +12,8 @@ fn bundle_commands_do_not_invoke_old_compiler() {
         let output = Command::new(env!("CARGO_BIN_EXE_wgt")).current_dir(temp.path())
             .env("WEIGHTC", &compiler).args(&command).output().unwrap();
         assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("Python weightc CLI has been removed"));
+        let expected = if command[0] == "package" { "native package does not support --force, --weights or --reference" } else { "Python weightc CLI has been removed" };
+        assert!(String::from_utf8_lossy(&output.stderr).contains(expected));
         assert!(!temp.path().join("args.txt").exists());
     }
 }
