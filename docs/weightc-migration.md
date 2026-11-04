@@ -64,7 +64,10 @@ sh scripts/package_wgt.sh --binary target/release/wgt --output dist/native-relea
 
 原生构建默认输出 `weights/<source stem>/`，已有目录和符号链接一律拒绝覆盖。
 制品包含 `model.json`、`checkpoint.json`、`source.wgt`、`manifest.json`。
-仍依赖旧 CLI 的 `wgt check/build/package/install/train/export/trace/debug`
+`wgt package --entry DIRECTORY -o NEW_DIRECTORY` 校验并复制原生目录制品；
+`wgt export DIRECTORY_OR_MODEL_JSON -o NEW_MODEL_JSON` 导出推理模型，不执行源码或训练。
+这两个命令不支持旧 ZIP/源码初始化语义，详见[原生制品命令](native-artifact-commands.md)。
+仍依赖旧 CLI 的 `wgt check/build/install/train/trace/debug`
 明确报错，不通过 PATH、`WEIGHTC` 或托管环境回退。
 `wgt test` 现为原生项目测试入口，详见[原生测试](native-testing.md)。
 

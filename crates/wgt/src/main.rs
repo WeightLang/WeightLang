@@ -267,11 +267,12 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
-    /// Bundle sources and explicitly selected embedded or external weights
+    /// Copy a verified native build into a new directory package (not ZIP; never trains)
     Package {
+        /// Existing native build directory; source files are not supported
         #[arg(long)]
         entry: Option<PathBuf>,
-        #[arg(short, long, default_value = "dist/model.wgtpkg")]
+        #[arg(short, long, default_value = "dist/native-package")]
         output: PathBuf,
         #[arg(long)]
         weights: Vec<String>,
@@ -303,10 +304,10 @@ enum Cmd {
         #[arg(short, long)]
         output: PathBuf,
     },
-    /// Explicitly initialize or migrate weights, without training
+    /// Export inference IR from a native build directory or model.json; never executes source
     Export {
         source: Option<PathBuf>,
-        /// Output root; writes <root>/<model>/
+        /// New inference JSON file (required); excludes optimizer state
         #[arg(short, long)]
         output: Option<PathBuf>,
         /// Replace an existing WeightLang model directory
@@ -490,6 +491,23 @@ fn execute(cli: Cli) -> Result<u8> {
     }
     let command = cli.command.context("choose a command; see wgt --help")?;
     let base = fs::canonicalize(&cli.directory).context("project directory does not exist")?;
+    // Native artifact operations do not execute source or prepare project dependencies.
+    match &command {
+        Cmd::Package { entry, output, force, weights, reference } => {
+            ensure!(!force && weights.is_empty() && reference.is_empty(), "native package does not support --force, --weights or --reference");
+            let input = entry.as_ref().context("native package requires --entry NATIVE_BUILD_DIRECTORY")?;
+            weightlang_wgt::native_artifact_commands::package(&base.join(input), &base.join(output))?;
+            return Ok(0);
+        }
+        Cmd::Export { source, output, force, devices, trainers } => {
+            ensure!(!force && trainers.is_empty() && devices.device.is_none() && devices.placements.is_empty() && devices.device_map.is_none(), "native export does not support --force, --trainer or device placement options");
+            let input = source.as_ref().context("native export requires a native build directory or inference model.json")?;
+            let output = output.as_ref().context("native export requires -o OUTPUT_MODEL_JSON")?;
+            weightlang_wgt::native_artifact_commands::export(&base.join(input), &base.join(output))?;
+            return Ok(0);
+        }
+        _ => {}
+    }
     if matches!(&command, Cmd::Check { .. } | Cmd::Build { .. } | Cmd::Package { .. } | Cmd::Install { .. } | Cmd::Train { .. } | Cmd::Export { .. } | Cmd::RetiredRun { .. } | Cmd::Trace { .. } | Cmd::Debug { .. }) {
         compiler_command(&base)?;
     }

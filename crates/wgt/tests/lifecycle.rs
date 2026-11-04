@@ -386,30 +386,38 @@ fn gpu_benchmark_when_explicitly_required() {
 }
 
 #[test]
-#[ignore = "HEAD 5d2bb29: wgt package routes to the removed Python CLI; native release-assets is covered separately"]
-fn package_command_should_support_native_artifacts() {
+fn package_and_export_native_artifacts() {
     let temp = scratch();
     fixture(temp.path(), 300, false, true);
-    run(temp.path());
+    fs::write(
+        temp.path().join("run.jsonl"),
+        json!({"steps":300,"resume":false,"complete":true,"build":true}).to_string(),
+    )
+    .unwrap();
     success(
-        command(WGT, temp.path())
-            .args(["package", "--entry", "model.wgt", "-o", "model.wgtpkg"])
+        command(WEIGHTC, temp.path())
+            .args(["build", "model.wgt", "-o", "built"])
             .output()
             .unwrap(),
     );
-    assert!(temp.path().join("model.wgtpkg").is_file());
-}
-
-#[test]
-#[ignore = "HEAD 5d2bb29: wgt export routes to the removed Python CLI; native save_model is covered separately"]
-fn export_command_should_support_native_models() {
-    let temp = scratch();
-    fixture(temp.path(), 300, false, true);
     success(
         command(WGT, temp.path())
-            .args(["export", "model.wgt", "-o", "exported"])
+            .args(["package", "--entry", "built", "-o", "packaged"])
             .output()
             .unwrap(),
     );
-    assert!(temp.path().join("exported").is_dir());
+    success(
+        command(WGT, temp.path())
+            .args(["export", "packaged", "-o", "exported.json"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(
+        read_json(temp.path().join("built/model.json")),
+        read_json(temp.path().join("exported.json"))
+    );
+    let expected = read_json(temp.path().join("built/manifest.json"))["report"]["metrics"]
+        ["prediction"]
+        .clone();
+    infer(temp.path(), &temp.path().join("exported.json"), &expected);
 }

@@ -25,15 +25,11 @@ WGT_REQUIRE_GPU=1 cargo test -p weightlang-wgt --test lifecycle --features gpu -
 
 解释执行、构建、评估和独立 AOT 执行都将 PATH 设为 `/nonexistent`。发布包命令只暴露 Git。AOT 编译阶段需要本机 Cargo、rustc 和链接器，使用正常工具链 PATH；本测试不提供 Python 回调或 Python 实现。
 
-## HEAD 能力缺口
+## 原生制品与支持边界
 
-测试最初针对提交 `5d2bb29df36fa236ba748655d014fc43aa94a3a5` 编写。该版本的 `wgt package` 和 `wgt export` 在命令分派时进入已移除的 Python CLI 入口，不能完成原生操作。两个期望成功的复现测试保留为 `ignored`，可以显式执行：
+测试最初在提交 `5d2bb29` 实测发现 `wgt package/export` 进入已移除的 Python CLI。当前已新增[原生制品命令](../../docs/native-artifact-commands.md)：package 接受完整原生构建目录并输出目录包，export 接受原生构建目录或推理 JSON，输出不含优化器的推理 JSON。生命周期测试真实执行两个命令并验证往返推理相等，不再忽略这两条路径。旧 ZIP、源码初始化导出、外部权重引用仍不支持，明确拒绝。
 
-```sh
-cargo test -p weightlang-wgt --test lifecycle -- --ignored --nocapture
-```
-
-原生可用替代路径分别为 `wgt release-assets` 和脚本 `save_model`，但它们不代表旧 package/export 命令已经修复。`weightc build` 和脚本保存接口拒绝覆盖，不支持 `--force`；测试检验不带覆盖选项时的保护。
+`weightc build`、package/export 和脚本保存接口拒绝覆盖，不支持 `--force`；测试检验不带覆盖选项时的保护。
 
 该 HEAD 有 Rust GPU trainer，但尚无 WGT `training_device`/`training_status` 接入，因此本例只验证 GPU 前向 benchmark，不宣称完成 WGT GPU 训练。AOT 编译器在该 HEAD 不继承 gpu feature，本例 AOT 只比较 CPU 生命周期。
 
