@@ -23,8 +23,17 @@ struct Checkpoint {
     optimizer: Option<State>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CustomCheckpoint {
+    format: String,
+    program: super::Program,
+    custom_optimizer: super::optimization::CustomState,
+}
+
 impl AdaptiveSession {
     pub fn set_optimizer(&mut self, optimizer: Optimizer) {
+        self.custom_optimizer = None;
         let zeros = || {
             self.program
                 .parameters
@@ -204,11 +213,23 @@ impl AdaptiveSession {
     }
 
     pub fn save_checkpoint(&self, path: &Path) -> Result<()> {
-        let value = serde_json::json!({"format":"weightlang.forward-training.v1", "program":self.program, "optimizer":self.optimizer});
+        let value = if let Some(state) = &self.custom_optimizer {
+            super::optimization::validate_state(&state.value)?;
+            serde_json::json!({"format":"weightlang.forward-training.v2", "program":self.program, "custom_optimizer":state})
+        } else {
+            serde_json::json!({"format":"weightlang.forward-training.v1", "program":self.program, "optimizer":self.optimizer})
+        };
         crate::training::write_new(path, &serde_json::to_vec(&value)?)
     }
 
     pub fn restore_checkpoint(value: serde_json::Value, budget: usize) -> Result<Self> {
+        if value.get("format").and_then(|v| v.as_str()) == Some("weightlang.forward-training.v2") {
+            let checkpoint: CustomCheckpoint = serde_json::from_value(value)?;
+            super::optimization::validate_state(&checkpoint.custom_optimizer.value)?;
+            let mut session = Self::prepare(checkpoint.program, budget)?;
+            session.custom_optimizer = Some(checkpoint.custom_optimizer);
+            return Ok(session);
+        }
         let checkpoint: Checkpoint = serde_json::from_value(value)?;
         ensure!(
             checkpoint.format == "weightlang.forward-training.v1",

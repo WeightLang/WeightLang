@@ -10,6 +10,7 @@ mod autodiff;
 pub use autodiff::ForwardPass;
 pub mod transport;
 mod training;
+pub mod optimization;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -154,6 +155,7 @@ pub struct AdaptiveSession {
     revision: u64,
     steps: u64,
     optimizer: Option<training::State>,
+    custom_optimizer: Option<optimization::CustomState>,
 }
 
 fn names<'a>(items: impl Iterator<Item = &'a str>) -> Result<HashMap<String, usize>> {
@@ -422,6 +424,7 @@ impl AdaptiveSession {
             revision: 0,
             steps: 0,
             optimizer: None,
+            custom_optimizer: None,
         })
     }
 

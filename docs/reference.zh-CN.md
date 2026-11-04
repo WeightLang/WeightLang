@@ -212,6 +212,20 @@ fit/reinforce 和显式 VJP 记录梯度时仍计算两边，包括 frozen 门�
 普通 if 保持硬分支；源文件文本、宿主函数、I/O 和离散控制决策不因此可微。
 事务、原生一阶自动微分、显式状态及预算细节见[自更新运行时](self-modifying-runtime.md)。
 
+## 自定义优化器更新
+
+CPU `forward` 模型可用 `differentiate(model,inputs,targets)` 显式求 `fn loss` 的批次平均损失与梯度；
+要求模型使用 `"none"` 优化器。`gradient_snapshot(handle)` 返回 loss、parameters、gradients、names、shapes、state、steps。
+普通 WGT 函数用列表/循环定义更新规则，`commit_gradients(handle,candidate_parameters,next_state)` 一次原子提交权重与用户状态，
+返回更新前 loss 并释放句柄；`release_gradient(handle)` 放弃快照。所有参数必填，无默认算法或默认裁剪。
+参数按稳定顺序包含全部非冻结参数，每个参数为行优先扁平 f32 列表；普通更新函数不自动可微。
+最多16个存活句柄、共64MiB计量预算；状态深度最多32、计量大小最多1MiB，禁止嵌套资源句柄。
+旧/已释放句柄、模型版本冲突、错误布局及非有限值报错，不部分提交。
+`save_checkpoint/load_checkpoint` 的 forward v2 保存/恢复用户状态及步数，兼容旧 v1读取；保存模型不含优化器。
+完整签名、预算计量、约束和续训示例见[原生训练](native-training.md#wgt-自定义更新算法cpu-forward)及
+[custom_momentum/model.wgt](../examples/native_training/custom_momentum/model.wgt)。目前不支持此接口的顺序/GPU模型，
+不自动执行算法、恢复训练循环或导入含循环的 host 模块。
+
 ## 实现与验证依据
 
 - 编译单元和静态图计划：`crates/wgt-runtime/src/source.rs`。

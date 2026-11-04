@@ -4,6 +4,70 @@
   "scope": "Implicit source functions, intrinsics, constants and declaration types. No std modules are imported. Contexts are separate contracts; ordinary functions are shared by interpreter and AOT. Parameters are required unless defaults explicitly say otherwise.",
   "entries": [
     {
+      "name": "differentiate",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "differentiate(model,inputs,targets)",
+      "purpose": "CPU forward 模型通过 fn loss 求批次平均损失和初始参数梯度，不提交；要求 optimizer none。返回梯度句柄，最多16个存活句柄，共享64MiB预算。",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/optimization.rs"
+    },
+    {
+      "name": "gradient_snapshot",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "gradient_snapshot(gradient)",
+      "purpose": "读取梯度快照对象：loss、parameters、gradients、names、shapes、state、steps；参数按稳定顺序列出非冻结参数，数据为行优先扁平列表。",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/optimization.rs"
+    },
+    {
+      "name": "commit_gradients",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "commit_gradients(gradient,parameters,state)",
+      "purpose": "原子提交完整候选参数和用户优化器状态，返回更新前loss并释放句柄；拒绝过期快照、非有限f32、布局错误和资源状态。状态深度至多32、计量大小至多1MiB。",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/optimization.rs"
+    },
+    {
+      "name": "release_gradient",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "release_gradient(gradient)",
+      "purpose": "释放未提交梯度快照并返回null；重复释放或提交后的句柄报错。Runtime结束释放所有剩余句柄。",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/optimization.rs"
+    },
+    {
       "name": "__graph",
       "kind": "internal",
       "contexts": [

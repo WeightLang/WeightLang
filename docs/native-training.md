@@ -129,6 +129,41 @@ SGD 无 momentum/weight decay；Adam 固定 beta1=0.9、beta2=0.999、eps=1e-8�
 再提交权重和优化器状态；非有限输入、损失、梯度、参数/矩状态均报错，不部分更新。
 `mlp` 使用独立确定性 Xavier uniform 权重、零 bias；不承诺与 Python/PyTorch 的 seed 初始化逐位相同。
 
+## WGT 自定义更新算法（CPU forward）
+
+`differentiate(model,inputs,targets)` 要求 CPU `forward` 模型以 `"none"` 构造，且定义受限可微 `fn loss`。
+它计算更新前批次平均损失及非冻结初始参数梯度，不提交 forward 写入，也不更新权重或优化器状态。
+普通 host 函数仍不自动可微；用户用现有循环、列表、索引和标量数学编写更新公式。
+完整例子为 [custom_momentum/model.wgt](../examples/native_training/custom_momentum/model.wgt)，将 beta 改为 0 即 SGD。
+
+| 签名 | 契约 |
+| --- | --- |
+| `differentiate(model,inputs,targets)` | 返回不透明梯度句柄；inputs/targets 为逐样本 f32 向量列表，非空且数量相同，形状遵循 forward/loss。参数与梯度均为更新前快照；无隐式优化器或裁剪。 |
+| `gradient_snapshot(gradient)` | 返回对象，字段为 `loss`、`parameters`、`gradients`、`names`、`shapes`、`state`、`steps`。parameters/gradients 按稳定参数顺序，仅含非冻结参数；每个参数是行优先扁平列表。state 初始 null，steps 是已提交自定义更新次数。 |
+| `commit_gradients(gradient,parameters,state)` | parameters 是全部可训练参数的候选绝对值，与快照顺序/长度一致。state 为用户定义的 JSON 兼容数据。检查全部完成后原子替换参数和状态，增加一次 steps，返回快照 loss 并释放句柄。 |
+| `release_gradient(gradient)` | 放弃快照并释放句柄，返回 null；已释放/提交的句柄再次使用报错。 |
+
+最多 16 个存活梯度句柄，总计量预算 64 MiB；释放/成功提交后立即归还句柄预算，Runtime 结束释放全部资源。
+计量包含参数、梯度、候选预留及元数据/状态，剩余预算用于单样本 forward/loss tape；求导结束不保留 tape。
+它不是进程总内存上限，普通列表副本、解析及分配器开销不在此上限内。
+求导扣除 forward/loss 指令工作量，以及按 tape f32 存储项和参数项计量的反传/归约工作；预算失败不退款。
+普通更新函数继续受脚本操作预算限制。
+
+状态允许有限数字、bool、字符串、null、列表及对象，禁止任何层级的模型/梯度等资源句柄；最大深度 32，
+按每节点 16 字节加字符串/对象键字节计量，最多 1 MiB。参数转换必须是有限 f32。
+错误形状、非有限候选、状态超限、活动执行事务、过期快照（包括 weightfs 修改后）均拒绝提交，参数和状态保持原值。
+冻结参数不可更新；同一参数的重复使用梯度由现有 VJP 合并。自定义路径目前不接受顺序模型或 GPU。
+
+`save_checkpoint` 在首次自定义提交后写 `weightlang.forward-training.v2`，包含模型、用户状态和自定义步数；
+`load_checkpoint` 同时接受旧 v1 与新 v2，严格拒绝未知断点字段。恢复不自动调用更新函数或训练，
+调用者需继续显式使用同一算法及状态版本；普通 `save_model` 不含优化器状态。
+数据游标、环境和 RNG 不自动恢复。目录须预先创建，断点仍拒绝覆盖已有文件。
+
+```sh
+mkdir -p weights/custom_momentum
+./target/debug/wgt run examples/native_training/custom_momentum/model.wgt
+```
+
 ## 强化学习与 benchmark 边界
 
 [REINFORCE 示例](../examples/native_training/reinforce.wgt) 用普通 WGT 函数定义奖励环境，

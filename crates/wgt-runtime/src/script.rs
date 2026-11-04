@@ -3,6 +3,7 @@ pub mod codegen;
 pub mod compiled;
 mod benchmark;
 mod dataset;
+mod optimization;
 mod math;
 pub mod testing;
 mod one_hot;
@@ -50,6 +51,7 @@ pub enum Value {
     Model(usize),
     Adaptive(usize),
     Reader(usize),
+    Gradient(u64),
 }
 impl Value {
     pub fn number(&self) -> Result<f64> {
@@ -239,6 +241,7 @@ fn execute_program(
         models: Vec::new(),
         adaptive: Vec::new(),
         readers: Vec::new(),
+        gradients: optimization::Gradients::default(),
         rng: 0,
         metrics: BTreeMap::new(),
     };
@@ -257,6 +260,7 @@ pub struct Runtime {
     models: Vec<crate::weightfs::Mounted<Trainer>>,
     adaptive: Vec<crate::weightfs::Mounted<crate::adaptive::AdaptiveSession>>,
     readers: Vec<Option<dataset::Reader>>,
+    gradients: optimization::Gradients,
     rng: u64,
     metrics: BTreeMap<String, serde_json::Value>,
 }
@@ -502,6 +506,9 @@ impl Runtime {
         );
         let name = entry.legacy_alias_for.as_deref().unwrap_or(name);
 
+        if matches!(name, "differentiate" | "gradient_snapshot" | "commit_gradients" | "release_gradient") {
+            return self.optimization_builtin(name, a);
+        }
         if name == "benchmark" {
             return self.benchmark(a);
         }
@@ -846,8 +853,8 @@ impl Runtime {
             "load_checkpoint" => {
                 let path=self.root.join(a[0].text()?);
                 let value:serde_json::Value=serde_json::from_reader(File::open(&path)?)?;
-                ensure!(matches!(value.get("format").and_then(|v| v.as_str()), Some("weightlang.forward-training.v1" | "weightlang.native-training.v1")), "load_checkpoint expects a native training checkpoint; use load_model(path, optimizer) for inference model IR");
-                if value.get("format").and_then(|v| v.as_str())==Some("weightlang.forward-training.v1") {
+                ensure!(matches!(value.get("format").and_then(|v| v.as_str()), Some("weightlang.forward-training.v1" | "weightlang.forward-training.v2" | "weightlang.native-training.v1")), "load_checkpoint expects a native training checkpoint; use load_model(path, optimizer) for inference model IR");
+                if matches!(value.get("format").and_then(|v| v.as_str()), Some("weightlang.forward-training.v1" | "weightlang.forward-training.v2")) {
                     ensure!(self.adaptive.len()<64,"model handle limit exceeded");
                     let session=crate::adaptive::AdaptiveSession::restore_checkpoint(value,64*1024*1024)?;
                     let index=self.adaptive.len(); self.adaptive.push(crate::weightfs::Mounted::auto(session)?);

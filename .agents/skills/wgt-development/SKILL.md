@@ -11,6 +11,12 @@ language/primitive_specs.json 是制品 graph 原语域，不是源码内置表�
 无需 import 的函数、张量 intrinsic、常量和声明类型统一登记在 language/prelude.json；
 script/prelude.rs 直接消费它，编辑器快照由它生成，领域实现路径见各 entry。
 普通函数与 tensor 上下文分开登记，不自动引入 std 模块。
+CPU forward 自定义算法：以 none 构造，differentiate(model,inputs,targets) 对受限 fn loss 求批次平均梯度；
+gradient_snapshot(handle) 提供loss/parameters/gradients/names/shapes/state/steps，普通WGT循环自行计算候选参数和状态，
+commit_gradients(handle,candidates,state) 原子提交并释放；release_gradient(handle) 放弃快照。
+最多16存活句柄、64MiB计量预算，状态最多32层/1MiB且不含资源句柄；普通host程序不自动可微。
+forward-training.v2 checkpoint保存自定义状态和步数，仍读旧v1；不自动执行算法，不支持该路径的顺序/GPU模型。
+完整契约 docs/native-training.md；真实例子 examples/native_training/custom_momentum/model.wgt，beta=0为SGD。
 保存推理模型用 save_model(model,path)，加载用 load_model(path,optimizer) 创建新优化器；
 保存训练断点用 save_checkpoint(model,path)，load_checkpoint(path) 恢复原优化器状态。
 旧 model/save/restore 仅为 legacy 别名，新例子使用新名；所有参数必填，保存拒绝已有目标。

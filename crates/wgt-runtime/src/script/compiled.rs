@@ -89,6 +89,7 @@ pub fn run_with_dependencies(
         models: Vec::new(),
         adaptive: Vec::new(),
         readers: Vec::new(),
+        gradients: super::optimization::Gradients::default(),
         rng: 0,
         metrics: BTreeMap::new(),
     };
