@@ -1,4 +1,6 @@
 //! Explicit WGT host scripts, interpreted entirely in Rust. No Python bridge.
+pub mod async_runtime;
+mod async_codegen;
 pub mod codegen;
 pub mod compiled;
 mod benchmark;
@@ -30,7 +32,7 @@ pub fn parse(source: &str) -> Result<Program> {
         } else {
             ("__graph", serde_json::to_string(&crate::source::graph(&unit.declarations)?.1)?)
         };
-        program.insert(name.into(), parse::Function { args:vec!["optimizer".into()], body:vec![Statement { line:1, kind:Stmt::Return(Expr::Call(builtin.into(),vec![Expr::Text(plan),Expr::Name("optimizer".into())])) }] });
+        program.insert(name.into(), parse::Function { is_async:false, args:vec!["optimizer".into()], body:vec![Statement { line:1, kind:Stmt::Return(Expr::Call(builtin.into(),vec![Expr::Text(plan),Expr::Name("optimizer".into())])) }] });
     } else {
         ensure!(unit.declarations.lines().all(|l| l.trim().is_empty() || l.trim().starts_with('#') || l.trim()=="wgt 0.5"), "model declarations require model NAME");
         ensure!(!program.contains_key("forward"), "forward requires model declarations");
@@ -60,6 +62,8 @@ pub enum Value {
     Adaptive(usize),
     Reader(usize),
     Gradient(u64),
+    Future(usize),
+    Task(usize),
 }
 impl Value {
     pub fn number(&self) -> Result<f64> {
@@ -265,6 +269,7 @@ fn execute_program(
         gradients: optimization::Gradients::default(),
         rng: 0,
         metrics: BTreeMap::new(),
+        async_state:async_runtime::AsyncState::default(),
     };
     let result = runtime.call(entry, Vec::new())?;
     Ok((runtime, result))
@@ -285,10 +290,13 @@ pub struct Runtime {
     gradients: optimization::Gradients,
     rng: u64,
     metrics: BTreeMap<String, serde_json::Value>,
+    async_state:async_runtime::AsyncState,
 }
 impl Runtime {
     pub fn tick(&mut self) -> Result<()> {
         self.permissions.check_deadline()?;
+        if let Some(context)=&self.async_state.context{return Ok(context.charge(1)?);}
+        if let Some(scope)=self.async_state.scopes.last(){return Ok(scope.charge(1)?);}
         self.remaining = self
             .remaining
             .checked_sub(1)
@@ -309,6 +317,7 @@ impl Runtime {
     }
     fn statement(&mut self, statement: &Stmt, env: &mut Env) -> Result<Flow> {
         match statement {
+            Stmt::Tasks(body)=>{self.enter_tasks()?;let result=self.block(body,env);let cleanup=self.leave_tasks(result.is_ok());let flow=result?;cleanup?;return Ok(flow);}
             Stmt::Let(name, expr) => {
                 let value = self.eval(expr, env)?;
                 env.insert(name.clone(), value);
@@ -443,6 +452,7 @@ impl Runtime {
                     .map(|v| self.eval(v, env))
                     .collect::<Result<_>>()?,
             )),
+            Expr::BuiltinCall(name,args) if name=="__await"||name=="__spawn"=>{let value=self.eval(&args[0],env)?;if name=="__await"{self.await_value(value)}else{self.spawn_future(value)}}
             Expr::BuiltinCall(name, args) | Expr::StaticCall(name, args) => {
                 let args = args.iter().map(|v| self.eval(v, env)).collect::<Result<_>>()?;
                 self.call(name, args)
@@ -583,6 +593,7 @@ impl Runtime {
         }
         self.tick()?;
         if let Some(function) = self.compiled.get(name).cloned() {
+            if function.async_body.is_some(){ensure!(args.len()==function.args.len(),"{name}: argument count mismatch");return self.cold_call(name,args);}
             ensure!(
                 args.len() == function.args.len(),
                 "{name}: argument count mismatch"
@@ -604,6 +615,7 @@ impl Runtime {
             };
         }
         if let Some(function) = self.program.get(name).cloned() {
+            if function.is_async{ensure!(args.len()==function.args.len(),"{name}: argument count mismatch");return self.cold_call(name,args);}
             ensure!(
                 args.len() == function.args.len(),
                 "{name}: argument count mismatch"
@@ -623,6 +635,7 @@ impl Runtime {
             .with_context(|| format!("{name}()"))
     }
     fn builtin(&mut self, name: &str, a: &[Value]) -> Result<Value> {
+        if self.async_state.context.is_some(){ensure!(["sqrt","exp","log","min","max","len","seed","random","assert"].contains(&name),"{name}: builtin unavailable in first native async stage; resource creation and synchronous I/O are forbidden");}
         if let Some(format) = name.strip_prefix("__load_") { return self.load_file(format, a); }
         if name == "__record_field" {
             return self.record_field(a[0].clone(), a[1].text()?);

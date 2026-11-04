@@ -13,10 +13,10 @@ module.exports = grammar({
     _statement: $ => choice($.model_declaration, $.operators_declaration, $.block_declaration, $.layer_declaration,
       $.port_declaration, $.constant_declaration, $.dimension_declaration,
       $.directive, $.data_row, $.function_declaration),
-    function_declaration: $ => seq('fn', field('name', $.identifier), $.arguments, repeat($._newline), $.body),
+    function_declaration: $ => seq(optional('async'), 'fn', field('name', $.identifier), $.arguments, repeat($._newline), $.body),
     // Balanced editor structure; semantic validation belongs to the Rust frontend.
     body: $ => seq('{', repeat(choice($._item, $._newline, $.body, $.script_keyword, ';')), '}'),
-    script_keyword: _ => choice('let', 'if', 'else', 'while', 'for', 'in', 'break', 'continue', 'return', 'train', 'on', 'rate', 'clip', 'assert', 'save', 'load', 'reload', 'checkpoint', 'json', 'text', 'to', 'using', 'overwrite'),
+    script_keyword: _ => choice('tasks', 'spawn', 'await', 'let', 'if', 'else', 'while', 'for', 'in', 'break', 'continue', 'return', 'train', 'on', 'rate', 'clip', 'assert', 'save', 'load', 'reload', 'checkpoint', 'json', 'text', 'to', 'using', 'overwrite'),
     literal: _ => choice('true', 'false', 'null'),
     model_declaration: $ => seq('model', field('name', $.identifier), repeat($._item)),
     operators_declaration: $ => seq('operators', field('name', $.identifier)),

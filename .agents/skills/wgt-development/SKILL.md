@@ -11,6 +11,11 @@ language/primitive_specs.json 是制品 graph 原语域，不是源码内置表�
 无需 import 的函数、张量 intrinsic、常量和声明类型统一登记在 language/prelude.json；
 script/prelude.rs 直接消费它，编辑器快照由它生成，领域实现路径见各 entry。
 普通函数与 tensor 上下文分开登记，不自动引入 std 模块。
+原生异步第一阶段见 docs/async-tasks.md 与 examples/native_training/async_tasks/model.wgt：async fn调用冷future，tasks作用域spawn、await只等目标并轮询兄弟任务，作用域join/取消并等待在途IO清理。
+仅纯数据参数/返回值，嵌套async await可用；拒绝嵌套tasks、async内spawn/tasks、模型等资源参数/返回、host/compute活跃上下文。await net(x)没有异步模型执行路径，不能宣称支持。
+await sleep(ms)与await load text from path通过固定两线程/64队列阻塞池执行；文本最多64MiB，metadata后按大小预留共享操作预算，worker按实际字节结算，未用预留恰一次归还。解释/AOT均须真实运行，不把解析通过当并发支持；AOT生成原生future，不回放AST。
+
+
 `train model on (inputs,targets) using strategy;` 静态调用同单元同步用户fn strategy(model,inputs,targets)，
 三参各求值一次且左至右、策略调用一次，忽略return；局部同名值不覆盖静态目标，拒绝builtin/构造器/async/错误形参。
 超参写在策略体内，与rate/clip互斥；策略决定零/一/多次显式commit，无额外提交、重试或整函数自动回滚。

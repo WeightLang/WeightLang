@@ -6,6 +6,7 @@ pub mod execution;
 pub mod adaptive;
 pub mod categorical;
 pub mod training;
+pub mod tasks;
 pub mod script;
 mod parameter_ops;
 mod quantized;

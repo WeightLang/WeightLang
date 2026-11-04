@@ -4,6 +4,66 @@
   "scope": "Implicit source functions, intrinsics, constants and declaration types. No std modules are imported. Contexts are separate contracts; ordinary functions are shared by interpreter and AOT. Parameters are required unless defaults explicitly say otherwise.",
   "entries": [
     {
+      "name": "async",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "async fn name(args) { BODY }",
+      "purpose": "创建冷用户future；显式纯数据参数与返回值；第一阶段拒绝资源/模型异步执行。",
+      "defaults": {},
+      "documentation": "docs/async-tasks.md",
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "tasks",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "tasks { BODY }",
+      "purpose": "同步函数内有界任务作用域，正常join、失败取消并等待在途IO；首期不支持嵌套。",
+      "defaults": {},
+      "documentation": "docs/async-tasks.md",
+      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+    },
+    {
+      "name": "await",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "await FUTURE_OR_TASK",
+      "purpose": "驱动冷future或等待作用域task，拒绝任意同步值。",
+      "defaults": {},
+      "documentation": "docs/async-tasks.md",
+      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+    },
+    {
+      "name": "spawn",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "spawn FUTURE",
+      "purpose": "在tasks内启动作用域子任务，禁止默认脱离。",
+      "defaults": {},
+      "documentation": "docs/async-tasks.md",
+      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+    },
+    {
+      "name": "sleep",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "await sleep(milliseconds)",
+      "purpose": "仅async fn：固定阻塞池等待0..30000整数毫秒，返回null；不是定时器reactor。",
+      "defaults": {},
+      "documentation": "docs/async-tasks.md",
+      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+    },
+    {
       "name": "save",
       "kind": "syntax",
       "contexts": [

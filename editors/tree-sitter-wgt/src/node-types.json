@@ -966,11 +966,27 @@
     "named": false
   },
   {
+    "type": "assert",
+    "named": false
+  },
+  {
+    "type": "async",
+    "named": false
+  },
+  {
+    "type": "await",
+    "named": false
+  },
+  {
     "type": "block",
     "named": false
   },
   {
     "type": "break",
+    "named": false
+  },
+  {
+    "type": "checkpoint",
     "named": false
   },
   {
@@ -1063,11 +1079,19 @@
     "named": false
   },
   {
+    "type": "json",
+    "named": false
+  },
+  {
     "type": "layer",
     "named": false
   },
   {
     "type": "let",
+    "named": false
+  },
+  {
+    "type": "load",
     "named": false
   },
   {
@@ -1095,6 +1119,10 @@
     "named": false
   },
   {
+    "type": "overwrite",
+    "named": false
+  },
+  {
     "type": "parameter",
     "named": false
   },
@@ -1107,6 +1135,10 @@
     "named": false
   },
   {
+    "type": "reload",
+    "named": false
+  },
+  {
     "type": "require",
     "named": false
   },
@@ -1115,7 +1147,15 @@
     "named": false
   },
   {
+    "type": "save",
+    "named": false
+  },
+  {
     "type": "share",
+    "named": false
+  },
+  {
+    "type": "spawn",
     "named": false
   },
   {
@@ -1124,6 +1164,18 @@
   },
   {
     "type": "target",
+    "named": false
+  },
+  {
+    "type": "tasks",
+    "named": false
+  },
+  {
+    "type": "text",
+    "named": false
+  },
+  {
+    "type": "to",
     "named": false
   },
   {
@@ -1140,6 +1192,10 @@
   },
   {
     "type": "use",
+    "named": false
+  },
+  {
+    "type": "using",
     "named": false
   },
   {

@@ -68,6 +68,7 @@ pub fn binary(op: &str, left: Value, right: Value) -> Result<Value> {
 pub struct Function {
     pub args: Vec<&'static str>,
     pub body: fn(&mut Runtime, &mut Env) -> Result<Flow>,
+    pub async_body: Option<fn(std::rc::Rc<std::cell::RefCell<Runtime>>,Env)->super::async_runtime::FutureValue>,
 }
 
 pub fn run(functions: Vec<(&'static str, Function)>, root: &Path, budget: u64) -> Result<Report> {
@@ -94,6 +95,7 @@ pub fn run_with_dependencies(
         gradients: super::optimization::Gradients::default(),
         rng: 0,
         metrics: BTreeMap::new(),
+        async_state:super::async_runtime::AsyncState::default(),
     };
     let result = runtime.call("main", Vec::new())?.json()?;
     Ok(Report {

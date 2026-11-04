@@ -90,6 +90,14 @@ fn main() {
 }
 ```
 
+## 原生异步任务
+
+普通脚本支持 `async fn name(args) { ... }`、`tasks { ... }`、`spawn future` 与 `await future_or_task`。
+调用 async fn 创建冷 future；spawn 仅用于同步 tasks 作用域，await 驱动/等待，正常退出 join，失败取消并等待在途 I/O 清理。
+第一阶段使用本地 future executor 和固定两线程阻塞 I/O 池，支持 async 用户函数、嵌套 await、`await sleep(ms)`、`await load text from path`；
+不支持嵌套 tasks、async fn 内 tasks/spawn、资源参数/返回值或异步模型执行。活跃 host/compute 限制下显式拒绝。
+完整签名、预算、RNG、错误/释放契约和限制见[原生异步任务](async-tasks.md)，例子见[async_tasks/model.wgt](../examples/native_training/async_tasks/model.wgt)。
+
 ## 普通函数、训练与数据
 
 WGT 0.5 普通函数还支持 `let action = sample from net(input);`：`net` 必须是当前函数内的模型句柄变量或参数，

@@ -1,5 +1,10 @@
 {
   "keywords": [
+    "async",
+    "await",
+    "spawn",
+    "tasks",
+    "sleep",
     "save",
     "load",
     "reload",

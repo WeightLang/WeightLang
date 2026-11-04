@@ -44,6 +44,7 @@ pub enum Stmt {
     Let(String, Expr),
     /// Explicit structured sampling; ordinary SampleFrom expressions stay scalar.
     LetSample(Vec<(String, String)>, String, Expr),
+    Tasks(Vec<Statement>),
     Collect(String, Vec<Statement>),
     Yield(Vec<(String, Expr)>),
     ForBatches(String, Expr, Expr, Vec<Statement>),
@@ -61,6 +62,7 @@ pub enum Stmt {
 }
 #[derive(Clone, Debug)]
 pub struct Function {
+    pub is_async:bool,
     pub args: Vec<String>,
     pub body: Vec<Statement>,
 }
@@ -179,6 +181,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
     };
     let mut program = Program::new();
     while parser.pos < parser.tokens.len() {
+        let is_async=parser.take("async");
         parser.expect("fn")?;
         let name = parser.name()?;
         ensure!(
@@ -198,10 +201,11 @@ pub fn parse_functions(source: &str) -> Result<Program> {
             }
         }
         parser.expect(")")?;
+        ensure!(!is_async || !matches!(name.as_str(),"main"|"forward"|"loss"),"async {name} is unavailable; entry and tensor functions must be synchronous");
         let body = parser.block()?;
         ensure!(
             program
-                .insert(name.clone(), Function { args, body })
+                .insert(name.clone(), Function { is_async,args, body })
                 .is_none(),
             "duplicate function: {name}"
         );
@@ -288,7 +292,7 @@ impl Parser {
         ensure!(
             ![
                 "fn", "let", "if", "else", "while", "for", "in", "return", "break", "continue",
-                "true", "false", "null", "mix", "then", "onehot"
+                "true", "false", "null", "mix", "then", "onehot", "async", "await", "spawn", "tasks", "sleep"
             ]
             .contains(&t.text.as_str()),
             "reserved name: {}",
@@ -309,7 +313,7 @@ impl Parser {
     }
     fn statement(&mut self) -> Result<Statement> {
         let line = self.line();
-        let kind = if self.take("let") {
+        let kind = if self.take("tasks") {Stmt::Tasks(self.block()?)} else if self.take("let") {
             if self.take("{") {
                 let mut bindings = Vec::new();
                 while !self.take("}") {
@@ -487,6 +491,7 @@ impl Parser {
             Expr::Text(t.text)
         } else {
             match t.text.as_str() {
+                "await"|"spawn"=>Expr::BuiltinCall(format!("__{}",t.text),vec![self.expr(7)?]),
                 "load" => {
                     let format = self.next()?;
                     ensure!(!format.quoted && matches!(format.text.as_str(), "model" | "checkpoint" | "json" | "text"), "line {}: expected load model, checkpoint, json or text", t.line);

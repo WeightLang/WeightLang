@@ -30,6 +30,7 @@ fn interpreter_and_aot_share_host_permissions() {
                 compiled::Function {
                     args: vec![],
                     body: main_body,
+                    async_body:None,
                 },
             )],
             Path::new("."),

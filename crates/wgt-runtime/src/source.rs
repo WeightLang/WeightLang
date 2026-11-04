@@ -24,7 +24,7 @@ pub fn split(source: &str) -> Result<Unit> {
             continue;
         }
         ensure!(!header || !trimmed.starts_with("wgt "), "line {}: duplicate version header", i+1);
-        if !in_function && trimmed.starts_with("fn ") {
+        if !in_function && (trimmed.starts_with("fn ") || trimmed.starts_with("async fn ")) {
             in_function = true;
             opened = false;
         }

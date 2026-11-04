@@ -22,6 +22,7 @@ fn expr(e: &Expr) -> String {
             "Value::List(vec![{}])",
             v.iter().map(expr).collect::<Vec<_>>().join(",")
         ),
+        Expr::BuiltinCall(n,args) if n=="__await"||n=="__spawn"=>format!("{{let value={};rt.{}(value)?}}",expr(&args[0]),if n=="__await"{"await_value"}else{"spawn_future"}),
         Expr::BuiltinCall(n, args) | Expr::StaticCall(n, args) => format!(
             "{{ let args = vec![{}]; rt.call({n:?}, args)? }}",
             args.iter().map(expr).collect::<Vec<_>>().join(",")
@@ -58,6 +59,7 @@ fn block(body: &[Statement]) -> String {
     let mut code = String::from("(|| -> Result<Flow> {\n");
     for statement in body {
         let inner = match &statement.kind {
+            Stmt::Tasks(body)=>format!("rt.enter_tasks()?;let result={};let cleanup=rt.leave_tasks(result.is_ok());let flow=result?;cleanup?;if !matches!(flow,Flow::Next){{return Ok(flow);}}",block(body)),
             Stmt::Let(n,e) => format!("let value = {}; env.insert({n:?}.into(),value);",expr(e)),
             Stmt::LetSample(bindings,n,input) => {
                 let assignments = bindings.iter().map(|(field,binding)| format!("env.insert({binding:?}.into(), {}.clone());", if field == "action" { "action" } else { "log_prob" })).collect::<String>();
@@ -96,15 +98,19 @@ pub fn rust_source_with_dependencies(
     anyhow::ensure!(program.contains_key("main"), "compilation requires fn main()");
     let mut functions: Vec<_> = program.iter().collect();
     functions.sort_by_key(|(name, _)| *name);
-    let mut code = String::from("#![allow(unused_imports,unused_variables,unused_mut)]\nuse anyhow::{Result,Context,ensure};\nuse weightlang_runtime::script::{Runtime,Env,Flow,Value,compiled};\n");
+    let mut code = String::from("#![allow(unused_imports,unused_variables,unused_mut)]\nuse anyhow::{Result,Context,ensure};\nuse weightlang_runtime::script::{Runtime,Env,Flow,Value,compiled,async_runtime};\n");
     let mut entries = Vec::new();
     for (i, (name, f)) in functions.iter().enumerate() {
-        code.push_str(&format!(
-            "fn f{i}(rt: &mut Runtime, env: &mut Env) -> Result<Flow> {{ {} }}\n",
-            block(&f.body)
-        ));
+        let async_body = if f.is_async {
+            code.push_str(&super::async_codegen::function(i, &f.body)?);
+            code.push_str(&format!("fn f{i}(_: &mut Runtime, _: &mut Env) -> Result<Flow> {{ anyhow::bail!(\"async function requires await\") }}\n"));
+            format!("Some(af{i})")
+        } else {
+            code.push_str(&format!("fn f{i}(rt: &mut Runtime, env: &mut Env) -> Result<Flow> {{ {} }}\n", block(&f.body)));
+            "None".into()
+        };
         entries.push(format!(
-            "({name:?}, compiled::Function {{ args: vec![{}], body: f{i} }})",
+            "({name:?}, compiled::Function {{ args: vec![{}], body: f{i}, async_body: {async_body} }})",
             f.args
                 .iter()
                 .map(|a| format!("{a:?}"))

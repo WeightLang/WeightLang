@@ -225,19 +225,17 @@ fn main() {
           (qualified_name
             (identifier))))
       (comment)
-      (call
+      (script_keyword)
+      (arguments
         (qualified_name
           (identifier))
-        (arguments
-          (qualified_name
-            (identifier))
-          (operator)
-          (qualified_name
-            (identifier))
-          (operator)
-          (number)
-          (punctuation)
-          (string)))
+        (operator)
+        (qualified_name
+          (identifier))
+        (operator)
+        (number)
+        (punctuation)
+        (string))
       (call
         (qualified_name
           (identifier))
@@ -487,24 +485,22 @@ fn main() {
           (identifier))
         (arguments
           (string)))
-      (call
-        (qualified_name
-          (identifier))
-        (arguments
-          (call
-            (qualified_name
-              (identifier))
-            (arguments
-              (array
-                (number)
-                (punctuation)
-                (number))))
-          (array
-            (number))
-          (operator)
-          (number)
-          (punctuation)
-          (string)))
+      (script_keyword)
+      (arguments
+        (call
+          (qualified_name
+            (identifier))
+          (arguments
+            (array
+              (number)
+              (punctuation)
+              (number))))
+        (array
+          (number))
+        (operator)
+        (number)
+        (punctuation)
+        (string))
       (script_keyword)
       (call
         (qualified_name

@@ -46,8 +46,23 @@
     }
   },
   "prelude": "language/prelude.json",
-  "file_syntax": {"context":"ordinary_function", "save":"save KIND VALUE to PATH [overwrite];", "load":"load KIND from PATH [using OPTIMIZER]", "formats":["model","checkpoint","json","text"], "default_overwrite":false, "parent_creation":false, "max_bytes":67108864, "budget":"one operation per encoded byte", "host_policy":"direct path IO denied; use capabilities", "assert":"assert CONDITION [, MESSAGE]; strict bool; message lazy on failure; two-argument function remains eager"},
-
+  "file_syntax": {
+    "context": "ordinary_function",
+    "save": "save KIND VALUE to PATH [overwrite];",
+    "load": "load KIND from PATH [using OPTIMIZER]",
+    "formats": [
+      "model",
+      "checkpoint",
+      "json",
+      "text"
+    ],
+    "default_overwrite": false,
+    "parent_creation": false,
+    "max_bytes": 67108864,
+    "budget": "one operation per encoded byte",
+    "host_policy": "direct path IO denied; use capabilities",
+    "assert": "assert CONDITION [, MESSAGE]; strict bool; message lazy on failure; two-argument function remains eager"
+  },
   "assert_syntax": {
     "syntax": "assert CONDITION [, MESSAGE];",
     "context": "ordinary_function",
@@ -129,5 +144,31 @@
     "evaluation": "MODEL,INPUTS,TARGETS left-to-right once; strategy once; return discarded",
     "updates": "explicit strategy-controlled zero or more commits; no implicit optimizer, retry or whole-function rollback",
     "hyperparameters": "defined in strategy body; using mutually exclusive with rate/clip"
+  },
+  "async_tasks": {
+    "syntax": [
+      "async fn",
+      "await",
+      "tasks",
+      "spawn"
+    ],
+    "cold_calls": true,
+    "executor": "local future polling; fixed 2 worker blocking IO pool and 64 queued operations",
+    "scope_tasks": 64,
+    "cold_futures": 10000,
+    "scope_timeout_ms": 30000,
+    "budget": "shared parent operations; spawn ordinal RNG split",
+    "io": [
+      "await sleep(integer_ms_0_to_30000)",
+      "await load text from path; 64 MiB maximum, metadata-sized shared reservation, worker settles actual bytes and returns unused reservation"
+    ],
+    "host_compute": "explicitly rejected before future or scope creation",
+    "nested_async_await": true,
+    "nested_tasks": false,
+    "spawn_inside_async": false,
+    "resource_parameters_results": false,
+    "model_device_async": false,
+    "aot": "native Rust future control flow; no AST replay",
+    "documentation": "docs/async-tasks.md"
   }
 }

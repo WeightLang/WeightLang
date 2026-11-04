@@ -17,6 +17,7 @@ pub(super) fn validate(program: &Program) -> Result<()> {
                     function.args.len() == 3,
                     "train strategy {name} must have exactly three parameters"
                 );
+                ensure!(!function.is_async,"train strategy {name} must be synchronous");
                 for arg in args {
                     expression(arg, program)?;
                 }
@@ -63,7 +64,7 @@ pub(super) fn validate(program: &Program) -> Result<()> {
                     block(b, program)?;
                 }
                 Stmt::Assert(e,message) => { expression(e,program)?; if let Some(m)=message { expression(m,program)?; } }
-                Stmt::Collect(_,body) => block(body,program)?,
+                Stmt::Tasks(body)|Stmt::Collect(_,body) => block(body,program)?,
                 Stmt::Yield(fields) => { for (_,e) in fields { expression(e,program)?; } }
                 Stmt::ForBatches(_,a,b,body) => {expression(a,program)?;expression(b,program)?;block(body,program)?;}
                 Stmt::Save(_,a,b,_) => { expression(a,program)?; expression(b,program)?; }
