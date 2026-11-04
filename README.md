@@ -37,10 +37,10 @@ See [migration and release packaging](docs/weightc-migration.md).
 
 ```sh
 cargo build --locked --workspace --bins
-./target/debug/weightc check examples/native_training/build.wgt
-./target/debug/wgt run examples/native_training/supervised.wgt
-./target/debug/weightc legacy-build examples/native_training/build.wgt -o weights/native-demo
-./target/debug/weightc compile examples/native_training/compiled.wgt -o .cache/weightlang/demo
+./target/debug/weightc check examples/native_training/build/model.wgt
+./target/debug/wgt run examples/native_training/supervised/model.wgt
+./target/debug/weightc legacy-build examples/native_training/build/model.wgt -o weights/native-demo
+./target/debug/weightc compile examples/native_training/compiled/model.wgt -o .cache/weightlang/demo
 ./.cache/weightlang/demo
 ```
 
@@ -50,7 +50,9 @@ training and saving. `legacy-build` (`build` alias) requires `main` to return a
 model and writes a complete model directory. It refuses existing destinations.
 
 Use `wgt new demo` to create a native script project, `wgt sync` to synchronize
-package dependencies, and `wgt run main.wgt` to run it. No Python environment
+package dependencies, and `wgt run model.wgt` to run it. Model source entrypoints
+must be named **`model.wgt`**; give each independent model or training example its
+own directory and use the directory name to identify it. No Python environment
 is prepared. Native artifact inspection, graph rendering and package fetching
 remain separate from script execution.
 
@@ -68,9 +70,9 @@ On Linux, [weightfs](docs/weightfs.md) can expose live weights as editable JSON
 files. The runtime attempts to mount it by default; an explicit model or
 checkpoint save is still required for persistence.
 
-`std/` retains WGT library sources; `language/primitive_specs.json` holds operator
-signatures. Retained library sources and artifact fixtures are migration material,
-not proof of execution support. See the [WGT 0.5 reference](docs/reference.zh-CN.md),
+The categorized `std/` directories provide runnable scalar and vector examples; see the [native math library](docs/standard-library.md). Older graph
+sources in `std/` and artifact fixtures remain migration material, not proof of
+execution support. See the [WGT 0.5 reference](docs/reference.zh-CN.md),
 [package guide](docs/packages.md), [command guide](docs/wgt.md), and
 [editor guide](docs/editors.md).
 

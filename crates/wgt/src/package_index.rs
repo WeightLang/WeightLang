@@ -476,16 +476,22 @@ pub fn submit(repo: &str, record: &Record) -> Result<String> {
     Ok(pr["html_url"].as_str().context("PR URL")?.into())
 }
 
-pub fn register(
-    repo: &str,
-    name: &str,
-    module: &str,
-    version: &str,
-    license: &str,
-    edition: &str,
-    cache: &Path,
-    dry_run: bool,
-) -> Result<()> {
+pub struct Registration<'a> {
+    pub name: &'a str,
+    pub module: &'a str,
+    pub version: &'a str,
+    pub license: &'a str,
+    pub edition: &'a str,
+}
+
+pub fn register(repo: &str, entry: Registration<'_>, cache: &Path, dry_run: bool) -> Result<()> {
+    let Registration {
+        name,
+        module,
+        version,
+        license,
+        edition,
+    } = entry;
     repository(repo)?;
     let record = verified_record(
         name,

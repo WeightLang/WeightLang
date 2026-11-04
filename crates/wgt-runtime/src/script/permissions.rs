@@ -122,6 +122,9 @@ impl Permissions {
             provider,
         ))
     }
+    pub(super) fn deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
     pub(super) fn allows_legacy_io(&self) -> bool {
         self.deadline.is_none()
     }
@@ -180,6 +183,18 @@ mod tests {
                 .is_err()
             );
         }
+    }
+    #[test]
+    fn provider_initialization_cannot_extend_absolute_deadline() {
+        let mut expired = policy();
+        expired["deadline_ms"] = 0.into();
+        let (permissions, initialized_at) =
+            Permissions::from_bytes_with(&serde_json::to_vec(&expired).unwrap(), |_| {
+                Ok(Instant::now())
+            })
+            .unwrap();
+        assert!(permissions.deadline().unwrap() <= initialized_at);
+        assert!(permissions.check_deadline().is_err());
     }
     #[test]
     fn inherited_deadline_and_direct_io_authority() {

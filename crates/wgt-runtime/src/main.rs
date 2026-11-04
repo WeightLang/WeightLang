@@ -144,6 +144,10 @@ fn main() -> Result<()> {
             weightlang_runtime::script::parse(&std::fs::read_to_string(&source)?)?;
             println!("ok: native WGT script; no execution");
         } else {
+            if let Some(status) = weightlang_runtime::isolation::supervise_current()? {
+                anyhow::ensure!(status == 0, "isolated execution failed");
+                return Ok(());
+            }
             let report = weightlang_runtime::script::run_file(Path::new(&source), 10_000_000)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }

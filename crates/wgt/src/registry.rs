@@ -1,7 +1,7 @@
 use crate::{
     artifact::{hash, hash_file},
-    package_artifact::{Info, index_files},
     manifest::{self, Lock, Manifest},
+    package_artifact::{index_files, Info},
 };
 use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
@@ -58,17 +58,29 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
 /// Compare digit lengths before bytes so arbitrarily large valid components work too.
 pub fn latest_release(module: &str, releases: &[Value]) -> Result<String> {
     let prefix = tag(module, "")?;
-    let mut versions: Vec<&str> = releases.iter().filter_map(|release| {
-        if release["draft"].as_bool() != Some(false)
-            || release["prerelease"].as_bool() != Some(false) {
-            return None;
-        }
-        let version = release["tag_name"].as_str()?.strip_prefix(&prefix)?;
-        manifest::version(version).ok()?;
-        Some(version)
-    }).collect();
-    versions.sort_by_key(|v| v[1..].split('.').map(|part| (part.len(), part)).collect::<Vec<_>>());
-    versions.last().map(|v| (*v).to_owned()).context("no stable published release found for package")
+    let mut versions: Vec<&str> = releases
+        .iter()
+        .filter_map(|release| {
+            if release["draft"].as_bool() != Some(false)
+                || release["prerelease"].as_bool() != Some(false)
+            {
+                return None;
+            }
+            let version = release["tag_name"].as_str()?.strip_prefix(&prefix)?;
+            manifest::version(version).ok()?;
+            Some(version)
+        })
+        .collect();
+    versions.sort_by_key(|v| {
+        v[1..]
+            .split('.')
+            .map(|part| (part.len(), part))
+            .collect::<Vec<_>>()
+    });
+    versions
+        .last()
+        .map(|v| (*v).to_owned())
+        .context("no stable published release found for package")
 }
 
 pub trait Remote {
@@ -84,7 +96,10 @@ impl Github {
         let mut releases = Vec::new();
         // GitHub's /latest is repository-wide and cannot select monorepo packages.
         for page in 1..=1000 {
-            let url = format!("https://api.github.com/repos/{}/{}/releases?per_page=100&page={page}", parts[1], parts[2]);
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/releases?per_page=100&page={page}",
+                parts[1], parts[2]
+            );
             let batch: Vec<Value> = serde_json::from_slice(&self.download(&url, 16 * 1024 * 1024)?)
                 .context("invalid GitHub releases response")?;
             let finished = batch.len() < 100;
@@ -207,10 +222,20 @@ pub fn fetch(
     locked: bool,
     remote: &dyn Remote,
 ) -> Result<Lock> {
-    let mut all: Lock = known.iter()
-        .filter(|((m, v, k), _)| manifest.dependencies.get(m) == Some(v)
-            && ["registry", "registry-commit", "registry-name", "registry-record"].contains(&k.as_str()))
-        .map(|(k, v)| (k.clone(), v.clone())).collect();
+    let mut all: Lock = known
+        .iter()
+        .filter(|((m, v, k), _)| {
+            manifest.dependencies.get(m) == Some(v)
+                && [
+                    "registry",
+                    "registry-commit",
+                    "registry-name",
+                    "registry-record",
+                ]
+                .contains(&k.as_str())
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     for (m, v) in &manifest.dependencies {
         let parts = manifest::module_parts(m)?;
         manifest::version(v)?;
@@ -401,11 +426,28 @@ pub fn package(
     fs::create_dir_all(parent)?;
     let stage = tempfile::tempdir_in(parent)?;
     let mut records = serde_json::Map::new();
-    let sources: Vec<_> = fs::read_dir(project)?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|e| e == "wgt"))
-        .collect();
-    for entry in fs::read_dir(artifacts)? {
+    // Git enumerates committed package sources recursively without descending
+    // into caches or following directory symlinks. Preserve relative paths when
+    // several model directories each contain a model.wgt entrypoint.
+    let tracked = git(project, &["ls-files", "-z", "--", "*.wgt"])?;
+    let mut sources = Vec::new();
+    for name in tracked.split('\0').filter(|name| !name.is_empty()) {
+        manifest::relative_file(name)?;
+        let source = project.join(name);
+        ensure!(
+            fs::symlink_metadata(&source)?.file_type().is_file(),
+            "source must be a regular file: {name}"
+        );
+        sources.push(source);
+    }
+    for entry in if artifacts.exists() {
+        Some(fs::read_dir(artifacts)?)
+    } else {
+        None
+    }
+    .into_iter()
+    .flatten()
+    {
         let path = entry?.path();
         if !path.join("manifest.json").is_file() {
             continue;
@@ -428,11 +470,57 @@ pub fn package(
             files.insert((*file).into(),json!({"asset":asset,"sha256":hash_file(&path.join(file))?,"size":fs::metadata(path.join(file))?.len()}));
         }
         ensure!(!records.contains_key(name), "duplicate model {name}");
-        records.insert(name.into(),json!({"source_path":source.file_name().unwrap().to_str().context("non-UTF8 source")?,"format":if art.native { "weightlang.native-build.v1" } else { "weightlang.artifact" },"untrained_tensors":art.untrained,"files":files}));
+        let source_path = source
+            .strip_prefix(project)?
+            .to_str()
+            .context("non-UTF8 source")?
+            .replace('\\', "/");
+        records.insert(name.into(),json!({"source_path":source_path,"format":if art.operator { crate::package_artifact::OPERATOR_FORMAT } else if art.native { "weightlang.native-build.v1" } else { "weightlang.artifact" },"untrained_tensors":art.untrained,"files":files}));
+    }
+    // Pure source libraries have no initialized parameters, checkpoints or training entrypoint.
+    for source in &sources {
+        let text = fs::read_to_string(source)?;
+        if !text.lines().any(|l| l.trim().starts_with("operators ")) {
+            continue;
+        }
+        let unit = weightlang_runtime::source::split(&text)?;
+        if !unit
+            .declarations
+            .lines()
+            .any(|l| l.trim().starts_with("operators "))
+        {
+            continue;
+        }
+        let name = weightlang_runtime::script::operators::library(&text)?;
+        ensure!(
+            !records.contains_key(&name),
+            "duplicate artifact name: {name}"
+        );
+        let metadata = json!({"format":crate::package_artifact::OPERATOR_FORMAT,"edition":"0.5","name":name,
+            "source":"source.wgt","source_sha256":hash(text.as_bytes())});
+        let payloads = [
+            ("manifest.json", serde_json::to_vec_pretty(&metadata)?),
+            ("source.wgt", text.into_bytes()),
+        ];
+        let mut files = serde_json::Map::new();
+        for (file, bytes) in payloads {
+            let asset = format!("{name}.{file}");
+            fs::write(stage.path().join(&asset), &bytes)?;
+            files.insert(
+                file.into(),
+                json!({"asset":asset,"sha256":hash(&bytes),"size":bytes.len()}),
+            );
+        }
+        let source_path = source
+            .strip_prefix(project)?
+            .to_str()
+            .context("non-UTF8 operator source")?
+            .replace('\\', "/");
+        records.insert(name,json!({"source_path":source_path,"format":crate::package_artifact::OPERATOR_FORMAT,"untrained_tensors":[],"files":files}));
     }
     ensure!(
         !records.is_empty(),
-        "no prebuilt artifacts; run wgt build first"
+        "no prebuilt model artifacts or operator libraries"
     );
     for source in &sources {
         let text = fs::read_to_string(source)?;
@@ -446,10 +534,10 @@ pub fn package(
         });
         if is_model {
             let name = source
-                .file_name()
-                .unwrap()
+                .strip_prefix(project)?
                 .to_str()
-                .context("non-UTF8 source")?;
+                .context("non-UTF8 source")?
+                .replace('\\', "/");
             ensure!(
                 records.values().any(|r| r["source_path"] == name),
                 "missing prebuilt artifact for {name}; run wgt build"

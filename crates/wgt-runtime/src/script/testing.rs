@@ -10,6 +10,16 @@ impl Suite {
     /// Discover ordinary test_* functions. Invalid signatures fail individually at run time.
     pub fn parse(source: &str) -> Result<Self> {
         let program = super::parse(source)?;
+        Self::from_program(program)
+    }
+    pub fn parse_with_imports(
+        source: &str,
+        root: &Path,
+        dependencies: &BTreeMap<String, String>,
+    ) -> Result<Self> {
+        Self::from_program(super::parse_with_imports(source, root, dependencies)?)
+    }
+    fn from_program(program: Program) -> Result<Self> {
         let mut names: Vec<_> = program
             .iter()
             .filter(|(name, function)| {

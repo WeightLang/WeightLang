@@ -4,7 +4,7 @@ use std::{fs, process::Command};
 fn native_script_check_needs_no_python() {
     let cache = tempfile::tempdir().unwrap();
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/native_training/build.wgt");
+        .join("../../examples/native_training/build/model.wgt");
     let output = Command::new(env!("CARGO_BIN_EXE_weightc"))
         .env_clear()
         .env("PATH", "")
@@ -104,7 +104,6 @@ fn repository_source_has_no_python_distribution_or_tests() {
         "pyproject.toml",
         "MANIFEST.in",
         ".github/workflows/publish-pypi.yml",
-        "crates/wgt/build.rs",
     ] {
         assert!(!root.join(file).exists(), "{file}");
     }

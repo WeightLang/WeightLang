@@ -68,7 +68,7 @@ pub fn binary(op: &str, left: Value, right: Value) -> Result<Value> {
 pub struct Function {
     pub args: Vec<&'static str>,
     pub body: fn(&mut Runtime, &mut Env) -> Result<Flow>,
-    pub async_body: Option<fn(std::rc::Rc<std::cell::RefCell<Runtime>>,Env)->super::async_runtime::FutureValue>,
+    pub async_body: Option<fn(std::rc::Rc<std::cell::RefCell<Runtime>>, Env) -> super::async_runtime::FutureValue>,
 }
 
 pub fn run(functions: Vec<(&'static str, Function)>, root: &Path, budget: u64) -> Result<Report> {
@@ -80,8 +80,10 @@ pub fn run_with_dependencies(
     budget: u64,
     dependencies: BTreeMap<String, String>,
 ) -> Result<Report> {
+    let (permissions, resources) = resources::Resources::from_env()?;
     let mut runtime = Runtime {
-        permissions: permissions::Permissions::from_env()?,
+        permissions,
+        resources,
         program: HashMap::new(),
         compiled: functions.into_iter().map(|(n, f)| (n.into(), f)).collect(),
         root: root.into(),
@@ -93,10 +95,13 @@ pub fn run_with_dependencies(
         adaptive: Vec::new(),
         readers: Vec::new(),
         gradients: super::optimization::Gradients::default(),
+        #[cfg(feature = "gpu")]
+        kernels: Vec::new(),
         rng: 0,
         metrics: BTreeMap::new(),
         agents: Vec::new(), environments: Vec::new(),
-        async_state:super::async_runtime::AsyncState::default(),
+        async_state: super::async_runtime::AsyncState::default(),
+        harness: super::openresponses::Harness::default(),
     };
     let result = runtime.call("main", Vec::new())?.json()?;
     Ok(Report {
@@ -115,6 +120,10 @@ pub fn entry_with_dependencies(
     root: &str,
     dependencies: Vec<(&str, &str)>,
 ) -> Result<()> {
+    if let Some(status) = crate::isolation::supervise_current()? {
+        ensure!(status == 0, "isolated execution failed");
+        return Ok(());
+    }
     let mut root = PathBuf::from(root);
     let mut budget = 10_000_000;
     let mut args = std::env::args().skip(1);

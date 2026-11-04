@@ -28,11 +28,11 @@ HF 的一次 batch 失败不提交读取偏移；总行数变化会报错，但�
 JSONL 错误可能已经消费输入；应关闭并重新打开。
 每次运行累计最多创建 1024 个流（包括已关闭的流）。
 
-完整可运行示例：[huggingface.wgt](../examples/native_training/huggingface.wgt)。
+完整可运行示例：[huggingface/model.wgt](../examples/native_training/huggingface/model.wgt)。
 它只加载五条公开 Iris 样本，不训练；需要网络：
 
 ```sh
-cargo run -p weightlang-wgt --bin wgt -- script examples/native_training/huggingface.wgt
+cargo run -p weightlang-wgt --bin wgt -- script examples/native_training/huggingface/model.wgt
 # 同一脚本也支持 script FILE --compiled
 ```
 

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/wgt", "crates/wgt-runtime"]
+members = ["crates/wgt", "crates/wgt-runtime", "crates/wgtime", "crates/wgtime-service", "crates/wgtime-control"]
 resolver = "2"
 
 [profile.release]

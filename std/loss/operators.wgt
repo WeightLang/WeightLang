@@ -1,0 +1,21 @@
+wgt 0.5
+operators Losses
+
+# 两个 f32[N] -> f32[1]：对全部特征取均值，不含 batch 轴。
+# 训练器在样本轴上的平均独立进行；库不拥有参数或优化器。
+fn squared_error(prediction, target) {
+    return square(prediction - target).mean;
+}
+
+# f32[1] 归约结果才乘 [0.5]，不对 N 个特征隐式广播标量。
+fn half_squared_error(prediction, target) {
+    return squared_error(prediction, target) * [0.5];
+}
+
+# logits/target 都是 f32[类别数]；输出 f32[1]，沿类别求和而非平均。
+# target 由调用方提供非负且总和为1的分布，可为独热或软标签；
+# 本纯张量库不动态校验该前提。任意有限权重会按同一加权公式计算。
+# 直接消费 log_softmax，避免先 softmax 再 log 导致小概率下溢。
+fn categorical_logits(logits, target) {
+    return -sum(target * log_softmax(logits));
+}

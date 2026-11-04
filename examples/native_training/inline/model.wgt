@@ -1,0 +1,11 @@
+# /// script
+# [dependencies]
+# ///
+wgt 0.5
+# 显式空依赖表使此脚本独立运行，不继承上级项目的依赖。
+# 需要发布包时，在表中加入 "github.com/owner/repo[/subdir]" = "v1.2.3"。
+fn main() {
+    # 单输入/单输出线性模型；这里仅初始化并前向，不进行训练或保存权重。
+    let model = mlp([1, 1], "identity", 42, "sgd");
+    return predict(model, [0.25]);
+}

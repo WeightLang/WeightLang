@@ -1,48 +1,131 @@
 //! Explicit WGT host scripts, interpreted entirely in Rust. No Python bridge.
+mod benchmark;
 pub mod async_runtime;
 mod async_codegen;
 pub mod codegen;
 pub mod compiled;
-mod benchmark;
-mod permissions;
 mod dataset;
 pub(crate) mod file_io;
 mod persistence;
-pub mod record_schema;
-pub mod records;
-pub mod agents;
-mod optimization;
-mod strategies;
 mod math;
-pub mod testing;
 mod one_hot;
+pub mod operators;
 pub(crate) mod parse;
 pub mod prelude;
+mod resources;
+mod openresponses;
+mod modules;
+mod permissions;
+pub mod testing;
+mod training_device;
+mod optimization;
+pub mod agents;
+mod strategies;
+pub mod record_schema;
+pub mod records;
 use crate::training::{mlp, random, Objective, Optimizer, Trainer};
 use anyhow::{bail, ensure, Context, Result};
 pub fn parse(source: &str) -> Result<Program> {
-    let unit = crate::source::split(source)?;
-    let mut program = parse::parse_functions(&unit.functions)?;
-    let model_name = unit.declarations.lines().find_map(|l| l.split('#').next().unwrap_or("").trim().strip_prefix("model ")).map(str::trim);
-    if let Some(name) = model_name {
-        ensure!(!name.starts_with("__") && !name.is_empty() && name.bytes().enumerate().all(|(i,c)| c.is_ascii_alphabetic() || c==b'_' || (i>0 && c.is_ascii_digit())), "invalid model name");
-        ensure!(!program.contains_key(name) && !prelude::is_builtin(name), "model name conflicts with function: {name}");
-        let (builtin, plan) = if program.remove("forward").is_some() {
-            program.remove("loss");
-            ("__adaptive", serde_json::to_string(&crate::adaptive::parse(source)?)?)
-        } else {
-            ("__graph", serde_json::to_string(&crate::source::graph(&unit.declarations)?.1)?)
-        };
-        program.insert(name.into(), parse::Function { is_async:false, args:vec!["optimizer".into()], body:vec![Statement { line:1, kind:Stmt::Return(Expr::Call(builtin.into(),vec![Expr::Text(plan),Expr::Name("optimizer".into())])) }] });
-    } else {
-        ensure!(unit.declarations.lines().all(|l| l.trim().is_empty() || l.trim().starts_with('#') || l.trim()=="wgt 0.5"), "model declarations require model NAME");
-        ensure!(!program.contains_key("forward"), "forward requires model declarations");
-    }
-    if let Some(main) = program.get("main") { ensure!(main.args.is_empty(), "main takes no arguments"); }
-    else { ensure!(model_name.is_some() || program.keys().any(|name| name.starts_with("test_")), "program requires fn main(), test_* functions or model declarations"); }
+    parse_linked(source, Program::new())
+}
+pub fn parse_with_imports(
+    source: &str,
+    root: &Path,
+    dependencies: &BTreeMap<String, String>,
+) -> Result<Program> {
+    let (source,modules)=modules::link(source,root)?;
+    let (source, functions) = operators::link(&source, root, dependencies)?;
+    let mut program=parse_linked(&source, functions)?;
+    for (name,function) in modules {ensure!(program.insert(name,function).is_none(),"duplicate module function");}
     Ok(program)
 }
-use parse::{Expr, Program, Statement, Stmt};
+fn parse_linked(source: &str, imported: Program) -> Result<Program> {
+    let unit = crate::source::split(source)?;
+    let mut program = parse::parse_functions(&unit.functions)?;
+    for (name, function) in &imported {
+        ensure!(
+            program.insert(name.clone(), function.clone()).is_none(),
+            "duplicate imported operator: {name}"
+        );
+    }
+    let model_name = unit
+        .declarations
+        .lines()
+        .find_map(|l| {
+            l.split('#')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .strip_prefix("model ")
+        })
+        .map(str::trim);
+    if let Some(name) = model_name {
+        ensure!(
+            !name.starts_with("__")
+                && !name.is_empty()
+                && name
+                    .bytes()
+                    .enumerate()
+                    .all(|(i, c)| c.is_ascii_alphabetic()
+                        || c == b'_'
+                        || (i > 0 && c.is_ascii_digit())),
+            "invalid model name"
+        );
+        ensure!(
+            !program.contains_key(name) && !prelude::is_builtin(name) && prelude::migration(name).is_none(),
+            "model name conflicts with function: {name}"
+        );
+        let (builtin, plan) = if program.contains_key("forward") {
+            let plan = crate::adaptive::parse_with_functions(source, &program)?;
+            program.remove("forward");
+            program.remove("loss");
+            ("__adaptive", serde_json::to_string(&plan)?)
+        } else {
+            (
+                "__graph",
+                serde_json::to_string(&crate::source::graph(&unit.declarations)?.1)?,
+            )
+        };
+        program.insert(
+            name.into(),
+            parse::Function {
+                is_async: false,
+                args: vec!["optimizer".into()],
+                body: vec![Statement {
+                    line: 1,
+                    kind: Stmt::Return(Expr::Call(
+                        builtin.into(),
+                        vec![Expr::Text(plan), Expr::Name("optimizer".into())],
+                    )),
+                }],
+            },
+        );
+    } else {
+        ensure!(
+            unit.declarations
+                .lines()
+                .all(|l| l.trim().is_empty() || l.trim().starts_with('#') || l.trim() == "wgt 0.5"),
+            "model declarations require model NAME"
+        );
+        ensure!(
+            !program.contains_key("forward"),
+            "forward requires model declarations"
+        );
+    }
+    if let Some(main) = program.get("main") {
+        ensure!(main.args.is_empty(), "main takes no arguments");
+    } else {
+        ensure!(
+            model_name.is_some() || program.keys().any(|name| name.starts_with("test_")),
+            "program requires fn main(), test_* functions or model declarations"
+        );
+    }
+    for name in imported.keys() {
+        program.remove(name);
+    }
+    Ok(program)
+}
+pub use parse::{Expr, Program, Statement, Stmt};
 use std::{
     collections::{BTreeMap, HashMap},
     fs::File,
@@ -62,11 +145,13 @@ pub enum Value {
     Model(usize),
     Adaptive(usize),
     Reader(usize),
+    Kernel(usize),
     Gradient(u64),
     Future(usize),
+    Task(usize),
     Agent(usize),
     Environment(usize),
-    Task(usize),
+    ResponseSession(usize),
 }
 impl Value {
     pub fn number(&self) -> Result<f64> {
@@ -245,8 +330,11 @@ fn execute(
     max_operations: u64,
     dependencies: BTreeMap<String, String>,
 ) -> Result<(Runtime, Value)> {
-    let program = parse(source)?;
-    ensure!(program.contains_key("main"), "execution requires fn main(); model construction is explicit");
+    let program = parse_with_imports(source, root, &dependencies)?;
+    ensure!(
+        program.contains_key("main"),
+        "execution requires fn main(); model construction is explicit"
+    );
     execute_program(program, root, max_operations, dependencies, "main")
 }
 
@@ -257,8 +345,10 @@ fn execute_program(
     dependencies: BTreeMap<String, String>,
     entry: &str,
 ) -> Result<(Runtime, Value)> {
+    let (permissions, resources) = resources::Resources::from_env()?;
     let mut runtime = Runtime {
-        permissions: permissions::Permissions::from_env()?,
+        permissions,
+        resources,
         program,
         compiled: HashMap::new(),
         root: root.into(),
@@ -270,16 +360,20 @@ fn execute_program(
         adaptive: Vec::new(),
         readers: Vec::new(),
         gradients: optimization::Gradients::default(),
+        #[cfg(feature = "gpu")]
+        kernels: Vec::new(),
         rng: 0,
         metrics: BTreeMap::new(),
         agents: Vec::new(), environments: Vec::new(),
-        async_state:async_runtime::AsyncState::default(),
+        async_state: async_runtime::AsyncState::default(),
+        harness: openresponses::Harness::default(),
     };
     let result = runtime.call(entry, Vec::new())?;
     Ok((runtime, result))
 }
 pub struct Runtime {
     permissions: permissions::Permissions,
+    resources: resources::Resources,
     dependencies: BTreeMap<String, String>,
     program: Program,
     compiled: HashMap<String, compiled::Function>,
@@ -292,17 +386,21 @@ pub struct Runtime {
     adaptive: Vec<crate::weightfs::Mounted<crate::adaptive::AdaptiveSession>>,
     readers: Vec<Option<dataset::Reader>>,
     gradients: optimization::Gradients,
+    #[cfg(feature = "gpu")]
+    kernels: Vec<crate::wgsl::Kernel>,
     rng: u64,
     metrics: BTreeMap<String, serde_json::Value>,
     agents: Vec<agents::Agent>,
     environments: Vec<agents::Environment>,
-    async_state:async_runtime::AsyncState,
+    async_state: async_runtime::AsyncState,
+    harness: openresponses::Harness,
 }
 impl Runtime {
     pub fn tick(&mut self) -> Result<()> {
         self.permissions.check_deadline()?;
-        if let Some(context)=&self.async_state.context{return Ok(context.charge(1)?);}
-        if let Some(scope)=self.async_state.scopes.last(){return Ok(scope.charge(1)?);}
+        self.resources.check_deadline()?;
+        if let Some(context) = &self.async_state.context { return Ok(context.charge(1)?); }
+        if let Some(scope) = self.async_state.scopes.last() { return Ok(scope.charge(1)?); }
         self.remaining = self
             .remaining
             .checked_sub(1)
@@ -323,7 +421,14 @@ impl Runtime {
     }
     fn statement(&mut self, statement: &Stmt, env: &mut Env) -> Result<Flow> {
         match statement {
-            Stmt::Tasks(body)=>{self.enter_tasks()?;let result=self.block(body,env);let cleanup=self.leave_tasks(result.is_ok());let flow=result?;cleanup?;return Ok(flow);}
+            Stmt::Tasks(body) => {
+                self.enter_tasks()?;
+                let result = self.block(body, env);
+                let cleanup = self.leave_tasks(result.is_ok());
+                let flow = result?;
+                cleanup?;
+                return Ok(flow);
+            }
             Stmt::Let(name, expr) => {
                 let value = self.eval(expr, env)?;
                 env.insert(name.clone(), value);
@@ -394,17 +499,17 @@ impl Runtime {
             Stmt::Eval(expr) => {
                 self.eval(expr, env)?;
             }
-            Stmt::Reload(format, target, path, optimizer) => {
-                let target = self.eval(target, env)?;
-                let path = self.eval(path, env)?;
-                let optimizer = optimizer.as_ref().map(|e| self.eval(e, env)).transpose()?;
-                self.reload_file(format, target, path, optimizer)?;
-            }
             Stmt::Assert(condition, message) => {
                 if !self.eval(condition, env)?.boolean()? {
                     let message = match message { Some(e) => self.eval(e, env)?, None => Value::Text("assertion failed".into()) };
                     bail!("{}", message.text()?);
                 }
+            }
+            Stmt::Reload(format, target, path, optimizer) => {
+                let target = self.eval(target, env)?;
+                let path = self.eval(path, env)?;
+                let optimizer = optimizer.as_ref().map(|e| self.eval(e, env)).transpose()?;
+                self.reload_file(format, target, path, optimizer)?;
             }
             Stmt::Save(format, value, path, overwrite) => {
                 let value = self.eval(value, env)?;
@@ -447,9 +552,13 @@ impl Runtime {
         self.tick()?;
         match expr {
             Expr::Mix(..) => bail!("mix is only available in tensor forward/loss functions"),
-            Expr::Sample(p,a,b) => {
-                let p=self.eval(p,env)?;
-                if self.draw_probability(p)? { self.eval(a,env) } else { self.eval(b,env) }
+            Expr::Sample(p, a, b) => {
+                let p = self.eval(p, env)?;
+                if self.draw_probability(p)? {
+                    self.eval(a, env)
+                } else {
+                    self.eval(b, env)
+                }
             }
             Expr::SampleFrom(name, input) => {
                 self.tick()?; // Model lookup has the same budget cost as the former argument.
@@ -472,7 +581,10 @@ impl Runtime {
                     .map(|v| self.eval(v, env))
                     .collect::<Result<_>>()?,
             )),
-            Expr::BuiltinCall(name,args) if name=="__await"||name=="__spawn"=>{let value=self.eval(&args[0],env)?;if name=="__await"{self.await_value(value)}else{self.spawn_future(value)}}
+            Expr::BuiltinCall(name, args) if name == "__await" || name == "__spawn" => {
+                let value = self.eval(&args[0], env)?;
+                if name == "__await" { self.await_value(value) } else { self.spawn_future(value) }
+            }
             Expr::BuiltinCall(name, args) | Expr::StaticCall(name, args) => {
                 let args = args.iter().map(|v| self.eval(v, env)).collect::<Result<_>>()?;
                 self.call(name, args)
@@ -525,6 +637,7 @@ impl Runtime {
         self.tick()?;
         let (logits, kind) = if let Value::Adaptive(index) = model {
             let mut session = self.adaptive[index].lock()?;
+            ensure!(!session.execution_active(), "execution active; resume or cancel first");
             let result = session.evaluate(&input.vector()?, self.remaining);
             self.remaining = self.remaining.saturating_sub(session.steps());
             (result?, session.program().output_type)
@@ -604,9 +717,18 @@ impl Runtime {
     }
 
     pub fn draw_probability(&mut self, probability: Value) -> Result<bool> {
-        let p=probability.number()?;
-        ensure!(p.is_finite() && (0. ..=1.).contains(&p),"sample probability must be in [0,1]");
-        Ok(if p==0. {false} else if p==1. {true} else {random(&mut self.rng)<p})
+        let p = probability.number()?;
+        ensure!(
+            p.is_finite() && (0. ..=1.).contains(&p),
+            "sample probability must be in [0,1]"
+        );
+        Ok(if p == 0. {
+            false
+        } else if p == 1. {
+            true
+        } else {
+            random(&mut self.rng) < p
+        })
     }
 
     /// Resolve source calls in the current function's environment before named functions.
@@ -625,7 +747,7 @@ impl Runtime {
             );
             ensure!(args.len() == 1, "model call expects 1 input, got {}", args.len());
             self.tick()?;
-            self.builtin("predict", &[value.clone(), args[0].clone()])
+            self.builtin("__predict", &[value.clone(), args[0].clone()])
         })()
         .with_context(|| format!("{name}()"))
     }
@@ -636,7 +758,10 @@ impl Runtime {
         }
         self.tick()?;
         if let Some(function) = self.compiled.get(name).cloned() {
-            if function.async_body.is_some(){ensure!(args.len()==function.args.len(),"{name}: argument count mismatch");return self.cold_call(name,args);}
+            if function.async_body.is_some() {
+                ensure!(args.len() == function.args.len(), "{name}: argument count mismatch");
+                return self.cold_call(name, args);
+            }
             ensure!(
                 args.len() == function.args.len(),
                 "{name}: argument count mismatch"
@@ -658,7 +783,10 @@ impl Runtime {
             };
         }
         if let Some(function) = self.program.get(name).cloned() {
-            if function.is_async{ensure!(args.len()==function.args.len(),"{name}: argument count mismatch");return self.cold_call(name,args);}
+            if function.is_async {
+                ensure!(args.len() == function.args.len(), "{name}: argument count mismatch");
+                return self.cold_call(name, args);
+            }
             ensure!(
                 args.len() == function.args.len(),
                 "{name}: argument count mismatch"
@@ -679,10 +807,19 @@ impl Runtime {
     }
     fn builtin(&mut self, name: &str, a: &[Value]) -> Result<Value> {
         if matches!(name,"__agent"|"__environment"|"__record") { return self.agent_builtin(name,a); }
-        if self.async_state.context.is_some(){ensure!(["sqrt","exp","log","min","max","len","seed","random","assert"].contains(&name),"{name}: builtin unavailable in first native async stage; resource creation and synchronous I/O are forbidden");}
-        if let Some(format) = name.strip_prefix("__load_") { return self.load_file(format, a); }
+        if name.starts_with("responses_") {
+            let expected = match name { "responses_scope" => 3, "responses_restrict" | "responses_submit" | "responses_next" => 2, "responses_session" | "responses_cancel" => 1, "responses_usage" => 0, _ => usize::MAX };
+            ensure!(a.len() == expected, "invalid responses call or argument count");
+            return self.responses_builtin(name, a);
+        }
+        if self.async_state.context.is_some() {
+            ensure!(["sqrt", "exp", "log", "min", "max", "len", "seed", "random", "__record_field"].contains(&name), "{name}: builtin unavailable in first native async stage; resource creation and synchronous I/O are forbidden");
+        }
         if name == "__record_field" {
             return self.record_field(a[0].clone(), a[1].text()?);
+        }
+        if let Some(format) = name.strip_prefix("__load_") {
+            return self.load_file(format, a);
         }
         if name == "__probabilities" {
             let [Value::CategoricalVector(kind, values)] = a else {
@@ -696,7 +833,6 @@ impl Runtime {
             return Ok(Value::CategoricalVector(crate::categorical::VectorType::Probabilities,
                 output.into_iter().map(Value::Number).collect()));
         }
-
         let entry = prelude::builtin(name).with_context(|| format!("unknown function: {name}"))?;
         let arity = entry.arity.as_ref().expect("builtin arity in prelude");
         ensure!(
@@ -704,35 +840,217 @@ impl Runtime {
             "{}: expected {}..={} arguments, got {}",
             entry.signature, arity.min, arity.max, a.len()
         );
-        let name = entry.legacy_alias_for.as_deref().unwrap_or(name);
-
         if matches!(name, "differentiate" | "differentiate_at" | "gradient_snapshot" | "commit_gradients" | "release_gradient") {
             return self.optimization_builtin(name, a);
         }
         if name == "benchmark" {
             return self.benchmark(a);
         }
-        ensure!(self.permissions.allows_legacy_io() || !["dependency", "load_model", "save_model", "jsonl", "hf_dataset", "batch", "save_checkpoint", "load_checkpoint"].contains(&name), "host policy requires capability-based I/O");
+        if matches!(
+            name,
+            "devices" | "training_device" | "training_status" | "wgsl_kernel" | "wgsl_run"
+        ) {
+            return self.training_device_builtin(name, a);
+        }
+        if matches!(name, "fit" | "reinforce") {
+            if let Some(Value::Model(index)) = a.first() {
+                if !self.models[*index].lock()?.backend().is_cpu() {
+                    self.resources.allow_direct_gpu_training()?;
+                }
+            }
+        }
+        if matches!(
+            name,
+            "execution_start" | "execution_resume" | "execution_cancel"
+        ) {
+            let count = match name {
+                "execution_start" => 4,
+                "execution_resume" => 2,
+                _ => 1,
+            };
+            ensure!(a.len() == count, "{name}: argument count mismatch");
+            let Value::Adaptive(index) = a[0] else {
+                bail!("execution requires a forward model")
+            };
+            let mut session = self.adaptive[index].lock()?;
+            if name == "execution_cancel" {
+                return Ok(Value::Bool(session.cancel_execution()));
+            }
+            let (available, memory) = self.resources.execution_allowance(self.remaining)?;
+            if name == "execution_start" {
+                let work = (a[2].integer()? as u64).min(available);
+                let bytes = a[3].integer()?.min(memory);
+                self.resources.execution_start()?;
+                session.start_execution(&a[1].vector()?, work, bytes)?;
+                return Ok(Value::Null);
+            }
+            ensure!(
+                session.execution_memory_limit()? <= memory,
+                "execution exceeds current scope memory limit"
+            );
+            let quantum = a[1].integer()? as u64;
+            ensure!(
+                (1..=1000000).contains(&quantum),
+                "execution quantum must be 1..1000000"
+            );
+            let before = session.steps();
+            let result = session.resume_execution(quantum, available);
+            self.resources
+                .charge_execution(session.steps() - before, &mut self.remaining)?;
+            return Value::from_json(serde_json::to_value(result?)?);
+        }
+        if name == "device_submit" {
+            ensure!(
+                a.len() == 3,
+                "device_submit expects model, input, device alias"
+            );
+            let model = self.models[a[0].model()?].lock()?.snapshot()?;
+            return self.resources.device_submit(
+                model,
+                a[1].vector()?,
+                a[2].text()?,
+                &mut self.remaining,
+            );
+        }
+        if name == "device_wait" {
+            ensure!(
+                a.len() == 3,
+                "device_wait expects device alias, job, timeout_ms"
+            );
+            return self.resources.device_wait(
+                a[0].text()?,
+                a[1].integer()? as u64,
+                a[2].integer()? as u64,
+            );
+        }
+        if name == "device_status" {
+            ensure!(a.len() == 1, "device_status expects device alias");
+            return self.resources.device_status(a[0].text()?);
+        }
+        if name == "compute_register" {
+            ensure!(
+                a.len() == 3,
+                "compute_register expects name, function, limits"
+            );
+            let function = a[1].text()?;
+            let arity = self
+                .program
+                .get(function)
+                .map(|f| f.args.len())
+                .or_else(|| self.compiled.get(function).map(|f| f.args.len()));
+            ensure!(
+                arity == Some(1) && !prelude::is_builtin(function),
+                "capability requires one-argument WGT function"
+            );
+            return self
+                .resources
+                .register(a[0].text()?, function, a[2].list()?);
+        }
+        if name == "compute_call" && a.len() == 2 {
+            if let Some((function, limits)) = self.resources.custom.get(a[0].text()?).cloned() {
+                a[1].list()?;
+                let trace_len = self.resources.trace_len();
+                let result = self.builtin(
+                    "compute_scope",
+                    &[
+                        Value::Text(function),
+                        Value::List(vec![a[1].clone()]),
+                        Value::List(limits),
+                    ],
+                );
+                self.resources
+                    .label_scope(a[0].text()?, trace_len, a[1].list()?.len());
+                return result;
+            }
+        }
+        if name == "compute_scope" {
+            ensure!(
+                a.len() == 3,
+                "compute_scope expects function, arguments, limits"
+            );
+            let function = a[0].text()?;
+            ensure!(
+                !prelude::is_builtin(function)
+                    && (self.program.contains_key(function)
+                        || self.compiled.contains_key(function)),
+                "scope requires a WGT function"
+            );
+            let arguments = a[1].list()?.to_vec();
+            let frame = match self
+                .resources
+                .enter_scope(a[2].list()?, &mut self.remaining)
+            {
+                Ok(frame) => frame,
+                Err(error) => {
+                    return Value::from_json(
+                        serde_json::json!({"ok":false,"error":error.to_string(),"value":null,"work":0}),
+                    )
+                }
+            };
+            let result = self.call(function, arguments).and_then(|v| v.json());
+            let work = self
+                .resources
+                .leave_scope(frame, &mut self.remaining, result.is_ok())?;
+            return Value::from_json(match result {
+                Ok(value) => {
+                    serde_json::json!({"ok":true,"error":"","value":value,"work":work.number()?})
+                }
+                Err(error) => {
+                    serde_json::json!({"ok":false,"error":format!("{error:#}"),"value":null,"work":work.number()?})
+                }
+            });
+        }
+        if name.starts_with("compute_") {
+            return self.resources.call(name, a, &mut self.remaining);
+        }
+        ensure!(
+            self.permissions.allows_legacy_io()
+                || ![
+                    "dependency",
+                    "load_model",
+                    "save_model",
+                    "jsonl",
+                    "hf_dataset",
+                    "batch",
+                    "save_checkpoint",
+                    "load_checkpoint"
+                ]
+                .contains(&name),
+            "host policy requires capability-based I/O"
+        );
         match name {
-            "entropy" | "normalize_probabilities" | "kl_divergence" | "js_divergence" | "cross_entropy_probs" | "temperature_softmax" => {
+            "entropy"
+            | "normalize_probabilities"
+            | "kl_divergence"
+            | "js_divergence"
+            | "cross_entropy_probs"
+            | "temperature_softmax" => {
                 let n = a[0].list()?.len() as u64;
                 let work = a.iter().try_fold(n, |sum, v| -> Result<u64> {
-                    Ok(sum.saturating_add(match v { Value::List(xs) => xs.len() as u64, _ => 0 }))
+                    Ok(sum.saturating_add(match v {
+                        Value::List(xs) => xs.len() as u64,
+                        _ => 0,
+                    }))
                 })?;
                 ensure!(self.remaining >= work, "operation budget exhausted");
                 self.remaining -= work;
                 math::probability::call(name, a)
             }
             "one_hot" => one_hot::encode(&a[0], &a[1], &mut self.remaining),
-            "zeros" | "ones" | "full" | "linspace" | "concat" | "vector_slice" | "gather" | "compress" | "reverse" => math::data::call(name, a, &mut self.remaining),
-            "relu" | "leaky_relu" | "elu" | "hard_sigmoid" | "hard_swish" => math::activation::call(name, a),
+            "zeros" | "ones" | "full" | "linspace" | "concat" | "vector_slice" | "gather"
+            | "compress" | "reverse" => math::data::call(name, a, &mut self.remaining),
+            "relu" | "leaky_relu" | "elu" | "hard_sigmoid" | "hard_swish" => {
+                math::activation::call(name, a)
+            }
             "bce_logits" | "huber" | "log_cosh" | "diff" | "ema" | "moving_mean" => {
                 let n = a[0].list()?.len();
                 let work = if name == "moving_mean" {
                     let window = a[1].integer()?;
                     ensure!(window > 0 && window <= n, "window must be in 1..=N");
-                    ((n-window+1) as u64).saturating_mul(window as u64)
-                } else { n as u64 };
+                    ((n - window + 1) as u64).saturating_mul(window as u64)
+                } else {
+                    n as u64
+                };
                 ensure!(self.remaining >= work, "operation budget exhausted");
                 self.remaining -= work;
                 if matches!(name, "diff" | "ema" | "moving_mean") {
@@ -741,20 +1059,24 @@ impl Runtime {
                     math::loss::call(name, a)
                 }
             }
-            "min" | "max" | "argmin" | "argmax" | "variance" | "stddev" | "median" | "quantile" | "sort" | "argsort" | "cumsum" | "cosine_similarity" | "clip" => {
+            "min" | "max" | "argmin" | "argmax" | "variance" | "stddev" | "median" | "quantile"
+            | "sort" | "argsort" | "cumsum" | "cosine_similarity" | "clip" => {
                 let work = math::algorithms::work(name, a[0].list()?.len());
                 ensure!(self.remaining >= work, "operation budget exhausted");
                 self.remaining -= work;
                 math::algorithms::call(name, a)
             }
-            "dot" | "norm" | "mean" | "softmax" | "log_softmax" | "logsumexp" | "l2_normalize" | "mse" | "mae" | "cross_entropy" => {
+            "dot" | "norm" | "mean" | "softmax" | "log_softmax" | "logsumexp" | "l2_normalize"
+            | "mse" | "mae" | "cross_entropy" => {
                 // Charge linear work before allocating or traversing input vectors.
                 let work = a[0].list()?.len() as u64;
                 ensure!(self.remaining >= work, "operation budget exhausted");
                 self.remaining -= work;
                 math::vector::call(name, a)
             }
-            "rsqrt" | "fma" | "hypot" | "expm1" | "log1p" | "sigmoid" | "softplus" | "silu" => math::call(name, a),
+            "rsqrt" | "fma" | "hypot" | "expm1" | "log1p" | "sigmoid" | "softplus" | "silu" => {
+                math::call(name, a)
+            }
             "dependency" => Ok(Value::Text(
                 self.dependencies
                     .get(a[0].text()?)
@@ -803,10 +1125,6 @@ impl Runtime {
             "sqrt" => number(a[0].number()?.sqrt()),
             "log" => number(a[0].number()?.ln()),
             "exp" => number(a[0].number()?.exp()),
-            "assert" => {
-                ensure!(a[0].boolean()?, "{}", a[1].text()?);
-                Ok(Value::Null)
-            }
             "metric" => {
                 self.metrics.insert(a[0].text()?.into(), a[1].json()?);
                 Ok(Value::Null)
@@ -837,48 +1155,14 @@ impl Runtime {
             "__graph" => {
                 ensure!(self.models.len() < 64, "model handle limit exceeded");
                 let graph: crate::source::Graph = serde_json::from_str(a[0].text()?)?;
-                let optimizer = match a[1].text()? { "sgd" => Optimizer::Sgd, "adam" => Optimizer::Adam, _ => bail!("optimizer must be sgd or adam") };
-                let trainer = Trainer::new(graph.instantiate()?, &self.root, 256*1024*1024, optimizer)?;
-                let index = self.models.len(); self.models.push(crate::weightfs::Mounted::auto(trainer)?); Ok(Value::Model(index))
-            }
-            "__adaptive" => {
-                ensure!(self.adaptive.len() < 64, "model handle limit exceeded");
-                let program = serde_json::from_str(a[0].text()?)?;
-                let mut session = crate::adaptive::AdaptiveSession::prepare(program, 64*1024*1024)?;
-                match a[1].text()? {
-                    "none" => {},
-                    "sgd" => session.set_optimizer(Optimizer::Sgd)?,
-                    "adam" => session.set_optimizer(Optimizer::Adam)?,
-                    _ => bail!("forward optimizer must be none, sgd or adam"),
-                }
-                let index = self.adaptive.len(); self.adaptive.push(crate::weightfs::Mounted::auto(session)?); Ok(Value::Adaptive(index))
-            }
-            "load_model" => {
-                ensure!(self.models.len() < 64, "model handle limit exceeded");
-                let path = self.root.join(a[0].text()?);
-                let value: serde_json::Value = serde_json::from_reader(File::open(&path)?)?;
-                ensure!(value.get("format").is_none(), "load_model expects inference model IR; use load_checkpoint for training checkpoints");
-                if value.get("instructions").is_some() {
-                    ensure!(self.adaptive.len() < 64, "model handle limit exceeded");
-                    let mut session = crate::adaptive::AdaptiveSession::prepare(serde_json::from_value(value)?,64*1024*1024)?;
-                    match a[1].text()? {
-                        "none" => {},
-                        "sgd" => session.set_optimizer(Optimizer::Sgd)?,
-                        "adam" => session.set_optimizer(Optimizer::Adam)?,
-                        _ => bail!("forward optimizer must be none, sgd or adam"),
-                    }
-                    let index=self.adaptive.len(); self.adaptive.push(crate::weightfs::Mounted::auto(session)?);
-                    return Ok(Value::Adaptive(index));
-                }
-                let model = serde_json::from_value(value)?;
                 let optimizer = match a[1].text()? {
                     "sgd" => Optimizer::Sgd,
                     "adam" => Optimizer::Adam,
                     _ => bail!("optimizer must be sgd or adam"),
                 };
                 let trainer = Trainer::new(
-                    model,
-                    path.parent().unwrap_or(Path::new(".")),
+                    graph.instantiate()?,
+                    &self.root,
                     256 * 1024 * 1024,
                     optimizer,
                 )?;
@@ -886,18 +1170,29 @@ impl Runtime {
                 self.models.push(crate::weightfs::Mounted::auto(trainer)?);
                 Ok(Value::Model(index))
             }
-            "save_model" => {
-                if let Value::Adaptive(index) = a[0] {
-                    crate::training::write_new(&self.root.join(a[1].text()?), &serde_json::to_vec(self.adaptive[index].lock()?.program())?)?;
-                    return Ok(Value::Null);
+            "__adaptive" => {
+                ensure!(self.adaptive.len() < 64, "model handle limit exceeded");
+                let program = serde_json::from_str(a[0].text()?)?;
+                let mut session =
+                    crate::adaptive::AdaptiveSession::prepare(program, 64 * 1024 * 1024)?;
+                match a[1].text()? {
+                    "none" => {}
+                    "sgd" => session.set_optimizer(Optimizer::Sgd)?,
+                    "adam" => session.set_optimizer(Optimizer::Adam)?,
+                    _ => bail!("forward optimizer must be none, sgd or adam"),
                 }
-                self.models[a[0].model()?].lock()?.export(&self.root.join(a[1].text()?))?;
-                Ok(Value::Null)
+                let index = self.adaptive.len();
+                self.adaptive.push(crate::weightfs::Mounted::auto(session)?);
+                Ok(Value::Adaptive(index))
             }
-            "predict" => {
+            "__predict" => {
                 let input = a[1].vector()?;
                 if let Value::Adaptive(index) = a[0] {
                     let mut session = self.adaptive[index].lock()?;
+                    ensure!(
+                        !session.execution_active(),
+                        "execution active; resume or cancel first"
+                    );
                     ensure!(input.len() == session.input_len(),
                         "input shape mismatch: expected f32[{}], got f32[{}]",
                         session.input_len(), input.len());
@@ -912,18 +1207,44 @@ impl Runtime {
                 let expected = session.session.report().input;
                 ensure!(input.len() == expected,
                     "input shape mismatch: expected f32[{expected}], got f32[{}]", input.len());
-                { let kind=session.session.output_type(); typed_vector(session.predict(&input)?,kind) }
+                let kind = session.session.output_type();
+                typed_vector(session.predict(&input)?, kind)
             }
             "fit" => {
                 if let Value::Adaptive(index) = a[0] {
-                    let x=a[1].matrix()?;
-                    let rate=a[3].float()?;
-                    let loss=match a[4].text()? {
-                        "loss" => self.adaptive[index].lock()?.train_custom(&x,&a[2].matrix()?,rate,&mut self.remaining,64*1024*1024)?,
-                        "mse" => self.adaptive[index].lock()?.train_step(&x,Objective::Mse(&a[2].matrix()?),rate,&mut self.remaining,64*1024*1024)?,
+                    let x = a[1].matrix()?;
+                    let rate = a[3].float()?;
+                    let loss = match a[4].text()? {
+                        "loss" => self.adaptive[index].lock()?.train_custom(
+                            &x,
+                            &a[2].matrix()?,
+                            rate,
+                            &mut self.remaining,
+                            64 * 1024 * 1024,
+                        )?,
+                        "mse" => self.adaptive[index].lock()?.train_step(
+                            &x,
+                            Objective::Mse(&a[2].matrix()?),
+                            rate,
+                            &mut self.remaining,
+                            64 * 1024 * 1024,
+                        )?,
                         "cross_entropy" => {
-                            let actions=a[2].list()?.iter().map(Value::integer).collect::<Result<Vec<_>>>()?;
-                            self.adaptive[index].lock()?.train_step(&x,Objective::Policy{actions:&actions,advantages:&vec![1.;x.len()]},rate,&mut self.remaining,64*1024*1024)?
+                            let actions = a[2]
+                                .list()?
+                                .iter()
+                                .map(Value::integer)
+                                .collect::<Result<Vec<_>>>()?;
+                            self.adaptive[index].lock()?.train_step(
+                                &x,
+                                Objective::Policy {
+                                    actions: &actions,
+                                    advantages: &vec![1.; x.len()],
+                                },
+                                rate,
+                                &mut self.remaining,
+                                64 * 1024 * 1024,
+                            )?
                         }
                         _ => bail!("forward loss must be mse, cross_entropy or loss"),
                     };
@@ -933,7 +1254,11 @@ impl Runtime {
                 let x = a[1].matrix()?;
                 let rate = a[3].float()?;
                 let loss = match a[4].text()? {
-                    "mse" => self.models[model].lock()?.step(&x, Objective::Mse(&a[2].matrix()?), rate)?,
+                    "mse" => self.models[model].lock()?.step(
+                        &x,
+                        Objective::Mse(&a[2].matrix()?),
+                        rate,
+                    )?,
                     "cross_entropy" => {
                         let actions = a[2]
                             .list()?
@@ -953,9 +1278,18 @@ impl Runtime {
                 };
                 number(loss as f64)
             }
-            "train" => {
-                let Value::Adaptive(index)=a[0] else {bail!("train requires a forward model with fn loss")};
-                let loss=self.adaptive[index].lock()?.train_clipped(&a[1].matrix()?,&a[2].matrix()?,a[3].float()?,a[4].float()?,&mut self.remaining,64*1024*1024)?;
+            "__train" => {
+                let Value::Adaptive(index) = a[0] else {
+                    bail!("train requires a forward model with fn loss")
+                };
+                let loss = self.adaptive[index].lock()?.train_clipped(
+                    &a[1].matrix()?,
+                    &a[2].matrix()?,
+                    a[3].float()?,
+                    a[4].float()?,
+                    &mut self.remaining,
+                    64 * 1024 * 1024,
+                )?;
                 number(loss as f64)
             }
             "reinforce" => {
@@ -966,8 +1300,17 @@ impl Runtime {
                     .map(Value::integer)
                     .collect::<Result<Vec<_>>>()?;
                 let advantages = a[3].vector()?;
-                if let Value::Adaptive(index)=a[0] {
-                    return number(self.adaptive[index].lock()?.train_step(&x,Objective::Policy{actions:&actions,advantages:&advantages},a[4].float()?,&mut self.remaining,64*1024*1024)? as f64);
+                if let Value::Adaptive(index) = a[0] {
+                    return number(self.adaptive[index].lock()?.train_step(
+                        &x,
+                        Objective::Policy {
+                            actions: &actions,
+                            advantages: &advantages,
+                        },
+                        a[4].float()?,
+                        &mut self.remaining,
+                        64 * 1024 * 1024,
+                    )? as f64);
                 }
                 let model = a[0].model()?;
                 number(self.models[model].lock()?.step(
@@ -1041,31 +1384,6 @@ impl Runtime {
             "close" => {
                 self.readers[a[0].reader()?].take();
                 Ok(Value::Null)
-            }
-            "save_checkpoint" => {
-                let path = self.root.join(a[1].text()?);
-                if let Value::Adaptive(index)=a[0] {
-                    self.adaptive[index].lock()?.save_checkpoint(&path)?;
-                    return Ok(Value::Null);
-                }
-                self.models[a[0].model()?].lock()?.save(&path)?;
-                Ok(Value::Null)
-            }
-            "load_checkpoint" => {
-                let path=self.root.join(a[0].text()?);
-                let value:serde_json::Value=serde_json::from_reader(File::open(&path)?)?;
-                ensure!(matches!(value.get("format").and_then(|v| v.as_str()), Some("weightlang.forward-training.v1" | "weightlang.forward-training.v2" | "weightlang.native-training.v1")), "load_checkpoint expects a native training checkpoint; use load_model(path, optimizer) for inference model IR");
-                if matches!(value.get("format").and_then(|v| v.as_str()), Some("weightlang.forward-training.v1" | "weightlang.forward-training.v2")) {
-                    ensure!(self.adaptive.len()<64,"model handle limit exceeded");
-                    let session=crate::adaptive::AdaptiveSession::restore_checkpoint(value,64*1024*1024)?;
-                    let index=self.adaptive.len(); self.adaptive.push(crate::weightfs::Mounted::auto(session)?);
-                    return Ok(Value::Adaptive(index));
-                }
-                ensure!(self.models.len() < 64, "model handle limit exceeded");
-                let trainer = Trainer::restore(&self.root.join(a[0].text()?), 256 * 1024 * 1024)?;
-                let index = self.models.len();
-                self.models.push(crate::weightfs::Mounted::auto(trainer)?);
-                Ok(Value::Model(index))
             }
             _ => bail!("unknown builtin"),
         }

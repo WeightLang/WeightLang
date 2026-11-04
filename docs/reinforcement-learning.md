@@ -57,7 +57,7 @@ NAME 必须与 `fn loss(prediction,NAME)` 的第二个参数同名，必须存�
 loss 不能访问模型参数、普通辅助函数或 I/O；不能在 main 中直接调用。
 
 PPO 的旧概率、动作和优势来自固定采样批次。先完整采集，再更新；多轮优化期间不重算旧概率。
-普通函数可用 `let {action,log_prob}=sample from policy(observation);` 从同次只读模型评估取得动作和稳定旧概率，
+模型类别采样的目标形式为 `decode policy(observation) {method:sample;}`，完整返回字段与 RNG 契约待 parser/runtime 实现后补充。
 不会再执行一次策略调用或 RNG；也支持 `action:a`、`log_prob:lp` 别名。
 概率为实际抽样分布的自然对数；logits 使用 f64 log-sum-exp，显式 probabilities 用实际总质量归一化解释。
 完整例子见 [sample_record/model.wgt](../examples/native_training/sample_record/model.wgt)。
@@ -100,6 +100,6 @@ cargo run --locked --offline -p weightlang-wgt --bin wgt -- run examples/native_
 ```
 
 测试覆盖数值梯度、detach、极端 logits、端点导数、裁剪、错误回滚、多个随机种子和解释/AOT 一致性。
-save/restore 保存新增损失程序和优化器，save_model 导出推理参数与程序；新增 IR 指令要求匹配版本运行时，
+`save checkpoint` 保存新增损失程序和优化器，`save model` 导出推理参数与程序；新增 IR 指令要求匹配版本运行时，
 不保证旧可执行文件能加载新制品。完整模型/报告保留于 weights/<experiment>/，不覆盖现有文件。
 断点仍不保存环境、脚本 RNG、采集进度或整批轨迹；它证明模型/优化器续训，不是整个 RL 进程恢复。

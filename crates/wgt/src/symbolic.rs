@@ -161,16 +161,26 @@ pub fn validate(layers: &Value, interface: &Value) -> Result<()> {
         combinations * count as u64 <= 200000,
         "symbolic validation exceeds node budget"
     );
-    fn emissions(layers: &Value,prefix: &str,contracts: &Contracts) -> Result<BTreeMap<String,(String,Vec<u64>)>> {
+    fn emissions(
+        layers: &Value,
+        prefix: &str,
+        contracts: &Contracts,
+    ) -> Result<BTreeMap<String, (String, Vec<u64>)>> {
         let mut result = BTreeMap::new();
         for layer in layers.as_array().context("invalid layers")? {
             let name = layer["name"].as_str().context("invalid name")?;
-            let path = if prefix.is_empty() { name.to_owned() } else { format!("{prefix}.{name}") };
+            let path = if prefix.is_empty() {
+                name.to_owned()
+            } else {
+                format!("{prefix}.{name}")
+            };
             if layer["op"] == "scan_state" {
                 let typ = &contracts.get(&path).context("missing scan contract")?.1;
-                result.insert(path.clone(),(typ.dtype.clone(),typ.shape[1..].to_vec()));
+                result.insert(path.clone(), (typ.dtype.clone(), typ.shape[1..].to_vec()));
             }
-            if let Some(children) = layer.get("layers") { result.extend(emissions(children,&path,contracts)?); }
+            if let Some(children) = layer.get("layers") {
+                result.extend(emissions(children, &path, contracts)?);
+            }
         }
         Ok(result)
     }
@@ -191,9 +201,15 @@ pub fn validate(layers: &Value, interface: &Value) -> Result<()> {
         let mut tensors = BTreeMap::new();
         let mut contracts = Contracts::new();
         infer_named(&unrecorded, &resolved, &mut tensors, &mut contracts)?;
-        let emitted = emissions(&unrecorded,"",&contracts)?;
-        if let Some(ref expected) = emission_baseline { ensure!(&emitted == expected,"scan_state emitted sample shape/dtype must be invariant"); }
-        else { emission_baseline = Some(emitted); }
+        let emitted = emissions(&unrecorded, "", &contracts)?;
+        if let Some(ref expected) = emission_baseline {
+            ensure!(
+                &emitted == expected,
+                "scan_state emitted sample shape/dtype must be invariant"
+            );
+        } else {
+            emission_baseline = Some(emitted);
+        }
         if let Some(ref expected) = baseline {
             ensure!(&tensors == expected, "dimension-dependent parameter layout");
         } else {

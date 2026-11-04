@@ -4,8 +4,15 @@ use anyhow::Result;
 
 fn expr(e: &Expr) -> String {
     let value = match e {
-        Expr::Mix(..) => "anyhow::bail!(\"mix is only available in tensor forward/loss functions\")".into(),
-        Expr::Sample(p,a,b) => format!("{{ let p={}; if rt.draw_probability(p)? {{ {} }} else {{ {} }} }}",expr(p),expr(a),expr(b)),
+        Expr::Mix(..) => {
+            "anyhow::bail!(\"mix is only available in tensor forward/loss functions\")".into()
+        }
+        Expr::Sample(p, a, b) => format!(
+            "{{ let p={}; if rt.draw_probability(p)? {{ {} }} else {{ {} }} }}",
+            expr(p),
+            expr(a),
+            expr(b)
+        ),
         Expr::SampleFrom(name, input) => format!(
             "{{ rt.tick()?; let model = env.get({name:?}).cloned().context({error:?})?; let input = {input}; rt.sample_model(model, input)? }}",
             error = format!("undefined variable: {name}"), input = expr(input)
@@ -22,7 +29,7 @@ fn expr(e: &Expr) -> String {
             "Value::List(vec![{}])",
             v.iter().map(expr).collect::<Vec<_>>().join(",")
         ),
-        Expr::BuiltinCall(n,args) if n=="__await"||n=="__spawn"=>format!("{{let value={};rt.{}(value)?}}",expr(&args[0]),if n=="__await"{"await_value"}else{"spawn_future"}),
+        Expr::BuiltinCall(n, args) if n == "__await" || n == "__spawn" => format!("{{ let value={}; rt.{}(value)? }}",expr(&args[0]),if n == "__await" {"await_value"}else{"spawn_future"}),
         Expr::BuiltinCall(n, args) | Expr::StaticCall(n, args) => format!(
             "{{ let args = vec![{}]; rt.call({n:?}, args)? }}",
             args.iter().map(expr).collect::<Vec<_>>().join(",")
@@ -59,7 +66,7 @@ fn block(body: &[Statement]) -> String {
     let mut code = String::from("(|| -> Result<Flow> {\n");
     for statement in body {
         let inner = match &statement.kind {
-            Stmt::Tasks(body)=>format!("rt.enter_tasks()?;let result={};let cleanup=rt.leave_tasks(result.is_ok());let flow=result?;cleanup?;if !matches!(flow,Flow::Next){{return Ok(flow);}}",block(body)),
+            Stmt::Tasks(body) => format!("rt.enter_tasks()?; let result={}; let cleanup=rt.leave_tasks(result.is_ok()); let flow=result?; cleanup?; if !matches!(flow,Flow::Next) {{ return Ok(flow); }}",block(body)),
             Stmt::Let(n,e) => format!("let value = {}; env.insert({n:?}.into(),value);",expr(e)),
             Stmt::LetSample(bindings,n,input) => {
                 let assignments = bindings.iter().map(|(field,binding)| format!("env.insert({binding:?}.into(), {}.clone());", if field == "action" { "action" } else { "log_prob" })).collect::<String>();
@@ -98,8 +105,11 @@ pub fn rust_source_with_dependencies(
     root: &str,
     dependencies: &std::collections::BTreeMap<String, String>,
 ) -> Result<String> {
-    let program = super::parse(source)?;
-    anyhow::ensure!(program.contains_key("main"), "compilation requires fn main()");
+    let program = super::parse_with_imports(source, std::path::Path::new(root), dependencies)?;
+    anyhow::ensure!(
+        program.contains_key("main"),
+        "compilation requires fn main()"
+    );
     let mut functions: Vec<_> = program.iter().collect();
     functions.sort_by_key(|(name, _)| *name);
     let mut code = String::from("#![allow(unused_imports,unused_variables,unused_mut)]\nuse anyhow::{Result,Context,ensure};\nuse weightlang_runtime::script::{Runtime,Env,Flow,Value,compiled,async_runtime};\n");

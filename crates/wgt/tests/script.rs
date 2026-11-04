@@ -3,8 +3,8 @@ use std::process::Command;
 
 #[test]
 fn native_script_cli_does_not_need_python_or_a_project_environment() {
-    let example =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/native_training/supervised.wgt");
+    let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/native_training/supervised/model.wgt");
     for check in [false, true] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_wgt"));
         command

@@ -1,5 +1,75 @@
 # 原生数学标准库（WGT 0.5，本地未发布）
 
+## 可导入的 WGT 计算库
+
+以下模块由 WGT 实现，原生张量编译器展开为既有原语，不为每个函数增加 Rust 内置。
+稳定逻辑命名空间必须显式导入；内部源码文件路径不暴露为公共模块名：
+
+```wgt
+wgt 0.5
+import activation from "std/activation"
+import loss_ops from "std/loss"
+model StandardExample
+input x: f32[2]
+output y: f32[2]
+parameter gain: f32[2] = [1, 1]
+fn forward(x) { return activation.swiglu(x, x * gain); }
+fn loss(prediction, target) { return loss_ops.squared_error(prediction, target); }
+fn main() { let net = StandardExample("sgd"); return net([-1, 2]); }
+```
+
+所有参数必填、无默认值。输入为非空定长一维 `f32[N]`，没有隐含 batch 轴或标量广播；
+多输入必须同形。只在 `forward/loss` 内调用，普通脚本不能直接调用限定算子。
+库不创建参数、初始化权重、执行训练或持有状态；调用方决定参数共享和训练时机。
+本地 WGT 0.5 未发布，支持 CPU 一阶梯度、解释和 AOT，不承诺 GPU 或融合提速。
+
+| 模块 | 完整签名 | 定义与输出 |
+| --- | --- | --- |
+| `std/activation` | `swish(x)` | `x*sigmoid(x)`，同形 `f32[N]`；稳定 sigmoid 门 |
+| 同上 | `swiglu(gate,value)` | `swish(gate)*value`，同形 `f32[N]`；输入为调用方已投影的两路特征，不创建投影权重 |
+| 同上 | `squared_relu(x)` | `square(relu(x))`，同形 `f32[N]` |
+| `std/loss` | `squared_error(prediction,target)` | 全部 N 个特征的平方误差均值，`f32[1]` |
+| 同上 | `half_squared_error(prediction,target)` | 上述均值乘 0.5，`f32[1]` |
+| 同上 | `categorical_logits(logits,target)` | `-sum(target*log_softmax(logits))`，`f32[1]`；自然对数，类别求和 |
+
+`categorical_logits` 的 target 应为非负且总和为 1 的独热或软标签；纯张量函数不做运行时
+分布检查，任意有限权重按相同公式求加权和。不要把概率作为 logits 输入。
+极大输入的减法、乘法和平方仍可能溢出并报错，不改变 f32 原语边界或静默裁剪。
+特征归约和训练器的样本平均是两个独立轴。
+
+库源随运行时内嵌，导入不读取工作目录，也不下载依赖；编译器随附的标准模块按 `std/activation`、`std/loss` 等逻辑名解析，与当前工作目录无关；开发版仍允许显式导入相对源码路径，该路径相对导入文件解析，不能覆盖保留的 std 逻辑名。未知 `std/` 名称明确报错。AOT 应打包实际依赖，不嵌入开发机绝对源码路径。
+`..`、`.wgt` 后缀和替代缩写不是合法标准库路径。重复别名、捕获、递归、循环与副作用
+沿用[自定义算子](custom-operators.md)的拒绝规则；AOT 包含已展开的计算，无运行时源码依赖。
+
+完整训练例子：[standard_operators/model.wgt](../examples/native_training/standard_operators/model.wgt)。
+可执行 `wgt run examples/native_training/standard_operators/model.wgt`，追加 `--compiled` 验证 AOT。
+
+## 审计边界与历史模块
+
+根目录旧图源码的 `block/use` 不是当前原生可执行标准库；逐文件 `weightc check` 均明确拒绝。
+`crates/wgt/src/contracts*` 和图查看器仍支持相关 JSON 制品的形状契约与展示，
+例如 scan/conv/attention；这与原生源码编译和执行分开。当前原生顺序 Layer 执行枚举
+只有 linear/relu/tanh/sigmoid/identity，自适应张量程序有另外的原语集。下表描述原生
+源码与执行链缺口，不否认历史制品的验证/查看支持，也不删除用户模型或权重。
+它们没有恒定返回的函数，但声明描述的结构不等于实际可执行能力。当前导入器不会将它们
+当作成功导入的空模块，也不会自动替换成不同数学或形状语义。
+
+| 旧模块与全部导出 | 当前精确阻碍 |
+| --- | --- |
+| `nn`: mlp, mlp_relu, mlp_tanh, mlp2, dense_gelu, dense_relu, dense_tanh；`heads`: classifier, binary, regressor；`blocks`: prenorm_ff, residual_mlp | 旧参数化 block/layer 工厂未迁入；纯算子不能创建线性权重或捕获模型参数；GELU/layernorm 不在当前张量算子域 |
+| `tensor_math`: l2norm, rms | 缺少张量除法/rsqrt 和显式标量扩展；不能拿 eps 在 max 外的宿主 l2_normalize 替代平方根内加 eps |
+| `rotary`: heads, merge_heads, partial | 缺少多轴 reshape/transpose、显式 cos/sin 多输入及广播契约 |
+| `recurrent`: gru_cell, gru | 缺少带外部状态的 scan 与参数化 cell；当前一维纯算子不能承载序列状态 |
+| `vision`: conv_relu, conv_pool, classifier | 缺少多轴卷积、池化和空间轴归约 |
+| `transformer`: tokens, attention, causal_attention, feed_forward, encoder, decoder, swiglu, gated_decoder | 缺少 embedding、多轴注意力、因果 mask、归一化与参数化投影；新 activation.swiglu 仅承担已投影两路特征的门乘，不是旧完整投影 block 的别名 |
+| `hf_decoder`: gpt2_block, rope_block, gemma_block, olmo_block, starcoder2_block, olmo2_block | 缺少多轴 attention/RoPE、归一化、dropout 和参数化组合 |
+| `gated_attention`: attention；`qwen_tail`: mlp, decoder, surgery, refinement_step | 缺少多输入 mask/位置、GQA、参数化投影与共享迭代结构 |
+| `delta_rule`: normalized_step | 缺少显式矩阵状态输入、矩阵乘法、广播和多输出状态契约 |
+
+分类目录中除 `activation/operators.wgt`、`loss/operators.wgt` 外的 `.wgt` 是宿主数学内置的
+可运行演示，不是可导入库；以下表格描述的函数属于无需 import 的运行时内置。
+
+
 原生标量函数直接调用，无需 import。解释器与 AOT 都经过同一个 Rust 实现。
 全部参数必填，无默认参数；输入输出均为有限 f64 标量，不接受张量或列表，
 不创建模型、权重或训练状态，也不提供张量自动微分。非有限结果报错。
@@ -199,5 +269,7 @@ KL/JS 的微小负舍入误差截为零；不保证精确实数恒等式。
 - [温度 softmax](../std/probability/temperature.wgt)
 
 可用 `wgt run 文件路径` 或追加 `--compiled` 执行。
+
+固定类别数的构造示例已使用 `onehot[3] 1`，结果为 `[0,1,0]`；类别轴长度在源码中可见。类别数需在运行时确定时仍使用 `one_hot(index,classes)`。
 
 forward/loss 的可微 `log_softmax`、`exp`、`log`、`sum`、`clip` 以及 `detach`、`minimum` 契约见[原生 RL](reinforcement-learning.md)。普通脚本中的列表/数值调用仍不建立梯度图；两种执行上下文不可混同。

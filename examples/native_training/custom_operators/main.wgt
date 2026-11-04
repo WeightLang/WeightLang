@@ -1,0 +1,13 @@
+wgt 0.2
+# Learn a tiny identity map on four explicit training rows.
+model custom_operators
+input x: f32[2]
+output y: f32[2]
+layer fc: linear(in=2, out=2)
+data identity:
+  [0, 0] -> [0, 0]
+  [0, 1] -> [0, 1]
+  [1, 0] -> [1, 0]
+  [1, 1] -> [1, 1]
+init seed=42
+train data=identity loss=mse optimizer=adam lr=0.05 epochs=400

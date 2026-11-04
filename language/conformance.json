@@ -1,306 +1,54 @@
 {
   "schema_version": 1,
   "cases": [
-    {
-      "id": "ordinary-native-agent",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nagent Actor {policy;learner:update;}\nfn update(actor,batch){return len(batch);}\nfn main(){return 0;}\n"
-    },
-    {
-      "id": "ordinary-record-literal",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main(){let row={state:0,observation:[1]};return row.state;}\n"
-    },
-    {
-      "id": "agent-missing-policy",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nagent Actor {critic;}\nfn main(){return 0;}\n"
-    },
-    {
-      "id": "ordinary-native-environment",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nenvironment Counter {observation:f32[1];action:f32[1];feedback:f32[1];reset:r;step:s;}\nfn r(state,seed){return {state:state,observation:[state]};}\nfn s(state,action){return {state:state,observation:[state],feedback:[0],terminated:false,truncated:false};}\nfn main(){return 0;}\n"
-    },
-    {
-      "id": "ordinary-native-async",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nasync fn child(x){await sleep(1);return x+1;}\nfn main(){tasks{let t=spawn child(1);return await t;}}\n"
-    },
-    {
-      "id": "async-main-rejected",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nasync fn main(){return 1;}\n"
-    },
-    {
-      "id": "tensor-await-rejected",
-      "context": "tensor_forward",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x){return await child(x);}\nasync fn child(x){return x;}\n"
-    },
-    {
-      "id": "ordinary-file-syntax",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main(){save text \"x\" to \"x.txt\" overwrite; let x=load json from \"x.json\"; assert true, \"ok\";}\n"
-    },
-    {
-      "id": "load-model-optimizer-required",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main(){let net=load model from \"model.json\";}\n"
-    },
-    {
-      "id": "tensor-file-syntax-rejected",
-      "context": "tensor_forward",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x){save text \"x\" to \"x.txt\";return x;}\n"
-    },
-    {
-      "id": "ordinary-train-strategy",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main(){train net on ([],[]) using strategy;}\nfn strategy(net,x,y){return null;}\n"
-    },
-    {
-      "id": "train-strategy-unknown",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main(){train net on ([],[]) using missing;}\n"
-    },
-    {
-      "id": "train-strategy-arity",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn strategy(net,x){return null;}\nfn main(){train net on ([],[]) using strategy;}\n"
-    },
-    {
-      "id": "ordinary-collect-records",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main(){let b=collect {for i in [1,2]{yield {x:[i],target:[i]};}};for part in b size 16 {let x=part.x;}return len(b);}\n"
-    },
-    {
-      "id": "tensor-collect-rejected",
-      "context": "tensor_forward",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x){let b=collect {yield {x:x};};return x;}\n"
-    },
-    {
-      "id": "ordinary-sample-record",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn choose(net,x) { let {action:a,log_prob:lp}=sample from net(x); return [a,lp]; }\nfn main() { return 0; }\n"
-    },
-    {
-      "id": "sample-record-duplicate",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main() { let {action:a,log_prob:a}=sample from net([1]); }\n"
-    },
-    {
-      "id": "ordinary-assert-syntax",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main(){assert true; assert (1)==1, \"ok\";}\n"
-    },
-    {
-      "id": "tensor-assert-rejected",
-      "context": "tensor_forward",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x){assert true;return x;}\n"
-    },
-    {
-      "id": "ordinary-slicing",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main() { let x = [1,2,3]; return (x[:])[1:][0:1].mean; }\n"
-    },
-    {
-      "id": "slice-step-rejected",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main() { return [1,2][::2]; }\n"
-    },
-    {
-      "id": "slice-axis-rejected",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main() { return [1,2][:,0]; }\n"
-    },
-    {
-      "id": "tensor-slicing",
-      "context": "tensor_forward",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[3]\noutput y: f32[2]\nfn forward(x) { return x[1:]; }\n"
-    },
-    {
-      "id": "tensor-empty-slice",
-      "context": "tensor_forward",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[3]\noutput y: f32[1]\nfn forward(x) { return x[1:1]; }\n"
-    },
-    {
-      "id": "tensor-negative-slice",
-      "context": "tensor_forward",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[3]\noutput y: f32[1]\nfn forward(x) { return x[-1:]; }\n"
-    },
-    {
-      "id": "tensor-runtime-slice",
-      "context": "tensor_forward",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[3]\noutput y: f32[1]\nfn forward(x) { return x[x:]; }\n"
-    },
-    {
-      "id": "ordinary-loop",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main() { for x in [1,2] { let y = x; } return 0; }\n"
-    },
-    {
-      "id": "ordinary-sample",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main() { return sample 1 { then { 1 } else { 0 } }; }\n"
-    },
-    {
-      "id": "ordinary-sample-from",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn choose(net,x) { return sample from net(x); }\nfn main() { return 0; }\n"
-    },
-    {
-      "id": "old-sample-call-rejected",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main() { return sample(net,[1]); }\n"
-    },
-    {
-      "id": "sample-from-arity-rejected",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main() { return sample from net([1],[2]); }\n"
-    },
-    {
-      "id": "tensor-sample-from-rejected",
-      "context": "tensor_forward",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x) { return sample from x(x); }\n"
-    },
-    {
-      "id": "unresolved-call-is-runtime",
-      "context": "ordinary_function",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main() { return missing(); }\n"
-    },
-    {
-      "id": "sequential-declarations",
-      "context": "model_declaration",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nlayer y: identity\ninit seed=1\n"
-    },
-    {
-      "id": "tensor-forward",
-      "context": "tensor_forward",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x) { return x; }\n"
-    },
-    {
-      "id": "tensor-target-loss",
-      "context": "tensor_loss",
-      "rust_accepts": true,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\ntarget truth: f32[2]\nfn forward(x) { return x; }\nfn loss(prediction,truth) { return mean(square(truth)); }\n"
-    },
-    {
-      "id": "tensor-for-rejected",
-      "context": "tensor_forward",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x) { for i in [1] { let y = x; } return x; }\n"
-    },
-    {
-      "id": "tensor-sample-rejected",
-      "context": "tensor_loss",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x) { return x; }\nfn loss(prediction,truth) { return sample 1 { then { prediction } else { truth } }; }\n"
-    },
-    {
-      "id": "old-edition",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.3\nfn main() { return 0; }\n"
-    },
-    {
-      "id": "leading-dot-editor-tolerance",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main() { return .5; }\n"
-    },
-    {
-      "id": "double-slash-editor-tolerance",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": true,
-      "source": "wgt 0.5\nfn main() { return 4 // 2; }\n"
-    },
-    {
-      "id": "unclosed-body",
-      "context": "ordinary_function",
-      "rust_accepts": false,
-      "editor_accepts": false,
-      "source": "wgt 0.5\nfn main() { return 1;\n"
-    },
-    {
-      "id": "operator-library-structure",
-      "context": "editor",
-      "editor_accepts": true,
-      "editor_node": "operators_declaration",
-      "source": "wgt 0.5\noperators Local\nfn activate(x) { return relu(x); }\n"
-    }
+    {"id":"let-group-host","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let a=1,\n b=a+1,c={x:[a,b],y:2};return c.x;}\n"},
+    {"id":"let-group-forward","context":"tensor_forward","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[2]\noutput y: f32[1]\nfn forward(x){let a=square(x), b=a.mean;return b;}\n"},
+    {"id":"let-group-loss","context":"tensor_loss","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x){return x;}\nfn loss(prediction,target){let a=prediction-target,b=square(a);return b.mean;}\n"},
+    {"id":"let-group-trailing-comma","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let a=1,;}\n"},
+    {"id":"let-group-missing-equals","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let a=1,b;}\n"},
+    {"id":"let-group-no-tuple","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let a=(1,2);}\n"},
+    {"id":"let-group-destructure-first","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let {action,log_prob}=sample from net([1]),b=2;}\n"},
+    {"id":"let-group-destructure-later","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let a=1,{action}=sample from net([1]);}\n"},
+    {"id":"ordinary-native-agent","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nagent Actor {policy;learner:update;}\nfn update(actor,batch){return len(batch);}\nfn main(){return 0;}\n"},
+    {"id":"ordinary-record-literal","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let row={state:0,observation:[1]};return row.state;}\n"},
+    {"id":"agent-missing-policy","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nagent Actor {critic;}\nfn main(){return 0;}\n"},
+    {"id":"ordinary-native-environment","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nenvironment Counter {observation:f32[1];action:f32[1];feedback:f32[1];reset:r;step:s;}\nfn r(state,seed){return {state:state,observation:[state]};}\nfn s(state,action){return {state:state,observation:[state],feedback:[0],terminated:false,truncated:false};}\nfn main(){return 0;}\n"},
+    {"id":"ordinary-native-async","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nasync fn child(x){await sleep(1);return x+1;}\nfn main(){tasks{let t=spawn child(1);return await t;}}\n"},
+    {"id":"async-main-rejected","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nasync fn main(){return 1;}\n"},
+    {"id":"tensor-await-rejected","context":"tensor_forward","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x){return await child(x);}\nasync fn child(x){return x;}\n"},
+    {"id":"ordinary-train-strategy","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main(){train net on ([],[]) using strategy;}\nfn strategy(net,x,y){return null;}\n"},
+    {"id":"train-strategy-unknown","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){train net on ([],[]) using missing;}\n"},
+    {"id":"train-strategy-arity","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn strategy(net,x){return null;}\nfn main(){train net on ([],[]) using strategy;}\n"},
+    {"id":"ordinary-collect-records","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let b=collect {for i in [1,2]{yield {x:[i],target:[i]};}};for part in b size 16 {let x=part.x;}return len(b);}\n"},
+    {"id":"tensor-collect-rejected","context":"tensor_forward","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x){let b=collect {yield {x:x};};return x;}\n"},
+    {"id":"ordinary-file-syntax","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main(){save text \"x\" to \"x.txt\" overwrite; let x=load json from \"x.json\"; assert true, \"ok\";}\n"},
+    {"id":"load-model-optimizer-required","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let net=load model from \"model.json\";}\n"},
+    {"id":"tensor-file-syntax-rejected","context":"tensor_forward","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x){save text \"x\" to \"x.txt\";return x;}\n"},
+    {"id":"ordinary-sample-record","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn choose(net,x) { let {action:a,log_prob:lp}=sample from net(x); return [a,lp]; }\nfn main() { return 0; }\n"},
+    {"id":"sample-record-duplicate","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { let {action:a,log_prob:a}=sample from net([1]); }\n"},
+    {"id":"ordinary-slicing","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main() { let x = [1,2,3]; return (x[:])[1:][0:1].mean; }\n"},
+    {"id":"slice-step-rejected","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return [1,2][::2]; }\n"},
+    {"id":"slice-axis-rejected","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return [1,2][:,0]; }\n"},
+    {"id":"tensor-slicing","context":"tensor_forward","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[3]\noutput y: f32[2]\nfn forward(x) { return x[1:]; }\n"},
+    {"id":"tensor-empty-slice","context":"tensor_forward","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[3]\noutput y: f32[1]\nfn forward(x) { return x[1:1]; }\n"},
+    {"id":"tensor-negative-slice","context":"tensor_forward","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[3]\noutput y: f32[1]\nfn forward(x) { return x[-1:]; }\n"},
+    {"id":"tensor-runtime-slice","context":"tensor_forward","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[3]\noutput y: f32[1]\nfn forward(x) { return x[x:]; }\n"},
+    {"id":"ordinary-loop","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main() { for x in [1,2] { let y = x; } return 0; }\n"},
+    {"id":"ordinary-sample","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return sample 1 { then { 1 } else { 0 } }; }\n"},
+    {"id":"ordinary-sample-from","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn choose(net,x) { return sample from net(x); }\nfn main() { return 0; }\n"},
+    {"id":"old-sample-call-rejected","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return sample(net,[1]); }\n"},
+    {"id":"sample-from-arity-rejected","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return sample from net([1],[2]); }\n"},
+    {"id":"tensor-sample-from-rejected","context":"tensor_forward","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x) { return sample from x(x); }\n"},
+    {"id":"unresolved-call-is-runtime","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return missing(); }\n"},
+    {"id":"sequential-declarations","context":"model_declaration","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nlayer y: identity\ninit seed=1\n"},
+    {"id":"tensor-forward","context":"tensor_forward","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x) { return x; }\n"},
+    {"id":"tensor-target-loss","context":"tensor_loss","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\ntarget truth: f32[2]\nfn forward(x) { return x; }\nfn loss(prediction,truth) { return mean(square(truth)); }\n"},
+    {"id":"tensor-for-rejected","context":"tensor_forward","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x) { for i in [1] { let y = x; } return x; }\n"},
+    {"id":"tensor-sample-rejected","context":"tensor_loss","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x) { return x; }\nfn loss(prediction,truth) { return sample 1 { then { prediction } else { truth } }; }\n"},
+    {"id":"old-edition","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.3\nfn main() { return 0; }\n"},
+    {"id":"leading-dot-editor-tolerance","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return .5; }\n"},
+    {"id":"double-slash-editor-tolerance","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return 4 // 2; }\n"},
+    {"id":"unclosed-body","context":"ordinary_function","rust_accepts":false,"editor_accepts":false,"source":"wgt 0.5\nfn main() { return 1;\n"},
+    {"id":"operator-library-structure","context":"editor","editor_accepts":true,"editor_node":"operators_declaration","source":"wgt 0.5\noperators Local\nfn activate(x) { return relu(x); }\n"}
   ]
 }

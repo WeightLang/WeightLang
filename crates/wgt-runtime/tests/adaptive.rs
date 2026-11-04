@@ -123,7 +123,12 @@ fn shapes_frozen_parameters_and_targets_are_checked_before_execution() {
         EXAMPLE.replace("input x: f32[2]", "input x: f32[0]"),
     ];
     for source in errors {
-        assert!(parse(&source).and_then(|p| AdaptiveSession::prepare(p, 4096)).is_err(), "{source}");
+        assert!(
+            parse(&source)
+                .and_then(|p| AdaptiveSession::prepare(p, 4096))
+                .is_err(),
+            "{source}"
+        );
     }
     let model = session(EXAMPLE);
     assert!(AdaptiveSession::prepare(parse(EXAMPLE).unwrap(), model.managed_bytes() - 1).is_err());
@@ -160,13 +165,15 @@ fn finite_fallthrough_rolls_back_and_return_without_write_keeps_revision() {
         .to_string()
         .contains("fell through"));
     assert_eq!(model.parameter("memory").unwrap(), &[0.]);
-    let mut model = session("wgt 0.5
+    let mut model = session(
+        "wgt 0.5
 model Test
 input x: f32[1]
 output y: f32[1]
 fn forward(x) {
     return x;
-}");
+}",
+    );
     assert_eq!(model.run(&[3.], 1).unwrap(), &[3.]);
     assert_eq!(model.revision(), 0);
 }

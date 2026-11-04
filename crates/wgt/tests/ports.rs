@@ -21,9 +21,15 @@ fn named_bool_mask_and_outputs_are_checked_independently() {
     });
     let mut tensors = BTreeMap::new();
     infer_named(&layers, &interface, &mut tensors, &mut Contracts::new()).unwrap();
-    assert_eq!(tensors["project.weight"], vec![4,4]);
+    assert_eq!(tensors["project.weight"], vec![4, 4]);
     interface["outputs"][1]["shape"] = json!([5]);
-    assert!(infer_named(&layers, &interface, &mut BTreeMap::new(), &mut Contracts::new()).is_err());
+    assert!(infer_named(
+        &layers,
+        &interface,
+        &mut BTreeMap::new(),
+        &mut Contracts::new()
+    )
+    .is_err());
 }
 
 #[test]
@@ -46,5 +52,11 @@ fn scan_accepts_explicit_state_and_rejects_wrong_state_width() {
     infer_named(&layers, &interface, &mut BTreeMap::new(), &mut contracts).unwrap();
     assert_eq!(contracts["memory"].1.axes, vec![Some("time".into()), None]);
     interface["inputs"][1]["shape"] = json!([5]);
-    assert!(infer_named(&layers, &interface, &mut BTreeMap::new(), &mut Contracts::new()).is_err());
+    assert!(infer_named(
+        &layers,
+        &interface,
+        &mut BTreeMap::new(),
+        &mut Contracts::new()
+    )
+    .is_err());
 }

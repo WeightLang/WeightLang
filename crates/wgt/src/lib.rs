@@ -21,6 +21,7 @@ pub mod weight_types;
 
 pub mod precision;
 
+pub mod source_check;
 pub mod script_compiler;
 pub mod script_dependencies;
 

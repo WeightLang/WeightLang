@@ -1,0 +1,8 @@
+wgt 0.5
+operators Activations
+
+# 纯算子接收显式特征，不捕获模型权重或初始化状态。
+# 输入和输出都是 [特征]；稳定 sigmoid 逐特征构成 SiLU 门。
+fn swish(x) {
+    return x * sigmoid(x);
+}

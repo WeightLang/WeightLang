@@ -1,5 +1,9 @@
 # 模型与数据存储
 
+模型源码入口必须为项目/模型目录下的 `model.wgt`；多个独立模型各建目录，不能用不同入口文件名区分。
+模型声明、forward、loss 和显式训练 main 可共存于该文件。`weights/` 中的推理制品、优化器断点与
+`source.wgt` 归档快照各有独立格式，不因入口命名规范而改名。模型示例组织见[示例目录](../examples/native_training/README.md)。
+
 完整模型放在 `weights/<model>/`；保留的实验基线、候选结果和报告放在 `weights/<experiment>/`，作为持久数据一起保留。不要将它们当缓存清理，也不要覆盖既有结果；只有提供显式 `--force` 或原生 `save ... overwrite;` 的操作才可以按其具体契约替换。原生构建和兼容保存函数仍拒绝已有目标；原生 save 语句默认拒绝覆盖，显式 overwrite 仅原子替换普通可写文件，拒绝目录和符号链接，详见[文件 IO](file-io.md)。
 
 | 内容 | 位置 | 用途 |
@@ -11,7 +15,7 @@
 
 预计写入超过 100 MB 前，检查目标目录、剩余空间、实际挂载和冗余内容。大文件不能放在 tmpfs，包括 `/tmp` 或 `/dev/shm` 的内存挂载。结束后只清理本任务产生且不再需要的临时文件，不删除已有权重、实验、缓存或其他工作。
 
-`weightc legacy-build` 默认向 `weights/<source stem>/` 输出 `model.json`、`checkpoint.json`、`source.wgt` 和完成标记 `manifest.json`。这些文件应作为完整目录保留。`save_model` 写入推理模型；`save_checkpoint` 写入包含优化器状态的训练断点，两者不能互换。调用者还需保存数据及脚本进度；断点不自动保存脚本 RNG 和外部依赖。详见[原生训练](native-training.md#保存与续训)。
+`weightc legacy-build` 默认向 `weights/<source stem>/` 输出 `model.json`、`checkpoint.json`、`source.wgt` 和完成标记 `manifest.json`。这些文件应作为完整目录保留。`save model VALUE to PATH;` 写入推理模型；`save checkpoint VALUE to PATH;` 写入包含优化器状态的训练断点，两者不能互换。调用者还需保存数据及脚本进度；断点不自动保存脚本 RNG 和外部依赖。详见[原生训练](native-training.md#保存与续训)。
 
 原生编译的 Cargo 中间文件使用当前目录下的 `.cache/weightlang/aot/`；编译不执行训练或生成权重。单文件脚本的依赖锁位于包缓存中的 `scripts/<脚本规范路径的 SHA256>/wgt.sum`；项目脚本使用项目的 `wgt.sum`。完整路径及依赖规则见[原生训练](native-training.md#单文件依赖注释与直接执行)。
 

@@ -129,6 +129,12 @@ fn old_registry_records_are_retained_but_not_selected_for_05() {
     let mut old = record("v9.0.0");
     old.edition = "0.3".into();
     let records = vec![(old, "old".into()), (record("v0.5.0"), "new".into())];
-    assert_eq!(package_index::select("example/gates", None, records.clone()).unwrap().0.version, "v0.5.0");
+    assert_eq!(
+        package_index::select("example/gates", None, records.clone())
+            .unwrap()
+            .0
+            .version,
+        "v0.5.0"
+    );
     assert!(package_index::select("example/gates", Some("v9.0.0"), records).is_err());
 }

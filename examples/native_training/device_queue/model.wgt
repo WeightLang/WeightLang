@@ -1,0 +1,21 @@
+wgt 0.5
+# 输入为两个标量特征，输出一个标量；权重仅初始化，不进行训练。
+# 宿主 devices 授予 accelerator 别名、精确硬件 ID 和队列/计算额度。
+fn main() {
+    compute_budget(10000, 4096, 10, 30000);
+    let model = mlp([2, 4, 1], "tanh", 42, "sgd");
+    let reference = predict(model, [1, 2]);
+    # 每个提交捕获当时的权重快照，两个任务可以并发；之后的训练不会修改已排队任务。
+    let first = device_submit(model, [1, 2], "accelerator");
+    let second = device_submit(model, [1, 2], "accelerator");
+    assert(first["ok"] && second["ok"], "device admission failed");
+    let a = device_wait("accelerator", first["job"], 30000);
+    let b = device_wait("accelerator", second["job"], 30000);
+    assert(a["ok"] && b["ok"], "device execution failed");
+    let error = a["output"][0] - reference[0];
+    assert(error * error < 0.000001, "device result differs from CPU reference");
+    error = b["output"][0] - reference[0];
+    assert(error * error < 0.000001, "second device result differs");
+    metric("device", device_status("accelerator"));
+    return a["output"];
+}

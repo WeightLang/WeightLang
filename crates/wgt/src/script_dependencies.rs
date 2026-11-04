@@ -61,7 +61,17 @@ pub fn prepare(source: &Path, offline: bool, locked: bool) -> Result<BTreeMap<St
     let text = fs::read_to_string(&source)?;
     let inline = metadata(&text)?;
     // Parse before any download or lock-file mutation.
-    weightlang_runtime::script::parse(&text)?;
+    let imports = weightlang_runtime::script::operators::imports(&text)?;
+    if imports.iter().all(|(_, path)| path.starts_with("./") || path.starts_with("std/")) {
+        weightlang_runtime::script::parse_with_imports(
+            &text,
+            source.parent().unwrap(),
+            &BTreeMap::new(),
+        )?;
+    } else {
+        // Package functions cannot be lowered until verified dependencies are available.
+        weightlang_runtime::source::split(&text)?;
+    }
     let cache = registry::cache_root()?;
     let (manifest, project) = if let Some(inline) = inline {
         let key = format!("{:x}", Sha256::digest(source.to_string_lossy().as_bytes()));

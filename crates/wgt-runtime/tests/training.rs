@@ -43,7 +43,8 @@ fn analytic_gradients_match_finite_differences() {
             .map(|p| (p.name.to_string(), p.shape.iter().product::<usize>()))
             .collect();
         for (i, (name, n)) in names.iter().enumerate() {
-            for j in 0..*n {
+            assert_eq!(grad[i].len(), *n);
+            for (j, gradient) in grad[i].iter().enumerate() {
                 let mut original = [0.];
                 t.session.read_parameter(name, j, &mut original).unwrap();
                 let mut losses = Vec::new();
@@ -67,9 +68,9 @@ fn analytic_gradients_match_finite_differences() {
                     .unwrap();
                 let numerical = (losses[1] - losses[0]) / 0.002;
                 assert!(
-                    (numerical - grad[i][j]).abs() < 0.002,
+                    (numerical - gradient).abs() < 0.002,
                     "{activation} {name} {j}: {numerical} != {}",
-                    grad[i][j]
+                    gradient
                 );
             }
         }

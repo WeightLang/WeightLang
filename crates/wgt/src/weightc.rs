@@ -42,7 +42,9 @@ enum Command {
     },
 }
 fn main() -> Result<()> {
-    if let Some(code) = weightlang_wgt::toolchain::dispatch_compiler(&std::env::args_os().skip(1).collect::<Vec<_>>())? {
+    if let Some(code) = weightlang_wgt::toolchain::dispatch_compiler(
+        &std::env::args_os().skip(1).collect::<Vec<_>>(),
+    )? {
         std::process::exit(i32::from(code));
     }
     let cli = Cli::parse();
@@ -57,9 +59,8 @@ fn main() -> Result<()> {
             println!("compiled: {}", output.display());
         }
         Command::Check { source } => {
-            weightlang_wgt::script_dependencies::metadata(&fs::read_to_string(&source)?)?;
-            script::parse(&fs::read_to_string(source)?)?;
-            println!("ok: native WGT script; no execution");
+            let base = std::env::current_dir()?;
+            std::process::exit(i32::from(weightlang_wgt::source_check::run(&base, Some(&source), "human")?));
         }
         Command::Build {
             source,

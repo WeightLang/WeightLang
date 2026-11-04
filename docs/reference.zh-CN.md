@@ -7,7 +7,13 @@
 
 当前实现为纯 Rust。原 Python 前端的完整图算子、block/import 等尚未全部迁入原生构造器；
 `std/` 根目录的旧图源码作为迁移材料保留，不能因为文件头改为 0.5 就宣称可执行；
-分类子目录中的原生标准库示例可单独运行，完整目录见[标准库](standard-library.md)。不支持的声明显式报错，不回退 Python。
+`std/math/` 和 `std/activation/` 中的原生标量示例可单独运行。不支持的声明显式报错，不回退 Python。
+
+## wgtime 服务边界（目标合同，接线待实现）
+
+[wgtime 专题](wgtime.md) 定义机器级单服务、轻量 IPC 客户端、服务端驻留权重/梯度/优化器、共享缓冲所有权及性能验收。
+当前解释与 AOT 仍内嵌执行核心；本段不宣称已有服务隔离或零拷贝。迁移不得改变现有 WGT 自定义 loss、optimizer、SAM 与 checkpoint 语义。
+外部程序保留数据、控制流、HTTP、工具循环与 harness；服务失败明确报错，不回退本地训练/推理。检查和编译仍不得隐式训练。
 
 ## 语法与能力边界的机器可读规格
 
@@ -28,8 +34,23 @@
 不能因名字出现在目录中就用于普通函数。`write` 等标注为语句，`positive` 只用于张量条件。
 目录也列出 `true`、`false`、`null` 常量及 `f32`、`prob`、`logits`、`probabilities` 声明类型；这些不是可调用函数。
 `std/` 模块不自动导入，仍须按各模块的使用契约显式引入。
+原生 WGT 计算库使用逻辑模块名 `import activation from "std/activation"` 与
+`import loss_ops from "std/loss"`，仅在 forward/loss 中调用，输入为非空同形 f32[N]。编译器随附模块与当前目录无关；开发版也允许相对导入文件的显式源码路径，本地路径不能覆盖 std 逻辑名。AOT 打包实际依赖，不写入开发机绝对源码路径。
+无默认参数、隐含 batch 或标量广播。前者导出 `swish(x)`、`swiglu(gate,value)`、
+`squared_relu(x)`（同形返回）；后者导出 `squared_error(prediction,target)`、
+`half_squared_error(prediction,target)`（特征均值）及 `categorical_logits(logits,target)`
+（类别加权负对数似然之和），均返回 f32[1]。target 分布条件由调用方保证，不动态验证。
+库不创建权重或训练状态，支持 CPU 梯度及 AOT；标准源内嵌、未知 std 路径报错。
+完整数学定义、限制、旧图模块能力表与可执行例子见[标准库](standard-library.md)。
 
 ## 编译单元与入口
+
+**模型源码入口固定为 `model.wgt`。** 每个独立模型或训练示例使用独立目录，
+例如 `examples/native_training/working_memory/model.wgt`；模型/功能名放在目录名中，
+不能用 `main.wgt`、`train.wgt` 或 `working_memory.wgt` 作为模型入口。
+`model.wgt` 是文件入口，`fn main()` 是显式执行时调用的函数，两者不是同一概念。
+这是项目、示例与技能的组织规范；底层 CLI 接受显式源码路径不代表推荐其他入口名称。
+标准库模块文件和制品中的 `source.wgt` 快照不属于模型源码入口，不随此规范改名。
 
 首个非空、非注释行必须恰好是 `wgt 0.5`，版本头只能出现一次。
 `#` 到行尾为注释，函数字符串使用双引号和 JSON 转义。顶层模型声明一行一条；
@@ -41,10 +62,10 @@
 只有模型声明的文件可检查，但执行或编译可执行文件时必须显式定义 main。
 
 ```sh
-weightc check examples/native_training/supervised.wgt
-wgt run examples/native_training/supervised.wgt
-wgt run examples/native_training/supervised.wgt --compiled
-weightc compile examples/native_training/supervised.wgt -o .cache/weightlang/regression
+weightc check examples/native_training/supervised/model.wgt
+wgt run examples/native_training/supervised/model.wgt
+wgt run examples/native_training/supervised/model.wgt --compiled
+weightc compile examples/native_training/supervised/model.wgt -o .cache/weightlang/regression
 ```
 
 `wgt script` 是 `wgt run` 的命令别名，不是另一套语言。
@@ -100,29 +121,18 @@ fn main() {
 
 ## 普通函数、训练与数据
 
-WGT 0.5 普通函数还支持 `let action = sample from net(input);`：`net` 必须是当前函数内的模型句柄变量或参数，
-只接受一个输入表达式，按模型输入宽度转换为有限 f32 向量。模型查找在输入求值之前，输入只求值一次；
-不支持 `sample from factory()(x)`、限定名或任意模型表达式。括号属于采样语法，`net(input)` 不会先按普通调用执行；
-整个采样结果可继续参与索引、后缀或二元运算，必要时用括号分组。
-返回零基类别索引，范围为 `[0, output_width)` 的整数数值。模型输出按显式类型抽样：`logits[N]` 使用稳定 softmax，`probabilities[N]` 验证后按实际总质量抽样；旧 `f32[N]` 保持原有 logits 解释及 RNG 数值顺序；
-每次成功抽样消耗一次脚本 RNG，受 `seed` 和操作预算控制。它执行无 tape 推理，不提交 forward 中显式 `write`，
-不更新权重或优化器；普通 `net(input)` 则提交 forward 写入。forward/loss 中拒绝此离散表达式。
-旧 `sample(net,input)` 函数入口已移除，会提示迁移到 `sample from net(input)`；二选一 `sample p { ... }` 语法保留。
-例如 `fn choose(net,x) { return sample from net(x); }`，可运行完整训练示例见 [reinforce/model.wgt](../examples/native_training/reinforce.wgt)。
-
 值包括有限数值、bool、字符串、null、列表、JSON 对象和不透明资源句柄。
 `let name = expr;` 绑定变量，`name = expr;` 修改已有绑定。
+
+`let a = expr, b = expr, c = expr;` 一次声明多项，可在逗号前后换行。每项从左到右求值一次并立即绑定，后项可引用前项；等价于同一块内连续的普通 `let`，不新增作用域或事务，后项失败不回滚前项副作用。普通函数保留原有重绑定规则，forward/loss 保留原有声明与形状约束。函数实参、列表和记录字面量内部的逗号由各自括号消费；最外层逗号才分隔声明，不提供元组或多目标赋值。`collect` 和绑定结果的 `learn` 必须独立书写，不能混入连续声明。组末不能有尾随逗号。
+完整示例见 [continuous_let/model.wgt](../examples/native_training/continuous_let/model.wgt)。
+
 支持函数调用、列表/对象索引、一元 `- !`、算术 `+ - * / %`、比较及短路 `&& ||`。
 数值运算产生无穷大或 NaN 时报错，包括数字除以零及对零取余；不会隐式替换除数。
-同次采样可用声明语句 `let {action, log_prob} = sample from net(input);` 同时绑定动作与当时的自然对数概率；
-支持 `let {action: a, log_prob: lp} = sample from net(input);`，也可只选择一个字段。
-字段只能为 `action` / `log_prob`，字段和绑定变量均不得重复，空绑定拒绝；这不是通用对象解构表达式。
-模型与输入的求值顺序、一次 forward、一次 RNG 和不提交写入的规则与标量形式相同；取得概率不会再次调用模型。
-logits 的 log probability 直接用 f64 减最大值和 log-sum-exp 计算，避免先 softmax 后取 log 的下溢；
-显式 probabilities 按实际抽样分布返回 `log(p_action) - log(sum(p))`，零概率类别不会被选中。
-旧 f32 的动作沿用原有采样算术；其 log probability 用同次输出的 f64 稳定公式，舍入可能与旧 f32 `log_softmax` 有差异。
-两个字段全部计算成功后才绑定变量。forward/loss 不支持此声明；解释和 AOT 共用采样核心。
-完整例子见 [sample_record/model.wgt](../examples/native_training/sample_record/model.wgt)。
+普通脚本中的 `sample p { then { a } else { b } }` 按标量概率 p 在 [0,1] 抽样，只执行选中表达式；
+精确端点不消耗随机数。它不建立张量梯度，示例见 [sample_branch/model.wgt](../examples/native_training/sample_branch/model.wgt)。
+
+类别采样目标语法为 `decode policy(input) {method:sample;}`。parser/runtime 实现前，此形式为规划契约，不可执行；目标模型/输入只求值一次，采样不提交 forward 写入，并沿用模型声明的 logits 或 probabilities 分布语义。返回字段、RNG 消耗和预算限制待实现后补齐。
 条件必须 bool，无隐式数值或张量真假转换；函数参数按位置传递，参数数目严格匹配。
 
 ## 原生 agent、environment 与 learn
@@ -176,11 +186,9 @@ collect/yield/分块不支持 tensor forward/loss，不使记录自动可微；P
 调用先查当前函数的局部绑定（包括参数）；模型句柄执行前向，其他局部值报不可调用，
 没有局部绑定才解析普通函数、模型构造器或内置函数。块仍共享当前函数环境，不捕获调用者变量。
 这不是通用函数对象或任意表达式调用：`factory()(x)` 不受支持。
-`net(x)` 与兼容接口 `predict(net,x)` 共用执行路径，不隐式训练、更新优化器或保存制品；
+`net(x)` 执行模型前向，不隐式训练、更新优化器或保存制品；
 无显式写入的前向不改变参数、revision 或训练步数。forward 中显式 `write` 仍按原有事务契约提交，
 失败则回滚；运行工作量仍计入执行预算。错误包含调用名、所在语句行号及形状不匹配时的预期/实际宽度。
-
-普通函数支持原生 `assert CONDITION [, MESSAGE];` 语句，条件严格为 bool 且只求值一次；仅失败才求字符串消息，默认 `assertion failed`。括号条件可写 `assert(condition);`。旧两实参 `assert(condition,message)` 保持急求值与返回 null 的兼容契约。解释/AOT 行为一致，错误含语句行号，详见[原生断言](assertions.md)。
 
 普通函数的原生文件语法为 `save KIND VALUE to PATH [overwrite];` 和读取表达式
 `load KIND from PATH`，KIND 为 `text/json/model/checkpoint`；`load model` 必填 `using OPTIMIZER`，
@@ -188,8 +196,7 @@ checkpoint 使用保存的优化器。值、路径各求值一次；相对路径
 默认拒绝覆盖，显式 overwrite 只原子替换普通可写文件；每文件最多 64 MiB，按编码字节消耗 operation budget。
 宿主策略模式拒绝直接路径 IO，须用授权 capability。模型与断点不能混用，load 不执行 main 或训练。
 `reload model TARGET from PATH using OPTIMIZER;` / `reload checkpoint TARGET from PATH;` 在同句柄中原子替换同结构模型状态，所有别名可见；model重新初始化优化器，checkpoint恢复保存状态与步数，运行时revision递增并使旧梯度失效。结构不匹配或候选失败保留旧状态。
-`assert CONDITION [, MESSAGE];` 要求严格 bool，只失败才求字符串消息，默认 `assertion failed`；
-旧两实参 `assert(condition,message)` 保持急求值兼容。解释/AOT 相同，错误含语句行号。
+`assert CONDITION;` 或 `assert CONDITION, MESSAGE;` 要求严格 bool，只失败才求字符串消息，默认 `assertion failed`。解释/AOT 相同，错误含语句行号。
 完整签名、格式、安全发布和 JSON 限制见[文件与断言语法](file-io.md)。
 
 控制流为 `if condition { ... } else { ... }`、`while condition { ... }`、
@@ -198,9 +205,8 @@ checkpoint 使用保存的优化器。值、路径各求值一次；相对路径
 无任意 Python、shell 或宿主回调。源码函数嵌套与求值均有预算限制。
 
 训练、流式 JSONL、强化学习、保存与 benchmark 的完整内置签名、默认值及限制见
-[原生训练](native-training.md#内置接口)。常用 `model(input)`、
-`fit(model,inputs,targets,rate,loss)` 没有隐式训练或保存。
-`save_model` 保存模型，`save_checkpoint` 保存优化器断点，两者不能混用。
+[原生训练](native-training.md#内置接口)。常用模型调用为 `net(input)`；显式训练使用
+`fit(model,inputs,targets,rate,loss)`，不会由推理调用隐式触发。
 
 ### 统一括号切片 `x[start:end]`
 
@@ -229,14 +235,24 @@ wgt 0.5
 fn main() {
     let x = [10,20,30,40];
     let start = 1;
-    assert(x[start:3] == [20,30], "half-open bounds");
-    assert(x[4:] == [], "empty list slice");
+    assert x[start:3] == [20,30], "half-open bounds";
+    assert x[4:] == [], "empty list slice";
     return x[:2];
 }
 ```
 
 包含列表、forward/loss 和显式训练的完整示例：
 [`slicing/model.wgt`](../examples/native_training/slicing/model.wgt)。
+
+### GPU 与 WGSL 内置函数
+
+WGT 0.5 新增 `devices()`、`training_device(model,device,memory_bytes,max_batch)`、
+`training_status(model)`、`wgsl_kernel(source,entry,device,memory_bytes)`、
+`wgsl_run(kernel,input,output_count,workgroups)`，参数全部必填，没有隐式设备回退。
+顺序模型可显式选择 GPU 执行 fit/reinforce；forward/loss 程序仍仅 CPU。
+自定义 WGSL 为普通函数的显式计算，不参与自动求导；固定一维 f32 输入/输出缓冲，
+workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
+完整签名、设备/预算限制、宿主策略、AOT、有效例子见 [原生 WGSL 与 GPU 训练](wgsl.md)。
 
 ## 自更新前向函数
 
@@ -250,7 +266,7 @@ fn main() {
 `frozen` 禁止本次调用内 write 及优化器更新；不意味着该参数的数学梯度为零。
 
 `fn forward` 复用普通函数的 let、赋值、return、if、while、break、continue 语法，
-操作数为定长 f32 张量。暂不支持 forward 中的 for、辅助函数调用、数据 IO 或优化器调用。
+操作数为定长 f32 张量。支持下述纯张量辅助算子；暂不支持 forward 中的 for、数据 IO 或优化器调用。
 当前前向表达式签名如下，除 linear 的 b 外没有默认参数：
 
 | 表达式/语句 | 语义与约束 |
@@ -266,6 +282,11 @@ fn main() {
 | `slice(x,start,length)` | start 非负整数、length 正整数，范围不得越界 |
 | `positive(x)` | 仅作为条件；x 必须 f32[1]，严格大于零选真分支 |
 | `let y = x;` | 复制张量值并保留梯度，不创建参数别名 |
+| `memory_alloc(slots,width)` | 两个 1..16384 的整数常量，分配零初始化 f32[N,D] 工作区并返回专用句柄；禁止复制或当作张量 |
+| `memory_read(bank,address)` | address:f32[N] 每项在 [0,1]，返回加权读取的 f32[D]；不隐式归一化，支持内存和地址梯度 |
+| `memory_write(bank,address,value);` | value:f32[D]，每槽更新为 `(1-address[i])*旧值+address[i]*value`；支持地址、旧值和新值梯度 |
+| `memory_free(bank);` | 释放工作区；未分配、重复释放或释放后访问报错 |
+| `resource_state()` | f32[3]：剩余前向工作量、剩余工作区字节、存活工作区字节；无梯度 |
 
 局部张量的长度由表达式推导，重复赋值不能改变长度；输入不可覆盖。
 同一模型内 forward 与 layer 不混用。模型通过 `Name(optimizer)` 构造，optimizer 必填
@@ -274,7 +295,7 @@ fn main() {
 无需 `register`、标签、`jump` 或 `branch` 源码指令，这些仅存在于内部 IR。
 
 完整可执行示例：[self_modifying/model.wgt](../examples/self_modifying/model.wgt)。
-可微路由训练示例：[soft_routing.wgt](../examples/native_training/soft_routing.wgt)，
+可微路由训练示例：[soft_routing/model.wgt](../examples/native_training/soft_routing/model.wgt)，
 完整训练、状态与保存约束见[可微程序](differentiable-programs.md)。上述三种算子的张量梯度仅用于 forward，
 全部参数必填，无温度等隐式选项。`p=1` 表示完整通过或完全采用 a 的输出。
 推理短路作用于直接写在 gate/route 内的表达式（支持嵌套），不延迟此前已执行的 let；
@@ -282,10 +303,20 @@ fn main() {
 forward 中也可写 `mix p { then { a } else { b } }`，等价于 `route(p,a,b)`；
 分支内各为一个张量表达式，可选尾随分号。`mix` 和 `then` 是保留名称。
 fit/reinforce 和显式 VJP 记录梯度时仍计算两边，包括 frozen 门，以保留完整数学梯度。
-短路示例：[lazy_routing.wgt](../examples/native_training/lazy_routing.wgt)。
+短路示例：[lazy_routing/model.wgt](../examples/native_training/lazy_routing/model.wgt)。
 路由选择梯度为 a-b，门梯度为 x；标量门梯度在特征轴求和。
 普通 if 保持硬分支；源文件文本、宿主函数、I/O 和离散控制决策不因此可微。
 事务、原生一阶自动微分、显式状态及预算细节见[自更新运行时](self-modifying-runtime.md)。
+
+工作内存独立于参数，每次任务/训练样本开始为空，完成或失败释放，不保存到模型。
+alloc/read/write 额外按 N×D 计费；释放不丢弃训练 tape 中的历史版本。
+普通函数新增 `execution_start(model,input,max_work,memory_bytes)`、
+`execution_resume(model,instructions)`、`execution_cancel(model)`，需 compute_budget，
+仅针对 forward 推理；暂停保持状态，完成才提交写入，错误或取消丢弃事务。
+完整形状、预算、返回字段、训练及生命周期契约见[工作内存与分步执行](working-memory.md)，
+可运行例子为 [working_memory/model.wgt](../examples/native_training/working_memory/model.wgt)。
+forward 工作内存、`resource_state()` 和普通脚本的 `execution_start/resume/cancel` 分段执行
+见[临时工作内存与分段执行](self-modifying-runtime.md#临时工作内存与分段执行)。
 
 ## 静态用户训练策略
 
@@ -306,7 +337,7 @@ CPU `forward` 模型可用 `differentiate(model,inputs,targets)` 显式求 `fn l
 参数按稳定顺序包含全部非冻结参数，每个参数为行优先扁平 f32 列表；普通更新函数不自动可微。
 最多16个存活句柄、共64MiB计量预算；状态深度最多32、计量大小最多1MiB，禁止嵌套资源句柄。
 旧/已释放句柄、模型版本冲突、错误布局及非有限值报错，不部分提交。
-`save_checkpoint/load_checkpoint` 的 forward v2 保存/恢复用户状态及步数，兼容旧 v1读取；保存模型不含优化器。
+`save checkpoint` / `load checkpoint` 的 forward v2 保存/恢复用户状态及步数，读取保留 v1 格式；`save model` 导出不含优化器的模型。
 完整签名、预算计量、约束和续训示例见[原生训练](native-training.md#wgt-自定义更新算法cpu-forward)及
 [custom_momentum/model.wgt](../examples/native_training/custom_momentum/model.wgt)。目前不支持此接口的顺序/GPU模型，
 不自动执行算法、恢复训练循环或导入含循环的 host 模块。
@@ -315,6 +346,21 @@ CPU `forward` 模型可用 `differentiate(model,inputs,targets)` 显式求 `fn l
 它与原接口共享句柄/内存预算，拒绝过期版本；批次保留与临时绑定副本也计入预算。
 [custom_sam/model.wgt](../examples/native_training/custom_sam/model.wgt) 用两次一阶求导与一次提交定义 SAM+SGD/动量；
 这不提供高阶自动微分、SAM专用对象或GPU自定义优化。完整同批次/状态语义见[原生训练](native-training.md#用普通-wgt-编写-sam)。
+
+## 自定义算子与导入
+
+`fn name(args) { let local = expression; return expression; }` 可在 forward/loss 中作为纯算子调用。
+全部实参必填，按位置、从左到右求值一次；只接收/返回定长 f32 向量，无默认值或隐式广播。
+不可捕获参数或调用者局部变量；模型参数须显式传入。函数体仅支持不可重复的 let 和最后一个 return，
+可组合已有纯张量原语和其他纯算子，不支持递归、I/O、状态写入、循环或任意宿主函数。
+支持的原语、shape/梯度契约、深度/展开上限见[自定义算子](custom-operators.md)。
+
+库用 `operators NAME` 声明；`import alias from "./ops.wgt"` 导入本地库，
+`import alias from "MODULE/LibraryName"` 导入已声明的包依赖，在 forward/loss 调用 `alias.function(args)`。
+库没有模型、训练入口或嵌套导入，全部函数公开；路径、版本锁、检查限制和分发契约见同页。
+导入与编译不运行算子；原生 IR 和 AOT 内嵌展开结果，保存后不依赖算子源码。
+这是本地 0.5 实现，未发布；完整有效例子为
+[custom_operators/model.wgt](../examples/native_training/custom_operators/model.wgt)。
 
 ## 实现与验证依据
 
@@ -328,26 +374,40 @@ CPU `forward` 模型可用 `differentiate(model,inputs,targets)` 显式求 `fn l
 
 保留模型和实验在 `weights/`，不因升级版本头自动迁移或覆盖。详见[存储规范](storage.md)。
 
+## 计算预算与原生能力
+
+WGT 0.5 新增 `compute_budget(work,workspace_bytes,calls,deadline_ms)`、
+`compute_status()`、`compute_capabilities()`、`compute_call(name,input)`、`compute_trace()`。
+完整参数、计价、能力版本、失败语义和可运行示例见[计算预算](compute-budget.md)。
+基础计算能力使用工作量、估算工作区和协作式截止时间额度；宿主授权与 Linux 进程限制见下文。
+
+宿主可通过 `WGT_HOST_POLICY` 提供预算与只读文件/HTTP 端点授权；
+`compute_host_status()` 返回累计读取量、请求次数、剩余额度和资源别名。
+`file_read.v1`、`http_get.v1` 通过 `compute_call` 调用。启用策略会拒绝旧 I/O 内置接口，
+权限与资源提供者共用初始化前固定的绝对截止时间；子预算失败只恢复父级上限与原截止时间，不退还已消费额度。HTTP 剩余不足 1 ms 时拒绝发出请求。完整兼容性、错误码和限制见[宿主策略](compute-budget.md#宿主策略与只读-io)。
+
+Linux 宿主策略新增 `cpu_seconds`、`address_space_bytes`，由独立工作进程执行内核硬限制；
+`compute_host_status()` 提供 CPU 时间与限制值。`file_write.v1` 通过输出别名新建文本文件，
+累计写入与新建内容占用分别受宿主额度约束，不覆盖已有文件。参见[进程与磁盘契约](compute-budget.md#linux-进程硬限制与-cpu-计量)。
+
+`compute_scope(function,args,limits)` 在九维子预算内执行 WGT 函数；子任务执行失败返回统一结果，消费计入父级，参数类型或目标函数无效则直接报错。
+`compute_register(name,function,limits)` 注册单参数 `user.*` 能力，供 compute_call 调用。
+参数、嵌套限制、权限与非事务语义见[子预算与自定义能力](compute-budget.md#子预算与自定义能力)。
+成本感知原生策略梯度示例见[资源训练](compute-budget.md#成本感知强化学习)。
+
 ## 运行中权重的文件系统视图
 
-Linux 训练、推理 CLI 及独立编译程序支持 [weightfs v1](weightfs.md)，在模型初始化后自动挂载
+Linux 训练、推理 CLI 及独立编译程序支持 [weightfs v1](weightfs.md)，在模型初始化后默认尝试挂载
 内存权重视图。它是运行时能力，不增加语法或内置函数；检查和编译阶段不挂载。
 环境变量 `WGT_WEIGHTFS=auto|on|off` 默认 auto。文件编辑校验形状和有限 f32，遵守冻结/共享
-存储约束，在执行之间提交；冲突报错。持久化仍使用显式 save/save_model，详见协议文档。
+存储约束，在执行之间提交；冲突报错。持久化仍使用显式 `save model` / `save checkpoint` 语句，详见协议文档。
 
-## 概率与分支语法的完整契约
+## GPU / NPU 资源调度
 
-`parameter p: prob = 0.7`、`frozen p: prob = 1`、`mix p { then { a } else { b } }`、
-`sample p { then { a } else { b } }` 及 `fn loss(prediction,target)` 的参数、表示、梯度、
-执行边界和可运行例子统一见[可微程序语法](differentiable-programs.md#概率混合自定义损失与采样语法)。
-forward/loss 新增 `square(x)`（等长平方）、`mean(x)`（唯一向量轴平均为 f32[1]）、
-等长逐元素 `a-b` 和 `-a`；全部无默认参数或广播。自定义损失通过 `fit(...,"loss")` 调用，
-其表达式与模型共同求导；普通 sample 块不建立梯度图，forward/loss 中明确拒绝。
-
-`onehot[N] index` 是普通函数中的独热表达式，如 `onehot[4] 2` 得到 `[0,0,1,0]`。
-N 为 1..1000000 整数字面量，index 是运行时 [0,N) 整数；优先级同一元负号，复杂索引用括号。
-原生等价调用 `one_hot(index,classes)` 支持运行时类别数。无默认值，不对索引求导，forward/loss 不支持。
-完整边界、预算与示例见[独热编码](differentiable-programs.md#独热编码)。
+WGT 0.5 提供 `device_submit(model,input,alias)`、`device_wait(alias,job,timeout_ms)`、
+`device_status(alias)`，使用宿主 devices 授权与有限队列，提交工作量同时消耗计算预算。
+解释与 AOT 均支持；GPU 需构建 gpu 特性，NPU 需宿主注册原生后端。
+完整签名、配额、失败、快照及支持范围见[GPU / NPU 设备资源](accelerator-resources.md)。
 
 ## 原生标量数学标准库
 
@@ -375,7 +435,7 @@ WGT 0.5 新增 `rsqrt(x)`、`fma(x,y,z)`、`hypot(x,y)`、`expm1(x)`、
 旧运行时不能读取新分类制品，需要支持分类 IR v2 的运行时；这不是双向格式兼容。
 v1 夹带分类元数据或概率验证指令、未知未来版本和任意未知字段都明确拒绝。
 训练断点外层版本按既有契约，嵌入模型/Program 单独版本化。
-`net(x)` 仍提交显式 `write`，`sample from net(x)` 仍无梯度 tape 且丢弃 forward 写入。
+`net(x)` 当前提交显式 `write`；规划中的 `decode` 将无梯度 tape 且丢弃 forward 写入，待实现验证。
 索引返回普通数值，切片返回普通列表；改变向量的算术/列表操作不自动推断类别类型。
 
 `scores.probabilities` 对 logits 沿唯一类别轴执行减最大值的稳定 softmax，返回有类型的 probabilities；
@@ -420,7 +480,7 @@ wgt 0.5
 fn main() {
     # 一维样本列表归约为一个标量；没有训练或模型初始化。
     let scores = [2, 4, 6];
-    assert(scores.mean == 4, "mean");
+    assert scores.mean == 4, "mean";
     return scores.mean;
 }
 ```
@@ -443,6 +503,14 @@ q 在 [0,1]，裁剪边界有限且有序；余弦要求等长非零向量。
 完整参数范围、形状、公式与计费见[分段激活、稳健损失与信号处理](standard-library.md#分段激活稳健损失与信号处理)。
 这些普通脚本函数不新增声明式图层支持、张量梯度或 `fit` 训练目标。
 
+## 概率与分支语法的完整契约
+
+`parameter p: prob = 0.7`、`frozen p: prob = 1`、`mix p { then { a } else { b } }`、
+`sample p { then { a } else { b } }` 及 `fn loss(prediction,target)` 的参数、表示、梯度、
+执行边界和可运行例子统一见[可微程序语法](differentiable-programs.md#概率混合自定义损失与采样语法)。
+forward/loss 新增 `square(x)`（等长平方）、`mean(x)`（唯一向量轴平均为 f32[1]）、
+等长逐元素 `a-b` 和 `-a`；全部无默认参数或广播。自定义损失通过 `fit(...,"loss")` 调用，
+其表达式与模型共同求导；普通 sample 块不建立梯度图，forward/loss 中明确拒绝。
 
 数据标准库新增 `zeros(count)`、`ones(count)`、`full(count,value)`、
 `linspace(start,end,count)`、`one_hot(index,classes)`、`concat(x,y)`、
@@ -452,6 +520,10 @@ q 在 [0,1]，裁剪边界有限且有序；余弦要求等长非零向量。
 完整参数范围、输出形状、预算和运行例子见[数据构造与索引](standard-library.md#数据构造与索引)。
 这些是普通脚本列表操作，不是 forward/loss 张量算子或零拷贝视图。
 
+`onehot[N] index` 是普通函数中的独热表达式，如 `onehot[4] 2` 得到 `[0,0,1,0]`。
+N 为 1..1000000 整数字面量，index 是运行时 [0,N) 整数；优先级同一元负号，复杂索引用括号。
+原生等价调用 `one_hot(index,classes)` 支持运行时类别数。无默认值，不对索引求导，forward/loss 不支持。
+完整边界、预算与示例见[独热编码](differentiable-programs.md#独热编码)。
 
 概率分析新增 `normalize_probabilities(weights)`、`entropy(p)`、`kl_divergence(p,q)`、
 `js_divergence(p,q)`、`cross_entropy_probs(p,q)`、`temperature_softmax(logits,temperature)`。
@@ -459,6 +531,8 @@ q 在 [0,1]，裁剪边界有限且有序；余弦要求等长非零向量。
 分布逐项在 [0,1]，总和允许 1e-9 绝对误差，计算前修正该误差；任意权重须显式归一化。
 零概率、公式、预算和例子见[概率分布分析](standard-library.md#概率分布分析)。
 这些是普通脚本分析函数，不提供张量自动微分或新的 `fit` 目标。
+
+现有路由示例优先使用 `mix`；独立可训练标量门使用 `prob`。固定类别数的独热编码优先写 `onehot[N] index`，动态类别数保留 `one_hot(index,classes)`。
 
 ## 原生 RL 训练语法
 
@@ -478,6 +552,8 @@ q 在 [0,1]，裁剪边界有限且有序；余弦要求等长非零向量。
 支持过滤、行号诊断、JSON 共存、JSONL 评估以及 CPU/GPU 前向和 CPU 训练步计时。
 AOT 测试入口明确拒绝；完整参数、版本与限制见[原生测试](native-testing.md)，
 可运行项目见[评估示例](../examples/native_evaluation/README.md)。
+
+WGSL 工作组数量受普通脚本整数范围限制，每项为 1..1000000000 且不超过所选设备限制；超范围值报错，不截断。
 
 
 <!-- permissions-foundation -->

@@ -76,18 +76,32 @@ fn decoder_primitives_preserve_shape_and_exact_parameter_layout() {
         {"name":"activation","op":"gelu","args":{"approximate":1}}
     ]);
     let mut weights = BTreeMap::new();
-    let output = infer(&layers, "", input.clone(), &mut weights, &mut Contracts::new()).unwrap();
+    let output = infer(
+        &layers,
+        "",
+        input.clone(),
+        &mut weights,
+        &mut Contracts::new(),
+    )
+    .unwrap();
     assert_eq!(output, input);
-    assert_eq!(weights["attention.q_proj.weight"], vec![24,16]);
-    assert_eq!(weights["attention.k_proj.weight"], vec![12,16]);
+    assert_eq!(weights["attention.q_proj.weight"], vec![24, 16]);
+    assert_eq!(weights["attention.k_proj.weight"], vec![12, 16]);
     assert_eq!(weights["attention.q_norm.weight"], vec![6]);
-    assert_eq!(weights["attention.o_proj.weight"], vec![16,24]);
+    assert_eq!(weights["attention.o_proj.weight"], vec![16, 24]);
     assert!(!weights.contains_key("attention.o_proj.bias"));
     assert!(!weights.contains_key("proj.bias"));
     assert!(!weights.contains_key("ln.bias"));
     let mut invalid = layers;
     invalid[1]["args"]["head_dim"] = json!(3);
-    assert!(infer(&invalid, "", input, &mut BTreeMap::new(), &mut Contracts::new()).is_err());
+    assert!(infer(
+        &invalid,
+        "",
+        input,
+        &mut BTreeMap::new(),
+        &mut Contracts::new()
+    )
+    .is_err());
 }
 
 #[test]
@@ -95,11 +109,25 @@ fn full_projection_qk_norm_layout() {
     let input = TensorType::parse(&json!({"dtype":"f32","shape":[7,16]})).unwrap();
     let mut layers = json!([{"name":"a","op":"rope_attention","args":{"dim":16,"heads":4,"kv_heads":2,"head_dim":6,"qk_norm":2}}]);
     let mut weights = BTreeMap::new();
-    infer(&layers, "", input.clone(), &mut weights, &mut Contracts::new()).unwrap();
+    infer(
+        &layers,
+        "",
+        input.clone(),
+        &mut weights,
+        &mut Contracts::new(),
+    )
+    .unwrap();
     assert_eq!(weights["a.q_norm.weight"], vec![24]);
     assert_eq!(weights["a.k_norm.weight"], vec![12]);
     layers[0]["args"]["qk_norm"] = json!(3);
-    assert!(infer(&layers, "", input, &mut BTreeMap::new(), &mut Contracts::new()).is_err());
+    assert!(infer(
+        &layers,
+        "",
+        input,
+        &mut BTreeMap::new(),
+        &mut Contracts::new()
+    )
+    .is_err());
 }
 
 #[test]
@@ -112,12 +140,26 @@ fn probabilistic_recur_checks_direct_scalar_probability() {
         {"name":"result","op":"identity","inputs":["next"]}
     ]}]);
     let mut weights = BTreeMap::new();
-    let actual = infer(&layers, "", input.clone(), &mut weights, &mut Contracts::new()).unwrap();
+    let actual = infer(
+        &layers,
+        "",
+        input.clone(),
+        &mut weights,
+        &mut Contracts::new(),
+    )
+    .unwrap();
     assert_eq!(actual, input);
     assert_eq!(weights.len(), 4);
     for gate in [json!("missing"), json!("next"), json!(3)] {
         let mut invalid = layers.clone();
         invalid[0]["args"]["until"] = gate;
-        assert!(infer(&invalid, "", input.clone(), &mut BTreeMap::new(), &mut Contracts::new()).is_err());
+        assert!(infer(
+            &invalid,
+            "",
+            input.clone(),
+            &mut BTreeMap::new(),
+            &mut Contracts::new()
+        )
+        .is_err());
     }
 }

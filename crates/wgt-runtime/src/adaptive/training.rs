@@ -31,6 +31,11 @@ struct CustomCheckpoint {
     custom_optimizer: super::optimization::CustomState,
 }
 
+enum LossMode {
+    Builtin,
+    Custom { clip: Option<f32> },
+}
+
 impl AdaptiveSession {
     pub fn set_optimizer(&mut self, optimizer: Optimizer) -> Result<()> {
         self.ensure_mutable()?;
@@ -61,27 +66,84 @@ impl AdaptiveSession {
         remaining: &mut u64,
         tape_budget: usize,
     ) -> Result<f32> {
-        self.train_step_impl(inputs,objective,rate,remaining,tape_budget,false,None)
+        self.train_step_impl(
+            inputs,
+            objective,
+            rate,
+            remaining,
+            tape_budget,
+            LossMode::Builtin,
+        )
     }
 
-    pub fn train_custom(&mut self, inputs:&[Vec<f32>], targets:&[Vec<f32>], rate:f32, remaining:&mut u64, tape_budget:usize) -> Result<f32> {
-        self.train_step_impl(inputs,Objective::Mse(targets),rate,remaining,tape_budget,true,None)
+    pub fn train_custom(
+        &mut self,
+        inputs: &[Vec<f32>],
+        targets: &[Vec<f32>],
+        rate: f32,
+        remaining: &mut u64,
+        tape_budget: usize,
+    ) -> Result<f32> {
+        self.train_step_impl(
+            inputs,
+            Objective::Mse(targets),
+            rate,
+            remaining,
+            tape_budget,
+            LossMode::Custom { clip: None },
+        )
     }
 
     /// Clip the global batch-mean gradient before committing one optimizer step.
-    pub fn train_clipped(&mut self, inputs:&[Vec<f32>], targets:&[Vec<f32>], rate:f32, clip:f32, remaining:&mut u64, tape_budget:usize)->Result<f32> {
-        ensure!(clip.is_finite() && clip>0.,"gradient clip norm must be positive and finite");
-        self.train_step_impl(inputs,Objective::Mse(targets),rate,remaining,tape_budget,true,Some(clip))
+    pub fn train_clipped(
+        &mut self,
+        inputs: &[Vec<f32>],
+        targets: &[Vec<f32>],
+        rate: f32,
+        clip: f32,
+        remaining: &mut u64,
+        tape_budget: usize,
+    ) -> Result<f32> {
+        ensure!(
+            clip.is_finite() && clip > 0.,
+            "gradient clip norm must be positive and finite"
+        );
+        self.train_step_impl(
+            inputs,
+            Objective::Mse(targets),
+            rate,
+            remaining,
+            tape_budget,
+            LossMode::Custom { clip: Some(clip) },
+        )
     }
 
-    fn train_step_impl(&mut self, inputs:&[Vec<f32>], objective:Objective<'_>, rate:f32, remaining:&mut u64, tape_budget:usize, custom:bool, clip:Option<f32>) -> Result<f32> {
+    fn train_step_impl(
+        &mut self,
+        inputs: &[Vec<f32>],
+        objective: Objective<'_>,
+        rate: f32,
+        remaining: &mut u64,
+        tape_budget: usize,
+        mode: LossMode,
+    ) -> Result<f32> {
         self.ensure_mutable()?;
-        let mut loss_session=if custom {
-            let program=self.program.loss.as_ref().context("fit loss requires fn loss(prediction,target)")?;
-            let session=Self::prepare((**program).clone(),tape_budget)?;
-            ensure!(session.input_len()>self.output_len() && session.output_len()==1,"custom loss shape mismatch");
+        self.ensure_idle()?;
+        let mut loss_session = if matches!(mode, LossMode::Custom { .. }) {
+            let program = self
+                .program
+                .loss
+                .as_ref()
+                .context("fit loss requires fn loss(prediction,target)")?;
+            let session = Self::prepare((**program).clone(), tape_budget)?;
+            ensure!(
+                session.input_len() > self.output_len() && session.output_len() == 1,
+                "custom loss shape mismatch"
+            );
             Some(session)
-        } else {None};
+        } else {
+            None
+        };
         ensure!(
             rate.is_finite() && rate > 0.,
             "learning rate must be positive and finite"
@@ -119,22 +181,32 @@ impl AdaptiveSession {
                 Objective::Mse(targets) => {
                     let target = &targets[sample];
                     ensure!(
-                        target.len() == loss_session.as_ref().map_or(y.len(),|s|s.input_len()-y.len()) && target.iter().all(|v| v.is_finite()),
+                        target.len()
+                            == loss_session
+                                .as_ref()
+                                .map_or(y.len(), |s| s.input_len() - y.len())
+                            && target.iter().all(|v| v.is_finite()),
                         "invalid target"
                     );
-                    if let Some(session)=&mut loss_session {
-                        let input:Vec<f32>=y.iter().chain(target).copied().collect();
-                        let result=session.forward(&input,*remaining,tape_budget.saturating_sub(pass.tape_bytes()));
-                        *remaining=remaining.saturating_sub(session.steps());
-                        let mut loss_pass=result?;
-                        loss += loss_pass.output()[0]/inputs.len() as f32;
-                        loss_pass.backward(&[1./inputs.len() as f32],&BTreeMap::new())?;
+                    if let Some(session) = &mut loss_session {
+                        let input: Vec<f32> = y.iter().chain(target).copied().collect();
+                        let result = session.forward(
+                            &input,
+                            *remaining,
+                            tape_budget.saturating_sub(pass.tape_bytes()),
+                        );
+                        *remaining = remaining.saturating_sub(session.steps());
+                        let mut loss_pass = result?;
+                        loss += loss_pass.output()[0] / inputs.len() as f32;
+                        loss_pass.backward(&[1. / inputs.len() as f32], &BTreeMap::new())?;
                         g.copy_from_slice(&loss_pass.input_gradient()?[..y.len()]);
-                    } else { for i in 0..y.len() {
-                        let diff = y[i] - target[i];
-                        loss += diff * diff / y.len() as f32 / inputs.len() as f32;
-                        g[i] = 2. * diff / y.len() as f32 / inputs.len() as f32;
-                    } }
+                    } else {
+                        for i in 0..y.len() {
+                            let diff = y[i] - target[i];
+                            loss += diff * diff / y.len() as f32 / inputs.len() as f32;
+                            g[i] = 2. * diff / y.len() as f32 / inputs.len() as f32;
+                        }
+                    }
                 }
                 Objective::Policy {
                     actions,
@@ -168,9 +240,19 @@ impl AdaptiveSession {
             loss.is_finite() && gradients.iter().flatten().all(|v| v.is_finite()),
             "nonfinite loss or gradient"
         );
-        if let Some(limit)=clip {
-            let norm=gradients.iter().flatten().map(|g|f64::from(*g).powi(2)).sum::<f64>().sqrt();
-            if norm>f64::from(limit) {let scale=f64::from(limit)/norm;for g in gradients.iter_mut().flatten(){*g=(f64::from(*g)*scale) as f32;}}
+        if let LossMode::Custom { clip: Some(limit) } = mode {
+            let norm = gradients
+                .iter()
+                .flatten()
+                .map(|g| f64::from(*g).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            if norm > f64::from(limit) {
+                let scale = f64::from(limit) / norm;
+                for g in gradients.iter_mut().flatten() {
+                    *g = (f64::from(*g) * scale) as f32;
+                }
+            }
         }
         state.steps = state
             .steps
@@ -220,6 +302,7 @@ impl AdaptiveSession {
     }
 
     pub(crate) fn checkpoint_bytes(&self) -> Result<Vec<u8>> {
+        self.ensure_idle()?;
         let value = if let Some(state) = &self.custom_optimizer {
             super::optimization::validate_state(&state.value)?;
             serde_json::json!({"format":"weightlang.forward-training.v2", "program":self.program, "custom_optimizer":state})
@@ -230,6 +313,7 @@ impl AdaptiveSession {
     }
 
     pub(crate) fn checkpoint_bytes_bounded(&self, limit: usize) -> Result<Vec<u8>> {
+        self.ensure_idle()?;
         let value = if let Some(state) = &self.custom_optimizer {
             super::optimization::validate_state(&state.value)?;
             serde_json::json!({"format":"weightlang.forward-training.v2", "program":self.program, "custom_optimizer":state})

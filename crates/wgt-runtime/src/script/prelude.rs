@@ -16,7 +16,6 @@ pub struct Entry {
     pub contexts: Vec<String>,
     pub signature: String,
     pub arity: Option<Arity>,
-    pub legacy_alias_for: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -37,6 +36,22 @@ pub fn builtin(name: &str) -> Option<&'static Entry> {
         entry.name == name
             && matches!(entry.kind.as_str(), "function" | "internal")
             && entry.contexts.iter().any(|context| context == "ordinary_function")
+    })
+}
+
+/// Retired source names stay reserved so they cannot silently become user calls.
+/// Qualified module calls are independent names; named model constructors remain valid.
+pub fn migration(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "predict" => "net(input)",
+        "sample" => "sample from net(input)",
+        "model" | "load_model" => "load model from path using optimizer",
+        "save_model" => "save model net to path;",
+        "save" | "save_checkpoint" | "checkpoint" => "save checkpoint net to path;",
+        "load" | "restore" | "load_checkpoint" => "load checkpoint from path",
+        "assert" => "assert condition, message;",
+        "train" => "train net on (inputs, targets) rate learning_rate clip max_norm;",
+        _ => return None,
     })
 }
 

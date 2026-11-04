@@ -32,10 +32,10 @@ pub(super) fn call(name: &str, args: &[Value]) -> Result<Value> {
     })
 }
 
-pub(super) mod vector;
-pub(super) mod algorithms;
 pub(super) mod activation;
-pub(super) mod loss;
-pub(super) mod signal;
+pub(super) mod algorithms;
 pub(super) mod data;
+pub(super) mod loss;
 pub(super) mod probability;
+pub(super) mod signal;
+pub(super) mod vector;

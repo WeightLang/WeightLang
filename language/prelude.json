@@ -3,6 +3,13 @@
   "source_edition": "0.5",
   "scope": "Implicit source functions, intrinsics, constants and declaration types. No std modules are imported. Contexts are separate contracts; ordinary functions are shared by interpreter and AOT. Parameters are required unless defaults explicitly say otherwise.",
   "entries": [
+    {"name":"responses_scope","kind":"function","contexts":["ordinary_function"],"signature":"responses_scope(limits, profiles, tools)","arity":{"min":3,"max":3},"purpose":"Configure one execution-only OpenResponses harness and shared worker ledger.","defaults":{},"documentation":"docs/openresponses.md","implementation":"crates/wgt-runtime/src/script/openresponses.rs"},
+    {"name":"responses_restrict","kind":"function","contexts":["ordinary_function"],"signature":"responses_restrict(profiles, tools)","arity":{"min":2,"max":2},"purpose":"Restrict inherited profile/tool grants before creating a session.","defaults":{},"documentation":"docs/openresponses.md","implementation":"crates/wgt-runtime/src/script/openresponses.rs"},
+    {"name":"responses_session","kind":"function","contexts":["ordinary_function"],"signature":"responses_session(request)","arity":{"min":1,"max":1},"purpose":"Create an owned OpenResponses conversation.","defaults":{},"documentation":"docs/openresponses.md","implementation":"crates/wgt-runtime/src/script/openresponses.rs"},
+    {"name":"responses_next","kind":"function","contexts":["ordinary_function"],"signature":"responses_next(session, profile)","arity":{"min":2,"max":2},"purpose":"Create an async request future; await it inside async fn.","defaults":{},"documentation":"docs/openresponses.md","implementation":"crates/wgt-runtime/src/script/openresponses.rs"},
+    {"name":"responses_submit","kind":"function","contexts":["ordinary_function"],"signature":"responses_submit(session, results)","arity":{"min":2,"max":2},"purpose":"Submit exactly one result for every pending call_id.","defaults":{},"documentation":"docs/openresponses.md","implementation":"crates/wgt-runtime/src/script/openresponses.rs"},
+    {"name":"responses_cancel","kind":"function","contexts":["ordinary_function"],"signature":"responses_cancel(session)","arity":{"min":1,"max":1},"purpose":"Close a local session and discard pending tool calls.","defaults":{},"documentation":"docs/openresponses.md","implementation":"crates/wgt-runtime/src/script/openresponses.rs"},
+    {"name":"responses_usage","kind":"function","contexts":["ordinary_function"],"signature":"responses_usage()","arity":{"min":0,"max":0},"purpose":"Read aggregate harness usage across workers.","defaults":{},"documentation":"docs/openresponses.md","implementation":"crates/wgt-runtime/src/script/openresponses.rs"},
     {
       "name": "agent",
       "kind": "syntax",
@@ -145,6 +152,18 @@
       "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
     },
     {
+      "name": "reload",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "reload model TARGET from PATH using OPTIMIZER; | reload checkpoint TARGET from PATH;",
+      "purpose": "同句柄同结构原子重载；model新优化器，checkpoint恢复状态，运行时revision递增并使旧梯度失效。",
+      "documentation": "docs/file-io.md",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+    },
+    {
       "name": "save",
       "kind": "syntax",
       "contexts": [
@@ -171,16 +190,18 @@
       "implementation": "crates/wgt-runtime/src/script/persistence.rs"
     },
     {
-      "name": "reload",
+      "name": "assert",
       "kind": "syntax",
       "contexts": [
         "ordinary_function"
       ],
-      "signature": "reload model TARGET from PATH using OPTIMIZER; | reload checkpoint TARGET from PATH;",
-      "purpose": "同句柄同结构原子重载，model新优化器，checkpoint恢复状态；revision单调递增，旧梯度失效。",
+      "signature": "assert CONDITION [, MESSAGE];",
+      "purpose": "条件必须bool且仅求值一次；仅失败时求消息。兼容两实参assert(condition,message)保持急求值。",
       "documentation": "docs/file-io.md",
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+      "defaults": {
+        "message": "assertion failed"
+      },
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
     },
     {
       "name": "__record_field",
@@ -198,18 +219,19 @@
       "implementation": "crates/wgt-runtime/src/script.rs"
     },
     {
-      "name": "assert",
-      "kind": "syntax",
+      "name": "__probabilities",
+      "kind": "internal",
       "contexts": [
         "ordinary_function"
       ],
-      "signature": "assert CONDITION [, MESSAGE];",
-      "purpose": "条件必须bool且仅求值一次；仅失败时求消息。兼容两实参assert(condition,message)保持急求值。",
-      "documentation": "docs/assertions.md",
-      "defaults": {
-        "message": "assertion failed"
+      "signature": "__probabilities(value)",
+      "purpose": "Compiler-only target for typed value.probabilities; source calls with __ prefix are rejected. Stable softmax for logits, strict validation and identity for probabilities, ordinary f32 rejected.",
+      "arity": {
+        "min": 1,
+        "max": 1
       },
-      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
     },
     {
       "name": "differentiate_at",
@@ -290,6 +312,307 @@
       },
       "defaults": {},
       "implementation": "crates/wgt-runtime/src/script/optimization.rs"
+    },
+    {
+      "name": "devices",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "devices()",
+      "purpose": "返回设备对象列表，字段 id/name/backend/kind/memory_model；CPU 在首项，之后为硬件 GPU。CPU 构建仅返回 CPU。枚举不证明模型可执行；设备编号不代表永久身份。",
+      "documentation": "docs/wgsl.md",
+      "arity": {
+        "min": 0,
+        "max": 0
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/training_device.rs"
+    },
+    {
+      "name": "training_device",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "training_device(model,device,memory_bytes,max_batch)",
+      "purpose": "顺序模型（声明式或 mlp）显式选择训练设备，返回与 training_status 相同的对象。device 为 cpu 或 devices 返回的精确 GPU ID，不接受 auto/gpu/npu。后两项为正整数；GPU 用于数值内存预算和最大批次，CPU 接受但不使用这两个限制。失败保持原设备、权重和优化器状态。",
+      "documentation": "docs/wgsl.md",
+      "arity": {
+        "min": 4,
+        "max": 4
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/training_device.rs"
+    },
+    {
+      "name": "training_status",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "training_status(model)",
+      "purpose": "返回 device、steps、inference_device、state。steps 是已提交优化步数；当前 inference_device 恒为 cpu、state 恒为 host_committed。只接受顺序模型。",
+      "documentation": "docs/wgsl.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/training_device.rs"
+    },
+    {
+      "name": "wgsl_kernel",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "wgsl_kernel(source,entry,device,memory_bytes)",
+      "purpose": "source 是 1..1048576 字节 WGSL 字符串，entry 为非空计算入口名，device 为精确硬件 GPU ID，memory_bytes 为正整数。编译并返回不透明内核句柄，不调度。每个 WGT runtime 最多 64 个内核，退出时释放。",
+      "documentation": "docs/wgsl.md",
+      "arity": {
+        "min": 4,
+        "max": 4
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/training_device.rs"
+    },
+    {
+      "name": "wgsl_run",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "wgsl_run(kernel,input,output_count,workgroups)",
+      "purpose": "input 为非空有限 f32 列表，output_count 正整数；workgroups 为三个正整数 [x,y,z]，每项不超过设备限制。同步调度并返回长度 output_count 的有限 f32 列表；输出初始为零。",
+      "documentation": "docs/wgsl.md",
+      "arity": {
+        "min": 4,
+        "max": 4
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/training_device.rs"
+    },
+    {
+      "name": "execution_start",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "execution_start(model,input,max_work,memory_bytes)",
+      "purpose": "输入为匹配模型宽度的有限 f32 向量；工作和字节参数为 1..1000000000 整数，分别收紧到 compute 余量和 workspace 上限；内存另不得超过原会话上限。准备独立事务，不执行 forward；返回 null。每次尝试消耗一个能力调用名额，工作额度须大于零，内存至少容纳模型的静态受管区。",
+      "documentation": "docs/working-memory.md",
+      "arity": {
+        "min": 4,
+        "max": 4
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "execution_resume",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "execution_resume(model,instructions)",
+      "purpose": "instructions 为 1..1000000；最多执行这么多 VM 指令，同时受剩余计算工作量、生命周期工作上限和当前作用域约束。返回 `{done,output,work,memory_bytes,peak_memory_bytes}`。未完成 output=null，完成后是 f32 输出向量。work 为本任务累计工作量，内存字段仅为动态工作区字节。",
+      "documentation": "docs/working-memory.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "execution_cancel",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "execution_cancel(model)",
+      "purpose": "取消活动事务并丢弃中间内存和权重写入；有任务返回 true，无任务返回 false。已完成工作不退款。",
+      "documentation": "docs/working-memory.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "compute_budget",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "compute_budget(work,workspace_bytes,calls,deadline_ms)",
+      "purpose": "每次运行只能设置一次。四个参数均为 [0,1000000000] 整数，calls 最大 10000。work 受当前解释器剩余操作额度约束；deadline 从此调用起计时。返回 null。",
+      "documentation": "docs/compute-budget.md",
+      "arity": {
+        "min": 4,
+        "max": 4
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/resources.rs"
+    },
+    {
+      "name": "compute_status",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "compute_status()",
+      "purpose": "返回 work_remaining、workspace_bytes、calls_remaining、deadline_remaining_ms 对象。",
+      "documentation": "docs/compute-budget.md",
+      "arity": {
+        "min": 0,
+        "max": 0
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/resources.rs"
+    },
+    {
+      "name": "compute_call",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "compute_call(name,input)",
+      "purpose": "input 为列表；返回 `{ok,error,value,work}`。需要先设置预算。",
+      "documentation": "docs/compute-budget.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/resources.rs"
+    },
+    {
+      "name": "compute_trace",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "compute_trace()",
+      "purpose": "返回本次运行的调用摘要列表：capability、input_length、work、ok、error。不记录输入内容。",
+      "documentation": "docs/compute-budget.md",
+      "arity": {
+        "min": 0,
+        "max": 0
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/resources.rs"
+    },
+    {
+      "name": "compute_capabilities",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "compute_capabilities()",
+      "purpose": "返回可用的版本化能力名列表：三个计算能力，以及宿主授权的 I/O 能力。不需要初始化预算。",
+      "documentation": "docs/compute-budget.md",
+      "arity": {
+        "min": 0,
+        "max": 0
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/resources.rs"
+    },
+    {
+      "name": "compute_host_status",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "compute_host_status()",
+      "purpose": "Return host policy counters or null without a policy.",
+      "arity": {
+        "min": 0,
+        "max": 0
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/resources.rs"
+    },
+    {
+      "name": "compute_scope",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "compute_scope(function,args,limits)",
+      "purpose": "Call a WGT function within a child resource budget.",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/resources.rs"
+    },
+    {
+      "name": "compute_register",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "compute_register(name,function,limits)",
+      "purpose": "Register a one-argument WGT function as a capability.",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/resources.rs"
+    },
+    {
+      "name": "device_submit",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "device_submit(model,input,alias)",
+      "purpose": "model 为原生顺序 f32 模型句柄，不支持 adaptive 句柄；input 为与输入宽度相同的有限数值列表；alias 为授权别名。返回 `{ok,job,work,error}`，成功 job 为本设备池整数 ID；准入拒绝时 job=null、work=0。",
+      "documentation": "docs/accelerator-resources.md",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/resources.rs"
+    },
+    {
+      "name": "device_wait",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "device_wait(alias,job,timeout_ms)",
+      "purpose": "job 为该池提交返回的整数，timeout_ms 为 [0,1000000000]。返回 `{ok,output,error,execution_wall_us}`；output 为 f32 推理结果列表。等待期限同时受当前计算预算与宿主剩余期限限制。",
+      "documentation": "docs/accelerator-resources.md",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/resources.rs"
+    },
+    {
+      "name": "device_status",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "device_status(alias)",
+      "purpose": "返回实际设备 ID、kind（Gpu/Npu）、active、ready、queued、并发/队列上限、受管内存额度、每任务额度、提交计数/余量、计算量/余量。未经授权的别名报错。",
+      "documentation": "docs/accelerator-resources.md",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/resources.rs"
     },
     {
       "name": "__graph",
@@ -1390,22 +1713,6 @@
       "implementation": "crates/wgt-runtime/src/script.rs"
     },
     {
-      "name": "assert",
-      "kind": "function",
-      "contexts": [
-        "ordinary_function"
-      ],
-      "signature": "assert(condition,message)",
-      "purpose": "bool 为 false 时终止脚本",
-      "documentation": "docs/native-training.md",
-      "arity": {
-        "min": 2,
-        "max": 2
-      },
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
-    },
-    {
       "name": "metric",
       "kind": "function",
       "contexts": [
@@ -1470,55 +1777,6 @@
       "implementation": "crates/wgt-runtime/src/script.rs"
     },
     {
-      "name": "model",
-      "kind": "function",
-      "contexts": [
-        "ordinary_function"
-      ],
-      "signature": "model(path,optimizer)",
-      "purpose": "Legacy alias of load_model; 加载原生顺序 IR 或 forward Program IR v1 JSON，使用新优化器；forward 另可选 none；不是普通 .wgt 模型解析器，也不接受传统 manifest 制品",
-      "documentation": "docs/native-training.md",
-      "arity": {
-        "min": 2,
-        "max": 2
-      },
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs",
-      "legacy_alias_for": "load_model"
-    },
-    {
-      "name": "save_model",
-      "kind": "function",
-      "contexts": [
-        "ordinary_function"
-      ],
-      "signature": "save_model(model,path)",
-      "purpose": "导出原生推理 IR v1 JSON；不包含优化器；forward 使用 Program 格式，供 model() 或 wgt-native adaptive 加载",
-      "documentation": "docs/native-training.md",
-      "arity": {
-        "min": 2,
-        "max": 2
-      },
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
-    },
-    {
-      "name": "predict",
-      "kind": "function",
-      "contexts": [
-        "ordinary_function"
-      ],
-      "signature": "predict(model,input)",
-      "purpose": "输入单个 f32 向量，返回输出列表；普通模型不训练，`forward` 模型可通过显式 `write` 提交参数更新",
-      "documentation": "docs/native-training.md",
-      "arity": {
-        "min": 2,
-        "max": 2
-      },
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
-    },
-    {
       "name": "fit",
       "kind": "function",
       "contexts": [
@@ -1542,22 +1800,6 @@
       ],
       "signature": "reinforce(model,observations,actions,advantages,lr)",
       "purpose": "一批观测的策略梯度更新，返回更新前的 mean(-advantage*log pi(action))",
-      "documentation": "docs/native-training.md",
-      "arity": {
-        "min": 5,
-        "max": 5
-      },
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
-    },
-    {
-      "name": "train",
-      "kind": "function",
-      "contexts": [
-        "ordinary_function"
-      ],
-      "signature": "train(model,inputs,targets,rate,max_norm)",
-      "purpose": "forward 自定义损失的批次平均梯度、全局 L2 裁剪及原子更新；等价 train 语句，见[原生 RL](reinforcement-learning.md)",
       "documentation": "docs/native-training.md",
       "arity": {
         "min": 5,
@@ -1647,40 +1889,6 @@
       "implementation": "crates/wgt-runtime/src/script/dataset.rs"
     },
     {
-      "name": "save",
-      "kind": "function",
-      "contexts": [
-        "ordinary_function"
-      ],
-      "signature": "save(model,path)",
-      "purpose": "Legacy alias of save_checkpoint; 保存顺序或 forward 训练断点：结构、权重、冻结关系、优化器类别、步数和矩状态；顺序模型另保留共享关系",
-      "documentation": "docs/native-training.md",
-      "arity": {
-        "min": 2,
-        "max": 2
-      },
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs",
-      "legacy_alias_for": "save_checkpoint"
-    },
-    {
-      "name": "restore",
-      "kind": "function",
-      "contexts": [
-        "ordinary_function"
-      ],
-      "signature": "restore(path)",
-      "purpose": "Legacy alias of load_checkpoint; 读取断点，返回模型及恢复后的优化器",
-      "documentation": "docs/native-training.md",
-      "arity": {
-        "min": 1,
-        "max": 1
-      },
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs",
-      "legacy_alias_for": "load_checkpoint"
-    },
-    {
       "name": "benchmark",
       "kind": "function",
       "contexts": [
@@ -1697,54 +1905,6 @@
         "mode": "cpu"
       },
       "implementation": "crates/wgt-runtime/src/script/benchmark.rs"
-    },
-    {
-      "name": "load_model",
-      "kind": "function",
-      "contexts": [
-        "ordinary_function"
-      ],
-      "signature": "load_model(path,optimizer)",
-      "purpose": "加载原生顺序 IR 或 forward Program IR v1 JSON，使用新优化器；forward 另可选 none；不是普通 .wgt 模型解析器，也不接受传统 manifest 制品",
-      "documentation": "docs/native-training.md",
-      "arity": {
-        "min": 2,
-        "max": 2
-      },
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
-    },
-    {
-      "name": "save_checkpoint",
-      "kind": "function",
-      "contexts": [
-        "ordinary_function"
-      ],
-      "signature": "save_checkpoint(model,path)",
-      "purpose": "保存顺序或 forward 训练断点：结构、权重、冻结关系、优化器类别、步数和矩状态；顺序模型另保留共享关系",
-      "documentation": "docs/native-training.md",
-      "arity": {
-        "min": 2,
-        "max": 2
-      },
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
-    },
-    {
-      "name": "load_checkpoint",
-      "kind": "function",
-      "contexts": [
-        "ordinary_function"
-      ],
-      "signature": "load_checkpoint(path)",
-      "purpose": "读取断点，返回模型及恢复后的优化器",
-      "documentation": "docs/native-training.md",
-      "arity": {
-        "min": 1,
-        "max": 1
-      },
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs"
     },
     {
       "name": "detach",
@@ -1839,6 +1999,34 @@
       ],
       "signature": "sum(x)",
       "purpose": "Reduce f32[N] to f32[1].",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "resource_state",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "resource_state()",
+      "purpose": "f32[3]：剩余前向工作量、剩余工作区字节、存活工作区字节；无梯度",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression"
+    },
+    {
+      "name": "memory_read",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "memory_read(bank,address)",
+      "purpose": "address:f32[N] 每项在 [0,1]，返回加权读取的 f32[D]；不隐式归一化，支持内存和地址梯度",
       "defaults": {},
       "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
@@ -2043,6 +2231,20 @@
       "position": "condition"
     },
     {
+      "name": "memory_alloc",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "memory_alloc(slots,width)",
+      "purpose": "两个 1..16384 的整数常量，分配零初始化 f32[N,D] 工作区并返回专用句柄；禁止复制或当作张量",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "binding"
+    },
+    {
       "name": "write",
       "kind": "intrinsic",
       "contexts": [
@@ -2051,6 +2253,34 @@
       ],
       "signature": "write(parameter,value)",
       "purpose": "全量替换非冻结参数，元素数须相同",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "statement"
+    },
+    {
+      "name": "memory_free",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "memory_free(bank)",
+      "purpose": "释放工作区；未分配、重复释放或释放后访问报错",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "statement"
+    },
+    {
+      "name": "memory_write",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "signature": "memory_write(bank,address,value)",
+      "purpose": "value:f32[D]，每槽更新为 `(1-address[i])*旧值+address[i]*value`；支持地址、旧值和新值梯度",
       "defaults": {},
       "implementation": "crates/wgt-runtime/src/adaptive/source.rs",
       "documentation": "docs/reference.zh-CN.md",
@@ -2101,6 +2331,28 @@
       "purpose": "Fixed-shape 32-bit floating-point tensor; supported ranks depend on declaration.",
       "defaults": {},
       "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "logits",
+      "kind": "type",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "output scores: logits[N]",
+      "purpose": "Finite, nonempty mutually exclusive category scores. Explicit output metadata survives model persistence and function values. .probabilities applies stable softmax along the category axis. Output declarations only; no binary logit type.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/categorical.rs"
+    },
+    {
+      "name": "probabilities",
+      "kind": "type",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "output choices: probabilities[N] / value.probabilities",
+      "purpose": "Finite mutually exclusive category vector, each value strictly in [0,1], sum within absolute 1e-5 of 1. Conversion validates and preserves values; no renormalization. Sampling scales by actual total mass and skips zero-mass entries. CPU native implementation; GPU categorical path not verified.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/categorical.rs"
     },
     {
       "name": "prob",
@@ -2172,41 +2424,36 @@
       "implementation": "crates/wgt-runtime/src/source.rs"
     },
     {
-      "name": "__probabilities",
+      "name": "__predict",
       "kind": "internal",
       "contexts": [
         "ordinary_function"
       ],
-      "signature": "__probabilities(value)",
-      "purpose": "Compiler-only target for typed value.probabilities; source calls with __ prefix are rejected. Stable softmax for logits, strict validation and identity for probabilities, ordinary f32 rejected.",
+      "signature": "__predict(internal)",
+      "purpose": "Compiler lowering only; unavailable in source",
+      "documentation": "docs/native-training.md",
       "arity": {
-        "min": 1,
-        "max": 1
+        "min": 2,
+        "max": 2
       },
       "defaults": {},
       "implementation": "crates/wgt-runtime/src/script.rs"
     },
     {
-      "name": "logits",
-      "kind": "type",
+      "name": "__train",
+      "kind": "internal",
       "contexts": [
-        "model_declaration"
+        "ordinary_function"
       ],
-      "signature": "output scores: logits[N]",
-      "purpose": "Finite, nonempty mutually exclusive category scores. Explicit output metadata survives model persistence and function values. .probabilities applies stable softmax along the category axis. Output declarations only; no binary logit type.",
+      "signature": "__train(internal)",
+      "purpose": "Compiler lowering only; unavailable in source",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 5,
+        "max": 5
+      },
       "defaults": {},
-      "implementation": "crates/wgt-runtime/src/categorical.rs"
-    },
-    {
-      "name": "probabilities",
-      "kind": "type",
-      "contexts": [
-        "model_declaration"
-      ],
-      "signature": "output choices: probabilities[N] / value.probabilities",
-      "purpose": "Finite mutually exclusive category vector, each value strictly in [0,1], sum within absolute 1e-5 of 1. Conversion validates and preserves values; no renormalization. Sampling scales by actual total mass and skips zero-mass entries. CPU native implementation; GPU categorical path not verified.",
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/categorical.rs"
+      "implementation": "crates/wgt-runtime/src/script.rs"
     }
   ]
 }

@@ -8,7 +8,7 @@
 
 每个测试创建新运行时，独立的模型、数据流、随机数、指标和操作预算（默认 10000000）。
 辅助函数不以 test_ 开头；带参数的 test_ 函数计为失败。构造器不是测试函数。
-失败不中止其他函数/文件；`assert(bool,message)` 失败输出文件:行号与消息，嵌套调用保留错误链。
+失败不中止其他函数/文件；原生 `assert CONDITION;` / `assert CONDITION, MESSAGE;` 失败输出文件:行号与消息，嵌套调用保留错误链。
 显示 PASS/FAIL、metric 和通过/失败/总数，任意失败非零退出；无匹配测试也非零退出。
 filter 是大小写敏感的 `文件路径::函数名` 子串；JSON fixture 按文件路径匹配。
 语法错误无法可靠发现函数名，整文件计一次失败，即使 filter 不匹配也不会隐藏它。
@@ -18,11 +18,11 @@ filter 是大小写敏感的 `文件路径::函数名` 子串；JSON fixture 按
 `wgt test --compiled` 当前明确拒绝，尚无 AOT 测试发现入口。
 普通 `wgt run --compiled` 的 assert、数据、评估和 benchmark 与解释器共用内置实现；
 计时值本来会变化，不要求逐位一致。CLI 的旧设备/分配选项只影响旧 JSON revision 路径，
-WGT 用 benchmark 的 mode 明确选择设备，predict 当前仍为 CPU。
+WGT 用 benchmark 的 mode 明确选择设备，模型句柄调用当前仍为 CPU。
 
 ## 评估
 
-测试内使用 `load_model(path,optimizer)` 加载保存的原生模型，不执行训练，不创建模型制品；
+测试内使用 `load model from PATH using OPTIMIZER` 加载保存的原生模型，不执行训练，不创建模型制品；
 可用 `dependency(module)` 解析已锁定依赖路径。相对路径基于测试文件所在目录。
 `jsonl(path)` / `batch(reader,count)` / `close(reader)` 流式读取数据；每批使用普通循环
 调用 `model(input)`，用 `mse`、`cross_entropy`、`argmax` 和计数器归约指标，

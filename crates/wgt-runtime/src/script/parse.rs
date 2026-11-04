@@ -75,6 +75,7 @@ pub type Program = HashMap<String, Function>;
 struct Token {
     text: String,
     line: usize,
+    column: usize,
     quoted: bool,
 }
 
@@ -177,6 +178,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
         tokens.push(Token {
             text: token,
             line: token_line,
+            column: text[..start].rsplit('\n').next().unwrap_or("").chars().count() + 1,
             quoted,
         });
     }
@@ -197,6 +199,9 @@ pub fn parse_functions(source: &str) -> Result<Program> {
         let is_async = parser.take("async");
         parser.expect("fn")?;
         let name = parser.name()?;
+        if let Some(replacement) = super::prelude::migration(&name) {
+            bail!("line {}: {name} is reserved for migration; use {replacement}", parser.line());
+        }
         ensure!(
             !super::prelude::is_builtin(&name),
             "function shadows builtin: {name}"
@@ -335,7 +340,8 @@ impl Parser {
         }
     }
     fn expect(&mut self, text: &str) -> Result<()> {
-        ensure!(self.take(text), "line {}: expected {text}", self.line());
+        let column = self.tokens.get(self.pos).map_or(1, |t| t.column);
+        ensure!(self.take(text), "line {}, column {}: expected {text}", self.line(), column);
         Ok(())
     }
     fn next(&mut self) -> Result<Token> {
@@ -376,17 +382,22 @@ impl Parser {
         self.expect("{")?;
         let mut body = Vec::new();
         while !self.take("}") {
-            body.push(self.statement()?);
+            if self.take("let") {
+                body.extend(self.let_declarations()?);
+            } else {
+                body.push(self.statement()?);
+            }
         }
         self.depth -= 1;
         Ok(body)
     }
-    fn statement(&mut self) -> Result<Statement> {
-        let line = self.line();
-        let kind = if self.take("tasks") {
-            Stmt::Tasks(self.block()?)
-        } else if self.take("let") {
-            if self.take("{") {
+    // Expand into ordinary statements: no new scope, transaction or evaluator path.
+    fn let_declarations(&mut self) -> Result<Vec<Statement>> {
+        let mut declarations = Vec::new();
+        loop {
+            let line = self.line();
+            let kind = if self.take("{") {
+                ensure!(declarations.is_empty(), "line {line}: sample destructuring must be a standalone let declaration");
                 let mut bindings = Vec::new();
                 while !self.take("}") {
                     let field = self.name()?;
@@ -403,27 +414,36 @@ impl Parser {
                 let Expr::SampleFrom(model, input) = value else {
                     bail!("line {line}: structured binding requires sample from model(input)");
                 };
-                self.expect(";")?;
                 Stmt::LetSample(bindings, model, *input)
             } else {
                 let name = self.name()?;
                 self.expect("=")?;
                 if self.take("collect") {
-                    let body = self.block()?;
-                    self.expect(";")?;
-                    Stmt::Collect(name, body)
+                    Stmt::Collect(name, self.block()?)
                 } else if self.take("learn") {
                     let model = self.expr(0)?;
                     let learner = if self.take("using") { self.name()? } else { String::new() };
-                    let body = self.block()?;
-                    self.expect(";")?;
-                    Stmt::Learn(Some(name), model, learner, body)
+                    Stmt::Learn(Some(name), model, learner, self.block()?)
                 } else {
-                    let value = self.expr(0)?;
-                    self.expect(";")?;
-                    Stmt::Let(name, value)
+                    Stmt::Let(name, self.expr(0)?)
                 }
+            };
+            let ordinary = matches!(kind, Stmt::Let(_, _));
+            ensure!(ordinary || declarations.is_empty(), "line {line}: collect/learn must be a standalone let declaration");
+            declarations.push(Statement { line, kind });
+            if self.take(",") {
+                ensure!(ordinary, "line {line}: sample destructuring, collect and learn must be standalone let declarations");
+                ensure!(!self.is(";"), "line {}: expected binding after let comma", self.line());
+            } else {
+                self.expect(";")?;
+                return Ok(declarations);
             }
+        }
+    }
+    fn statement(&mut self) -> Result<Statement> {
+        let line = self.line();
+        let kind = if self.take("tasks") {
+            Stmt::Tasks(self.block()?)
         } else if self.take("learn") {
             let model = self.expr(0)?;
             let learner = if self.take("using") { self.name()? } else { String::new() };
@@ -462,27 +482,11 @@ impl Parser {
             self.expect(";")?;
             Stmt::Save(format.text, value, path, overwrite)
         } else if self.take("assert") {
-            // Preserve the published two-argument function's eager evaluation.
-            let start = self.pos;
-            if self.take("(") {
-                let mut args = self.arguments(")")?;
-                if args.len() == 2 && self.is(";") {
-                    self.expect(";")?;
-                    Stmt::Eval(Expr::BuiltinCall("assert".into(), args))
-                } else {
-                    ensure!(args.len() == 1, "line {line}: assert expects one condition");
-                    self.pos = start;
-                    let condition = self.expr(0)?;
-                    let message = if self.take(",") { Some(self.expr(0)?) } else { None };
-                    self.expect(";")?;
-                    Stmt::Assert(condition, message)
-                }
-            } else {
-                let condition = self.expr(0)?;
-                let message = if self.take(",") { Some(self.expr(0)?) } else { None };
-                self.expect(";")?;
-                Stmt::Assert(condition, message)
-            }
+            ensure!(!self.is("("), "line {line}: assert(...) was removed; use assert condition, message;");
+            let condition = self.expr(0)?;
+            let message = if self.take(",") { Some(self.expr(0)?) } else { None };
+            self.expect(";")?;
+            Stmt::Assert(condition, message)
         } else if self.is("train") && self.train_statement() {
             self.expect("train")?;
             let model = self.expr(0)?;
@@ -505,7 +509,7 @@ impl Parser {
                 ensure!(!self.is("using"), "train rate/clip cannot be combined with using");
                 self.expect(";")?;
                 Stmt::Eval(Expr::BuiltinCall(
-                    "train".into(),
+                    "__train".into(),
                     vec![model, inputs, targets, rate, clip],
                 ))
             }
@@ -715,6 +719,9 @@ impl Parser {
                             name.truncate(name.find('.').unwrap_or(name.len()));
                         }
                         if self.take("(") {
+                            if let Some(replacement) = super::prelude::migration(&name) {
+                                bail!("line {}, column {}: {name}(...) was removed; use {replacement}", t.line, t.column);
+                            }
                             Expr::Call(name, self.arguments(")")?)
                         } else {
                             Expr::Name(name)

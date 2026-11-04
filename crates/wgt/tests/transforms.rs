@@ -106,10 +106,10 @@ fn malformed_patterns_sizes_reductions_and_overflow_are_rejected() {
         )
         .is_err());
     }
-    for op in ["rearrange"] {
+    {
         assert!(transform(
             input.clone(),
-            op,
+            "rearrange",
             json!({"pattern":"a ->","sizes":{},"reduction":"sum"})
         )
         .is_err());

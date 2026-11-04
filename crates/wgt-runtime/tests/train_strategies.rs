@@ -39,6 +39,11 @@ fn bad_strategy_targets_and_mixed_options_are_rejected() {
  ] {assert!(script::parse(&format!("{MODEL}\n{body}")).is_err(),"{body}");}
 }
 #[test]
+fn failed_strategy_does_not_retry_or_roll_back_prior_explicit_commit() {
+    let report=run("fn fails(net,x,y){update(net,x,y);assert(false,\"stop\");} fn main(){let net=Regression(\"none\");compute_budget(100000,1048576,10,10000);let result=compute_scope(\"invoke\",[net],[10000,1048576,1,1000,0,0,0,0,0]);return net([1]);} fn invoke(net){train net on ([[1]],[[2]]) using fails;}");
+    assert!((report.result[0].as_f64().unwrap() - 0.4).abs() < 0.000001);
+}
+#[test]
 fn failure_after_commit_keeps_saved_state_and_stops_before_next_statement() {
     let directory=std::path::PathBuf::from("/tmp/weightlang").join(format!("train-strategy-failure-{}",std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();

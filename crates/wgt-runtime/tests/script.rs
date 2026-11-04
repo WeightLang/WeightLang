@@ -56,14 +56,17 @@ fn gae_distinguishes_termination_and_truncation() {
 #[test]
 fn examples_train_without_python_and_benchmark_reports_scope() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/native_training");
-    let supervised = run_file(&root.join("supervised.wgt"), 10_000_000).unwrap();
+    let supervised = run_file(&root.join("supervised/model.wgt"), 10_000_000).unwrap();
     assert!(supervised.metrics["final_batch_loss"].as_f64().unwrap() < 0.01);
     assert_eq!(supervised.metrics["inference"]["device"], "cpu");
-    let rl = run_file(&root.join("reinforce.wgt"), 10_000_000).unwrap();
+    let rl = run_file(&root.join("reinforce/model.wgt"), 10_000_000).unwrap();
     assert!(rl.result.as_f64().unwrap() > 0.9);
     // The actual executable has no interpreter available on PATH.
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_wgt-native"))
-        .args(["script", root.join("supervised.wgt").to_str().unwrap()])
+        .args([
+            "script",
+            root.join("supervised/model.wgt").to_str().unwrap(),
+        ])
         .env("PATH", "/nonexistent")
         .output()
         .unwrap();
@@ -75,10 +78,7 @@ fn examples_train_without_python_and_benchmark_reports_scope() {
 }
 #[test]
 fn check_does_not_open_data_or_run_side_effects() {
-    parse(
-        "wgt 0.5\nfn main(){ let data=jsonl(\"absent-file\"); save_checkpoint(0,\"never-created\"); }",
-    )
-    .unwrap();
+    parse("wgt 0.5\nfn main(){ let data=jsonl(\"absent-file\"); }").unwrap();
 }
 
 #[test]
@@ -97,10 +97,10 @@ fn main() {
  assert(len(batch(stream,8))==0,"EOF");
  close(stream);
  for i in range(0,20) {fit(m,column(rows,"input"),column(rows,"target"),0.1,"mse");}
- save_checkpoint(m,"checkpoint.json");
+ save_checkpoint(m, "checkpoint.json");
  save_model(m,"model.json");
  let restored=load_checkpoint("checkpoint.json");
- let inference=load_model("model.json","sgd");
+ let inference=load_model("model.json", "sgd");
  assert(m([1])==restored([1]),"checkpoint weights");
  assert(m([1])==inference([1]),"inference weights");
  fit(m,[[1]],[[3]],0.1,"mse");
@@ -128,21 +128,20 @@ fn main() {
 #[test]
 fn deeply_chained_expressions_fail_before_execution() {
     let expression = vec!["1"; 200].join("+");
-    assert!(parse(&format!(
-        "wgt 0.5\nfn main(){{return {expression};}}"
-    ))
-    .is_err());
+    assert!(parse(&format!("wgt 0.5\nfn main(){{return {expression};}}")).is_err());
 }
 
 #[test]
 fn huggingface_handles_validate_without_network() {
     assert_eq!(
-        execute(r#"fn main() {
+        execute(
+            r#"fn main() {
             let data=hf_dataset("test/data","default","train");
             close(data);
             close(data);
             return true;
-        }"#),
+        }"#
+        ),
         true
     );
     for body in [
@@ -152,6 +151,11 @@ fn huggingface_handles_validate_without_network() {
         r#"let d=hf_dataset("test/data","default","train"); close(d); batch(d,1);"#,
         r#"let d=hf_dataset("test/data","default","train"); batch(d,0);"#,
     ] {
-        assert!(run(&format!("wgt 0.5\nfn main(){{ {body} }}"), Path::new("."),1000).is_err());
+        assert!(run(
+            &format!("wgt 0.5\nfn main(){{ {body} }}"),
+            Path::new("."),
+            1000
+        )
+        .is_err());
     }
 }

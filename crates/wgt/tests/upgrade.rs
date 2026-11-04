@@ -17,7 +17,7 @@ struct Packages {
 impl Packages {
     fn weights(&self) -> Vec<u8> {
         let mut header=serde_json::to_vec(&json!({"fc.bias":{"dtype":"F32","shape":[1],"data_offsets":[0,4]},"fc.weight":{"dtype":"F32","shape":[1,1],"data_offsets":[4,8]}})).unwrap();
-        while header.len() % 8 != 0 {
+        while !header.len().is_multiple_of(8) {
             header.push(b' ');
         }
         let mut bytes = (header.len() as u64).to_le_bytes().to_vec();

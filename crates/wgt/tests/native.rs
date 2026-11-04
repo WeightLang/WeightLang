@@ -11,6 +11,61 @@ const MODULE: &str = "github.com/example/models/gates";
 const VERSION: &str = "v0.2.0";
 const COMMIT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+#[test]
+fn graph_discovers_model_css_and_explicit_style_wins() {
+    let t = tempfile::tempdir().unwrap();
+    artifact(&t.path().join("artifact"), false);
+    fs::write(t.path().join("model.wgt"), "model source").unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_wgt"))
+            .current_dir(t.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let html = |args: &[&str]| {
+        let result = run(args);
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        String::from_utf8(result.stdout).unwrap()
+    };
+    let args = ["graph", "artifact", "--stdout"];
+    assert!(html(&args).contains("<weightlang-viewer>"));
+    fs::write(t.path().join("model.css"), "/* project-companion */").unwrap();
+    assert!(html(&args).contains("/* project-companion */"));
+    fs::write(
+        t.path().join("artifact/model.css"),
+        "/* bundled-companion */",
+    )
+    .unwrap();
+    assert!(html(&args).contains("/* bundled-companion */"));
+    assert!(!html(&args).contains("/* project-companion */"));
+    assert!(
+        html(&["graph", "artifact/manifest.json", "--stdout"]).contains("/* bundled-companion */")
+    );
+    fs::write(t.path().join("custom.css"), "/* explicit-style */").unwrap();
+    let explicit = html(&["graph", "artifact", "--style", "custom.css", "--stdout"]);
+    assert!(explicit.contains("/* explicit-style */"));
+    assert!(!explicit.contains("/* bundled-companion */"));
+    assert!(
+        !run(&["graph", "artifact", "--style", "missing.css", "--stdout"])
+            .status
+            .success()
+    );
+    fs::write(t.path().join("artifact/model.css"), [0xff]).unwrap();
+    assert!(!run(&args).status.success());
+    assert!(run(&["graph", "artifact", "--json"]).status.success());
+    fs::remove_file(t.path().join("artifact/model.css")).unwrap();
+    fs::create_dir(t.path().join("models")).unwrap();
+    fs::write(t.path().join("models/model.wgt"), "source").unwrap();
+    fs::write(t.path().join("models/model.css"), "/* nested-companion */").unwrap();
+    fs::write(t.path().join("wgt.toml"), "[project]\nmodule = \"local/demo\"\nedition = \"0.5\"\n[model]\nsource = \"models/model.wgt\"\n").unwrap();
+    assert!(html(&args).contains("/* nested-companion */"));
+}
+
 fn artifact(root: &Path, residual: bool) {
     fs::create_dir_all(root).unwrap();
     let layers = if residual {
@@ -265,9 +320,9 @@ fn cli_works_without_python_or_weightc_and_preserves_files() {
     assert!(fs::read_to_string(t.path().join("demo/wgt.sum"))
         .unwrap()
         .is_empty());
-    let before = fs::read(t.path().join("demo/main.wgt")).unwrap();
+    let before = fs::read(t.path().join("demo/model.wgt")).unwrap();
     assert!(!run(&["-C", "demo", "init"]).status.success());
-    assert_eq!(fs::read(t.path().join("demo/main.wgt")).unwrap(), before);
+    assert_eq!(fs::read(t.path().join("demo/model.wgt")).unwrap(), before);
     let check = run(&["-C", "demo", "check"]);
     assert!(!check.status.success());
     assert!(String::from_utf8_lossy(&check.stderr).contains("weightc"));
@@ -554,7 +609,8 @@ fn weight_domain_v7_artifact_validation() {
     manifest["interface"]["parameter_ids"] = json!({});
     manifest["interface"]["parameter_shares"] = json!({});
     manifest["interface"]["weight_types"] = json!({"tri":[-1,0,1]});
-    manifest["interface"]["weight_assignments"] = json!([{"target":"fc.weight","type":"tri","axis":0,"start":0,"stop":1}]);
+    manifest["interface"]["weight_assignments"] =
+        json!([{"target":"fc.weight","type":"tri","axis":0,"start":0,"stop":1}]);
     fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
     Artifact::read(root.path()).unwrap();
     manifest["interface"]["weight_assignments"][0]["stop"] = json!(3);
@@ -576,7 +632,8 @@ fn inline_script_dependencies_resolve_verified_cache_in_both_execution_modes() {
     let fake = Fake::new(&dir.path().join("fixture"));
     let lock = registry::fetch(&manifest(), &Lock::new(), &cache, false, &fake).unwrap();
     let source = dir.path().join("train.wgt");
-    let body = format!(r#"# /// script
+    let body = format!(
+        r#"# /// script
 # [dependencies]
 # "{MODULE}" = "{VERSION}"
 # ///
@@ -587,40 +644,89 @@ fn main() {{
     close(reader);
     return rows[0]["model"];
 }}
-"#);
+"#
+    );
     fs::write(&source, body).unwrap();
-    let key = format!("{:x}", Sha256::digest(source.canonicalize().unwrap().to_string_lossy().as_bytes()));
+    let key = format!(
+        "{:x}",
+        Sha256::digest(source.canonicalize().unwrap().to_string_lossy().as_bytes())
+    );
     let state = cache.join("scripts").join(key);
     fs::create_dir_all(&state).unwrap();
     fs::write(state.join("wgt.sum"), manifest::lock_text(&lock)).unwrap();
-    for compiled in [false,true] {
+    for compiled in [false, true] {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_wgt"));
-        cmd.env("WEIGHTLANG_CACHE", &cache).arg("--offline").arg("--locked").arg(&source);
-        if compiled { cmd.arg("--compiled"); }
+        cmd.env("WEIGHTLANG_CACHE", &cache)
+            .arg("--offline")
+            .arg("--locked")
+            .arg(&source);
+        if compiled {
+            cmd.arg("--compiled");
+        }
         let output = cmd.output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let report: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(report["result"], "demo");
     }
     assert!(!dir.path().join("wgt.toml").exists());
     assert!(!dir.path().join("wgt.sum").exists());
     // Project scripts use the project's existing declaration and lock instead.
-    fs::write(&source, format!("wgt 0.5\nfn main() {{ return dependency(\"{MODULE}\"); }}")).unwrap();
+    fs::write(
+        &source,
+        format!("wgt 0.5\nfn main() {{ return dependency(\"{MODULE}\"); }}"),
+    )
+    .unwrap();
     fs::write(dir.path().join("wgt.toml"), format!("[project]\nmodule=\"local/test\"\nedition=\"0.5\"\n[dependencies]\n\"{MODULE}\"=\"{VERSION}\"\n")).unwrap();
     fs::write(dir.path().join("wgt.sum"), manifest::lock_text(&lock)).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_wgt")).env("WEIGHTLANG_CACHE", &cache)
-        .args(["--offline", "--locked"]).arg(&source).output().unwrap();
-    assert!(output.status.success(), "{}",String::from_utf8_lossy(&output.stderr));
-    fs::write(registry::module_dir(&cache,MODULE,VERSION).join("demo/source.wgt"), "tampered").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_wgt")).env("WEIGHTLANG_CACHE", &cache)
-        .arg("--offline").arg(&source).output().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_wgt"))
+        .env("WEIGHTLANG_CACHE", &cache)
+        .args(["--offline", "--locked"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::write(
+        registry::module_dir(&cache, MODULE, VERSION).join("demo/source.wgt"),
+        "tampered",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_wgt"))
+        .env("WEIGHTLANG_CACHE", &cache)
+        .arg("--offline")
+        .arg(&source)
+        .output()
+        .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("cache hash mismatch"), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("cache hash mismatch"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     // An explicit empty block must not inherit the now-corrupted project dependency.
-    fs::write(&source, "# /// script\n# [dependencies]\n# ///\nwgt 0.5\nfn main() { return 42; }").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_wgt")).env("WEIGHTLANG_CACHE", &cache)
-        .args(["--offline", "--locked"]).arg(&source).output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    fs::write(
+        &source,
+        "# /// script\n# [dependencies]\n# ///\nwgt 0.5\nfn main() { return 42; }",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_wgt"))
+        .env("WEIGHTLANG_CACHE", &cache)
+        .args(["--offline", "--locked"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["result"], 42.0);
 }

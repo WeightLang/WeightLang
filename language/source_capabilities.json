@@ -4,186 +4,26 @@
   "release_status": "unreleased",
   "scope": "Tested context boundaries, not an exhaustive builtin or grammar specification",
   "domains": {
-    "source": {
-      "authority": [
-        "crates/wgt-runtime/src/source.rs",
-        "crates/wgt-runtime/src/script/parse.rs",
-        "crates/wgt-runtime/src/adaptive/source.rs"
-      ]
-    },
-    "artifact_graph": {
-      "specification": "language/primitive_specs.json",
-      "consumer": "crates/wgt/src/primitives.rs",
-      "source_builtin_catalog": false
-    }
+    "source": {"authority": ["crates/wgt-runtime/src/source.rs", "crates/wgt-runtime/src/script/parse.rs", "crates/wgt-runtime/src/adaptive/source.rs"]},
+    "artifact_graph": {"specification": "language/primitive_specs.json", "consumer": "crates/wgt/src/primitives.rs", "source_builtin_catalog": false}
   },
   "contexts": {
-    "ordinary_function": {
-      "parser": "script/parse.rs",
-      "values": "finite f64, bool, string, null, lists and runtime handles",
-      "validation": "parsing does not resolve every runtime call"
-    },
-    "tensor_forward": {
-      "parser": "script/parse.rs",
-      "lowering": "adaptive/source.rs",
-      "values": "fixed f32 vectors",
-      "for_loop": false,
-      "sample_expression": false
-    },
-    "tensor_loss": {
-      "parser": "script/parse.rs",
-      "lowering": "adaptive/source.rs",
-      "result": "f32[1]",
-      "sample_expression": false
-    },
-    "model_declaration": {
-      "parser": "source.rs",
-      "shares_function_parser": false
-    },
-    "editor": {
-      "parser": "editors/tree-sitter-wgt/grammar.js",
-      "validation": "balanced structure with recovery; does not enforce edition, call validity or tensor semantics"
-    }
+    "ordinary_function": {"parser": "script/parse.rs", "values": "finite f64, bool, string, null, lists and runtime handles", "validation": "parsing does not resolve every runtime call"},
+    "tensor_forward": {"parser": "script/parse.rs", "lowering": "adaptive/source.rs", "values": "fixed f32 vectors", "for_loop": false, "sample_expression": false},
+    "tensor_loss": {"parser": "script/parse.rs", "lowering": "adaptive/source.rs", "result": "f32[1]", "sample_expression": false},
+    "model_declaration": {"parser": "source.rs", "shares_function_parser": false},
+    "editor": {"parser": "editors/tree-sitter-wgt/grammar.js", "validation": "balanced structure with recovery; does not enforce edition, call validity or tensor semantics"}
   },
+  "let_groups": {"syntax":"let a = expr, b = expr;", "contexts":["ordinary_function","tensor_forward","tensor_loss"], "lowering":"ordered ordinary Stmt::Let sequence", "evaluation":"left-to-right once; later initializers see earlier bindings; no group rollback", "shadowing":"unchanged per context", "multiline":true, "nested_commas":"call/list/record delimiters own their commas", "trailing_comma":false, "standalone_only":["sample destructuring","collect","learn"], "tuple":false},
   "prelude": "language/prelude.json",
-  "file_syntax": {
-    "context": "ordinary_function",
-    "save": "save KIND VALUE to PATH [overwrite];",
-    "load": "load KIND from PATH [using OPTIMIZER]",
-    "formats": [
-      "model",
-      "checkpoint",
-      "json",
-      "text"
-    ],
-    "default_overwrite": false,
-    "parent_creation": false,
-    "max_bytes": 67108864,
-    "budget": "one operation per encoded byte",
-    "host_policy": "direct path IO denied; use capabilities",
-    "assert": "assert CONDITION [, MESSAGE]; strict bool; message lazy on failure; two-argument function remains eager"
-  },
-  "assert_syntax": {
-    "syntax": "assert CONDITION [, MESSAGE];",
-    "context": "ordinary_function",
-    "condition": "strict bool; evaluated once",
-    "message": "string; evaluated only on failure; default assertion failed",
-    "legacy": "assert(condition,message) remains eager"
-  },
-  "slicing": {
-    "syntax": "x[start:end]",
-    "bounds": "zero-based half-open; no clamping",
-    "defaults": {
-      "start": 0,
-      "end": "length"
-    },
-    "ordinary": "lists; runtime integer endpoints; empty allowed",
-    "tensor": "1D f32; compile-time numeric endpoints; empty rejected",
-    "steps": false,
-    "negative_indices": false,
-    "multi_axis": false,
-    "legacy_slice": "slice(x,start,length) unchanged"
-  },
-  "categorical_vectors": {
-    "output_types": [
-      "logits[N]",
-      "probabilities[N]"
-    ],
-    "width": "1..16384",
-    "axis": "one mutually exclusive category axis",
-    "conversion": "typed_value.probabilities",
-    "plain_f32_conversion": "rejected; explicit softmax(x) remains available",
-    "probability_range": "finite and strictly [0,1]",
-    "sum_absolute_tolerance": 1.0e-05,
-    "sum_accumulator": "f64",
-    "normalization": "logits stable softmax subtracts maximum; probabilities validate and preserve values",
-    "metadata": "runtime values and model/optimizer-checkpoint output contracts; missing artifact field defaults to f32",
-    "gradient": "softmax VJP for logits; identity for validated probabilities",
-    "cross_entropy": "existing logits input contract unchanged",
-    "gpu": "new categorical path unverified"
-  },
-  "categorical_sampling": {
-    "syntax": "sample from model(input)",
-    "context": "ordinary_function",
-    "model": "local model handle variable or function parameter",
-    "input": "one expression evaluated once; finite f32 vector matching model input",
-    "output": "zero-based categorical index; explicit logits stable softmax, probabilities validate and sample actual mass, legacy f32 retains logits interpretation",
-    "forward_writes": "discarded",
-    "optimizer_updates": false,
-    "rng": "one script RNG draw per successful sample",
-    "legacy_function": "sample(model,input) rejected with migration diagnostic"
-  },
-  "conformance": "language/conformance.json",
-  "sample_record": {
-    "syntax": "let {action,log_prob}=sample from model(input);",
-    "aliases": "action:a, log_prob:lp",
-    "context": "ordinary_function declaration only",
-    "evaluation": "one model evaluation and RNG draw; scalar sample stays scalar",
-    "log_probability": "stable f64 logits log-sum-exp or log(p_action)-log(sum(p))",
-    "writes": "discarded"
-  },
-  "record_batches": {
-    "collect": "let batch=collect { ... yield {field:expression}; ... };",
-    "projection": "batch.field; batch[i].field",
-    "chunks": "for part in batch size positive_integer",
-    "order": "preserved, no implicit shuffle; tail retained; empty zero chunks",
-    "schema": "same field set, kinds and homogeneous fixed list shapes",
-    "limits": {
-      "rows": 100000,
-      "fields": 256,
-      "depth": 64,
-      "nodes": 1000000,
-      "utf8_text_bytes": 1000000
-    },
-    "scope": "yield belongs to nearest lexical collect in same function; return propagates",
-    "tensor_lowering": false
-  },
-  "training_strategy": {
-    "syntax": "train MODEL on (INPUTS,TARGETS) using STRATEGY;",
-    "target": "declared synchronous ordinary user function with exactly three parameters; static binding ignores locals; forward declarations allowed",
-    "evaluation": "MODEL,INPUTS,TARGETS left-to-right once; strategy once; return discarded",
-    "updates": "explicit strategy-controlled zero or more commits; no implicit optimizer, retry or whole-function rollback",
-    "hyperparameters": "defined in strategy body; using mutually exclusive with rate/clip"
-  },
-  "async_tasks": {
-    "syntax": [
-      "async fn",
-      "await",
-      "tasks",
-      "spawn"
-    ],
-    "cold_calls": true,
-    "executor": "local future polling; fixed 2 worker blocking IO pool and 64 queued operations",
-    "scope_tasks": 64,
-    "cold_futures": 10000,
-    "scope_timeout_ms": 30000,
-    "budget": "shared parent operations; spawn ordinal RNG split",
-    "io": [
-      "await sleep(integer_ms_0_to_30000)",
-      "await load text from path; 64 MiB maximum, metadata-sized shared reservation, worker settles actual bytes and returns unused reservation"
-    ],
-    "host_compute": "explicitly rejected before future or scope creation",
-    "nested_async_await": true,
-    "nested_tasks": false,
-    "spawn_inside_async": false,
-    "resource_parameters_results": false,
-    "model_device_async": false,
-    "aot": "native Rust future control flow; no AST replay",
-    "documentation": "docs/async-tasks.md"
-  },
-  "agent_environment": {
-    "declarations": [
-      "agent NAME { policy; [critic;] [learner: FUNCTION;] }",
-      "environment NAME { observation:f32[N]; action:f32[A]; feedback:f32[F]; reset:FUNCTION; step:FUNCTION; }"
-    ],
-    "learn": "[let report =] learn target [using learner] { BODY }",
-    "learner": "static synchronous two-parameter user function; original target and full RecordBatch",
-    "updates": "policy identity protected while collecting; unlock before learner; no automatic optimizer",
-    "environment": "constructor reset once; fixed state schema; complete validation before committing state/observation/done/RNG",
-    "termination": "terminated and truncated independent; either requires reset before step",
-    "rng": "instance-local; reset replays original seed; host stream unchanged",
-    "checkpoint": "model policy only; no agent/environment snapshot",
-    "async": false,
-    "documentation": "docs/agents-environments.md"
-  }
+  "agent_environment": {"declarations":["agent NAME { policy; [critic;] [learner: FUNCTION;] }","environment NAME { observation:f32[N]; action:f32[A]; feedback:f32[F]; reset:FUNCTION; step:FUNCTION; }"],"learn":"[let report =] learn target [using learner] { BODY }","learner":"static synchronous two-parameter user function; original target and full RecordBatch","updates":"policy identity protected while collecting; unlock before learner; no automatic optimizer","environment":"constructor reset once; fixed state schema; complete validation before committing state/observation/done/RNG","termination":"terminated and truncated independent; either requires reset before step","rng":"instance-local; reset replays original seed; host stream unchanged","checkpoint":"model policy only; no agent/environment snapshot","async":false,"documentation":"docs/agents-environments.md"},
+  "async_tasks": {"syntax":["async fn","await","tasks","spawn"], "cold_calls":true, "executor":"local future polling; fixed 2 worker blocking IO pool and 64 queued operations", "scope_tasks":64, "cold_futures":10000, "scope_timeout_ms":30000, "budget":"shared parent operations; spawn ordinal RNG split", "io":["await sleep(integer_ms_0_to_30000)","await load text from path; 64 MiB maximum, metadata-sized shared reservation, worker settles actual bytes and returns unused reservation"], "host_compute":"explicitly rejected before future or scope creation", "nested_async_await":true, "nested_tasks":false, "spawn_inside_async":false, "resource_parameters_results":false, "model_device_async":false, "aot":"native Rust future control flow; no AST replay", "documentation":"docs/async-tasks.md"},
+  "training_strategy": {"syntax":"train MODEL on (INPUTS,TARGETS) using STRATEGY;", "target":"declared synchronous ordinary user function with exactly three parameters; static binding ignores locals; forward declarations allowed", "evaluation":"MODEL,INPUTS,TARGETS left-to-right once; strategy once; return discarded", "updates":"explicit strategy-controlled zero or more commits; no implicit optimizer, retry or whole-function rollback", "hyperparameters":"defined in strategy body; using mutually exclusive with rate/clip"},
+  "file_syntax": {"context":"ordinary_function", "save":"save KIND VALUE to PATH [overwrite];", "load":"load KIND from PATH [using OPTIMIZER]", "formats":["model","checkpoint","json","text"], "default_overwrite":false, "parent_creation":false, "max_bytes":67108864, "budget":"one operation per encoded byte", "host_policy":"direct path IO denied; use capabilities", "assert":"assert CONDITION [, MESSAGE]; strict bool; message lazy on failure; two-argument function remains eager"},
+  "slicing": {"syntax": "x[start:end]", "bounds": "zero-based half-open; no clamping", "defaults": {"start": 0, "end": "length"}, "ordinary": "lists; runtime integer endpoints; empty allowed", "tensor": "1D f32; compile-time numeric endpoints; empty rejected", "steps": false, "negative_indices": false, "multi_axis": false, "legacy_slice": "slice(x,start,length) unchanged"},
+  "categorical_vectors": {"output_types": ["logits[N]", "probabilities[N]"], "width": "1..16384", "axis": "one mutually exclusive category axis", "conversion": "typed_value.probabilities", "plain_f32_conversion": "rejected; explicit softmax(x) remains available", "probability_range": "finite and strictly [0,1]", "sum_absolute_tolerance": 0.00001, "sum_accumulator": "f64", "normalization": "logits stable softmax subtracts maximum; probabilities validate and preserve values", "metadata": "runtime values and model/optimizer-checkpoint output contracts; missing artifact field defaults to f32", "gradient": "softmax VJP for logits; identity for validated probabilities", "cross_entropy": "existing logits input contract unchanged", "gpu": "new categorical path unverified"},
+  "categorical_sampling": {"syntax": "sample from model(input)", "context": "ordinary_function", "model": "local model handle variable or function parameter", "input": "one expression evaluated once; finite f32 vector matching model input", "output": "zero-based categorical index; explicit logits stable softmax, probabilities validate and sample actual mass, legacy f32 retains logits interpretation", "forward_writes": "discarded", "optimizer_updates": false, "rng": "one script RNG draw per successful sample", "legacy_function": "sample(model,input) rejected with migration diagnostic"},
+  "sample_record": {"syntax":"let {action,log_prob}=sample from model(input);", "aliases":"action:a, log_prob:lp", "context":"ordinary_function declaration only", "evaluation":"one model evaluation and RNG draw; scalar sample stays scalar", "log_probability":"stable f64 logits log-sum-exp or log(p_action)-log(sum(p))", "writes":"discarded"},
+  "record_batches": {"collect":"let batch=collect { ... yield {field:expression}; ... };", "projection":"batch.field; batch[i].field", "chunks":"for part in batch size positive_integer", "order":"preserved, no implicit shuffle; tail retained; empty zero chunks", "schema":"same field set, kinds and homogeneous fixed list shapes", "limits":{"rows":100000,"fields":256,"depth":64,"nodes":1000000,"utf8_text_bytes":1000000}, "scope":"yield belongs to nearest lexical collect in same function; return propagates", "tensor_lowering":false},
+  "conformance": "language/conformance.json"
 }

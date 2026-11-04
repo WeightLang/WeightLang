@@ -1,0 +1,29 @@
+wgt 0.5
+model LazyRouter
+# 单个样本包含一个路由概率和一个数据值；输出是单个数据值。
+input x: f32[2]
+output y: f32[1]
+# 此例展示推理短路，不训练参数。权重有限，但与大输入相乘会溢出。
+frozen expensive: f32[1,1] = [1e30]
+fn forward(x) {
+    let p = slice(x, 0, 1);
+    let value = slice(x, 1, 1);
+    # 专家表达式直接写在 mix 分支内，p=1 时不执行 else 的矩阵乘法。
+    # 如果提前 let other = linear(...)，那条语句仍会先执行。
+    return mix p {
+        then { value }
+        else { linear(value, expensive) }
+    };
+}
+fn main() {
+    let model = LazyRouter("none");
+    # 无关分支中的溢出不会影响已确定的选择；两种执行模式都应成功。
+    let selected = predict(model, [1, 1e20]);
+    assert(selected[0] > 1e19, "unused branch was evaluated");
+    # 抽样也走无 tape 的推理短路；这里只有一个输出类别，必定返回索引 0。
+    assert(sample(model, [1, 1e20]) == 0, "sample evaluated unused branch");
+    # p=0 时真正执行右侧专家，不做近似概率阈值处理。
+    let other = predict(model, [0, 1]);
+    assert(other[0] > 1e29, "selected branch was skipped");
+    return selected;
+}

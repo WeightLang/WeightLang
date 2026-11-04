@@ -52,6 +52,11 @@ pub fn compile_options(source: &Path, output: &Path, offline: bool, locked: bool
     manifest["dependencies"]["weightlang-runtime"]["path"] =
         toml_edit::value(runtime.to_str().context("runtime path must be UTF-8")?);
     manifest["dependencies"]["weightlang-runtime"]["default-features"] = toml_edit::value(false);
+    if cfg!(feature = "gpu") {
+        let mut features = toml_edit::Array::new();
+        features.push("gpu");
+        manifest["dependencies"]["weightlang-runtime"]["features"] = toml_edit::value(features);
+    }
     fs::write(project.path().join("Cargo.toml"), manifest.to_string())?;
     // Serialize publication with the shared Cargo target: another compiler must not replace
     // its executable between cargo finishing and our copy.

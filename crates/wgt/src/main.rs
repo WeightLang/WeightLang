@@ -211,7 +211,7 @@ enum Cmd {
     Metadata,
     /// Explain a compiler diagnostic code
     Explain { code: String },
-    /// Legacy model check (removed; use weightc check for native scripts)
+    /// Check a source file or current project without executing it
     Check {
         source: Option<PathBuf>,
         /// Show inferred layer shapes and named axes
@@ -362,7 +362,7 @@ enum Cmd {
         /// Compare tensor values with a compatible baseline artifact
         #[arg(long)]
         compare: Option<PathBuf>,
-        /// Override HTML appearance with a local CSS stylesheet
+        /// Override HTML appearance (default: model.css beside the model)
         #[arg(long)]
         style: Option<PathBuf>,
         #[arg(short, long)]
@@ -465,9 +465,18 @@ fn main() -> ExitCode {
     let mut index = 1;
     while index < args.len() {
         let arg = args[index].to_string_lossy();
-        if ["-C", "--directory", "--registry"].contains(&arg.as_ref()) { index += 2; continue; }
-        if arg.starts_with('-') { index += 1; continue; }
-        if Path::new(&args[index]).extension().is_some_and(|e| e == "wgt") {
+        if ["-C", "--directory", "--registry"].contains(&arg.as_ref()) {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        if Path::new(&args[index])
+            .extension()
+            .is_some_and(|e| e == "wgt")
+        {
             args.insert(index, OsString::from("script"));
         }
         break;
@@ -491,6 +500,11 @@ fn execute(cli: Cli) -> Result<u8> {
     }
     let command = cli.command.context("choose a command; see wgt --help")?;
     let base = fs::canonicalize(&cli.directory).context("project directory does not exist")?;
+    // Checking must return before toolchain dispatch or dependency preparation.
+    if let Cmd::Check { source, shapes, error_format } = &command {
+        ensure!(!shapes, "wgt check --shapes is unavailable; check validates syntax and native model lowering without execution");
+        return weightlang_wgt::source_check::run(&base, source.as_deref(), error_format);
+    }
     // Native artifact operations do not execute source or prepare project dependencies.
     match &command {
         Cmd::Package { entry, output, force, weights, reference } => {
@@ -508,21 +522,56 @@ fn execute(cli: Cli) -> Result<u8> {
         }
         _ => {}
     }
-    if matches!(&command, Cmd::Check { .. } | Cmd::Build { .. } | Cmd::Package { .. } | Cmd::Install { .. } | Cmd::Train { .. } | Cmd::Export { .. } | Cmd::RetiredRun { .. } | Cmd::Trace { .. } | Cmd::Debug { .. }) {
+    if matches!(
+        &command,
+        Cmd::Check { .. }
+            | Cmd::Build { .. }
+            | Cmd::Package { .. }
+            | Cmd::Install { .. }
+            | Cmd::Train { .. }
+            | Cmd::Export { .. }
+            | Cmd::RetiredRun { .. }
+            | Cmd::Trace { .. }
+            | Cmd::Debug { .. }
+    ) {
         compiler_command(&base)?;
     }
     match command {
-        Cmd::Script { source, check, compiled, max_operations } => {
+        Cmd::Script {
+            source,
+            check,
+            compiled,
+            max_operations,
+        } => {
             let path = base.join(source);
             if check {
                 weightlang_wgt::script_dependencies::metadata(&fs::read_to_string(&path)?)?;
-                weightlang_runtime::script::parse(&fs::read_to_string(&path)?)?;
+                let text = fs::read_to_string(&path)?;
+                if text.lines().any(|l| l.trim().starts_with("operators ")) {
+                    weightlang_runtime::script::operators::library(&text)?;
+                } else {
+                    weightlang_runtime::script::parse_with_imports(&text, path.parent().unwrap(), &Default::default())?;
+                }
                 println!("ok: native WGT script; no execution");
             } else if compiled {
-                return weightlang_wgt::script_compiler::run_options(&path, max_operations, cli.offline, cli.locked);
+                return weightlang_wgt::script_compiler::run_options(
+                    &path,
+                    max_operations,
+                    cli.offline,
+                    cli.locked,
+                );
             } else {
-                let dependencies = weightlang_wgt::script_dependencies::prepare(&path, cli.offline, cli.locked)?;
-                let report = weightlang_runtime::script::run_with_dependencies(&fs::read_to_string(&path)?, path.parent().unwrap(), max_operations, dependencies)?;
+                if let Some(status) = weightlang_runtime::isolation::supervise_current()? {
+                    return Ok(status);
+                }
+                let dependencies =
+                    weightlang_wgt::script_dependencies::prepare(&path, cli.offline, cli.locked)?;
+                let report = weightlang_runtime::script::run_with_dependencies(
+                    &fs::read_to_string(&path)?,
+                    path.parent().unwrap(),
+                    max_operations,
+                    dependencies,
+                )?;
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
@@ -530,7 +579,8 @@ fn execute(cli: Cli) -> Result<u8> {
             module: None,
             version,
             all: false,
-        } | Cmd::SelfManage {
+        }
+        | Cmd::SelfManage {
             command: SelfCommand::Update { version },
         } => {
             ensure!(
@@ -587,13 +637,14 @@ fn execute(cli: Cli) -> Result<u8> {
                 "--style requires HTML"
             );
             let comparison = compare.map(|p| base.join(p));
-            let graph = Graph::read_compared(&base.join(artifact), comparison.as_deref())?;
-            let text = if let Some(style) = style {
-                let path = base.join(style);
-                graph.html_with_style(
-                    &fs::read_to_string(&path)
-                        .with_context(|| format!("read CSS {}", path.display()))?,
-                )?
+            let graph = Graph::read_compared(&base.join(&artifact), comparison.as_deref())?;
+            let text = if matches!(format, Format::Html) {
+                let css = weightlang_wgt::graph::stylesheet(
+                    &base,
+                    &base.join(&artifact),
+                    style.as_deref(),
+                )?;
+                graph.html_with_style(&css)?
             } else {
                 graph.render(format.name())?
             };
@@ -645,7 +696,15 @@ fn execute(cli: Cli) -> Result<u8> {
             );
         }
         Cmd::Install { archive, output } => {
-            compiler(&base, &["install".into(), archive.into_os_string(), "-o".into(), output.into_os_string()])?;
+            compiler(
+                &base,
+                &[
+                    "install".into(),
+                    archive.into_os_string(),
+                    "-o".into(),
+                    output.into_os_string(),
+                ],
+            )?;
         }
         Cmd::Cache => println!("{}", registry::cache_root()?.display()),
         Cmd::Doctor => {
@@ -687,21 +746,55 @@ fn execute(cli: Cli) -> Result<u8> {
             }
             return Ok(cmd.status()?.code().unwrap_or(1).clamp(0, 255) as u8);
         }
-        Cmd::Register { module, name, version, license, edition, dry_run } => {
+        Cmd::Register {
+            module,
+            name,
+            version,
+            license,
+            edition,
+            dry_run,
+        } => {
             ensure!(!cli.offline, "registration verification requires network");
             ensure!(!cli.locked, "--locked forbids registry submissions");
             let cache = registry::cache_root()?;
             fs::create_dir_all(&cache)?;
-            let guard = fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(cache.join(".wgt-lock"))?;
+            let guard = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(cache.join(".wgt-lock"))?;
             guard.lock_exclusive()?;
-            package_index::register(&cli.registry, &name, &module, &version, &license, &edition, &cache, dry_run)?;
+            package_index::register(
+                &cli.registry,
+                package_index::Registration {
+                    name: &name,
+                    module: &module,
+                    version: &version,
+                    license: &license,
+                    edition: &edition,
+                },
+                &cache,
+                dry_run,
+            )?;
         }
-        Cmd::Publish { index, name, license, edition, register_only, no_register, dry_run } => {
+        Cmd::Publish {
+            index,
+            name,
+            license,
+            edition,
+            register_only,
+            no_register,
+            dry_run,
+        } => {
             ensure!(dry_run || !cli.offline, "--offline forbids publishing");
             ensure!(dry_run || !cli.locked, "--locked forbids publishing");
             let index = base.join(index);
             let value: Value = serde_json::from_slice(&fs::read(&index)?)?;
-            ensure!(value["format"] == "weightlang.package-index" && value["format_version"] == 1, "invalid package index");
+            ensure!(
+                value["format"] == "weightlang.package-index" && value["format_version"] == 1,
+                "invalid package index"
+            );
             let module = value["module"].as_str().context("package module")?;
             let version = value["version"].as_str().context("package version")?;
             let parts = manifest::module_parts(module)?;
@@ -711,24 +804,52 @@ fn execute(cli: Cli) -> Result<u8> {
             if !no_register {
                 package_index::repository(&cli.registry)?;
                 let candidate = package_index::Record {
-                    format_version: 1, name: name.clone(), module: module.into(), version: version.into(),
+                    format_version: 1,
+                    name: name.clone(),
+                    module: module.into(),
+                    version: version.into(),
                     source_commit: value["commit"].as_str().context("source commit")?.into(),
                     index_sha256: weightlang_wgt::artifact::hash(&fs::read(&index)?),
-                    license: license.clone().context("--license is required for registration")?, edition: edition.clone(), yanked: false,
+                    license: license
+                        .clone()
+                        .context("--license is required for registration")?,
+                    edition: edition.clone(),
+                    yanked: false,
                 };
                 candidate.validate()?;
             }
-            if !register_only { registry::publish(&value, index.parent().unwrap(), dry_run)?; }
+            if !register_only {
+                registry::publish(&value, index.parent().unwrap(), dry_run)?;
+            }
             if !no_register {
                 if dry_run {
-                    println!("would verify {module}@{version} and submit {name} to {} (no upload or PR)", cli.registry);
+                    println!(
+                        "would verify {module}@{version} and submit {name} to {} (no upload or PR)",
+                        cli.registry
+                    );
                 } else {
                     let cache = registry::cache_root()?;
                     fs::create_dir_all(&cache)?;
-                    let guard = fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(cache.join(".wgt-lock"))?;
+                    let guard = fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .create(true)
+                        .truncate(false)
+                        .open(cache.join(".wgt-lock"))?;
                     guard.lock_exclusive()?;
-                    package_index::register(&cli.registry, &name, module, version, license.as_deref().unwrap(), &edition, &cache, false)
-                        .context("release may already exist; retry wgt publish with --register-only")?;
+                    package_index::register(
+                        &cli.registry,
+                        package_index::Registration {
+                            name: &name,
+                            module,
+                            version,
+                            license: license.as_deref().unwrap(),
+                            edition: &edition,
+                        },
+                        &cache,
+                        false,
+                    )
+                    .context("release may already exist; retry wgt publish with --register-only")?;
                 }
             }
         }
@@ -761,12 +882,26 @@ fn execute(cli: Cli) -> Result<u8> {
                     );
                     let mut known = manifest::read_lock(&project.join("wgt.sum"))?;
                     let requested = module;
-                    let selection = if requested.starts_with("github.com/") { None } else {
-                        Some(package_index::resolve(&cli.registry, &requested, version.as_deref(), &cache, cli.offline)?)
+                    let selection = if requested.starts_with("github.com/") {
+                        None
+                    } else {
+                        Some(package_index::resolve(
+                            &cli.registry,
+                            &requested,
+                            version.as_deref(),
+                            &cache,
+                            cli.offline,
+                        )?)
                     };
-                    let module = selection.as_ref().map(|s| s.record.module.clone()).unwrap_or(requested);
+                    let module = selection
+                        .as_ref()
+                        .map(|s| s.record.module.clone())
+                        .unwrap_or(requested);
                     if update {
-                        ensure!(manifest.dependencies.contains_key(&module), "dependency not found; use wgt add");
+                        ensure!(
+                            manifest.dependencies.contains_key(&module),
+                            "dependency not found; use wgt add"
+                        );
                     }
                     manifest::module_parts(&module)?;
                     let version = if let Some(selection) = &selection {
@@ -774,8 +909,12 @@ fn execute(cli: Cli) -> Result<u8> {
                         selection.record.version.clone()
                     } else {
                         // A registered dependency cannot silently bypass its registry on update.
-                        ensure!(!known.keys().any(|(m, _, k)| m == &module && k == "registry-name"),
-                            "use the registered owner/name to add or update this dependency");
+                        ensure!(
+                            !known
+                                .keys()
+                                .any(|(m, _, k)| m == &module && k == "registry-name"),
+                            "use the registered owner/name to add or update this dependency"
+                        );
                         match version.as_deref() {
                             None | Some("latest") => {
                                 ensure!(!cli.offline, "latest version discovery requires network; use --version with an exact cached version offline");
@@ -804,7 +943,10 @@ fn execute(cli: Cli) -> Result<u8> {
                     println!("locked {module}@{version}");
                 }
                 Cmd::Update { all: true, .. } => {
-                    ensure!(!cli.locked, "dependency upgrades are incompatible with --locked");
+                    ensure!(
+                        !cli.locked,
+                        "dependency upgrades are incompatible with --locked"
+                    );
                     ensure!(!cli.offline, "latest dependency upgrades require network; use fetch --offline --locked to reuse pins");
                     if manifest.dependencies.is_empty() {
                         println!("no package dependencies to update");
@@ -813,10 +955,22 @@ fn execute(cli: Cli) -> Result<u8> {
                         let result = upgrade::latest(&manifest, &known, &cache)?;
                         upgrade::save(&manifest_path, &result)?;
                         for change in &result.changes {
-                            println!("{}: {} -> {}{}", change.module, change.before, change.after,
-                                if change.before == change.after { " (already latest)" } else { "" });
+                            println!(
+                                "{}: {} -> {}{}",
+                                change.module,
+                                change.before,
+                                change.after,
+                                if change.before == change.after {
+                                    " (already latest)"
+                                } else {
+                                    ""
+                                }
+                            );
                         }
-                        println!("locked {} package dependencies; toolchain unchanged", result.changes.len());
+                        println!(
+                            "locked {} package dependencies; toolchain unchanged",
+                            result.changes.len()
+                        );
                     }
                 }
                 Cmd::Remove { module } => {
@@ -875,7 +1029,6 @@ fn execute(cli: Cli) -> Result<u8> {
                         "synchronized {} dependencies (wgt.sum)",
                         manifest.dependencies.len()
                     );
-
                 }
                 Cmd::Fetch => {
                     let known = manifest::read_lock(&project.join("wgt.sum"))?;
@@ -1012,18 +1165,50 @@ fn execute(cli: Cli) -> Result<u8> {
                     }
                     compiler(&project, &args)?;
                 }
-                Cmd::Build { entry, output, force } => {
-                    let mut args: Vec<OsString> = vec!["build".into(), ".".into(), "-o".into(), output.into_os_string()];
-                    if let Some(entry) = entry { args.extend(["--entry".into(), entry.into_os_string()]); }
-                    if force { args.push("--force".into()); }
+                Cmd::Build {
+                    entry,
+                    output,
+                    force,
+                } => {
+                    let mut args: Vec<OsString> = vec![
+                        "build".into(),
+                        ".".into(),
+                        "-o".into(),
+                        output.into_os_string(),
+                    ];
+                    if let Some(entry) = entry {
+                        args.extend(["--entry".into(), entry.into_os_string()]);
+                    }
+                    if force {
+                        args.push("--force".into());
+                    }
                     compiler(&project, &args)?;
                 }
-                Cmd::Package { entry, output, force, weights, reference } => {
-                    let mut args: Vec<OsString> = vec!["package".into(), ".".into(), "-o".into(), output.into_os_string()];
-                    if let Some(entry) = entry { args.extend(["--entry".into(), entry.into_os_string()]); }
-                    if force { args.push("--force".into()); }
-                    for value in weights { args.extend(["--weights".into(), value.into()]); }
-                    for value in reference { args.extend(["--reference".into(), value.into()]); }
+                Cmd::Package {
+                    entry,
+                    output,
+                    force,
+                    weights,
+                    reference,
+                } => {
+                    let mut args: Vec<OsString> = vec![
+                        "package".into(),
+                        ".".into(),
+                        "-o".into(),
+                        output.into_os_string(),
+                    ];
+                    if let Some(entry) = entry {
+                        args.extend(["--entry".into(), entry.into_os_string()]);
+                    }
+                    if force {
+                        args.push("--force".into());
+                    }
+                    for value in weights {
+                        args.extend(["--weights".into(), value.into()]);
+                    }
+                    for value in reference {
+                        args.extend(["--reference".into(), value.into()]);
+                    }
                     compiler(&project, &args)?;
                 }
                 Cmd::Train { args } => {
@@ -1067,7 +1252,7 @@ fn execute(cli: Cli) -> Result<u8> {
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
                     let source = source
                         .or_else(|| config.as_ref().and_then(|c| c.model.source.clone()))
-                        .unwrap_or_else(|| "main.wgt".into());
+                        .unwrap_or_else(|| "model.wgt".into());
                     let devices = runtime.devices(devices, config.as_ref(), &project);
                     let native_initialization = DeviceOptions::default();
                     let artifact = build(
@@ -1101,7 +1286,10 @@ fn execute(cli: Cli) -> Result<u8> {
                     ensure!(max_operations > 0, "max-operations must be positive");
                     ensure!(std::env::var_os("WGT_HOST_POLICY").is_none(), "wgt test does not yet support WGT_HOST_POLICY; run an explicitly supervised script instead");
                     registry::prepare(&manifest, &project, &cache, cli.offline, cli.locked)?;
-                    ensure!(!compiled, "wgt test --compiled is not supported; use interpreted wgt test");
+                    ensure!(
+                        !compiled,
+                        "wgt test --compiled is not supported; use interpreted wgt test"
+                    );
                     test_project(
                         &project,
                         &runtime.devices(devices, config.as_ref(), &project),
@@ -1158,6 +1346,7 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
         "wgt.lock",
         ".wgt-version",
         "main.wgt",
+        "model.wgt",
         "tests/main.json",
     ] {
         ensure!(!path.join(file).exists(), "refusing to overwrite {file}");
@@ -1166,7 +1355,7 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
     fs::write(
         path.join("wgt.toml"),
         format!(
-            "[project]\nmodule = {}\nedition = \"0.5\"\n\n[model]\nsource = \"main.wgt\"\noutput = \"weights\"\n\n[revisions]\nmax_versions = 5\n\n[dependencies]\n",
+            "[project]\nmodule = {}\nedition = \"0.5\"\n\n[model]\nsource = \"model.wgt\"\noutput = \"weights\"\n\n[revisions]\nmax_versions = 5\n\n[dependencies]\n",
             serde_json::to_string(&module)?
         ),
     )?;
@@ -1175,10 +1364,10 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
         path.join(toolchain::PIN),
         format!("{}\n", toolchain::CURRENT),
     )?;
-    fs::write(path.join("main.wgt"), "wgt 0.5\n# One feature and one output; all iterations update the same initialized model.\nfn main() {\n    let model = mlp([1, 4, 1], \"tanh\", 42, \"adam\");\n    for step in range(0, 100) {\n        let loss = fit(model, [[0], [1]], [[0], [1]], 0.03, \"mse\");\n    }\n    metric(\"training_steps\", 100);\n    return model;\n}\n")?;
+    fs::write(path.join("model.wgt"), "wgt 0.5\n# One feature and one output; all iterations update the same initialized model.\nfn main() {\n    let model = mlp([1, 4, 1], \"tanh\", 42, \"adam\");\n    for step in range(0, 100) {\n        let loss = fit(model, [[0], [1]], [[0], [1]], 0.03, \"mse\");\n    }\n    metric(\"training_steps\", 100);\n    return model;\n}\n")?;
     project_ignore::initialize(path)?;
     println!(
-        "created {} (wgt sync; wgt script main.wgt; weightc legacy-build main.wgt)",
+        "created {} (wgt sync; wgt script model.wgt; weightc legacy-build model.wgt)",
         path.display()
     );
     Ok(())
@@ -1249,15 +1438,26 @@ fn build(
     fs::create_dir_all(output)?;
     let scratch = tempfile::tempdir_in(output)?;
     let artifact = scratch.path().join("model");
-    compiler(project, &[
-        "revision".into(), "checkout".into(), "HEAD".into(),
-        "-o".into(), artifact.as_os_str().into(),
-    ])?;
+    compiler(
+        project,
+        &[
+            "revision".into(),
+            "checkout".into(),
+            "HEAD".into(),
+            "-o".into(),
+            artifact.as_os_str().into(),
+        ],
+    )?;
     let current = Artifact::read(&artifact)?;
-    ensure!(current.manifest["model"].as_str() == model_name(source)?.as_deref(),
-        "current weight revision belongs to another model");
-    ensure!(current.manifest["source"]["sha256"].as_str() == Some(&weightlang_wgt::artifact::hash_file(source)?),
-        "source differs from current weight revision; explicitly train or migrate first");
+    ensure!(
+        current.manifest["model"].as_str() == model_name(source)?.as_deref(),
+        "current weight revision belongs to another model"
+    );
+    ensure!(
+        current.manifest["source"]["sha256"].as_str()
+            == Some(&weightlang_wgt::artifact::hash_file(source)?),
+        "source differs from current weight revision; explicitly train or migrate first"
+    );
     Ok(scratch)
 }
 fn build_with_trainers(

@@ -1,12 +1,15 @@
-# Rust 原生执行后端
+# WGT 推理运行时架构（目标设计，尚未实现）
 
-`wgt-native` 执行原生 IR v1；WGT 0.5 脚本的训练和执行入口见[原生训练](native-training.md)。模型加载不会隐式训练。
+目标运行时命名为 `wgtime`，职责是加载权重与计算结构、接收显式张量输入并执行推理。
+它将以可复用 Rust 库实现，由机器级唯一 `wgtime` 服务进程宿主；多用户共享同一服务，进程并发启动必须互斥并连接已运行服务。
+WGT 编译程序只链接轻量 IPC 客户端，不嵌入推理核心、不独立加载权重、不创建 GPU context。连接失败必须明确报错，不得静默回退到进程内执行。
+
+下述 NativeSession、IR 与资源管理章节描述当前本地实现能力，不代表上述单服务架构已落地。服务 IPC 鉴权、跨用户隔离、模型实例复用键、可变会话状态隔离、资源预算和崩溃清理仍待设计与验证。训练/优化器及 harness 的调用路径和状态归属也待确定；模型加载继续与显式训练分离，不隐式训练。
+当前本地检查/原生 CLI 命令仍是 `weightc check FILE.wgt` 与 `wgt run FILE.wgt`；尚无公开 `wgtime` 进程入口，亦未完成后续去重 `wgt-native` 的合并。
 
 ```sh
-cargo build -p weightlang-runtime --bin wgt-native
-# 使用通过 save_model 导出的 model.json：
-target/debug/wgt-native weights/native_training/model.json 1048576 --device cpu --check
-printf '[0.25]\n' | target/debug/wgt-native weights/native_training/model.json 1048576 --device cpu
+# 当前本地实现的诊断入口，不代表目标 wgtime service 已实现：
+cargo test -p weightlang-runtime
 ```
 
 ## 原生 IR v1
@@ -32,7 +35,7 @@ WGT 0.5 模型构造器当前不支持 share 声明。
 linear 节点字段为 `op=linear, weight=NAME, bias=NAME|null`；bias 可以省略，表示无偏置。
 权重必须为 `[out,current_width]`，bias 必须为 `[out]`。
 其余节点只有 op。严格拒绝未知算子和字段。
-完整的模型及断点保存流程见 [checkpoint.wgt](../examples/native_training/checkpoint.wgt)；须显式执行脚本后才会创建 model.json。
+完整的模型及断点保存流程见 [checkpoint/model.wgt](../examples/native_training/checkpoint/model.wgt)；须显式执行脚本后才会创建 model.json。
 
 ## 内存与生命周期契约
 

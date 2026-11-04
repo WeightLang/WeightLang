@@ -76,7 +76,7 @@ fn clipped_update_is_global_and_failed_batch_keeps_optimizer() {
     a.set_optimizer(Optimizer::Adam).unwrap();
     b.set_optimizer(Optimizer::Adam).unwrap();
     let x = vec![vec![1., 0.], vec![0., 1.]];
-    let y = vec![vec![0., 1., -0.6931472, 1.]; 2];
+    let y = vec![vec![0., 1., -std::f32::consts::LN_2, 1.]; 2];
     let mut invalid = y.clone();
     invalid[1][2] = -1000.;
     assert!(a
@@ -145,8 +145,8 @@ fn rl_loss_and_optimizer_survive_export_and_restore() {
 fn main() {{
     let a=Policy("adam"); let xs=[[1,0]]; let ys=[[0,1,-0.6931472,1]];
     train (a) on (xs,ys) rate (0.03) clip (0.5);
-    save_checkpoint(a,"checkpoint.json"); save_model(a,"model.json");
-    let b=load_checkpoint("checkpoint.json"); let c=load_model("model.json","none");
+    save_checkpoint(a, "checkpoint.json"); save_model(a,"model.json");
+    let b=load_checkpoint("checkpoint.json"); let c=load_model("model.json", "none");
     assert(a([1,0])==c([1,0]),"export mismatch");
     let loss_a=train(a,xs,ys,0.03,0.5);
     let loss_b=train(b,xs,ys,0.03,0.5);

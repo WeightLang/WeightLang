@@ -119,6 +119,40 @@ impl ExecutionSession {
         Ok(session)
     }
 
+    /// Explicit adapter preparation without calibration forwards or CPU fallback.
+    pub fn prepare_exact(model: Model, root: &Path, budget: usize, device: &str) -> Result<Self> {
+        ensure!(
+            device != "cpu" && device != "auto" && device != "gpu",
+            "exact accelerator device ID required"
+        );
+        #[cfg(feature = "gpu")]
+        {
+            let mut session =
+                Self::prepare(model, root, budget, "cpu", AllocationPolicy::Flexible)?;
+            let adapter = crate::gpu::adapters()
+                .into_iter()
+                .find(|a| a.info.id == device)
+                .ok_or_else(|| anyhow::anyhow!("device unavailable: {device}"))?;
+            let gpu = crate::gpu::Gpu::prepare(&adapter, &mut session.cpu, budget)?;
+            session.report.gpu_buffer_bytes = gpu.bytes;
+            session.report.memory.managed_bytes += gpu.bytes;
+            session.report.memory.device = device.into();
+            session.report.zero_heap_allocation = false;
+            session.report.selection = "explicit device; no calibration dispatch".into();
+            session.report.candidates = vec![Candidate {
+                device: adapter.info,
+                median_ns: None,
+                rejected: None,
+            }];
+            session.gpu = Some(gpu);
+            Ok(session)
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (model, root, budget);
+            anyhow::bail!("GPU support not compiled; enable gpu feature")
+        }
+    }
     fn select(&mut self, requested: &str, budget: usize) -> Result<()> {
         #[cfg(not(feature = "gpu"))]
         {

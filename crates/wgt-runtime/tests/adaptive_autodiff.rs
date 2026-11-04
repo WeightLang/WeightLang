@@ -208,7 +208,8 @@ fn invalid_or_nonfinite_vjp_is_not_exposed_as_a_valid_gradient() {
     assert!(pass
         .backward(&[1.], &BTreeMap::from([("memory".into(), vec![1., 2.])]))
         .is_err());
-    let mut m=model("wgt 0.5
+    let mut m = model(
+        "wgt 0.5
 model Test
 input x: f32[1]
 frozen w: f32[1,1] = [1e-30]
@@ -216,7 +217,8 @@ output y: f32[1]
 fn forward(x) {
     let y = linear(x,w);
     return y;
-}");
+}",
+    );
     let mut pass = m.forward(&[1e30], 10, 4096).unwrap();
     assert!(pass.backward(&[1e30], &BTreeMap::new()).is_err());
     assert!(pass.parameter_gradient("w").is_err());
@@ -226,14 +228,16 @@ fn forward(x) {
 
 #[test]
 fn relu_uses_zero_derivative_at_zero_and_negative_inputs() {
-    let mut m = model("wgt 0.5
+    let mut m = model(
+        "wgt 0.5
 model Test
 input x: f32[3]
 output y: f32[3]
 fn forward(x) {
     let y = relu(x);
     return y;
-}");
+}",
+    );
     let mut pass = m.forward(&[-1., 0., 2.], 10, 4096).unwrap();
     pass.backward(&[1., 1., 1.], &BTreeMap::new()).unwrap();
     close(pass.input_gradient().unwrap(), &[0., 0., 1.]);

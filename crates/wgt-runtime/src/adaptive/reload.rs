@@ -5,6 +5,7 @@ impl AdaptiveSession {
     /// Replace validated state without changing the enclosing Mounted identity.
     pub(crate) fn reload_candidate(&mut self, mut candidate: Self) -> Result<()> {
         self.ensure_mutable()?;
+        self.ensure_idle()?;
         let structure = |session: &Self| -> Result<serde_json::Value> {
             let mut value = serde_json::to_value(session.program())?;
             for parameter in value["parameters"]
@@ -40,6 +41,7 @@ mod tests {
                 registers: vec![crate::adaptive::Register {
                     name: "x".into(),
                     len: 1,
+                    shape: vec![1],
                 }],
                 parameters: vec![crate::adaptive::Parameter {
                     name: "w".into(),

@@ -24,7 +24,7 @@ environment Counter {
 `actor.policy`、已声明时的 `actor.critic` 取出原句柄。
 `actor.act(observation)` 只抽取零基类别动作，复用模型采样、单次 RNG 和不提交 forward 写入的契约。
 需要同次 log probability 时，先 `let policy=actor.policy;`，再
-`let {action,log_prob}=sample from policy(observation);`；sample callee 仍要求局部变量。
+模型类别采样目标将使用 `decode policy(observation) {method:sample;}`；该语法待 parser/runtime 实现后补充完整契约。
 单标量回归模型不应通过 act 解释为互斥动作，直接调用取出的 policy。
 
 ## 整批 learn

@@ -18,7 +18,7 @@ fn build_train_reload_and_protect_without_python() {
     let dir = temp();
     let output = dir.path().join("model");
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/native_training/build.wgt");
+        .join("../../examples/native_training/build/model.wgt");
     let args = [
         "build",
         example.to_str().unwrap(),

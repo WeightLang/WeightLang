@@ -87,6 +87,12 @@ fn main() { tasks { let a=spawn work(); let b=spawn work(); return [await a,awai
     std::fs::remove_dir(root).unwrap();
 }
 
+#[test]
+fn async_scope_rejects_active_compute_budget() {
+    let source="wgt 0.5\nasync fn child(){return 1;}\nfn main(){compute_budget(100,1024,2,1000);return await child();}";
+    let error = script::run(source, Path::new("."), 1000).unwrap_err();
+    assert!(format!("{error:#}").contains("async"));
+}
 
 #[test]
 fn task_failure_survives_scope_join() {

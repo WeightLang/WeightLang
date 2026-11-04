@@ -1,0 +1,74 @@
+==================
+Multiline let with nested commas and standalone sample destructuring
+==================
+wgt 0.5
+fn main() {
+    let a = pair(1, 2),
+        b = [a, 3],
+        c = {x: a, y: b};
+    let {action, log_prob} = sample from net(b);
+    return c;
+}
+
+---
+
+(source_file
+  (directive
+    (number))
+  (function_declaration
+    (identifier)
+    (arguments)
+    (body
+      (script_keyword)
+      (parameter
+        (identifier))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (number)
+          (punctuation)
+          (number)))
+      (punctuation)
+      (parameter
+        (identifier))
+      (array
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (number))
+      (punctuation)
+      (parameter
+        (identifier))
+      (body
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (qualified_name
+          (identifier)))
+      (script_keyword)
+      (body
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (qualified_name
+          (identifier)))
+      (operator)
+      (qualified_name
+        (identifier))
+      (clause)
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))))
+      (script_keyword)
+      (qualified_name
+        (identifier)))))

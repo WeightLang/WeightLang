@@ -1,5 +1,5 @@
 ==================
-examples/native_training/supervised.wgt
+examples/native_training/supervised/model.wgt
 ==================
 wgt 0.5
 # 每行一个合成样本：input 的唯一轴是特征，target 是对应的 y=2x+1。

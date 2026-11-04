@@ -1,5 +1,7 @@
 // An error-tolerant editor grammar, not a replacement for WeightLang validation.
 // Newlines terminate declarations; function bodies use balanced braces and semicolons.
+// Comma-separated let groups use the same balanced body items as single let;
+// nested call/list/record commas stay inside their balanced containers.
 // Indentation is deliberately not semantic here: declarations remain flat in the
 // tree, so editing an unfinished block does not hide later model declarations.
 module.exports = grammar({

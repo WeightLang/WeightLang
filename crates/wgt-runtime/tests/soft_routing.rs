@@ -147,7 +147,7 @@ fn disabled_optimizer_bad_checkpoints_and_tape_exhaustion_are_rejected() {
 
 #[test]
 fn declared_router_and_gate_learn_end_to_end() {
-    let source = include_str!("../../../examples/native_training/soft_routing.wgt");
+    let source = include_str!("../../../examples/native_training/soft_routing/model.wgt");
     let report = script::run(source, Path::new("."), 1_000_000).unwrap();
     assert!((report.result[0].as_f64().unwrap() - 1.).abs() < 0.1);
 }
@@ -209,7 +209,7 @@ fn checkpoints_resume_exactly_and_exports_load_without_training() {
 fn main() {{
     let m=Router(\"adam\");
     fit(m,[[0,0]],[[0,0]],0.01,\"mse\");
-    save_checkpoint(m,\"checkpoint.json\");
+    save_checkpoint(m, \"checkpoint.json\");
     save_model(m,\"model.json\");
     let restored=load_checkpoint(\"checkpoint.json\");
     let exported=load_model(\"model.json\",\"none\");

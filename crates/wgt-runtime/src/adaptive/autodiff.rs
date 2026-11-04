@@ -6,12 +6,36 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy)]
 enum Edge {
-    Minimum{a:usize,b:usize},
-    Clip{x:usize,low:f32,high:f32},
-    Sum{x:usize},
+    Minimum {
+        a: usize,
+        b: usize,
+    },
+    Clip {
+        x: usize,
+        low: f32,
+        high: f32,
+    },
+    Sum {
+        x: usize,
+    },
     Leaf,
-    Mean { x: usize },
-    Blend { p: usize, a: usize, b: Option<usize> },
+    MemoryRead {
+        memory: usize,
+        address: usize,
+    },
+    MemoryWrite {
+        memory: usize,
+        address: usize,
+        value: usize,
+    },
+    Mean {
+        x: usize,
+    },
+    Blend {
+        p: usize,
+        a: usize,
+        b: Option<usize>,
+    },
     Linear {
         x: usize,
         w: usize,
@@ -42,6 +66,7 @@ pub(super) struct Tape {
     nodes: Vec<Node>,
     registers: Vec<Option<usize>>,
     parameters: Vec<usize>,
+    memories: Vec<Option<usize>>,
     bytes: usize,
     budget: usize,
 }
@@ -52,6 +77,7 @@ impl Tape {
             nodes: Vec::new(),
             registers: vec![None; session.registers.len()],
             parameters: Vec::new(),
+            memories: vec![None; session.registers.len()],
             bytes: 0,
             budget,
         };
@@ -99,13 +125,54 @@ impl Tape {
         Ok(())
     }
 
+    pub(super) fn memory_allocate(&mut self, m: usize, value: &[f32]) -> Result<()> {
+        self.memories[m] = Some(self.push(value, Edge::Leaf)?);
+        Ok(())
+    }
+    pub(super) fn memory_write(
+        &mut self,
+        m: usize,
+        a: usize,
+        v: usize,
+        value: &[f32],
+    ) -> Result<()> {
+        let edge = Edge::MemoryWrite {
+            memory: self.memories[m].context("uninitialized tape memory")?,
+            address: self.reg(a)?,
+            value: self.reg(v)?,
+        };
+        self.memories[m] = Some(self.push(value, edge)?);
+        Ok(())
+    }
+
     pub(super) fn record(&mut self, op: Op, value: &[f32]) -> Result<()> {
         let (out, edge) = match op {
-            Op::Constant(r,_) | Op::Unary(r,_,5) => (r,Edge::Leaf),
-            Op::Minimum(r,a,b)=>(r,Edge::Minimum{a:self.reg(a)?,b:self.reg(b)?}),
-            Op::Clip(r,x,low,high)=>(r,Edge::Clip{x:self.reg(x)?,low,high}),
-            Op::Sum(r,x)=>(r,Edge::Sum{x:self.reg(x)?}),
-            Op::Mean(r,x) => (r,Edge::Mean{x:self.reg(x)?}),
+            Op::Constant(r, _) | Op::Unary(r, _, 5) => (r, Edge::Leaf),
+            Op::Minimum(r, a, b) => (
+                r,
+                Edge::Minimum {
+                    a: self.reg(a)?,
+                    b: self.reg(b)?,
+                },
+            ),
+            Op::Clip(r, x, low, high) => (
+                r,
+                Edge::Clip {
+                    x: self.reg(x)?,
+                    low,
+                    high,
+                },
+            ),
+            Op::Sum(r, x) => (r, Edge::Sum { x: self.reg(x)? }),
+            Op::ResourceState(r) => (r, Edge::Leaf),
+            Op::MemoryRead(r, m, a) => (
+                r,
+                Edge::MemoryRead {
+                    memory: self.memories[m].context("uninitialized tape memory")?,
+                    address: self.reg(a)?,
+                },
+            ),
+            Op::Mean(r, x) => (r, Edge::Mean { x: self.reg(x)? }),
             Op::Read(r, p) => {
                 self.registers[r] = Some(self.parameters[p]);
                 return Ok(());
@@ -133,7 +200,14 @@ impl Tape {
                     kind,
                 },
             ),
-            Op::Blend(r, p, a, b) => (r, Edge::Blend { p: self.reg(p)?, a: self.reg(a)?, b: b.map(|b| self.reg(b)).transpose()? }),
+            Op::Blend(r, p, a, b) => (
+                r,
+                Edge::Blend {
+                    p: self.reg(p)?,
+                    a: self.reg(a)?,
+                    b: b.map(|b| self.reg(b)).transpose()?,
+                },
+            ),
             Op::Slice(r, x, start) => (
                 r,
                 Edge::Slice {
@@ -307,9 +381,40 @@ impl ForwardPass {
             }
             match node.edge {
                 Edge::Leaf => {}
+                Edge::MemoryRead { memory, address } => {
+                    let width = node.value.len();
+                    for i in 0..before[address].value.len() {
+                        for (j, g) in node.gradient.iter().enumerate() {
+                            let index = i * width + j;
+                            let a = before[address].value[i];
+                            let m = before[memory].value[index];
+                            before[address].gradient[i] += g * m;
+                            before[memory].gradient[index] += g * a;
+                        }
+                    }
+                }
+                Edge::MemoryWrite {
+                    memory,
+                    address,
+                    value,
+                } => {
+                    let width = before[value].value.len();
+                    for (index, g) in node.gradient.iter().enumerate() {
+                        let i = index / width;
+                        let j = index % width;
+                        let a = before[address].value[i];
+                        let m = before[memory].value[index];
+                        let v = before[value].value[j];
+                        before[memory].gradient[index] += g * (1. - a);
+                        before[address].gradient[i] += g * (v - m);
+                        before[value].gradient[j] += g * a;
+                    }
+                }
                 Edge::Mean { x } => {
-                    let g=node.gradient[0]/before[x].value.len() as f32;
-                    for v in &mut before[x].gradient { *v+=g; }
+                    let g = node.gradient[0] / before[x].value.len() as f32;
+                    for v in &mut before[x].gradient {
+                        *v += g;
+                    }
                 }
                 Edge::Linear { x, w, b } => {
                     let width = before[x].value.len();
@@ -342,32 +447,56 @@ impl ForwardPass {
                         before[b].gradient[i] += g * db;
                     }
                 }
-                Edge::Minimum{a,b} => {
-                    for (i,&g) in node.gradient.iter().enumerate() {
-                        let (av,bv)=(before[a].value[i],before[b].value[i]);
-                        let da=if av<bv {1.} else if av>bv {0.} else {0.5};
-                        before[a].gradient[i]+=g*da;before[b].gradient[i]+=g*(1.-da);
+                Edge::Minimum { a, b } => {
+                    for (i, &g) in node.gradient.iter().enumerate() {
+                        let (av, bv) = (before[a].value[i], before[b].value[i]);
+                        let da = if av < bv {
+                            1.
+                        } else if av > bv {
+                            0.
+                        } else {
+                            0.5
+                        };
+                        before[a].gradient[i] += g * da;
+                        before[b].gradient[i] += g * (1. - da);
                     }
                 }
-                Edge::Clip{x,low,high} => {
-                    for (i,&g) in node.gradient.iter().enumerate() {if before[x].value[i]>low && before[x].value[i]<high {before[x].gradient[i]+=g;}}
+                Edge::Clip { x, low, high } => {
+                    for (i, &g) in node.gradient.iter().enumerate() {
+                        if before[x].value[i] > low && before[x].value[i] < high {
+                            before[x].gradient[i] += g;
+                        }
+                    }
                 }
-                Edge::Sum{x} => {for g in &mut before[x].gradient {*g+=node.gradient[0];}}
+                Edge::Sum { x } => {
+                    for g in &mut before[x].gradient {
+                        *g += node.gradient[0];
+                    }
+                }
                 Edge::Unary { x, kind } => {
-                    if kind==8 {
-                        let sum:f32=node.gradient.iter().sum();
-                        for (i,&g) in node.gradient.iter().enumerate() {before[x].gradient[i]+=g-node.value[i].exp()*sum;}
+                    if kind == 8 {
+                        let sum: f32 = node.gradient.iter().sum();
+                        for (i, &g) in node.gradient.iter().enumerate() {
+                            before[x].gradient[i] += g - node.value[i].exp() * sum;
+                        }
                         continue;
                     }
                     if kind == 3 {
-                        let dot: f32 = node.gradient.iter().zip(&node.value).map(|(g,y)| g*y).sum();
+                        let dot: f32 = node
+                            .gradient
+                            .iter()
+                            .zip(&node.value)
+                            .map(|(g, y)| g * y)
+                            .sum();
                         for (i, &g) in node.gradient.iter().enumerate() {
-                            before[x].gradient[i] += node.value[i] * (g-dot);
+                            before[x].gradient[i] += node.value[i] * (g - dot);
                         }
                         continue;
                     }
                     for (i, &g) in node.gradient.iter().enumerate() {
-                        if g == 0. { continue; }
+                        if g == 0. {
+                            continue;
+                        }
                         let y = node.value[i];
                         let derivative = match kind {
                             0 => 1. - y * y,
@@ -389,13 +518,17 @@ impl ForwardPass {
                 }
                 Edge::Blend { p, a, b } => {
                     for (i, &g) in node.gradient.iter().enumerate() {
-                        if g == 0. { continue; }
-                        let j = if before[p].value.len()==1 { 0 } else { i };
+                        if g == 0. {
+                            continue;
+                        }
+                        let j = if before[p].value.len() == 1 { 0 } else { i };
                         let probability = before[p].value[j];
                         let other = b.map_or(0., |b| before[b].value[i]);
                         before[p].gradient[j] += g * (before[a].value[i] - other);
                         before[a].gradient[i] += g * probability;
-                        if let Some(b) = b { before[b].gradient[i] += g * (1.-probability); }
+                        if let Some(b) = b {
+                            before[b].gradient[i] += g * (1. - probability);
+                        }
                     }
                 }
                 Edge::Slice { x, start } => {

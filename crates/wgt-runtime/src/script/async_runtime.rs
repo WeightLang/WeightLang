@@ -26,7 +26,7 @@ pub(super) fn data(value: &Value) -> Result<()> {
 impl Runtime {
     pub fn cold_call(&mut self, name: &str, args: Vec<Value>) -> Result<Value> {
         self.permissions.check_deadline()?;
-        ensure!(self.permissions.allows_legacy_io(), "async tasks unavailable under host policy");
+        self.resources.allow_async_scope()?;
         for arg in &args {
             data(arg)?;
         }
@@ -37,7 +37,7 @@ impl Runtime {
     }
     pub fn enter_tasks(&mut self) -> Result<()> {
         self.permissions.check_deadline()?;
-        ensure!(self.permissions.allows_legacy_io(), "async tasks unavailable under host policy");
+        self.resources.allow_async_scope()?;
         ensure!(
             self.async_state.context.is_none(),
             "tasks inside async fn is unavailable in the first native async stage"
@@ -174,19 +174,23 @@ impl Runtime {
     fn async_child(&self) -> Runtime {
         Runtime {
             permissions: self.permissions.clone(),
+            resources: resources::Resources::default(),
+            harness: self.harness.child(),
             dependencies: self.dependencies.clone(),
             program: self.program.clone(),
             compiled: self.compiled.clone(),
             root: self.root.clone(),
             remaining: 0,
+            gpu_benchmark_restricted: self.gpu_benchmark_restricted,
             depth: 0,
             models: Vec::new(),
             adaptive: Vec::new(),
             readers: Vec::new(),
             gradients: optimization::Gradients::default(),
-            agents: Vec::new(), environments: Vec::new(),
+            #[cfg(feature = "gpu")]
+            kernels: Vec::new(),
             rng: self.rng,
-            gpu_benchmark_restricted: self.gpu_benchmark_restricted,
+            agents: Vec::new(), environments: Vec::new(),
             metrics: BTreeMap::new(),
             async_state: AsyncState {
                 pool: self.async_state.pool.clone(),
@@ -277,7 +281,9 @@ pub async fn await_local(rt: Rc<RefCell<Runtime>>, value: Value) -> Result<Value
         .and_then(Option::take)
         .context("future already started")
         .map_err(task_error)?;
-    if name == "__async_sleep" || name == "__async_read" {
+    if name == "__async_responses" {
+                    openresponses::next(rt, args).await
+                } else if name == "__async_sleep" || name == "__async_read" {
         io(rt, name, args).await
     } else {
         invoke(rt, name, args).await
@@ -365,7 +371,9 @@ fn eval<'a>(
                     .and_then(Option::take)
                     .context("future already started")
                     .map_err(task_error)?;
-                if name == "__async_sleep" || name == "__async_read" {
+                if name == "__async_responses" {
+                    openresponses::next(rt, args).await
+                } else if name == "__async_sleep" || name == "__async_read" {
                     io(rt, name, args).await
                 } else {
                     invoke(rt, name, args).await

@@ -15,6 +15,8 @@ adapter_model.bin
 /dist/
 
 build/
+!examples/native_training/build/
+!examples/native_training/build/model.wgt
 /.venv/
 __pycache__/
 *.egg-info/

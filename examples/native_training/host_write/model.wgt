@@ -1,0 +1,10 @@
+wgt 0.5
+# 宿主 outputs 必须授权 result 别名；此例只在显式执行时写入。
+# 输出是任务结果文本，不是模型或优化器断点；重复执行会拒绝覆盖。
+fn main() {
+    compute_budget(1000, 4096, 4, 10000);
+    let result = compute_call("file_write.v1", ["result", "native resource result\n"]);
+    assert(result["ok"], "output creation failed");
+    metric("resources", compute_host_status());
+    return result["value"];
+}

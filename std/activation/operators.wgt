@@ -1,0 +1,20 @@
+wgt 0.5
+operators Activations
+
+# f32[N] -> f32[N]：逐特征 SiLU 门；无参数、无隐含 batch 或广播。
+# sigmoid 是稳定原语，避免手写 exp 在大负输入溢出。
+fn swish(x) {
+    return x * sigmoid(x);
+}
+
+# gate/value 均为 f32[N]。两路投影由调用模型提供，参数身份不在库内创建。
+# SiLU 门可为负数，不是概率门；各特征独立相乘，保持 N。
+fn swiglu(gate, value) {
+    return swish(gate) * value;
+}
+
+# f32[N] -> f32[N]：ReLU 后平方；负半轴归零，正半轴保留二次响应。
+# 极大正输入的平方仍可能超出 f32，遵循原语的非有限结果错误。
+fn squared_relu(x) {
+    return square(relu(x));
+}

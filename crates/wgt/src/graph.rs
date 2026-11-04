@@ -5,6 +5,35 @@ use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
 
+/// Explicit styles win; otherwise use the artifact's or project model's companion CSS.
+pub fn stylesheet(base: &Path, artifact: &Path, explicit: Option<&Path>) -> Result<String> {
+    if let Some(path) = explicit {
+        return fs_read_style(&base.join(path));
+    }
+    let root = if artifact.is_file() {
+        artifact.parent().context("no artifact parent")?
+    } else {
+        artifact
+    };
+    let bundled = root.join("model.css");
+    if bundled.try_exists()? {
+        return fs_read_style(&bundled);
+    }
+    let source = crate::manifest::ProjectConfig::read(base)?
+        .and_then(|config| config.model.source)
+        .unwrap_or_else(|| "model.wgt".into());
+    let source = base.join(source);
+    let style = source.with_extension("css");
+    if source.is_file() && style.try_exists()? {
+        return fs_read_style(&style);
+    }
+    Ok(String::new())
+}
+
+fn fs_read_style(path: &Path) -> Result<String> {
+    std::fs::read_to_string(path).with_context(|| format!("read CSS {}", path.display()))
+}
+
 #[derive(Serialize)]
 pub struct Node {
     pub id: String,
@@ -101,28 +130,64 @@ impl Graph {
         let output = TensorType::parse(&a.manifest["interface"]["output"])?;
         if a.manifest["format_version"].as_u64().unwrap() >= 4 {
             let mut first = String::new();
-            for (index, port) in a.manifest["interface"]["inputs"].as_array().context("named inputs")?.iter().enumerate() {
+            for (index, port) in a.manifest["interface"]["inputs"]
+                .as_array()
+                .context("named inputs")?
+                .iter()
+                .enumerate()
+            {
                 let typ = TensorType::parse(port)?;
-                let id = g.node(port["name"].as_str().context("input name")?, "input", (&typ, &typ), "", "", "");
+                let id = g.node(
+                    port["name"].as_str().context("input name")?,
+                    "input",
+                    (&typ, &typ),
+                    "",
+                    "",
+                    "",
+                );
                 if a.manifest["interface"].get("dimensions").is_some() {
                     let label = crate::symbolic::label(port)?;
                     let node = g.nodes.last_mut().context("missing input node")?;
-                    node.input_shape = label.clone(); node.output_shape = label;
-                    node.args = "bounded dimensions; internal node shapes show the first legal assignment".into();
+                    node.input_shape = label.clone();
+                    node.output_shape = label;
+                    node.args =
+                        "bounded dimensions; internal node shapes show the first legal assignment"
+                            .into();
                 }
-                if index == 0 { first = id; }
+                if index == 0 {
+                    first = id;
+                }
             }
             let mut values = std::collections::BTreeMap::new();
-            g.layers(&a.manifest["layers"], "", first, &a.contracts, Some(&mut values))?;
-            for port in a.manifest["interface"]["outputs"].as_array().context("named outputs")? {
+            g.layers(
+                &a.manifest["layers"],
+                "",
+                first,
+                &a.contracts,
+                Some(&mut values),
+            )?;
+            for port in a.manifest["interface"]["outputs"]
+                .as_array()
+                .context("named outputs")?
+            {
                 let typ = TensorType::parse(port)?;
-                let out = g.node(port["name"].as_str().context("output name")?, "output", (&typ, &typ), "", "", "");
+                let out = g.node(
+                    port["name"].as_str().context("output name")?,
+                    "output",
+                    (&typ, &typ),
+                    "",
+                    "",
+                    "",
+                );
                 if a.manifest["interface"].get("dimensions").is_some() {
                     let label = crate::symbolic::label(port)?;
                     let node = g.nodes.last_mut().context("missing output node")?;
-                    node.input_shape = label.clone(); node.output_shape = label;
+                    node.input_shape = label.clone();
+                    node.output_shape = label;
                 }
-                let source = values.get(port["from"].as_str().context("output reference")?).context("unknown output")?;
+                let source = values
+                    .get(port["from"].as_str().context("output reference")?)
+                    .context("unknown output")?;
                 g.edge(source.clone(), out, "flow");
             }
         } else {
@@ -218,7 +283,9 @@ impl Graph {
         let mut values = std::collections::BTreeMap::from([("input".to_owned(), previous.clone())]);
         if parent.is_empty() {
             for node in &self.nodes {
-                if node.op == "input" { values.insert(node.path.clone(), node.id.clone()); }
+                if node.op == "input" {
+                    values.insert(node.path.clone(), node.id.clone());
+                }
             }
         }
         // Scan state has a separate entry and a feedback edge from the cell output.
@@ -228,7 +295,9 @@ impl Graph {
         }
         for node in &self.nodes {
             if node.parent == parent && node.op == "argument" {
-                if let Some(name) = node.path.strip_prefix(&format!("{parent}.$")) { values.insert(name.to_owned(),node.id.clone()); }
+                if let Some(name) = node.path.strip_prefix(&format!("{parent}.$")) {
+                    values.insert(name.to_owned(), node.id.clone());
+                }
             }
         }
         for l in layers.as_array().context("layers")? {
@@ -264,41 +333,77 @@ impl Graph {
             }
             if op == "route" {
                 for branch in l["layers"].as_array().context("route branches")? {
-                    let last = self.layers(&Value::Array(vec![branch.clone()]), &path, id.clone(), contracts, None)?;
-                    self.edge(last,id.clone(),"conditional");
+                    let last = self.layers(
+                        &Value::Array(vec![branch.clone()]),
+                        &path,
+                        id.clone(),
+                        contracts,
+                        None,
+                    )?;
+                    self.edge(last, id.clone(), "conditional");
                 }
                 previous = id.clone();
             } else if op == "scan_state" || (op == "seq" && l["returns"].is_object()) {
                 let mut argument_nodes = std::collections::BTreeMap::new();
                 if let Some(refs) = l["inputs"].as_array() {
-                    for (i,reference) in refs.iter().skip(1).enumerate() {
+                    for (i, reference) in refs.iter().skip(1).enumerate() {
                         let reference = reference.as_str().context("invalid argument reference")?;
-                        let key = if op == "scan_state" { format!("state{i}") } else { format!("arg{}",i+1) };
+                        let key = if op == "scan_state" {
+                            format!("state{i}")
+                        } else {
+                            format!("arg{}", i + 1)
+                        };
                         // State result types are exact; ordinary arguments use the producer label.
-                        let typ = if op == "scan_state" { &contracts[&format!("{path}.$result.{key}")].1 } else { input };
-                        let node = self.node(&format!("{path}.${key}"),"argument",(typ,typ),&path,"","");
+                        let typ = if op == "scan_state" {
+                            &contracts[&format!("{path}.$result.{key}")].1
+                        } else {
+                            input
+                        };
+                        let node = self.node(
+                            &format!("{path}.${key}"),
+                            "argument",
+                            (typ, typ),
+                            &path,
+                            "",
+                            "",
+                        );
                         let source = values.get(reference).context("unknown argument")?.clone();
                         if op != "scan_state" {
-                            let producer = self.nodes.iter().find(|n| n.id == source).context("missing argument producer")?;
-                            let (shape,width) = (producer.output_shape.clone(),producer.output);
-                            let argument = self.nodes.iter_mut().find(|n| n.id == node).context("missing argument node")?;
-                            argument.input_shape = shape.clone(); argument.output_shape = shape;
-                            argument.input = width; argument.output = width;
+                            let producer = self
+                                .nodes
+                                .iter()
+                                .find(|n| n.id == source)
+                                .context("missing argument producer")?;
+                            let (shape, width) = (producer.output_shape.clone(), producer.output);
+                            let argument = self
+                                .nodes
+                                .iter_mut()
+                                .find(|n| n.id == node)
+                                .context("missing argument node")?;
+                            argument.input_shape = shape.clone();
+                            argument.output_shape = shape;
+                            argument.input = width;
+                            argument.output = width;
                         }
-                        self.edge(source,node.clone(),"flow");
-                        argument_nodes.insert(key,node);
+                        self.edge(source, node.clone(), "flow");
+                        argument_nodes.insert(key, node);
                     }
                 }
                 let mut body = std::collections::BTreeMap::new();
-                self.layers(&l["layers"],&path,id.clone(),contracts,Some(&mut body))?;
+                self.layers(&l["layers"], &path, id.clone(), contracts, Some(&mut body))?;
                 let returns = l["returns"].as_object().context("missing returns")?;
-                for (field,reference) in returns {
-                    let source = body.get(reference.as_str().context("invalid result reference")?).context("unknown block result")?;
+                for (field, reference) in returns {
+                    let source = body
+                        .get(reference.as_str().context("invalid result reference")?)
+                        .context("unknown block result")?;
                     if op == "scan_state" && field != "output" {
-                        self.edge(source.clone(),argument_nodes[field].clone(),"recurrent");
+                        self.edge(source.clone(), argument_nodes[field].clone(), "recurrent");
                     }
                 }
-                previous = body.get(returns["output"].as_str().context("missing output")?).context("unknown block output")?.clone();
+                previous = body
+                    .get(returns["output"].as_str().context("missing output")?)
+                    .context("unknown block output")?
+                    .clone();
             } else if matches!(op, "recur" | "scan" | "ponder") {
                 let state = if op == "scan" {
                     let typ = crate::contracts::TensorType {
@@ -312,7 +417,11 @@ impl Graph {
                         (&typ, &typ),
                         &path,
                         "",
-                        if l["inputs"].as_array().is_some_and(|refs| refs.len() == 2) { "explicit initial state" } else { "zero initial state" },
+                        if l["inputs"].as_array().is_some_and(|refs| refs.len() == 2) {
+                            "explicit initial state"
+                        } else {
+                            "zero initial state"
+                        },
                     ))
                 } else {
                     None
@@ -334,8 +443,13 @@ impl Graph {
                 self.edge(last, result.clone(), "flow");
                 if let Some(gate) = l["args"]["until"].as_str() {
                     let gate_path = format!("{path}.{gate}");
-                    let gate_id = self.nodes.iter().find(|n| n.path == gate_path)
-                        .context("missing loop stop probability node")?.id.clone();
+                    let gate_id = self
+                        .nodes
+                        .iter()
+                        .find(|n| n.path == gate_path)
+                        .context("missing loop stop probability node")?
+                        .id
+                        .clone();
                     self.edge(gate_id, result.clone(), "halt");
                 }
                 previous = result;
@@ -363,14 +477,19 @@ impl Graph {
             if let Some(results) = l["results"].as_object() {
                 for field in results.keys() {
                     let result_path = format!("{path}.$result.{field}");
-                    let typ = &contracts.get(&result_path).context("missing result contract")?.1;
-                    let result = self.node(&result_path,"result",(typ,typ),&path,"","");
-                    self.edge(previous.clone(),result.clone(),"result");
-                    values.insert(format!("{name}.{field}"),result);
+                    let typ = &contracts
+                        .get(&result_path)
+                        .context("missing result contract")?
+                        .1;
+                    let result = self.node(&result_path, "result", (typ, typ), &path, "", "");
+                    self.edge(previous.clone(), result.clone(), "result");
+                    values.insert(format!("{name}.{field}"), result);
                 }
             }
         }
-        if let Some(exports) = exports { *exports = values; }
+        if let Some(exports) = exports {
+            *exports = values;
+        }
         Ok(previous)
     }
     pub fn render(&self, format: &str) -> Result<String> {

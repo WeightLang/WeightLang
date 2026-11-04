@@ -28,6 +28,11 @@ wgt-native adaptive examples/self_modifying/model.wgt 4096 100 --check
 
 ## 状态与失败
 
+独立工作内存现由 memory_alloc/read/write/free 提供，与参数状态分离。
+推理可通过 execution_start/resume/cancel 暂停和继续，原模型的已提交参数保持可见，
+直到任务返回才提交事务写入。工作区不持久化，也不包含在权重文件系统视图中。
+完整接口和计费见[工作内存与分步执行](working-memory.md)。
+
 - 一次调用是一个权重事务：内部写入立即可见，成功 return 后一起提交。
 - 非有限运算、未定义寄存器、落出程序或步数耗尽，回滚本次全部参数写入。
 - 有写入的成功调用 revision 加一，多次 write 仍只加一；只读调用不改变 revision。
@@ -67,3 +72,8 @@ API 详情以 `crates/wgt-runtime/src/adaptive/transport.rs` 为准。
 prob 的原生参数存储为 logit（frozen 为概率）；读取表达式自动转换，write 禁止改写 prob。
 mix 保留 route 的推理短路与完整 VJP。fn loss 是无模型参数的张量子程序，
 其输入梯度回传到模型输出；fit(...,"loss") 才执行训练。详见[语法契约](differentiable-programs.md#概率混合自定义损失与采样语法)。
+
+## 临时工作内存与分段执行
+
+forward 可分配任务内临时内存，读写支持一阶梯度；普通脚本可暂停、恢复或取消一个前向事务。
+接口、形状、预算、生命周期和完整训练示例见[可微工作内存与分步执行](working-memory.md)。

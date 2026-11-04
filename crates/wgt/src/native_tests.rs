@@ -24,9 +24,13 @@ pub fn run(
     let mut summary = Summary::default();
     for path in files {
         let loaded = (|| -> Result<_> {
-            let suite = Suite::parse(&fs::read_to_string(&path)?)?;
             let dependencies =
                 weightlang_wgt::script_dependencies::prepare(&path, offline, locked)?;
+            let suite = Suite::parse_with_imports(
+                &fs::read_to_string(&path)?,
+                path.parent().context("test file has no parent")?,
+                &dependencies,
+            )?;
             Ok((suite, dependencies))
         })();
         let (suite, dependencies) = match loaded {

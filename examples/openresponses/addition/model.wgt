@@ -1,0 +1,34 @@
+wgt 0.5
+import harness from "std/openresponses/harness"
+# 两个独立会话共享父scope请求/工具账本；不会构造或训练权重模型。
+# HTTP profile由执行时宿主配置，模型不能修改端点或认证。
+async fn add_worker(prompt) {
+    responses_restrict(["local"], ["add"]);
+    let session = responses_session({model: "fake-model", input: prompt,
+        stream: true, tools: [{type: "function", name: "add", strict: true,
+            parameters: {type: "object",
+                properties: {x: {type: "number"}, y: {type: "number"}},
+                required: ["x", "y"], additionalProperties: false}}]});
+    while true {
+        let step = await harness.next(session, "local");
+        if harness.finished(step) { return step.response; }
+        assert step.status == "tools", "provider failed or incomplete";
+        assert len(step.calls) == 1, "example accepts one tool per round";
+        let call = step.calls[0];
+        # 名称显式映射到本地算术，不通过模型字符串查找任意函数。
+        assert call.name == "add", "unmapped tool";
+        harness.submit(session, [{call_id: call.call_id,
+            output: call.arguments.x + call.arguments.y}]);
+    }
+}
+fn main() {
+    responses_scope({requests: 8, bytes: 200000, tools: 4,
+        rounds: 8, concurrency: 2, deadline_ms: 30000}, ["local"], ["add"]);
+    tasks {
+        let a = spawn add_worker("Add 1 and 2");
+        let b = spawn add_worker("Add 3 and 4");
+        let first = await a;
+        let second = await b;
+        return [first, second];
+    }
+}

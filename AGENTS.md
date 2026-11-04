@@ -12,6 +12,8 @@
 
 # WGT authoring
 
+- The model source entrypoint must be named `model.wgt`. Put each independent model/example in its own directory (for example `examples/native_training/working_memory/model.wgt`); use directory names to distinguish models, never `main.wgt`, `train.wgt` or a feature-named entrypoint. Keep commands, links, test fixtures that load real examples, and relative data/output paths aligned when moving files. This source-entry convention does not rename artifact snapshots such as `source.wgt` or library modules under `std/`.
+
 - For model authoring or language implementation, use `/home/lightjunction/.codex/skills/wgt-development/SKILL.md` when available. Keep its grammar and runnable examples aligned with the latest implemented language only; validate against the current parser/runtime, excluding historical syntax and unimplemented proposals.
 - New or substantially changed WGT examples need meaningful comments explaining axis meanings, shape transitions, gate/reduction intent, independent versus shared loop weights and initialization/training state. Explain intent rather than narrating obvious lines.
 

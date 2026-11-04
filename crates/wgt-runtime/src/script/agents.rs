@@ -53,10 +53,18 @@ impl Runtime {
                 Ok(Value::Environment(index))
             }
             "__record"=>{
-                ensure!(args.len()%2==0,"invalid record fields");
-                let mut values=std::collections::BTreeMap::new();
-                for pair in args.chunks_exact(2) {ensure!(values.insert(pair[0].text()?.to_owned(),pair[1].clone()).is_none(),"duplicate record field");}
-                let value=Value::Object(values);state(&value,&mut self.remaining)?;Ok(value)
+                // Charge and validate borrowed fields before cloning any nested
+                // value. Both execution paths use the identical traversal.
+                if let Some(context)=&self.async_state.context {
+                    super::records::validate_record_fields(args,||Ok(context.charge(1)?))?;
+                } else {
+                    super::records::validate_record_fields(args,|| {
+                        self.remaining=self.remaining.checked_sub(1).context("script operation budget exceeded")?;
+                        Ok(())
+                    })?;
+                }
+                let values=args.chunks_exact(2).map(|pair|Ok((pair[0].text()?.to_owned(),pair[1].clone()))).collect::<Result<_>>()?;
+                Ok(Value::Object(values))
             }
             _=>bail!("unknown agent runtime operation"),
         }

@@ -87,6 +87,7 @@ impl AdaptiveSession {
         remaining: &mut u64,
         budget: usize,
     ) -> Result<GradientSnapshot> {
+        self.ensure_idle()?;
         ensure!(
             self.optimizer.is_none(),
             "custom optimization requires optimizer none"
@@ -250,6 +251,7 @@ impl AdaptiveSession {
         state: serde_json::Value,
     ) -> Result<f32> {
         self.ensure_mutable()?;
+        self.ensure_idle()?;
         ensure!(
             self.optimizer.is_none(),
             "custom optimization requires optimizer none"

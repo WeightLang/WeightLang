@@ -27,7 +27,7 @@ pub(super) struct Candidate {
     pub moments: Option<(Vec<f32>, Vec<f32>)>,
 }
 
-/// Experimental Rust-only MSE/policy and SGD/Adam backend. No WGT binding or CPU fallback.
+/// Experimental MSE/policy and SGD/Adam backend. No CPU fallback.
 /// Uses bounded per-call device arenas, including a complete batch tape. The
 /// committed CPU weights survive device loss; this is not a throughput API.
 #[derive(Debug)]
@@ -39,6 +39,15 @@ pub struct GpuTraining {
     failed: Arc<AtomicBool>,
     max_batch: usize,
     budget: usize,
+    buffers: Option<Box<Buffers>>,
+}
+
+#[derive(Debug)]
+struct Buffers {
+    bytes: u64,
+    storage: wgpu::Buffer,
+    status: wgpu::Buffer,
+    readback: wgpu::Buffer,
 }
 
 // Flat uniforms avoid Rust/WGSL struct-layout and padding assumptions.
@@ -231,6 +240,7 @@ impl GpuTraining {
             failed,
             max_batch,
             budget: budget_bytes,
+            buffers: None,
         })
     }
 
@@ -244,6 +254,23 @@ impl GpuTraining {
         inputs: &[Vec<f32>],
         objective: Objective<'_>,
     ) -> Result<(f32, Vec<Vec<f32>>)> {
+        let (arena, loss, _, gradients) = self.gradient_plan(session, inputs, objective)?;
+        let data = self.execute(&arena)?;
+        let gradients = session
+            .parameters
+            .iter()
+            .zip(gradients)
+            .map(|(p, start)| data[start..start + p.len].to_vec())
+            .collect();
+        Ok((data[loss], gradients))
+    }
+
+    fn gradient_plan(
+        &self,
+        session: &mut Session,
+        inputs: &[Vec<f32>],
+        objective: Objective<'_>,
+    ) -> Result<(Arena, usize, Vec<usize>, Vec<usize>)> {
         let batch = inputs.len();
         if batch == 0
             || batch > self.max_batch
@@ -425,32 +452,29 @@ impl GpuTraining {
                 _ => {}
             }
         }
-        let data = self.execute(&arena)?;
-        let gradients = session
-            .parameters
-            .iter()
-            .zip(gradients)
-            .map(|(p, start)| data[start..start + p.len].to_vec())
-            .collect();
-        Ok((data[loss], gradients))
+        Ok((arena, loss, weights, gradients))
     }
 
-    pub(super) fn stage_update(
+    /// Keep gradients on device from backward through optimization. Only a checked
+    /// transaction is published to the authoritative host checkpoint state.
+    pub(super) fn step(
         &mut self,
-        session: &Session,
-        gradients: &[Vec<f32>],
+        session: &mut Session,
+        inputs: &[Vec<f32>],
+        objective: Objective<'_>,
         rate: f32,
         rule: UpdateRule<'_>,
-    ) -> Result<Vec<Candidate>> {
-        let mut arena = Arena::new(self, session)?;
+    ) -> Result<(f32, Vec<Candidate>)> {
+        let (mut arena, loss, weights, gradients) =
+            self.gradient_plan(session, inputs, objective)?;
         let mut outputs = Vec::new();
         for (i, p) in session.parameters.iter().enumerate() {
             if p.frozen {
                 continue;
             }
-            if let Storage::Resident(values) = &p.storage {
-                let w = arena.values(values)?;
-                let g = arena.values(&gradients[i])?;
+            if let Storage::Resident(_) = &p.storage {
+                let w = weights[i];
+                let g = gradients[i];
                 let candidate = arena.zeros(p.len)?;
                 let mut job = Job::new(17, p.len, w, candidate).sources(g, 0, 0);
                 let moments = match &rule {
@@ -465,7 +489,7 @@ impl GpuTraining {
                         let next_m = arena.zeros(p.len)?;
                         let next_v = arena.zeros(p.len)?;
                         job = Job::new(19, p.len, w, candidate).sources(g, m, v);
-                        // CPU computes the exact same powf correction once per step.
+                        // Use the CPU powf expression for this step, without GPU pow drift.
                         job.0[2] = (1. - 0.9f32.powf(*step as f32)).to_bits();
                         job.0[3] = (1. - 0.999f32.powf(*step as f32)).to_bits();
                         job.0[4] = next_m as u32;
@@ -478,50 +502,60 @@ impl GpuTraining {
                 outputs.push((i, candidate, p.len, moments));
             }
         }
-        if outputs.is_empty() {
-            // Still check device health before committing a frozen-only step.
-            scoped(&self.device, &self.failed, || Ok(()))?;
-            return Ok(Vec::new());
-        }
         let data = self.execute(&arena)?;
-        Ok(outputs
-            .into_iter()
-            .map(|(index, start, n, moments)| Candidate {
-                index,
-                values: data[start..start + n].to_vec(),
-                moments: moments.map(|(m, v)| (data[m..m + n].to_vec(), data[v..v + n].to_vec())),
-            })
-            .collect())
+        Ok((
+            data[loss],
+            outputs
+                .into_iter()
+                .map(|(index, start, n, moments)| Candidate {
+                    index,
+                    values: data[start..start + n].to_vec(),
+                    moments: moments
+                        .map(|(m, v)| (data[m..m + n].to_vec(), data[v..v + n].to_vec())),
+                })
+                .collect(),
+        ))
     }
 
-    fn execute(&self, arena: &Arena) -> Result<Vec<f32>> {
+    fn execute(&mut self, arena: &Arena) -> Result<Vec<f32>> {
         if !arena.data.iter().all(|v| v.is_finite()) {
             return Err(TrainingError::NonFinite("parameter").into());
         }
         scoped(&self.device, &self.failed, || {
-            let storage = initialized_buffer(
-                &self.device,
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("transaction tape and parameters"),
-                    contents: bytemuck::cast_slice(&arena.data),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                },
-            )?;
-            let status = initialized_buffer(
-                &self.device,
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("arithmetic status"),
-                    contents: &[0; 4],
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                },
-            )?;
             let byte_len = arena.data.len() as u64 * 4;
-            let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("transaction readback"),
-                size: byte_len + 4,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            // Exact-size reuse keeps accounting unchanged for smaller batches too.
+            // Drop old allocations before replacing them, avoiding a double arena peak.
+            if self.buffers.as_ref().is_none_or(|b| b.bytes != byte_len) {
+                drop(self.buffers.take());
+                let buffer = |label, size, usage| {
+                    self.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some(label),
+                        size,
+                        usage,
+                        mapped_at_creation: false,
+                    })
+                };
+                let usage = wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST;
+                self.buffers = Some(Box::new(Buffers {
+                    bytes: byte_len,
+                    storage: buffer("transaction tape and parameters", byte_len, usage),
+                    status: buffer("arithmetic status", 4, usage),
+                    readback: buffer(
+                        "transaction readback",
+                        byte_len + 4,
+                        wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    ),
+                }));
+            }
+            let buffers = self.buffers.as_ref().expect("allocated training buffers");
+            let (storage, status, readback) =
+                (&buffers.storage, &buffers.status, &buffers.readback);
+            // Reset all tape and status bytes: a failed step must not poison a retry.
+            self.queue
+                .write_buffer(storage, 0, bytemuck::cast_slice(&arena.data));
+            self.queue.write_buffer(status, 0, &[0; 4]);
             let mut encoder = self.device.create_command_encoder(&Default::default());
             let layout = self.pipeline.get_bind_group_layout(0);
             for job in &arena.jobs {
@@ -556,8 +590,8 @@ impl GpuTraining {
                 pass.set_bind_group(0, &binding, &[]);
                 pass.dispatch_workgroups(job.0[1].div_ceil(64), 1, 1);
             }
-            encoder.copy_buffer_to_buffer(&storage, 0, &readback, 0, byte_len);
-            encoder.copy_buffer_to_buffer(&status, 0, &readback, byte_len, 4);
+            encoder.copy_buffer_to_buffer(storage, 0, readback, 0, byte_len);
+            encoder.copy_buffer_to_buffer(status, 0, readback, byte_len, 4);
             let submission = self.queue.submit([encoder.finish()]);
             let (send, receive) = mpsc::sync_channel(1);
             readback.map_async(wgpu::MapMode::Read, .., move |result| {
@@ -693,24 +727,13 @@ mod tests {
         let revision = trainer.session.revision;
         let first = trainer.first.clone();
         let second = trainer.second.clone();
-        let (_, gradients) = trainer.gradients(&x, Objective::Mse(&y)).unwrap();
         let TrainingBackend::Gpu(gpu) = &mut trainer.backend else {
             panic!("GPU selected")
         };
-        // Actual wgpu device destruction between backprop and candidate update,
-        // not a synthetic error return. The last CPU commit must remain readable.
+        // Destroy a real device after a committed step and cached allocations.
+        // The next fused transaction must fail without changing checkpoint state.
         gpu.device.destroy();
-        let rule = match optimizer {
-            Optimizer::Sgd => UpdateRule::Sgd,
-            Optimizer::Adam => UpdateRule::Adam {
-                first: &trainer.first,
-                second: &trainer.second,
-                step: trainer.steps + 1,
-            },
-        };
-        let error = gpu
-            .stage_update(&trainer.session, &gradients, 0.01, rule)
-            .unwrap_err();
+        let error = trainer.step(&x, Objective::Mse(&y), 0.01).unwrap_err();
         assert!(
             matches!(
                 error.downcast_ref::<TrainingError>(),

@@ -6,12 +6,16 @@ use std::collections::HashMap;
 
 mod source;
 pub use source::parse;
+pub(crate) use source::parse_with_functions;
 mod autodiff;
 pub use autodiff::ForwardPass;
-pub mod transport;
 mod training;
 mod reload;
 pub mod optimization;
+pub mod transport;
+mod workspace;
+mod tensor;
+pub use workspace::ExecutionProgress;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +36,8 @@ pub struct Program {
 pub struct Register {
     pub name: String,
     pub len: usize,
+    /// Explicit row-major geometry; never reconstructed from the flat length.
+    pub shape: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -50,14 +56,62 @@ pub struct Parameter {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Instruction {
-    Constant { out:String, data:Vec<f32> },
-    Detach { out:String, input:String },
-    Exp { out:String, input:String },
-    Log { out:String, input:String },
-    LogSoftmax { out:String, input:String },
-    Minimum { out:String, left:String, right:String },
-    Clip { out:String, input:String, low:f32, high:f32 },
-    Sum { out:String, input:String },
+    Constant {
+        out: String,
+        data: Vec<f32>,
+    },
+    Detach {
+        out: String,
+        input: String,
+    },
+    Exp {
+        out: String,
+        input: String,
+    },
+    Log {
+        out: String,
+        input: String,
+    },
+    LogSoftmax {
+        out: String,
+        input: String,
+    },
+    Minimum {
+        out: String,
+        left: String,
+        right: String,
+    },
+    Clip {
+        out: String,
+        input: String,
+        low: f32,
+        high: f32,
+    },
+    Sum {
+        out: String,
+        input: String,
+    },
+    MemoryAlloc {
+        out: String,
+        slots: usize,
+        width: usize,
+    },
+    MemoryFree {
+        memory: String,
+    },
+    MemoryRead {
+        out: String,
+        memory: String,
+        address: String,
+    },
+    MemoryWrite {
+        memory: String,
+        address: String,
+        value: String,
+    },
+    ResourceState {
+        out: String,
+    },
     Read {
         out: String,
         parameter: String,
@@ -94,14 +148,39 @@ pub enum Instruction {
         out: String,
         input: String,
     },
-    Softmax { out: String, input: String },
-    ValidateProbabilities { out: String, input: String },
-    Neg { out: String, input: String },
-    Mean { out: String, input: String },
-    Gate { out: String, probability: String, input: String },
-    Route { out: String, probability: String, yes: String, no: String },
+    Softmax {
+        out: String,
+        input: String,
+    },
+    ValidateProbabilities {
+        out: String,
+        input: String,
+    },
+    Neg {
+        out: String,
+        input: String,
+    },
+    Mean {
+        out: String,
+        input: String,
+    },
+    Gate {
+        out: String,
+        probability: String,
+        input: String,
+    },
+    Route {
+        out: String,
+        probability: String,
+        yes: String,
+        no: String,
+    },
     /// Skip an unevaluated expression only when no differentiation tape is requested.
-    InferenceSkip { probability: String, when_one: bool, target: String },
+    InferenceSkip {
+        probability: String,
+        when_one: bool,
+        target: String,
+    },
     Slice {
         out: String,
         input: String,
@@ -125,10 +204,15 @@ pub enum Instruction {
 
 #[derive(Debug, Clone, Copy)]
 enum Op {
-    Constant(usize,usize),
-    Minimum(usize,usize,usize),
-    Clip(usize,usize,f32,f32),
-    Sum(usize,usize),
+    Constant(usize, usize),
+    Minimum(usize, usize, usize),
+    Clip(usize, usize, f32, f32),
+    Sum(usize, usize),
+    MemoryAlloc(usize, usize, usize),
+    MemoryFree(usize),
+    MemoryRead(usize, usize, usize),
+    MemoryWrite(usize, usize, usize),
+    ResourceState(usize),
     Read(usize, usize),
     Write(usize, usize),
     Linear(usize, usize, usize, Option<usize>),
@@ -161,6 +245,12 @@ pub struct AdaptiveSession {
     steps: u64,
     optimizer: Option<training::State>,
     custom_optimizer: Option<optimization::CustomState>,
+    workspace: workspace::Workspace,
+    memory_limit: usize,
+    pc: usize,
+    wrote: bool,
+    pending: Option<Box<AdaptiveSession>>,
+    execution_limit: u64,
 }
 
 fn names<'a>(items: impl Iterator<Item = &'a str>) -> Result<HashMap<String, usize>> {
@@ -175,14 +265,22 @@ fn names<'a>(items: impl Iterator<Item = &'a str>) -> Result<HashMap<String, usi
 }
 
 impl AdaptiveSession {
-    pub fn begin_collection(&self) -> Result<crate::collection::CollectionToken> { self.collection.begin() }
+    pub fn begin_collection(&self) -> Result<crate::collection::CollectionToken> {
+        self.ensure_idle()?;
+        self.collection.begin()
+    }
     pub(crate) fn ensure_mutable(&self) -> Result<()> { self.collection.ensure_mutable() }
     pub fn prepare(program: Program, budget_bytes: usize) -> Result<Self> {
         ensure!(matches!(program.version, 1 | 2), "unsupported adaptive IR version");
-        ensure!(program.version >= 2 || (program.output_type.is_plain() && !program.instructions.iter().any(|i| matches!(i, Instruction::ValidateProbabilities { .. }))), "categorical output metadata and validation require adaptive IR version 2");
+        ensure!(program.version >= 2 || (program.output_type.is_plain()
+            && !program.instructions.iter().any(|i| matches!(i, Instruction::ValidateProbabilities { .. }))),
+            "categorical output metadata and validation require adaptive IR version 2");
         ensure!(!program.instructions.is_empty(), "empty adaptive program");
         if let Some(loss) = &program.loss {
-            ensure!(loss.loss.is_none() && loss.parameters.is_empty(), "loss must be a parameter-free tensor program");
+            ensure!(
+                loss.loss.is_none() && loss.parameters.is_empty(),
+                "loss must be a parameter-free tensor program"
+            );
         }
         let regs = names(program.registers.iter().map(|r| r.name.as_str()))?;
         let params = names(program.parameters.iter().map(|p| p.name.as_str()))?;
@@ -219,11 +317,15 @@ impl AdaptiveSession {
                 .with_context(|| format!("unknown label: {s}"))
         };
         let len = |r: usize| program.registers[r].len;
+        let memories = workspace::validate(&program, &regs)?;
         let mut floats = 0usize;
         for p in &program.parameters {
             if p.probability {
                 ensure!(p.shape == [1], "prob parameter must be scalar");
-                ensure!(!p.frozen || p.data.iter().all(|v| (0. ..=1.).contains(v)), "frozen prob must be in [0,1]");
+                ensure!(
+                    !p.frozen || p.data.iter().all(|v| (0. ..=1.).contains(v)),
+                    "frozen prob must be in [0,1]"
+                );
             }
             let size = crate::elements(&p.shape)?;
             ensure!(
@@ -236,8 +338,10 @@ impl AdaptiveSession {
                 .context("budget overflow")?;
         }
         for instruction in &program.instructions {
-            if let Instruction::Constant{data,..}=instruction {
-                floats=floats.checked_add(data.len()).context("constant size overflow")?;
+            if let Instruction::Constant { data, .. } = instruction {
+                floats = floats
+                    .checked_add(data.len())
+                    .context("constant size overflow")?;
             }
         }
         let mut maximum = 0;
@@ -262,6 +366,41 @@ impl AdaptiveSession {
         for (pc, instruction) in program.instructions.iter().enumerate() {
             let op = (|| -> Result<Op> {
                 Ok(match instruction {
+                    Instruction::MemoryAlloc { out, slots, width } => {
+                        Op::MemoryAlloc(dest(out)?, *slots, *width)
+                    }
+                    Instruction::MemoryFree { memory } => Op::MemoryFree(reg(memory)?),
+                    Instruction::MemoryRead {
+                        out,
+                        memory,
+                        address,
+                    } => {
+                        let (r, m, a) = (dest(out)?, reg(memory)?, reg(address)?);
+                        let (slots, width) = memories[&m];
+                        ensure!(
+                            len(r) == width && len(a) == slots,
+                            "memory_read shape mismatch"
+                        );
+                        Op::MemoryRead(r, m, a)
+                    }
+                    Instruction::MemoryWrite {
+                        memory,
+                        address,
+                        value,
+                    } => {
+                        let (m, a, v) = (reg(memory)?, reg(address)?, reg(value)?);
+                        let (slots, width) = memories[&m];
+                        ensure!(
+                            len(a) == slots && len(v) == width,
+                            "memory_write shape mismatch"
+                        );
+                        Op::MemoryWrite(m, a, v)
+                    }
+                    Instruction::ResourceState { out } => {
+                        let r = dest(out)?;
+                        ensure!(len(r) == 3, "resource_state requires f32[3]");
+                        Op::ResourceState(r)
+                    }
                     Instruction::Read { out, parameter } => {
                         let (r, p) = (dest(out)?, param(parameter)?);
                         ensure!(
@@ -276,7 +415,10 @@ impl AdaptiveSession {
                             !program.parameters[p].frozen,
                             "cannot write frozen parameter: {parameter}"
                         );
-                        ensure!(!program.parameters[p].probability, "write to prob is unsupported; use optimizer updates");
+                        ensure!(
+                            !program.parameters[p].probability,
+                            "write to prob is unsupported; use optimizer updates"
+                        );
                         ensure!(
                             len(r) == program.parameters[p].data.len(),
                             "write length mismatch"
@@ -312,23 +454,39 @@ impl AdaptiveSession {
                         );
                         Op::Binary(r, a, b, matches!(instruction, Instruction::Mul { .. }))
                     }
-                    Instruction::Constant{out,data} => {
-                        let r=dest(out)?;
-                        ensure!(data.len()==len(r) && data.iter().all(|v|v.is_finite()),"invalid tensor constant");
-                        Op::Constant(r,ops.len())
+                    Instruction::Constant { out, data } => {
+                        let r = dest(out)?;
+                        ensure!(
+                            data.len() == len(r) && data.iter().all(|v| v.is_finite()),
+                            "invalid tensor constant"
+                        );
+                        Op::Constant(r, ops.len())
                     }
-                    Instruction::Minimum{out,left,right} => {
-                        let (r,a,b)=(dest(out)?,reg(left)?,reg(right)?);
-                        ensure!(len(r)==len(a) && len(a)==len(b),"minimum shape mismatch");
-                        Op::Minimum(r,a,b)
+                    Instruction::Minimum { out, left, right } => {
+                        let (r, a, b) = (dest(out)?, reg(left)?, reg(right)?);
+                        ensure!(
+                            len(r) == len(a) && len(a) == len(b),
+                            "minimum shape mismatch"
+                        );
+                        Op::Minimum(r, a, b)
                     }
-                    Instruction::Clip{out,input,low,high} => {
-                        let (r,x)=(dest(out)?,reg(input)?);
-                        ensure!(len(r)==len(x) && low.is_finite() && high.is_finite() && low<=high,"invalid clip shape or bounds");
-                        Op::Clip(r,x,*low,*high)
+                    Instruction::Clip {
+                        out,
+                        input,
+                        low,
+                        high,
+                    } => {
+                        let (r, x) = (dest(out)?, reg(input)?);
+                        ensure!(
+                            len(r) == len(x) && low.is_finite() && high.is_finite() && low <= high,
+                            "invalid clip shape or bounds"
+                        );
+                        Op::Clip(r, x, *low, *high)
                     }
-                    Instruction::Sum{out,input} => {
-                        let (r,x)=(dest(out)?,reg(input)?);ensure!(len(r)==1,"sum output must be f32[1]");Op::Sum(r,x)
+                    Instruction::Sum { out, input } => {
+                        let (r, x) = (dest(out)?, reg(input)?);
+                        ensure!(len(r) == 1, "sum output must be f32[1]");
+                        Op::Sum(r, x)
                     }
                     Instruction::Detach { out, input }
                     | Instruction::Exp { out, input }
@@ -357,23 +515,42 @@ impl AdaptiveSession {
                         Op::Unary(r, x, kind)
                     }
                     Instruction::Mean { out, input } => {
-                        let (r,x)=(dest(out)?,reg(input)?);
-                        ensure!(len(r)==1,"mean output must be f32[1]");
-                        Op::Mean(r,x)
+                        let (r, x) = (dest(out)?, reg(input)?);
+                        ensure!(len(r) == 1, "mean output must be f32[1]");
+                        Op::Mean(r, x)
                     }
-                    Instruction::Gate { out, probability, input } => {
+                    Instruction::Gate {
+                        out,
+                        probability,
+                        input,
+                    } => {
                         let (r, p, x) = (dest(out)?, reg(probability)?, reg(input)?);
-                        ensure!(len(r) == len(x) && (len(p) == 1 || len(p) == len(r)), "gate shape mismatch");
+                        ensure!(
+                            len(r) == len(x) && (len(p) == 1 || len(p) == len(r)),
+                            "gate shape mismatch"
+                        );
                         Op::Blend(r, p, x, None)
                     }
-                    Instruction::Route { out, probability, yes, no } => {
+                    Instruction::Route {
+                        out,
+                        probability,
+                        yes,
+                        no,
+                    } => {
                         let (r, p, a, b) = (dest(out)?, reg(probability)?, reg(yes)?, reg(no)?);
-                        ensure!(len(r) == len(a) && len(r) == len(b) && (len(p) == 1 || len(p) == len(r)), "route shape mismatch");
+                        ensure!(
+                            len(r) == len(a)
+                                && len(r) == len(b)
+                                && (len(p) == 1 || len(p) == len(r)),
+                            "route shape mismatch"
+                        );
                         Op::Blend(r, p, a, Some(b))
                     }
-                    Instruction::InferenceSkip { probability, when_one, target } => {
-                        Op::InferenceSkip(reg(probability)?, *when_one, label(target)?)
-                    }
+                    Instruction::InferenceSkip {
+                        probability,
+                        when_one,
+                        target,
+                    } => Op::InferenceSkip(reg(probability)?, *when_one, label(target)?),
                     Instruction::Slice { out, input, start } => {
                         let (r, x) = (dest(out)?, reg(input)?);
                         ensure!(
@@ -422,6 +599,12 @@ impl AdaptiveSession {
             .map(|p| crate::zero_buffer(p.data.len()))
             .collect::<Result<_>>()?;
         Ok(Self {
+            workspace: workspace::Workspace::new(program.registers.len()),
+            memory_limit: budget_bytes,
+            pc: 0,
+            wrote: false,
+            pending: None,
+            execution_limit: 0,
             initialized: vec![false; program.registers.len()],
             program,
             ops,
@@ -473,7 +656,12 @@ impl AdaptiveSession {
     /// Replace one live parameter between executions; existing tapes remain snapshots.
     pub fn replace_parameter(&mut self, name: &str, values: &[f32]) -> Result<()> {
         self.ensure_mutable()?;
-        let p = self.program.parameters.iter_mut().find(|p| p.name == name)
+        self.ensure_idle()?;
+        let p = self
+            .program
+            .parameters
+            .iter_mut()
+            .find(|p| p.name == name)
             .context("unknown parameter")?;
         ensure!(!p.frozen, "frozen parameter");
         ensure!(values.len() == p.data.len(), "parameter length mismatch");
@@ -495,9 +683,12 @@ impl AdaptiveSession {
 
     /// One forward transaction; state persists between successful calls. Invalid
     /// arithmetic, undefined registers, fallthrough and exhausted budgets roll back
-    /// all weight writes. max_steps counts every instruction, including jumps.
+    /// all weight writes. max_steps counts instruction work, including jumps and
+    /// the N*D surcharge for allocating/accessing task-local memory.
     pub fn run(&mut self, input: &[f32], max_steps: u64) -> Result<&[f32]> {
-        if self.program.instructions.iter().any(|i| matches!(i, Instruction::Write { .. })) { self.ensure_mutable()?; }
+        if self.program.instructions.iter().any(|i| matches!(i, Instruction::Write { .. })) {
+            self.ensure_mutable()?;
+        }
         self.begin(input, max_steps)?;
         let result = self.execute(max_steps, None).and_then(|(r, wrote)| {
             if wrote {
@@ -506,7 +697,10 @@ impl AdaptiveSession {
             Ok(r)
         });
         match result {
-            Ok(r) => Ok(&self.registers[r]),
+            Ok(r) => {
+                self.workspace.clear();
+                Ok(&self.registers[r])
+            }
             Err(error) => {
                 self.restore();
                 Err(error)
@@ -518,13 +712,19 @@ impl AdaptiveSession {
     /// committing forward writes. Used for action sampling, not differentiation.
     pub fn evaluate(&mut self, input: &[f32], max_steps: u64) -> Result<Vec<f32>> {
         self.begin(input, max_steps)?;
-        let result = self.execute(max_steps, None).map(|(r, _)| self.registers[r].clone());
+        let result = self
+            .execute(max_steps, None)
+            .map(|(r, _)| self.registers[r].clone());
         self.restore();
         result
     }
 
     fn begin(&mut self, input: &[f32], max_steps: u64) -> Result<()> {
+        self.ensure_idle()?;
         self.steps = 0;
+        self.pc = 0;
+        self.wrote = false;
+        self.workspace.clear();
         ensure!(
             input.len() == self.input_len() && input.iter().all(|v| v.is_finite()),
             "invalid adaptive input"
@@ -540,6 +740,7 @@ impl AdaptiveSession {
     }
 
     fn restore(&mut self) {
+        self.workspace.clear();
         for (p, b) in self.program.parameters.iter_mut().zip(&self.backup) {
             p.data.copy_from_slice(b);
         }
@@ -548,22 +749,81 @@ impl AdaptiveSession {
     fn execute(
         &mut self,
         max_steps: u64,
-        mut tape: Option<&mut autodiff::Tape>,
+        tape: Option<&mut autodiff::Tape>,
     ) -> Result<(usize, bool)> {
-        let mut pc = 0;
-        let mut wrote = false;
+        self.execute_slice(max_steps, tape, u64::MAX)?
+            .context("unexpected execution suspension")
+    }
+
+    fn execute_slice(
+        &mut self,
+        max_steps: u64,
+        mut tape: Option<&mut autodiff::Tape>,
+        quantum: u64,
+    ) -> Result<Option<(usize, bool)>> {
+        let mut count = 0;
         loop {
+            if count == quantum {
+                return Ok(None);
+            }
+            count += 1;
+            let pc = self.pc;
             ensure!(
                 self.steps < max_steps,
                 "adaptive instruction budget exceeded"
             );
-            let op = self
+            let op = *self
                 .ops
                 .get(pc)
                 .context("adaptive program fell through without return")?;
-            self.steps += 1;
+            let cost = self.workspace.cost(op)?;
+            ensure!(
+                cost <= max_steps - self.steps,
+                "adaptive instruction budget exceeded"
+            );
+            self.steps += cost;
             let mut output = None;
-            match *op {
+            match op {
+                Op::MemoryAlloc(m, slots, width) => {
+                    self.workspace.allocate(
+                        m,
+                        slots,
+                        width,
+                        self.memory_limit - self.managed_bytes,
+                    )?;
+                    if let Some(tape) = tape.as_deref_mut() {
+                        tape.memory_allocate(m, self.workspace.data(m)?)?;
+                    }
+                }
+                Op::MemoryFree(m) => {
+                    self.workspace.free(m)?;
+                }
+                Op::MemoryRead(r, m, a) => {
+                    self.ready(a)?;
+                    self.workspace.read(
+                        m,
+                        &self.registers[a],
+                        &mut self.scratch[..self.registers[r].len()],
+                    )?;
+                    output = Some(r);
+                }
+                Op::MemoryWrite(m, a, v) => {
+                    self.ready(a)?;
+                    self.ready(v)?;
+                    self.workspace
+                        .write(m, &self.registers[a], &self.registers[v])?;
+                    if let Some(tape) = tape.as_deref_mut() {
+                        tape.memory_write(m, a, v, self.workspace.data(m)?)?;
+                    }
+                }
+                Op::ResourceState(r) => {
+                    self.scratch[..3].copy_from_slice(&[
+                        (max_steps - self.steps) as f32,
+                        (self.memory_limit - self.managed_bytes - self.workspace.bytes) as f32,
+                        self.workspace.bytes as f32,
+                    ]);
+                    output = Some(r);
+                }
                 Op::Read(r, p) => {
                     let data = &self.program.parameters[p].data;
                     self.scratch[..data.len()].copy_from_slice(data);
@@ -577,7 +837,7 @@ impl AdaptiveSession {
                     self.program.parameters[p]
                         .data
                         .copy_from_slice(&self.registers[r]);
-                    wrote = true;
+                    self.wrote = true;
                 }
                 Op::Linear(r, x, w, b) => {
                     self.ready(x)?;
@@ -603,25 +863,56 @@ impl AdaptiveSession {
                     }
                     output = Some(r);
                 }
-                Op::Constant(r,i) => {
-                    let Instruction::Constant{data,..}=&self.program.instructions[i] else {unreachable!()};
-                    self.scratch[..data.len()].copy_from_slice(data);output=Some(r);
+                Op::Constant(r, i) => {
+                    let Instruction::Constant { data, .. } = &self.program.instructions[i] else {
+                        unreachable!()
+                    };
+                    self.scratch[..data.len()].copy_from_slice(data);
+                    output = Some(r);
                 }
-                Op::Minimum(r,a,b) => {
-                    self.ready(a)?;self.ready(b)?;
-                    for i in 0..self.registers[r].len() {self.scratch[i]=self.registers[a][i].min(self.registers[b][i]);}output=Some(r);
+                Op::Minimum(r, a, b) => {
+                    self.ready(a)?;
+                    self.ready(b)?;
+                    for i in 0..self.registers[r].len() {
+                        self.scratch[i] = self.registers[a][i].min(self.registers[b][i]);
+                    }
+                    output = Some(r);
                 }
-                Op::Clip(r,x,low,high) => {
-                    self.ready(x)?;for (i,v) in self.registers[x].iter().enumerate() {self.scratch[i]=v.clamp(low,high);}output=Some(r);
+                Op::Clip(r, x, low, high) => {
+                    self.ready(x)?;
+                    for (i, v) in self.registers[x].iter().enumerate() {
+                        self.scratch[i] = v.clamp(low, high);
+                    }
+                    output = Some(r);
                 }
-                Op::Sum(r,x) => {
-                    self.ready(x)?;self.scratch[0]=self.registers[x].iter().map(|v|f64::from(*v)).sum::<f64>() as f32;output=Some(r);
+                Op::Sum(r, x) => {
+                    self.ready(x)?;
+                    self.scratch[0] =
+                        self.registers[x].iter().map(|v| f64::from(*v)).sum::<f64>() as f32;
+                    output = Some(r);
                 }
                 Op::Unary(r, x, kind) => {
                     self.ready(x)?;
-                    if kind == 9 { let values: Vec<f64> = self.registers[x].iter().map(|v| *v as f64).collect(); crate::categorical::validate_probabilities(&values)?; }
-                    let max = if kind == 3 || kind == 8 { self.registers[x].iter().copied().fold(f32::NEG_INFINITY, f32::max) } else { 0. };
-                    let total: f64 = if kind == 3 || kind == 8 { self.registers[x].iter().map(|v| (f64::from(*v) - f64::from(max)).exp()).sum() } else { 1. };
+                    if kind == 9 {
+                        let values: Vec<f64> = self.registers[x].iter().map(|v| *v as f64).collect();
+                        crate::categorical::validate_probabilities(&values)?;
+                    }
+                    let max = if kind == 3 || kind == 8 {
+                        self.registers[x]
+                            .iter()
+                            .copied()
+                            .fold(f32::NEG_INFINITY, f32::max)
+                    } else {
+                        0.
+                    };
+                    let total: f64 = if kind == 3 || kind == 8 {
+                        self.registers[x]
+                            .iter()
+                            .map(|v| (f64::from(*v) - f64::from(max)).exp())
+                            .sum()
+                    } else {
+                        1.
+                    };
                     for (i, v) in self.registers[x].iter().enumerate() {
                         self.scratch[i] = match kind {
                             0 => v.tanh(),
@@ -631,20 +922,25 @@ impl AdaptiveSession {
                             5 | 9 => *v,
                             6 => v.exp(),
                             7 => v.ln(),
-                            8 => (f64::from(*v)-f64::from(max)-total.ln()) as f32,
+                            8 => (f64::from(*v) - f64::from(max) - total.ln()) as f32,
                             _ => v.max(0.),
                         };
                     }
                     output = Some(r);
                 }
-                Op::Mean(r,x) => {
+                Op::Mean(r, x) => {
                     self.ready(x)?;
-                    self.scratch[0]=(self.registers[x].iter().map(|v| f64::from(*v)).sum::<f64>() / self.registers[x].len() as f64) as f32;
-                    output=Some(r);
+                    self.scratch[0] = (self.registers[x].iter().map(|v| f64::from(*v)).sum::<f64>()
+                        / self.registers[x].len() as f64)
+                        as f32;
+                    output = Some(r);
                 }
                 Op::Blend(r, p, a, b) => {
                     self.ready(p)?;
-                    ensure!(self.registers[p].iter().all(|v| (0. ..=1.).contains(v)), "gate/route probability must be in [0,1]");
+                    ensure!(
+                        self.registers[p].iter().all(|v| (0. ..=1.).contains(v)),
+                        "gate/route probability must be in [0,1]"
+                    );
                     let all_zero = tape.is_none() && self.registers[p].iter().all(|v| *v == 0.);
                     let all_one = tape.is_none() && self.registers[p].iter().all(|v| *v == 1.);
                     if all_zero || all_one {
@@ -658,20 +954,27 @@ impl AdaptiveSession {
                         }
                     } else {
                         self.ready(a)?;
-                        if let Some(b) = b { self.ready(b)?; }
+                        if let Some(b) = b {
+                            self.ready(b)?;
+                        }
                         for i in 0..self.registers[r].len() {
-                            let p = self.registers[p][if self.registers[p].len() == 1 { 0 } else { i }];
-                            self.scratch[i] = p * self.registers[a][i] + (1. - p) * b.map_or(0., |b| self.registers[b][i]);
+                            let p =
+                                self.registers[p][if self.registers[p].len() == 1 { 0 } else { i }];
+                            self.scratch[i] = p * self.registers[a][i]
+                                + (1. - p) * b.map_or(0., |b| self.registers[b][i]);
                         }
                     }
                     output = Some(r);
                 }
                 Op::InferenceSkip(p, when_one, target) => {
                     self.ready(p)?;
-                    ensure!(self.registers[p].iter().all(|v| (0. ..=1.).contains(v)), "gate/route probability must be in [0,1]");
+                    ensure!(
+                        self.registers[p].iter().all(|v| (0. ..=1.).contains(v)),
+                        "gate/route probability must be in [0,1]"
+                    );
                     let endpoint = if when_one { 1. } else { 0. };
                     if tape.is_none() && self.registers[p].iter().all(|v| *v == endpoint) {
-                        pc = target;
+                        self.pc = target;
                         continue;
                     }
                 }
@@ -684,17 +987,20 @@ impl AdaptiveSession {
                 Op::Label => {}
                 Op::Branch(c, yes, no) => {
                     self.ready(c)?;
-                    pc = if self.registers[c][0] > 0. { yes } else { no };
+                    self.pc = if self.registers[c][0] > 0. { yes } else { no };
                     continue;
                 }
                 Op::Jump(target) => {
-                    pc = target;
+                    self.pc = target;
                     continue;
                 }
                 Op::Return(r) => {
                     self.ready(r)?;
-                    if self.program.output_type == crate::categorical::VectorType::Probabilities { let values: Vec<f64> = self.registers[r].iter().map(|v| *v as f64).collect(); crate::categorical::validate_probabilities(&values)?; }
-                    return Ok((r, wrote));
+                    if self.program.output_type == crate::categorical::VectorType::Probabilities {
+                        let values: Vec<f64> = self.registers[r].iter().map(|x| *x as f64).collect();
+                        crate::categorical::validate_probabilities(&values)?;
+                    }
+                    return Ok(Some((r, self.wrote)));
                 }
             }
             if let Some(r) = output {
@@ -704,12 +1010,12 @@ impl AdaptiveSession {
                     "nonfinite activation at instruction {pc}"
                 );
                 if let Some(tape) = tape.as_deref_mut() {
-                    tape.record(*op, &self.scratch[..n])?;
+                    tape.record(op, &self.scratch[..n])?;
                 }
                 self.registers[r].copy_from_slice(&self.scratch[..n]);
                 self.initialized[r] = true;
             }
-            pc += 1;
+            self.pc += 1;
         }
     }
 }

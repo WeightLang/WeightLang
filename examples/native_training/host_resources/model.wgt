@@ -1,0 +1,12 @@
+wgt 0.5
+# 宿主通过 WGT_HOST_POLICY 授予名为 data 的文件；脚本不能选择真实路径。
+# 前缀长度约束模型一次接收的信息量，累计字节额度属于整个任务。
+fn main() {
+    compute_budget(10000, 4096, 10, 10000);
+    let host = compute_host_status();
+    assert(host != null, "WGT_HOST_POLICY is required");
+    let result = compute_call("file_read.v1", ["data", 64]);
+    assert(result["ok"], "file capability failed");
+    metric("host", compute_host_status());
+    return result["value"];
+}

@@ -3,7 +3,7 @@ use crate::Session;
 use anyhow::Result;
 use std::fmt;
 
-/// Experimental Rust API; WGT bindings are not connected. CPU remains the default.
+/// Explicit training backend. CPU remains the default.
 #[derive(Debug, Default)]
 pub enum TrainingBackend {
     #[default]
@@ -38,6 +38,17 @@ impl fmt::Display for TrainingError {
 impl std::error::Error for TrainingError {}
 
 impl TrainingBackend {
+    pub fn is_cpu(&self) -> bool {
+        matches!(self, Self::Cpu)
+    }
+
+    pub fn device_id(&self) -> &str {
+        match self {
+            Self::Cpu => "cpu",
+            #[cfg(feature = "gpu")]
+            Self::Gpu(gpu) => &gpu.device_info().id,
+        }
+    }
     pub(super) fn gradients(
         &mut self,
         session: &mut Session,

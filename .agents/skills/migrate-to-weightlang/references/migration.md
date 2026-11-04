@@ -1,5 +1,7 @@
 # 原生 WGT 0.5 迁移路线
 
+模型源码入口必须命名为 `model.wgt`。每个独立模型/训练示例一个目录，使用 `<模型或示例名>/model.wgt`，不要创建 `main.wgt`、`train.wgt` 或功能命名的模型入口。`fn main()` 是执行函数，不是入口文件名。迁移或移动入口时同步命令、文档链接、测试引用及相对数据/保存路径；标准库模块和制品的 `source.wgt` 快照不改名。
+
 只接受 `wgt 0.5`。旧 Python 导入、反编译和旧语法入口已经移除，不能沿用历史命令。
 先读取当前仓库 `docs/reference.zh-CN.md`、`docs/native-training.md` 和 `docs/storage.md`，
 并核对 `wgt --help` 与 `weightc --help`。
@@ -29,6 +31,10 @@ wgt run model.wgt
 目标形状和限制见 `docs/reinforcement-learning.md`。推理模型用 `save_model` 保存，
 含优化器的断点用 `save` 保存并用 `restore` 恢复，两种文件不能混用。
 路径按当前命令帮助和项目配置核对；保留产物写入 `weights/<model>/`，不得覆盖已有产物。
+
+需要 GPU 训练时，当前本地实现仅支持顺序模型通过 `training_device(model,id,memory_bytes,max_batch)`
+显式选择设备；`fn forward` 模型训练仍在 CPU，`predict` 也使用 CPU。按目标设备、构建特性和
+`docs/wgsl.md` 验证，不把设备枚举当成训练成功，不把初始化权重当成迁移完成。
 
 ## 验收
 

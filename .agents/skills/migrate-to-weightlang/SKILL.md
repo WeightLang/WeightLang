@@ -3,6 +3,8 @@ name: migrate-to-weightlang
 description: 将现有模型开发项目本身迁移为 WeightLang 项目，默认在原仓库接入 WGT 架构及训练、推理入口，而不是向 WeightLang 仓库新增示例。也支持指定模型或检查点转成 .wgt；按用户范围迁移架构、权重并验证行为。
 ---
 
+模型源码入口必须命名为 `model.wgt`。每个独立模型/训练示例一个目录，使用 `<模型或示例名>/model.wgt`，不要创建 `main.wgt`、`train.wgt` 或功能命名的模型入口。`fn main()` 是执行函数，不是入口文件名。迁移或移动入口时同步命令、文档链接、测试引用及相对数据/保存路径；标准库模块和制品的 `source.wgt` 快照不改名。
+
 # migrate-to-weightlang
 
 交付能在原项目中继续开发、训练和推理的 WeightLang 项目，以及可读的 `.wgt` 和验证证据。

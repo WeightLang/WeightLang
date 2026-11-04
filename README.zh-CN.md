@@ -35,10 +35,10 @@ wgt update
 
 ```sh
 cargo build --locked --workspace --bins
-./target/debug/weightc check examples/native_training/build.wgt
-./target/debug/wgt run examples/native_training/supervised.wgt
-./target/debug/weightc legacy-build examples/native_training/build.wgt -o weights/native-demo
-./target/debug/weightc compile examples/native_training/compiled.wgt -o .cache/weightlang/demo
+./target/debug/weightc check examples/native_training/build/model.wgt
+./target/debug/wgt run examples/native_training/supervised/model.wgt
+./target/debug/weightc legacy-build examples/native_training/build/model.wgt -o weights/native-demo
+./target/debug/weightc compile examples/native_training/compiled/model.wgt -o .cache/weightlang/demo
 ./.cache/weightlang/demo
 ```
 
@@ -46,7 +46,8 @@ cargo build --locked --workspace --bins
 训练和保存由脚本显式控制。`legacy-build`（兼容别名 `build`）要求 `main` 返回模型，
 输出完整模型目录，拒绝覆盖任何已有目标。
 
-`wgt new demo` 创建原生脚本项目；`wgt sync` 只同步包依赖；`wgt run main.wgt`
+模型源码入口固定为 **`model.wgt`**；每个模型/训练示例使用独立目录，名称放在目录名中。
+`wgt new demo` 创建原生脚本项目；`wgt sync` 只同步包依赖；`wgt run model.wgt`
 执行脚本，不再准备 Python 环境。制品检查、图形渲染和依赖获取与训练执行分开。
 
 ## 能力范围
@@ -61,8 +62,8 @@ cargo build --locked --workspace --bins
 Linux 的 [weightfs](docs/weightfs.md) 可将运行中的权重展示为可编辑的 JSON 文件。
 运行时默认尝试挂载；持久化仍需显式保存模型或断点。
 
-WGT 标准库源码保留在 `std/`，算子签名保留在 `language/primitive_specs.json`。
-保留的标准库源码及制品夹具作为迁移资料，不表示原生执行器已经支持。
+`std/` 的分类目录提供可运行的标量数学、激活和向量算法示例，完整接口见[原生数学标准库](docs/standard-library.md)。
+`std/` 根目录的旧图源码及制品夹具作为迁移资料，不表示原生执行器已经支持。
 参见 [WGT 0.5 参考](docs/reference.zh-CN.md)、[包依赖](docs/packages.md)、
 [命令行](docs/wgt.md)和[编辑器支持](docs/editors.md)。
 

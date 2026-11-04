@@ -49,7 +49,9 @@ fn diagnostic_commands_report_removed_python_cli() {
             .output()
             .unwrap();
         assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("Python weightc CLI has been removed"));
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Python weightc CLI has been removed")
+        );
         assert!(!temp.path().join("args.txt").exists());
     }
 }

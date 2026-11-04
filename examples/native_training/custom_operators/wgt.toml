@@ -1,0 +1,12 @@
+[project]
+module = "local/custom_operators"
+edition = "0.2"
+
+[model]
+source = "main.wgt"
+output = "weights"
+
+[revisions]
+max_versions = 5
+
+[dependencies]

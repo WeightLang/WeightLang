@@ -117,7 +117,7 @@ fn main() {{
     let report = script::run(&source, Path::new("."), 1000).unwrap();
     assert_eq!(report.result, serde_json::json!([1e20f32 as f64]));
     script::run(
-        include_str!("../../../examples/native_training/lazy_routing.wgt"),
+        include_str!("../../../examples/native_training/lazy_routing/model.wgt"),
         Path::new("."),
         1000,
     )

@@ -30,7 +30,7 @@ gate 推理时 p 全为 0 直接返回同形状零向量，跳过 x 表达式；
 若提前 `let other=linear(x,b);`，该语句仍执行，不进行跨语句的延迟或代码移动。
 支持嵌套路由；未选中表达式不消耗执行指令预算，其数值错误不会触发。
 实际选择的表达式及 p 的错误照常报错；失败仍回滚本次 forward 写入。
-完整例子：[lazy_routing.wgt](../examples/native_training/lazy_routing.wgt)。
+完整例子：[lazy_routing/model.wgt](../examples/native_training/lazy_routing/model.wgt)。
 
 训练（fit/reinforce）和显式 VJP（Rust/JSON forward）仍计算两边，即使 p=0/1 或来自 frozen 参数。
 这是为了保留 dp=a-b、gate 的 dp=x 等完整梯度，不提供伪造的零梯度。
@@ -40,14 +40,14 @@ if positive(x) 仍是硬分支，只沿执行路径反传，比较和循环次�
 
 ## 同文件训练
 
-完整带注释例子：[soft_routing.wgt](../examples/native_training/soft_routing.wgt)。
+完整带注释例子：[soft_routing/model.wgt](../examples/native_training/soft_routing/model.wgt)。
 它从初始化开始，训练一个按输入符号混合 x/-x 的路由和一个开放门，近似 abs(x)。
 专家固定，router/openness 可训练；同一模型句柄的循环迭代共享同一组参数。
 
 ```sh
-weightc check examples/native_training/soft_routing.wgt
-wgt run examples/native_training/soft_routing.wgt
-wgt run examples/native_training/soft_routing.wgt --compiled
+weightc check examples/native_training/soft_routing/model.wgt
+wgt run examples/native_training/soft_routing/model.wgt
+wgt run examples/native_training/soft_routing/model.wgt --compiled
 ```
 
 - `模型名(optimizer)`：optimizer 必填 none/sgd/adam 字符串；只初始化，不训练。
@@ -56,11 +56,10 @@ wgt run examples/native_training/soft_routing.wgt --compiled
   lr 为正有限 f32；CE 模型输出 logits，而非先做 softmax 的概率。返回更新前批次平均损失。
   使用 `"loss"` 可调用同文件 `fn loss(prediction,target)`；两参数均为单样本输出宽度的 f32 向量，
   返回 f32[1]，按样本求梯度再求批次平均。损失函数使用受限张量表达式，不能读取模型参数。
-  完整示例：[prob_mix_loss.wgt](../examples/native_training/prob_mix_loss.wgt)。
+  完整示例：[prob_mix_loss/model.wgt](../examples/native_training/prob_mix_loss/model.wgt)。
 - `reinforce(model,observations,actions,advantages,lr)`：forward 模型支持相同的策略梯度目标；
   advantage 是外部常量，不反传进环境或抽样决策。
-- `sample from model(observation)`：forward 模型输出 logits，经 softmax 抽样；不提交 forward 写回，
-  使用无 tape 的短路推理，只消耗脚本 RNG 和指令预算，不更新模型或优化器。
+- forward 模型采样目标语法为 `decode policy(observation) {method:sample;}`；需等待 parser/runtime 接线完成后，核实短路、RNG 和失败事务细节再公开承诺。
 - `model(input)`：保持已有语义，执行并提交 forward 的显式 write；不执行优化器。
 
 训练对每个样本从同一组批次起始参数开始计算；write 只在该次计算中生效且保留梯度链。
@@ -72,20 +71,25 @@ frozen 在 forward 中禁止写入，在训练中禁止优化器更新，但仍�
 SGD 无 momentum/weight decay；Adam beta1=0.9、beta2=0.999、eps=1e-8。
 每个 forward 会话张量预算 64 MiB，每个训练样本 tape 另有 64 MiB 预算；不含优化器矩、
 梯度累加、候选更新、解析或容器开销，不是进程 RSS 限额。
-训练 forward 指令数从脚本剩余操作预算逐样本扣除；反向和优化器工作不是逐 FLOP 计数。
-当前不支持任意 WGT 损失的自动反传、二阶梯度、forward 辅助函数调用、任意张量形状、GPU 训练。
-benchmark/legacy-build 仍只接受原顺序模型，不能据此宣称支持 forward 模型。
+训练 forward 工作量从脚本剩余操作预算逐样本扣除；内存操作按大小额外计费，反向和优化器工作不是逐 FLOP 计数。
+当前 forward 模型不支持任意 WGT 损失的自动反传、二阶梯度、任意张量形状或 GPU 训练。
+支持有界、无副作用的[纯张量辅助算子及算子包](custom-operators.md)，不支持任意普通函数调用。
+benchmark/device_submit/legacy-build 仍只接受原顺序模型，不能据此宣称支持 forward 模型。
 
 ## 保存与加载
 
-- `save_model(model,path)`：forward 模型写出内部 Program IR v1 JSON，包含计算结构、实际参数和
-  frozen 标记，不包含优化器；`load_model(path,optimizer)` 加载，可选择 none/sgd/adam，后两者新建优化器。
-  此格式可供 `wgt-native adaptive` 使用，不是原顺序 IR 的 layers 格式。
-  当前源码降低出的 Program 包含推理跳过指令，序列化后仍保留短路行为；
-  旧的 eager Program 不会在加载时自动重排，需从 WGT 源码重新编译才能跳过分支计算。
-- `save_checkpoint(model,path)`：写出 `weightlang.forward-training.v1` 断点，包括 Program、优化器种类、
-  步数及一二阶矩；none 模型也可保存，此时优化器为空。
-- `load_checkpoint(path)`：识别 forward 与原顺序模型断点，恢复后可继续相同训练；不执行 forward 或 main。
+工作内存的 `memory_alloc/read/write/free` 以及 `resource_state` 现已接入同一个前向执行器。
+读写对连续地址和值反传；内存生命周期、额度和硬控制动作不求导。
+训练仍一次完成整段轨迹，逐样本清空工作区；分步暂停恢复只用于推理。
+内存值版本另占 tape 额度，不能通过 free 退还反向传播需要的历史。
+完整签名、梯度、计费、执行状态与例子见[工作内存](working-memory.md)。
+
+- `save model VALUE to PATH;`：forward 模型写出内部 Program IR JSON，包含计算结构、实际参数和
+  frozen 标记，不包含优化器；`load model from PATH using OPTIMIZER` 用指定的新优化器创建可执行模型。
+  此格式可供当前本地推理实现读取，不是原顺序 IR 的 layers 格式。
+  `save checkpoint VALUE to PATH;` 写出训练断点，包括 Program、优化器种类、步数及一二阶矩；
+  `load checkpoint from PATH` 识别 forward 与原顺序模型断点并恢复状态。加载不会执行 forward 或 main。
+  这些路径将迁接到目标 wgtime service；服务架构尚未实现，不能作为已完成的系统级推理入口。
 
 全部 path 为必填字符串，相对原脚本目录；父目录须已存在，目标存在（含符号链接）即拒绝覆盖。
 沿用同目录临时文件与硬链接发布。模型输出保留于 weights/<experiment>/。
@@ -105,7 +109,8 @@ prob 无向量形状或默认初值，不能通过 write 改写，也不能直�
 
 同文件 `fn loss(prediction,target)` 的两个参数名可自选，第一参数为模型输出形状 f32[N]，第二参数默认同形；
 可用 `target NAME: f32[M]` 指定第二参数宽度，返回须为 f32[1]。详见[原生 RL](reinforcement-learning.md)。
-仅访问两个输入及局部变量，不访问模型参数，不调用普通辅助函数或执行 I/O/sample。
+仅访问两个输入及局部变量，不访问模型参数，不调用任意普通辅助函数或执行 I/O/sample；
+可以调用[纯张量算子](custom-operators.md)，梯度包含展开后的原语计算。
 使用 forward 张量算子和 let/if/while/return；新增 square(x)、mean(x)、a-b、-a。
 square 返回逐元素平方，mean 沿唯一特征轴平均；减法要求等长，无广播。
 例如 `return mean(square(prediction-target));`，用 `fit(m,x,y,lr,"loss")` 执行。
@@ -113,14 +118,14 @@ fit 按批次轴取平均，targets 为目标声明宽度（未声明则同输�
 损失定义不是宿主回调，不能在 main 中直接调用；构造/检查/编译不会训练。
 模型与损失 tape 共享每样本 64 MiB 张量预算，损失指令也扣除脚本预算；预算不含会话寄存器和优化器。
 整批成功才更新权重和优化器；损失程序保存在 Program/训练断点中，重载后可继续使用。
-完整例子：[prob_mix_loss.wgt](../examples/native_training/prob_mix_loss.wgt)。
+完整例子：[prob_mix_loss/model.wgt](../examples/native_training/prob_mix_loss/model.wgt)。
 
 普通 main/辅助函数可写 `sample p { then { a } else { b } }`；p 是有限 f64 且在 [0,1]，
 先且仅求值 p 一次，只执行选中的表达式，返回其结果。分支可嵌套、可选尾随分号，无块内 let/return。
 p=0/1 不消耗随机数，否则从 seed/random 的同一局部流抽取一次，按 random()<p 选择 then。
-支持括号概率表达式 `sample (p+q) {...}`，类别采样使用 `sample from model(observation)`，旧 `sample(model,observation)` 已移除。
+支持括号概率表达式 `sample (p+q) {...}`；模型类别采样目标使用 `decode policy(observation) {method:sample;}`，待实现后补充完整契约。
 这是离散采样，不隐式反传；在 forward/loss 中使用明确报错。策略梯度仍由 reinforce 显式接收动作/优势。
-完整例子：[sample_branch.wgt](../examples/native_training/sample_branch.wgt)。
+完整例子：[sample_branch/model.wgt](../examples/native_training/sample_branch/model.wgt)。
 
 ## 独热编码
 
@@ -131,7 +136,9 @@ N 是必填十进制整数字面量，范围 1..1000000；index 在运行时求�
 底层等价于 `one_hot(index,N)`，该函数也接受运行时类别数，边界相同。
 分配前按 N 扣除操作预算；不对离散索引求导，仅普通函数可用，forward/loss 不支持。
 结果可显式作为模型输入或 MSE/自定义损失的目标；cross_entropy/reinforce 的类别参数仍为索引。
-示例见 [sample_branch.wgt](../examples/native_training/sample_branch.wgt)，解释与 AOT 使用相同检查。
+示例见 [sample_branch/model.wgt](../examples/native_training/sample_branch/model.wgt)，解释与 AOT 使用相同检查。
+
+现有 soft_routing 示例采用 `mix` 和 `parameter openness: prob = 0.5`；后者的内部初值仍是 logit=0，保持原初始化与训练行为。lazy_routing 示例使用 `mix` 保留精确端点短路。按模型 logits 抽取类别的目标形式为 `decode policy(observation) {method:sample;}`；等待 parser/runtime 实现并验证后再迁移示例，不能替换成二选一概率采样。
 
 ## 后缀平均
 

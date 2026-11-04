@@ -1,0 +1,14 @@
+wgt 0.5
+fn main() {
+    let hardware = devices();
+    assert(len(hardware) > 1, "a hardware GPU and a --features gpu build are required");
+    # 固定 ABI：group 0 / binding 0 为 f32 输入，binding 1 为 f32 输出。
+    # 每个 invocation 处理一项；输出长度保持为 4，越界线程不执行计算。
+    let source = "@group(0) @binding(0) var<storage, read> x: array<f32>; @group(0) @binding(1) var<storage, read_write> y: array<f32>; @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3<u32>) { if id.x < arrayLength(&x) && id.x < arrayLength(&y) { y[id.x] = x[id.x] * 2.0; } }";
+    let kernel = wgsl_kernel(source, "main", hardware[1]["id"], 1048576);
+    # [1,1,1] 是工作组数量，不是张量形状；本内核每组有 64 个线程。
+    # 这是显式计算，没有模型参数、训练状态或自动反向传播。
+    let result = wgsl_run(kernel, [1, 2, 3, 4], 4, [1, 1, 1]);
+    assert(result == [2, 4, 6, 8], "WGSL result mismatch");
+    return result;
+}

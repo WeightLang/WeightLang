@@ -90,7 +90,7 @@ impl Trainer {
         self.backend.gradients(&mut self.session, inputs, objective)
     }
 
-    /// Select an experimental Rust training backend. WGT bindings are not connected.
+    /// Select an explicit training backend, also exposed through WGT training_device.
     /// Changing backend preserves weights, steps and checkpoint state.
     pub fn set_backend(&mut self, backend: TrainingBackend) -> Result<()> {
         self.backend = backend;
@@ -112,7 +112,6 @@ impl Trainer {
             rate.is_finite() && rate > 0.,
             "learning rate must be positive and finite"
         );
-        let (loss, gradients) = self.gradients(inputs, objective)?;
         let step = self
             .steps
             .checked_add(1)
@@ -132,7 +131,7 @@ impl Trainer {
                     step,
                 },
             };
-            let updates = gpu.stage_update(&self.session, &gradients, rate, rule)?;
+            let (loss, updates) = gpu.step(&mut self.session, inputs, objective, rate, rule)?;
             // No fallible operation remains after staging every owner. The CPU copy
             // is the committed state, including after device loss or external edits.
             for candidate in updates {
@@ -147,6 +146,7 @@ impl Trainer {
             self.session.revision = revision;
             return Ok(loss);
         }
+        let (loss, gradients) = self.gradients(inputs, objective)?;
         let (mut first, mut second) = (self.first.clone(), self.second.clone());
         let mut updates = Vec::new();
         for (i, parameter) in self.session.parameters.iter().enumerate() {
@@ -276,7 +276,8 @@ impl Trainer {
         self.checkpoint_bytes_bounded(usize::MAX)
     }
 
-    pub(crate) fn checkpoint_bytes_bounded(&mut self, limit: usize) -> Result<Vec<u8>> {
+    /// Encode a bounded checkpoint for a trusted service-side persistence owner.
+    pub fn checkpoint_bytes_bounded(&mut self, limit: usize) -> Result<Vec<u8>> {
         let record = Checkpoint {
             format: "weightlang.native-training.v1".into(),
             model: self.snapshot()?,
@@ -298,7 +299,7 @@ impl Trainer {
         Self::restore_value(serde_json::from_reader(std::fs::File::open(path)?)?, budget)
     }
 
-    pub(crate) fn restore_value(value: serde_json::Value, budget: usize) -> Result<Self> {
+    pub fn restore_value(value: serde_json::Value, budget: usize) -> Result<Self> {
         let c: Checkpoint = serde_json::from_value(value)?;
         ensure!(
             c.format == "weightlang.native-training.v1",
@@ -423,7 +424,7 @@ pub fn mlp(widths: &[usize], activation: &str, seed: u64) -> Result<Model> {
         }
     }
     Ok(Model {
-        output_type: Default::default(),
+        output_type: crate::categorical::VectorType::F32,
         version: 1,
         input: widths[0],
         parameters,

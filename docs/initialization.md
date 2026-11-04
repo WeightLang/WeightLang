@@ -18,7 +18,7 @@ fn main() {
 }
 ```
 
-构造时优化器参数必填，普通顺序模型支持 `"sgd"` 和 `"adam"`。两个构造调用创建独立模型；复用同一个句柄会共享参数和优化器状态。`weightc check` 不构造模型或训练，保存必须显式调用 `save_model` 或 `save`。初始化不等于训练；保存格式和覆盖保护见[原生训练](native-training.md#保存与续训)。
+构造时优化器参数必填，普通顺序模型支持 `"sgd"` 和 `"adam"`。两个构造调用创建独立模型；复用同一个句柄会共享参数和优化器状态。`weightc check` 不构造模型或训练，保存必须显式使用 `save model` 或 `save checkpoint` 语句。初始化不等于训练；保存格式和覆盖保护见[原生训练](native-training.md#保存与续训)。
 
 使用 `fn forward` 的自更新模型使用显式 `parameter` / `frozen` 初值，不能与 `layer` / `init` 混用。其构造和状态规则见[语言参考](reference.zh-CN.md#自更新前向函数)。
 

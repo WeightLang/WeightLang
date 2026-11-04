@@ -12,11 +12,11 @@ pub struct RecordBatch {
     bytes: usize,
 }
 
-fn shape(value: &Value, depth: usize, remaining: &mut u64, nodes: &mut usize) -> Result<Shape> {
+fn shape_with(value: &Value, depth: usize, charge: &mut impl FnMut() -> Result<()>, nodes: &mut usize) -> Result<Shape> {
     ensure!(depth <= MAX_DEPTH, "record value nesting limit exceeded");
     *nodes += 1;
     ensure!(*nodes <= MAX_NODES, "record value node limit exceeded");
-    *remaining = remaining.checked_sub(1).ok_or_else(|| anyhow::anyhow!("script operation budget exceeded"))?;
+    charge()?;
     Ok(match value {
         Value::Number(n) => { ensure!(n.is_finite(), "record numbers must be finite"); Shape::Number }
         Value::Bool(_) => Shape::Bool,
@@ -25,16 +25,38 @@ fn shape(value: &Value, depth: usize, remaining: &mut u64, nodes: &mut usize) ->
         Value::List(values) => {
             let mut element = None;
             for value in values {
-                let candidate = shape(value, depth + 1, remaining, nodes)?;
+                let candidate = shape_with(value, depth + 1, charge, nodes)?;
                 ensure!(element.as_ref().is_none_or(|s| s == &candidate), "record lists require homogeneous fixed shapes");
                 element = Some(candidate);
             }
             Shape::List { len: values.len(), element: element.map(Box::new) }
         }
         Value::Object(fields) => Shape::Record(fields.iter().map(|(name,value)|
-            Ok((name.clone(), shape(value, depth + 1, remaining, nodes)?))).collect::<Result<_>>()?),
+            Ok((name.clone(), shape_with(value, depth + 1, charge, nodes)?))).collect::<Result<_>>()?),
         _ => bail!("record fields cannot contain resource handles or record batches"),
     })
+}
+
+fn shape(value:&Value,depth:usize,remaining:&mut u64,nodes:&mut usize)->Result<Shape>{
+    shape_with(value,depth,&mut || { *remaining=remaining.checked_sub(1).ok_or_else(||anyhow::anyhow!("script operation budget exceeded"))?;Ok(()) },nodes)
+}
+
+/// Validate before cloning a record into storage. Each visited node is charged
+/// directly to the caller's ledger, including work before a validation failure.
+pub(super) fn validate_record_fields(args:&[Value],mut charge:impl FnMut()->Result<()>)->Result<()> {
+    ensure!(args.len()%2==0,"invalid record fields");
+    charge()?; // The record root is charged identically to state validation.
+    let mut nodes=1;
+    let mut bytes=5usize; // state validation historically includes the wrapper name.
+    let mut names=std::collections::BTreeSet::new();
+    for pair in args.chunks_exact(2) {
+        let name=pair[0].text()?;
+        ensure!(names.insert(name),"duplicate record field");
+        shape_with(&pair[1],2,&mut charge,&mut nodes)?;
+        bytes=bytes.checked_add(name.len()).and_then(|n|n.checked_add(data_bytes(&pair[1]))).ok_or_else(||anyhow::anyhow!("record text size overflow"))?;
+        ensure!(bytes<=MAX_TEXT_BYTES,"record batch text byte limit exceeded");
+    }
+    Ok(())
 }
 
 fn data_bytes(value: &Value) -> usize {
@@ -92,6 +114,24 @@ impl RecordBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn record_callbacks_charge_failures_and_share_atomic_budget() {
+        use std::sync::{Arc,atomic::{AtomicU64,Ordering}};
+        let args=vec![Value::Text("x".into()),Value::List(vec![Value::Number(1.),Value::Number(2.)])];
+        let remaining=Arc::new(AtomicU64::new(4));
+        let charge=|budget:Arc<AtomicU64>|move||->Result<()>{budget.try_update(Ordering::AcqRel,Ordering::Acquire,|n|n.checked_sub(1)).map_err(|_|anyhow::anyhow!("exhausted"))?;Ok(())};
+        validate_record_fields(&args,charge(remaining.clone())).unwrap();
+        assert_eq!(remaining.load(Ordering::Acquire),0);
+        assert!(validate_record_fields(&args,charge(remaining.clone())).is_err());
+        let invalid=vec![Value::Text("x".into()),Value::List(vec![Value::Number(1.),Value::Bool(true)])];
+        let mut charged=0;
+        assert!(validate_record_fields(&invalid,||{charged+=1;Ok(())}).is_err());
+        assert_eq!(charged,4);
+        let remaining=Arc::new(AtomicU64::new(7));
+        let handles=(0..2).map(|_|{let args=args.clone();let budget=remaining.clone();std::thread::spawn(move||validate_record_fields(&args,charge(budget)))}).collect::<Vec<_>>();
+        let successes=handles.into_iter().map(|h|h.join().unwrap()).filter(Result::is_ok).count();
+        assert_eq!(successes,1);assert_eq!(remaining.load(Ordering::Acquire),0);
+    }
     #[test]
     fn utf8_text_limit_counts_nested_names_and_is_atomic() {
         let mut budget=10_000_000;

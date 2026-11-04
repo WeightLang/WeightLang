@@ -17,13 +17,21 @@ pub fn split(source: &str) -> Result<Unit> {
     for (i, line) in source.lines().enumerate() {
         let trimmed = line.trim();
         if !header && !trimmed.is_empty() && !trimmed.starts_with('#') {
-            ensure!(trimmed == "wgt 0.5", "line {}: expected 'wgt 0.5'; older source versions are not supported", i + 1);
+            ensure!(
+                trimmed == "wgt 0.5",
+                "line {}: expected 'wgt 0.5'; older source versions are not supported",
+                i + 1
+            );
             header = true;
             declarations.push(line);
             functions.push(line);
             continue;
         }
-        ensure!(!header || !trimmed.starts_with("wgt "), "line {}: duplicate version header", i+1);
+        ensure!(
+            !header || !trimmed.starts_with("wgt "),
+            "line {}: duplicate version header",
+            i + 1
+        );
         if !in_function && (trimmed.starts_with("fn ") || trimmed.starts_with("async fn ") || trimmed.starts_with("agent ") || trimmed.starts_with("environment ")) {
             in_function = true;
             opened = false;
@@ -34,29 +42,47 @@ pub fn split(source: &str) -> Result<Unit> {
             let (mut quote, mut escape) = (false, false);
             for c in line.chars() {
                 if quote {
-                    if escape { escape = false; }
-                    else if c == '\\' { escape = true; }
-                    else if c == '"' { quote = false; }
+                    if escape {
+                        escape = false;
+                    } else if c == '\\' {
+                        escape = true;
+                    } else if c == '"' {
+                        quote = false;
+                    }
                 } else {
                     match c {
                         '#' => break,
                         '"' => quote = true,
-                        '{' => { depth += 1; opened = true; },
-                        '}' => { depth = depth.checked_sub(1).context("unexpected closing brace")?; },
+                        '{' => {
+                            depth += 1;
+                            opened = true;
+                        }
+                        '}' => {
+                            depth = depth.checked_sub(1).context("unexpected closing brace")?;
+                        }
                         _ => {}
                     }
                 }
             }
-            ensure!(!quote, "line {}: unterminated string", i+1);
-            if opened && depth == 0 { in_function = false; }
+            ensure!(!quote, "line {}: unterminated string", i + 1);
+            if opened && depth == 0 {
+                in_function = false;
+            }
         } else {
             declarations.push(line);
-            functions.push(if !header || trimmed.starts_with('#') { line } else { "" });
+            functions.push(if !header || trimmed.starts_with('#') {
+                line
+            } else {
+                ""
+            });
         }
     }
     ensure!(header, "missing 'wgt 0.5' header");
     ensure!(!in_function, "unterminated function");
-    Ok(Unit { declarations: declarations.join("\n"), functions: functions.join("\n") })
+    Ok(Unit {
+        declarations: declarations.join("\n"),
+        functions: functions.join("\n"),
+    })
 }
 
 /// Static sequential graph plan. Weights are created only by an explicit constructor call.
@@ -69,7 +95,13 @@ pub struct Graph {
     pub layers: Vec<GraphLayer>,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct GraphLayer { pub name: String, pub op: String, pub input: usize, pub output: usize, pub bias: bool }
+pub struct GraphLayer {
+    pub name: String,
+    pub op: String,
+    pub input: usize,
+    pub output: usize,
+    pub bias: bool,
+}
 
 pub fn vector_port(body: &str) -> Result<(String, usize)> {
     let (name, n, kind) = typed_vector_port(body)?;
@@ -104,20 +136,51 @@ pub fn graph(source: &str) -> Result<(String, Graph)> {
     let mut names = std::collections::HashSet::new();
     for (i, text) in source.lines().enumerate() {
         let text = text.split('#').next().unwrap_or("").trim();
-        if text.is_empty() || text == "wgt 0.5" { continue; }
-        let (keyword, body) = text.split_once(char::is_whitespace).context("expected declaration")?;
+        if text.is_empty() || text == "wgt 0.5" {
+            continue;
+        }
+        let (keyword, body) = text
+            .split_once(char::is_whitespace)
+            .context("expected declaration")?;
         let body = body.trim();
         match keyword {
-            "model" => { ensure!(name.is_none(), "duplicate model"); name = Some(body.to_string()); },
-            "input" => { ensure!(input.is_none() && layers.is_empty(), "input must precede layers and occur once"); width = vector_port(body)?.1; input = Some(width); },
-            "output" => { ensure!(output.is_none(), "duplicate output"); let (_, n, kind) = typed_vector_port(body)?; output = Some(n); output_type = kind; },
-            "init" => { ensure!(seed.is_none(), "duplicate init"); seed = Some(body.strip_prefix("seed=").context("native init requires seed=N")?.parse::<u64>()?); },
+            "model" => {
+                ensure!(name.is_none(), "duplicate model");
+                name = Some(body.to_string());
+            }
+            "input" => {
+                ensure!(
+                    input.is_none() && layers.is_empty(),
+                    "input must precede layers and occur once"
+                );
+                width = vector_port(body)?.1;
+                input = Some(width);
+            }
+            "output" => {
+                ensure!(output.is_none(), "duplicate output");
+                let (_, n, kind) = typed_vector_port(body)?;
+                output = Some(n);
+                output_type = kind;
+            }
+            "init" => {
+                ensure!(seed.is_none(), "duplicate init");
+                seed = Some(
+                    body.strip_prefix("seed=")
+                        .context("native init requires seed=N")?
+                        .parse::<u64>()?,
+                );
+            }
             "layer" => {
                 ensure!(width > 0, "input must precede layers");
-                let (id, spec) = body.split_once(':').context("layer requires name: operator")?;
+                let (id, spec) = body
+                    .split_once(':')
+                    .context("layer requires name: operator")?;
                 ensure!(names.insert(id.trim().to_string()), "duplicate layer name");
                 let spec = spec.trim();
-                let (op, out, bias) = if let Some(args) = spec.strip_prefix("linear(").and_then(|s| s.strip_suffix(')')) {
+                let (op, out, bias) = if let Some(args) = spec
+                    .strip_prefix("linear(")
+                    .and_then(|s| s.strip_suffix(')'))
+                {
                     let mut declared_in = width;
                     let mut out = None;
                     let mut bias = true;
@@ -129,8 +192,11 @@ pub fn graph(source: &str) -> Result<(String, Graph)> {
                         match key.trim() {
                             "in" => declared_in = val.trim().parse()?,
                             "out" => out = Some(val.trim().parse::<usize>()?),
-                            "bias" => { ensure!(matches!(val.trim(), "0" | "1"), "bias must be 0 or 1"); bias = val.trim() == "1"; },
-                            _ => anyhow::bail!("unsupported native linear argument: {key}")
+                            "bias" => {
+                                ensure!(matches!(val.trim(), "0" | "1"), "bias must be 0 or 1");
+                                bias = val.trim() == "1";
+                            }
+                            _ => anyhow::bail!("unsupported native linear argument: {key}"),
                         }
                     }
                     ensure!(declared_in == width, "linear input width mismatch");
@@ -140,17 +206,41 @@ pub fn graph(source: &str) -> Result<(String, Graph)> {
                     (spec, width, false)
                 };
                 ensure!(out > 0 && out <= 16384, "invalid output width");
-                layers.push(GraphLayer { name: id.trim().into(), op: op.into(), input: width, output: out, bias });
+                layers.push(GraphLayer {
+                    name: id.trim().into(),
+                    op: op.into(),
+                    input: width,
+                    output: out,
+                    bias,
+                });
                 width = out;
-            },
-            _ => anyhow::bail!("line {}: declaration is not supported by native vector construction: {keyword}", i+1)
+            }
+            _ => anyhow::bail!(
+                "line {}: declaration is not supported by native vector construction: {keyword}",
+                i + 1
+            ),
         }
     }
     ensure!(!layers.is_empty(), "model has no layers");
     ensure!(output == Some(width), "output contract mismatch");
-    let total: usize = layers.iter().filter(|l| l.op == "linear").map(|l| l.input*l.output + usize::from(l.bias)*l.output).sum();
-    ensure!(total <= 4_000_000, "native model exceeds 4 million parameters");
-    Ok((name.context("missing model")?, Graph { output_type, input: input.context("missing input")?, seed: seed.context("missing init seed")?, layers }))
+    let total: usize = layers
+        .iter()
+        .filter(|l| l.op == "linear")
+        .map(|l| l.input * l.output + usize::from(l.bias) * l.output)
+        .sum();
+    ensure!(
+        total <= 4_000_000,
+        "native model exceeds 4 million parameters"
+    );
+    Ok((
+        name.context("missing model")?,
+        Graph {
+            output_type,
+            input: input.context("missing input")?,
+            seed: seed.context("missing init seed")?,
+            layers,
+        },
+    ))
 }
 
 impl Graph {
@@ -163,14 +253,43 @@ impl Graph {
                     let weight = format!("{}.weight", l.name);
                     let bias = l.bias.then(|| format!("{}.bias", l.name));
                     let scale = (6. / (l.input + l.output) as f64).sqrt();
-                    parameters.push(Parameter { name: weight.clone(), shape: vec![l.output,l.input], frozen: false, value: Value::Resident { data: (0..l.input*l.output).map(|_| ((crate::training::random(&mut rng)*2.-1.)*scale) as f32).collect() } });
-                    if let Some(b) = &bias { parameters.push(Parameter { name: b.clone(), shape: vec![l.output], frozen:false, value:Value::Resident { data:vec![0.;l.output] } }); }
+                    parameters.push(Parameter {
+                        name: weight.clone(),
+                        shape: vec![l.output, l.input],
+                        frozen: false,
+                        value: Value::Resident {
+                            data: (0..l.input * l.output)
+                                .map(|_| {
+                                    ((crate::training::random(&mut rng) * 2. - 1.) * scale) as f32
+                                })
+                                .collect(),
+                        },
+                    });
+                    if let Some(b) = &bias {
+                        parameters.push(Parameter {
+                            name: b.clone(),
+                            shape: vec![l.output],
+                            frozen: false,
+                            value: Value::Resident {
+                                data: vec![0.; l.output],
+                            },
+                        });
+                    }
                     Layer::Linear { weight, bias }
-                },
-                "relu" => Layer::Relu, "tanh" => Layer::Tanh, "sigmoid" => Layer::Sigmoid,
-                "identity" => Layer::Identity, _ => anyhow::bail!("invalid graph plan")
+                }
+                "relu" => Layer::Relu,
+                "tanh" => Layer::Tanh,
+                "sigmoid" => Layer::Sigmoid,
+                "identity" => Layer::Identity,
+                _ => anyhow::bail!("invalid graph plan"),
             });
         }
-        Ok(crate::Model { output_type:self.output_type, version:if self.output_type.is_plain(){1}else{2}, input:self.input, parameters, layers })
+        Ok(crate::Model {
+            output_type: self.output_type,
+            version: if self.output_type.is_plain() { 1 } else { 2 },
+            input: self.input,
+            parameters,
+            layers,
+        })
     }
 }

@@ -18,10 +18,19 @@ device = "cpu"
 
 #[test]
 fn toml_roundtrip_and_validation() {
-    assert_eq!(ProjectConfig::parse(CONFIG).unwrap().revisions.max_versions, 5);
+    assert_eq!(
+        ProjectConfig::parse(CONFIG).unwrap().revisions.max_versions,
+        5
+    );
     for limit in [0, 1, 12] {
         let configured = format!("{CONFIG}\n[revisions]\nmax_versions = {limit}\n");
-        assert_eq!(ProjectConfig::parse(&configured).unwrap().revisions.max_versions, limit);
+        assert_eq!(
+            ProjectConfig::parse(&configured)
+                .unwrap()
+                .revisions
+                .max_versions,
+            limit
+        );
     }
     for invalid in ["-1", "true", "1.5", "\"5\""] {
         let configured = format!("{CONFIG}\n[revisions]\nmax_versions = {invalid}\n");
@@ -60,7 +69,13 @@ fn sync_is_offline_idempotent_and_locked() {
     assert!(project.join("wgt.toml").is_file());
     let config = fs::read_to_string(project.join("wgt.toml")).unwrap();
     assert!(config.contains("[revisions]\nmax_versions = 5"));
-    assert_eq!(ProjectConfig::parse(&config).unwrap().revisions.max_versions, 5);
+    assert_eq!(
+        ProjectConfig::parse(&config)
+            .unwrap()
+            .revisions
+            .max_versions,
+        5
+    );
     assert!(!project.join("wgt.mod").exists());
     for _ in 0..2 {
         let result = run(&["-C", "demo", "sync", "--no-env", "--offline", "--locked"]);

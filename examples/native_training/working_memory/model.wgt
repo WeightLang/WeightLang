@@ -1,0 +1,43 @@
+wgt 0.5
+# 工作内存为 [槽位,特征]=[2,2]，与参数和优化器状态独立。
+# 每次前向先写入 x/-x，再训练地址 logits 读取正确槽位；不是训练算术近似。
+model WorkingMemory
+input x: f32[2]
+output y: f32[2]
+parameter address_logits: f32[2] = [0,0]
+frozen first: f32[2] = [1,0]
+frozen second: f32[2] = [0,1]
+fn forward(x) {
+    let bank = memory_alloc(2,2);
+    # one-hot 地址精确写入单槽；softmax 地址沿槽位轴归一化。
+    memory_write(bank, first, x);
+    memory_write(bank, second, -x);
+    let result = memory_read(bank, softmax(address_logits));
+    memory_free(bank);
+    return result;
+}
+fn main() {
+    compute_budget(100000,65536,10,60000);
+    # 构造只有随机/显式初值；同一模型在以下批次中共享并更新地址参数。
+    let m = WorkingMemory("adam");
+    let inputs = [[1,2],[-1,-2],[2,-1],[-2,1]];
+    let first_loss = fit(m,inputs,inputs,0.04,"mse");
+    for step in range(0,300) { fit(m,inputs,inputs,0.04,"mse"); }
+    let last_loss = fit(m,inputs,inputs,0.04,"mse");
+    assert(last_loss < first_loss * 0.01,"memory addressing did not learn");
+    # 未用于训练的向量验证执行链；不把它当成通用任务泛化证明。
+    let expected = predict(m,[3,-4]);
+    assert(mse(expected,[3,-4])<0.05,"held-out memory read failed");
+    # 每次只执行两条 VM 指令，保留寄存器和内存；最终输出与完整推理相同。
+    execution_start(m,[3,-4],1000,65536);
+    let progress = execution_resume(m,2);
+    while !progress["done"] { progress = execution_resume(m,2); }
+    assert(progress["output"]==expected,"resumed execution differs");
+    assert(progress["peak_memory_bytes"]==16,"unexpected workspace peak");
+    metric("initial_loss",first_loss);
+    metric("final_loss",last_loss);
+    metric("held_out_mse",mse(expected,[3,-4]));
+    metric("execution_work",progress["work"]);
+    metric("peak_workspace_bytes",progress["peak_memory_bytes"]);
+    return true;
+}

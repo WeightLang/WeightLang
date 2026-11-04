@@ -4,6 +4,11 @@ Six native WGT 0.5 two-input models: xor_mlp, and_mlp, or_mlp, nand_mlp,
 nor_mlp and xnor_mlp. Inputs are [a,b], output is a sigmoid probability;
 threshold at 0.5. Each newly trained model passes all four truth-table rows.
 
+Each model has its own directory and a `model.wgt` entrypoint: `xor/model.wgt`,
+`and/model.wgt`, `or/model.wgt`, `nand/model.wgt`, `nor/model.wgt`, `xnor/model.wgt`.
+Packaging records these package-relative source paths. Existing published assets,
+source snapshots and checksums retain their original identities.
+
 Each source declares a 2→8→1 tanh/sigmoid network and explicitly trains it in
 main: seed 42, Adam, full-batch MSE, learning rate 0.05, 1500 steps. The complete
 truth tables are training data, not held-out validation or generalization evidence.
@@ -11,8 +16,8 @@ Model names and input/output meanings are preserved; weights and training method
 are new. Old v0.1.0/v0.2.0 assets and checksums are unchanged.
 
 ```sh
-weightc check packages/gates/xor.wgt
-weightc legacy-build packages/gates/xor.wgt -o weights/new-xor-05
+weightc check packages/gates/xor/model.wgt
+weightc legacy-build packages/gates/xor/model.wgt -o weights/new-xor-05
 wgt add weightlang/gates --version v0.5.0
 ```
 

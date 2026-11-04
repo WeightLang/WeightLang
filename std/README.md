@@ -1,5 +1,20 @@
 # 标准库目录
 
+真实可导入的纯 WGT 库（WGT 0.5，本地未发布）：
+
+- `import activation from "std/activation/operators"`：swish、swiglu、squared_relu。
+- `import loss_ops from "std/loss/operators"`：squared_error、half_squared_error、categorical_logits。
+
+仅在 forward/loss 调用；输入为非空同形 f32 向量，全部参数必填，无隐含广播。
+激活保持形状，损失归约到 f32[1]；权重与训练由调用模型显式管理。
+完整真实训练例子为 [standard_operators/model.wgt](../examples/native_training/standard_operators/model.wgt)。
+定义、标签限制、CPU 梯度和 AOT 契约见[标准库文档](../docs/standard-library.md)。
+
+下列分类文件中的 main 是运行时内置的演示，不能作为可导入库；
+根目录 block/use 文件目前不能由原生源码前端执行。图制品的形状验证与查看能力
+不证明这些源码能编译执行，逐模块阻碍见标准库文档的审计表。
+
+
 - `math/`：原生标量数学的完整可运行示例。
 - `activation/`：稳定激活函数的完整可运行示例。
 - 根目录旧 block 文件：保留既有路径，属于尚未完整迁移的图标准库。

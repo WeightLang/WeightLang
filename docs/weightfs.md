@@ -101,7 +101,7 @@ GPU 实机编辑验收仍需对应硬件测试。自更新 forward 同样使用�
 JSON 浏览与文件编辑会分配内存；底层未封装的 CPU 前向仍保留原有零堆分配契约。
 
 挂载目录是明确的易失权重视图，不属于 `weights/` 制品，也不是下载/训练数据缓存。
-持久化必须显式调用 `save_model` 或 `save`，保存到新的 `weights/<experiment>/` 文件；
+持久化必须显式使用 `save model` 或 `save checkpoint` 语句，保存到新的 `weights/<experiment>/` 文件；
 仍拒绝覆盖已有结果。详见[存储规范](storage.md)和[原生训练](native-training.md#保存与续训)。
 
 ## 验证

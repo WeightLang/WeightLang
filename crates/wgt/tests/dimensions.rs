@@ -106,7 +106,8 @@ fn malformed_patterns_sizes_reductions_and_overflow_are_rejected() {
         )
         .is_err());
     }
-    for op in ["rearrange"] {
+    {
+        let op = "rearrange";
         assert!(transform(
             input.clone(),
             op,
@@ -177,7 +178,8 @@ fn named_contracts_validate_and_records_must_be_exact() {
 #[test]
 fn existing_operators_propagate_axis_identity() {
     let input = json!({"dtype":"f32","shape":[3,4],"axes":["time","feature"]});
-    for op in ["meanpool"] {
+    {
+        let op = "meanpool";
         assert_eq!(
             infer_layers(input.clone(), json!([{"name":"pool","op":op}]))
                 .unwrap()

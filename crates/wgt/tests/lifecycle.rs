@@ -112,7 +112,7 @@ fn assert_checkpoint(root: &Path, steps: u64) {
 }
 fn infer(root: &Path, model: &Path, expected: &Value) {
     let source = format!(
-        "wgt 0.5\nfn main() {{ let net = load_model({}, \"adam\"); return net([0.25]); }}",
+        "wgt 0.5\nfn main() {{ let net = model({}, \"adam\"); return net([0.25]); }}",
         serde_json::to_string(model.to_str().unwrap()).unwrap()
     );
     let source_dir = root.join("inference");
@@ -206,7 +206,7 @@ fn training_resume_evaluation_artifacts_and_negative_paths() {
         .output()
         .unwrap();
     assert!(!failed.status.success());
-    assert!(String::from_utf8_lossy(&failed.stderr).contains("load_checkpoint expects a native training checkpoint"));
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("unsupported checkpoint format"));
     assert!(!corrupt.join("out/model.json").exists());
 
     let build = temp.path().join("build");
