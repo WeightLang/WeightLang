@@ -373,6 +373,7 @@ impl ForwardPass {
                             0 => 1. - y * y,
                             1 => y * (1. - y),
                             4 => -1.,
+                            9 => 1.,
                             6 => y,
                             7 => 1. / before[x].value[i],
                             _ => {

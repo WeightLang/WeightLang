@@ -4,6 +4,7 @@ pub mod weightfs;
 pub mod source;
 pub mod execution;
 pub mod adaptive;
+pub mod categorical;
 pub mod training;
 pub mod script;
 mod parameter_ops;
@@ -24,6 +25,8 @@ use std::{
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Model {
+    #[serde(default, skip_serializing_if = "categorical::VectorType::is_plain")]
+    pub output_type: categorical::VectorType,
     pub version: u32,
     pub input: usize,
     pub parameters: Vec<Parameter>,
@@ -110,6 +113,7 @@ enum Op {
 /// Owns all execution buffers and file handles; Drop releases them deterministically.
 #[derive(Debug)]
 pub struct Session {
+    output_type: categorical::VectorType,
     names: HashMap<String, usize>,
     revision: u64,
     parameters: Vec<Tensor>,
@@ -147,7 +151,8 @@ impl Session {
     /// File offsets are byte offsets into immutable little-endian f32 files.
     /// The budget excludes IR metadata, JSON parsing, OS page cache and a 4 KiB I/O stack buffer.
     pub fn prepare(model: Model, root: &Path, budget: usize) -> Result<Self> {
-        ensure!(model.version == 1, "unsupported native IR version");
+        ensure!(matches!(model.version, 1 | 2), "unsupported native IR version");
+        ensure!(model.version >= 2 || model.output_type.is_plain(), "categorical output metadata requires native IR version 2");
         ensure!(
             model.input > 0 && !model.layers.is_empty(),
             "input and layers must be nonempty"
@@ -341,6 +346,7 @@ impl Session {
             streamed_parameters: streamed,
         };
         Ok(Self {
+            output_type: model.output_type,
             names,
             revision: 0,
             parameters,
@@ -351,6 +357,8 @@ impl Session {
             report,
         })
     }
+
+    pub fn output_type(&self) -> categorical::VectorType { self.output_type }
 
     pub fn report(&self) -> &Report {
         &self.report
@@ -443,6 +451,21 @@ impl Session {
                     }
                 }
                 Op::Identity => {}
+            }
+        }
+        if !self.output_type.is_plain() {
+            let output = &self.left[..width];
+            if output.is_empty() || output.iter().any(|x| !x.is_finite()) {
+                return Err("categorical output must be a nonempty finite vector");
+            }
+            if self.output_type == categorical::VectorType::Probabilities {
+                if output.iter().any(|x| !(0. ..=1.).contains(x)) {
+                    return Err("probabilities must each be in [0,1]");
+                }
+                let total: f64 = output.iter().map(|x| *x as f64).sum();
+                if (total - 1.).abs() > categorical::PROBABILITY_SUM_TOLERANCE {
+                    return Err("probabilities must sum to 1 within absolute tolerance 1e-5");
+                }
             }
         }
         Ok(&self.left[..width])

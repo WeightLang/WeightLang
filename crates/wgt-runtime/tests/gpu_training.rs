@@ -232,6 +232,7 @@ fn shared(id: &str) {
     // Two repeated uses, an offset view, an add expression with duplicate sources,
     // and a frozen dependency chain exercise owner folding independently of MLP.
     let model = Model {
+        output_type: Default::default(),
         version: 1,
         input: 1,
         parameters: vec![
@@ -630,6 +631,7 @@ fn real_gpu_adam_shared_frozen_and_transaction_rollback() {
     let _guard = GPU_TEST.lock().expect("GPU acceptance lock poisoned");
     let Some(id) = hardware() else { return };
     let model = Model {
+        output_type: Default::default(),
         version: 1,
         input: 2,
         parameters: vec![

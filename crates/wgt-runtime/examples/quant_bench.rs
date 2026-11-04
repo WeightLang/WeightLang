@@ -22,6 +22,7 @@ fn main() {
         }
     }
     let create = |value| Model {
+        output_type: Default::default(),
         version: 1,
         input: n,
         parameters: vec![Parameter {

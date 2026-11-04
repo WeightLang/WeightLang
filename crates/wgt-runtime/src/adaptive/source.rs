@@ -8,7 +8,7 @@ pub fn parse(source: &str) -> Result<Program> {
     let unit = crate::source::split(source)?;
     let functions = crate::script::parse::parse_functions(&unit.functions)?;
     let forward = functions.get("forward").context("stateful model requires fn forward(input)")?;
-    let mut program = Program { version:1, input:String::new(), registers:Vec::new(), parameters:Vec::new(), instructions:Vec::new(), loss:None };
+    let mut program = Program { output_type:Default::default(), version:1, input:String::new(), registers:Vec::new(), parameters:Vec::new(), instructions:Vec::new(), loss:None };
     let (mut model, mut output) = (false, None);
     let mut target = None;
     for (line, text) in unit.declarations.lines().enumerate() {
@@ -24,7 +24,7 @@ pub fn parse(source: &str) -> Result<Program> {
                 program.registers.push(Register { name, len });
             },
             "target" => { ensure!(target.is_none(),"duplicate loss target declaration"); target=Some(crate::source::vector_port(body)?); },
-            "output" => { ensure!(output.is_none(), "duplicate output"); output = Some(crate::source::vector_port(body)?.1); },
+            "output" => { ensure!(output.is_none(), "duplicate output"); let (_, n, kind) = crate::source::typed_vector_port(body)?; output=Some(n); program.output_type=kind; },
             "parameter" | "frozen" => {
                 let (name, body) = body.split_once(':').context("parameter requires name: f32[shape] = values")?;
                 let (shape, values) = body.split_once('=').context("parameter requires explicit values")?;
@@ -49,7 +49,7 @@ pub fn parse(source: &str) -> Result<Program> {
     ensure!(model && !program.input.is_empty() && output.is_some(), "forward model requires model, input and output declarations");
     ensure!(forward.args == [program.input.clone()], "forward argument must match the declared input name");
     let sizes = program.registers.iter().map(|r| (r.name.clone(),r.len)).collect();
-    let mut lower = Lower { program, sizes, next:0, loops:Vec::new(), output:output.unwrap() };
+    let mut lower = Lower { program, sizes, types:HashMap::new(), next:0, loops:Vec::new(), output:output.unwrap() };
     lower.block(&forward.body)?;
     ensure!(lower.program.instructions.iter().any(|i| matches!(i,I::Return{..})), "forward requires a return");
     ensure!(target.is_none() || functions.contains_key("loss"),"target requires fn loss");
@@ -58,16 +58,18 @@ pub fn parse(source: &str) -> Result<Program> {
         let n=lower.output;
         let m=if let Some((name,width))=&target { ensure!(*name==loss.args[1],"target name must match second loss argument"); *width } else { n };
         let input="__loss_input".to_string();
-        let program=Program{version:1,input:input.clone(),registers:vec![Register{name:input.clone(),len:n+m}],parameters:vec![],instructions:vec![],loss:None};
-        let mut loss_lower=Lower{program,sizes:HashMap::from([(input.clone(),n+m)]),next:0,loops:vec![],output:1};
+        let program=Program{output_type:Default::default(),version:1,input:input.clone(),registers:vec![Register{name:input.clone(),len:n+m}],parameters:vec![],instructions:vec![],loss:None};
+        let mut loss_lower=Lower{program,sizes:HashMap::from([(input.clone(),n+m)]),types:HashMap::from([(loss.args[0].clone(),lower.program.output_type)]),next:0,loops:vec![],output:1};
         for (i,name) in loss.args.iter().enumerate() {
             loss_lower.register(name,if i==0 {n} else {m})?;
             loss_lower.program.instructions.push(I::Slice{out:name.clone(),input:input.clone(),start:i*n});
         }
         loss_lower.block(&loss.body).context("fn loss")?;
         ensure!(loss_lower.program.instructions.iter().any(|i| matches!(i,I::Return{..})),"loss requires a scalar return");
+        if !lower.program.output_type.is_plain() { loss_lower.program.version=2; }
         lower.program.loss=Some(Box::new(loss_lower.program));
     }
+    if !lower.program.output_type.is_plain() { lower.program.version=2; }
     Ok(lower.program)
 }
 // Endpoints are compile-time scalar arithmetic, never tensor values or host calls.
@@ -101,6 +103,7 @@ fn scalar_literal(expr: &Expr) -> Result<f32> {
 struct Lower {
     program: Program,
     sizes: HashMap<String,usize>,
+    types: HashMap<String, crate::categorical::VectorType>,
     next: usize,
     loops: Vec<(String,String)>,
     output: usize,
@@ -123,7 +126,20 @@ impl Lower {
         let out = self.fresh(); self.assign(&out,expr)?; Ok(out)
     }
     fn assign(&mut self, out:&str, expr:&Expr) -> Result<()> {
+        use crate::categorical::VectorType;
         if let Expr::BuiltinCall(name, args) = expr {
+            if name == "__probabilities" {
+                let [value] = args.as_slice() else { bail!(".probabilities expects one value") };
+                let input = self.value(value)?;
+                let kind = self.types.get(&input).copied().unwrap_or_default();
+                ensure!(kind != VectorType::F32, ".probabilities requires a logits[N] or probabilities[N] tensor");
+                self.register(out, self.size(&input)?)?;
+                self.program.instructions.push(if kind == VectorType::Logits {
+                    I::Softmax { out: out.into(), input }
+                } else { I::ValidateProbabilities { out: out.into(), input } });
+                self.types.insert(out.into(), VectorType::Probabilities);
+                return Ok(());
+            }
             return self.assign(out, &Expr::Call(name.clone(), args.clone()));
         }
         if let Expr::Mix(p,a,b)=expr {
@@ -250,7 +266,14 @@ impl Lower {
             },
             _ => bail!("forward expressions must produce explicitly shaped tensors")
         };
-        self.register(out,len)?;
+        let kind = match &instruction {
+            I::Slice { input, start: 0, .. } if self.size(input)? == len => self.types.get(input).copied().unwrap_or_default(),
+            I::Detach { input, .. } => self.types.get(input).copied().unwrap_or_default(),
+            I::Softmax { .. } => VectorType::Probabilities,
+            _ => VectorType::F32,
+        };
+        self.register(out, len)?;
+        self.types.insert(out.into(), kind);
         self.program.instructions.push(instruction); Ok(())
     }
     fn condition(&mut self, expr:&Expr, yes:String, no:String) -> Result<()> {

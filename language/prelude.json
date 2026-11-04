@@ -1962,6 +1962,43 @@
       "purpose": "Sequential activation preserving vector width.",
       "defaults": {},
       "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "__probabilities",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__probabilities(value)",
+      "purpose": "Compiler-only target for typed value.probabilities; source calls with __ prefix are rejected. Stable softmax for logits, strict validation and identity for probabilities, ordinary f32 rejected.",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "logits",
+      "kind": "type",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "output scores: logits[N]",
+      "purpose": "Finite, nonempty mutually exclusive category scores. Explicit output metadata survives model persistence and function values. .probabilities applies stable softmax along the category axis. Output declarations only; no binary logit type.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/categorical.rs"
+    },
+    {
+      "name": "probabilities",
+      "kind": "type",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "output choices: probabilities[N] / value.probabilities",
+      "purpose": "Finite mutually exclusive category vector, each value strictly in [0,1], sum within absolute 1e-5 of 1. Conversion validates and preserves values; no renormalization. Sampling scales by actual total mass and skips zero-mass entries. CPU native implementation; GPU categorical path not verified.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/categorical.rs"
     }
   ]
 }

@@ -26,7 +26,7 @@
 直接读取它驱动普通函数名称保留、参数数量检查及兼容别名；编辑器生成器从同一目录生成快照。
 `ordinary_function` 供解释与 AOT 共用；`tensor_forward` / `tensor_loss` 是独立张量转换契约，
 不能因名字出现在目录中就用于普通函数。`write` 等标注为语句，`positive` 只用于张量条件。
-目录也列出 `true`、`false`、`null` 常量及 `f32`、`prob` 声明类型；这些不是可调用函数。
+目录也列出 `true`、`false`、`null` 常量及 `f32`、`prob`、`logits`、`probabilities` 声明类型；这些不是可调用函数。
 `std/` 模块不自动导入，仍须按各模块的使用契约显式引入。
 
 ## 编译单元与入口
@@ -59,7 +59,7 @@ weightc compile examples/native_training/supervised.wgt -o .cache/weightlang/reg
 | --- | --- |
 | `model Name` | 一个模型名称，不得与函数或内置函数重名 |
 | `input x: f32[N]` | 一个输入，固定 N 为 1..16384，先于 layer |
-| `output y: f32[M]` | 一个输出，M 必须等于最后一层宽度 |
+| `output y: f32[M]` | 一个输出，M 必须等于最后一层宽度；互斥分类也可声明 `logits[M]` 或 `probabilities[M]`，见下文分类向量 |
 | `layer id: linear(in=N,out=M,bias=1)` | out 必填；in 默认前层宽度；bias 仅 0/1，默认 1；可用 `linear(M)` |
 | `layer id: relu` / `tanh` / `sigmoid` / `identity` | 不改变向量宽度，无参数 |
 | `init seed=N` | 必填、不可重复；N 为非负 u64；调用构造函数时进行均匀 Xavier 初始化，bias 为零 |
@@ -96,7 +96,7 @@ WGT 0.5 普通函数还支持 `let action = sample from net(input);`：`net` 必
 只接受一个输入表达式，按模型输入宽度转换为有限 f32 向量。模型查找在输入求值之前，输入只求值一次；
 不支持 `sample from factory()(x)`、限定名或任意模型表达式。括号属于采样语法，`net(input)` 不会先按普通调用执行；
 整个采样结果可继续参与索引、后缀或二元运算，必要时用括号分组。
-返回零基类别索引，范围为 `[0, output_width)` 的整数数值。模型输出按 logits 处理，用减最大值的 softmax 权重抽样；
+返回零基类别索引，范围为 `[0, output_width)` 的整数数值。模型输出按显式类型抽样：`logits[N]` 使用稳定 softmax，`probabilities[N]` 验证后按实际总质量抽样；旧 `f32[N]` 保持原有 logits 解释及 RNG 数值顺序；
 每次成功抽样消耗一次脚本 RNG，受 `seed` 和操作预算控制。它执行无 tape 推理，不提交 forward 中显式 `write`，
 不更新权重或优化器；普通 `net(input)` 则提交 forward 写入。forward/loss 中拒绝此离散表达式。
 旧 `sample(net,input)` 函数入口已移除，会提示迁移到 `sample from net(input)`；二选一 `sample p { ... }` 语法保留。
@@ -166,7 +166,7 @@ fn main() {
 ## 自更新前向函数
 
 同一个模型可用 `fn forward(x)` 定义有状态前向，替代 layer/init 声明。
-函数参数必须与 input 名称一致，input/output 仍使用相同的 `f32[N]` 端口语法。
+函数参数必须与 input 名称一致，input 使用 `f32[N]`；output 可使用 `f32[N]`、`logits[N]` 或 `probabilities[N]`。
 参数显式声明为 `parameter w: f32[O,I] = [...]` 或 `frozen w: f32[O,I] = [...]`；
 初值是行优先扁平有限 f32 数组，元素数必须与正整数形状匹配。
 自更新模型还可声明标量 `parameter p: prob = 0.7` 或 `frozen p: prob = 1`。
@@ -276,6 +276,46 @@ WGT 0.5 新增 `rsqrt(x)`、`fma(x,y,z)`、`hypot(x,y)`、`expm1(x)`、
 `mae(x,y)`、`cross_entropy(logits,target)`。向量是非空一维有限 f64 列表；
 双向量必须等长，eps>0，target 为合法零起始整数类别。参数无默认值。
 返回形状、数值与预算边界及完整示例见[向量算法](standard-library.md#向量算法)。
+
+### 互斥分类向量与 `expression.probabilities`
+
+`output scores: logits[N]` 表示 N 个互斥类别的有限实数分数；`output choices: probabilities[N]`
+表示已经计算好的类别概率。N 为固定整数 1..16384，只支持一个类别轴，不支持独立二分类 `logit[N]`。
+这两种类型仅用于输出声明；输入、权重和普通参数声明仍用原有类型，标量 `prob` 的语义不变。
+声明不会自动修改 forward 结果：logits 不自动 softmax，probabilities 不自动归一化。
+
+模型调用返回的向量携带真实类型，局部变量、普通函数参数和返回值保留该类型；模型和训练断点保存、加载、
+以及 AOT 也保留输出契约。带分类元数据的原生 Model/forward Program 使用 IR version 2；
+普通 f32 仍写 version 1 且省略类型字段，新运行时读取旧 version 1 时默认为 f32。
+旧运行时不能读取新分类制品，需要支持分类 IR v2 的运行时；这不是双向格式兼容。
+v1 夹带分类元数据或概率验证指令、未知未来版本和任意未知字段都明确拒绝。
+训练断点外层版本按既有契约，嵌入模型/Program 单独版本化。
+`net(x)` 仍提交显式 `write`，`sample from net(x)` 仍无梯度 tape 且丢弃 forward 写入。
+索引返回普通数值，切片返回普通列表；改变向量的算术/列表操作不自动推断类别类型。
+
+`scores.probabilities` 对 logits 沿唯一类别轴执行减最大值的稳定 softmax，返回有类型的 probabilities；
+已是 probabilities 时逐项验证后保持原值，不重复 softmax、不静默归一化。每项必须有限且严格在 [0,1]，
+总和使用 f64 累加，与 1 的绝对误差不得超过 **1e-5**；此容差覆盖最大支持宽度的 f32 softmax 舍入。
+空向量、非有限值、错误形状和非法概率都明确报错。普通 f32 向量不能使用该后缀，显式数学函数 `softmax(x)` 保留。
+后缀与索引从左向右结合，接在完整调用或括号之后，输入只求值一次，不受同名局部变量遮蔽。
+
+forward/loss 的预测参数保留输出类型，后缀转换可微：logits 使用 softmax Jacobian，probabilities 验证为恒等梯度。
+`log_softmax(prediction)` 仍直接消费 logits，交叉熵原有输入契约不变，不强制先 softmax 再 log。
+显式概率采样按实际总质量缩放一次 RNG 阈值，跳过零质量类别；这不修改存储向量。
+CPU 路径已实现，GPU 新类型路径未验证。完整示例见 [categorical/model.wgt](../examples/native_training/categorical/model.wgt)。
+
+```wgt
+wgt 0.5
+model Categories
+input x: f32[3]
+output scores: logits[3]
+fn forward(x) { return x; }
+fn main() {
+    let net = Categories("adam");
+    let scores = net([1000, 1000, -1000]);
+    return scores.probabilities;
+}
+```
 
 ### 后缀平均 `expression.mean`
 

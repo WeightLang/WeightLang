@@ -18,6 +18,18 @@ cargo build -p weightlang-wgt
 这不是超时、内存限额或内置训练算子的 FLOP 限制。内置文件操作可能阻塞。
 `wgt-native script` 使用相同默认预算，只接受文件及可选 `--check`。
 
+## 显式分类输出
+
+互斥类别输出可声明 `output scores: logits[N]` 或 `output choices: probabilities[N]`（N=1..16384）。
+`net(x)` 的返回值跨局部变量、函数参数和返回值保留类型，模型/训练断点保存加载与 AOT 也保留声明。
+`scores.probabilities` 对 logits 做减最大值的稳定 softmax；已是 probabilities 时验证并保持原值。
+概率每项须有限且在 [0,1]，f64 累加的总和与 1 绝对误差不超过 1e-5，不静默归一化。
+`sample from net(x)` 按显式类型转换或验证；概率路径按实际总质量缩放阈值并跳过零概率项。
+旧 f32 输出采样保持既有 logits 解释，普通 f32 的显式 `softmax(x)` 不变；独立二分类 logit 类型未实现。
+后缀转换支持 CPU 张量 loss 和梯度，`log_softmax(prediction)` 与交叉熵仍直接消费 logits，原有损失契约不变。
+GPU 新类型路径尚未验证。详见[分类向量参考](reference.zh-CN.md#互斥分类向量与-expressionprobabilities)，
+完整例子为 [categorical/model.wgt](../examples/native_training/categorical/model.wgt)。
+
 ## 语法与值
 
 首个非空、非注释行必须为 `wgt 0.5`。模型声明与下列函数属于同一种语言；完整模型声明和 forward 契约见[0.5 参考](reference.zh-CN.md)。旧模型、script、adaptive 版本头均拒绝。

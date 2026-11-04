@@ -62,6 +62,8 @@ pub fn split(source: &str) -> Result<Unit> {
 /// Static sequential graph plan. Weights are created only by an explicit constructor call.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Graph {
+    #[serde(default, skip_serializing_if = "crate::categorical::VectorType::is_plain")]
+    pub output_type: crate::categorical::VectorType,
     pub input: usize,
     pub seed: u64,
     pub layers: Vec<GraphLayer>,
@@ -70,16 +72,34 @@ pub struct Graph {
 pub struct GraphLayer { pub name: String, pub op: String, pub input: usize, pub output: usize, pub bias: bool }
 
 pub fn vector_port(body: &str) -> Result<(String, usize)> {
-    let (name, dtype) = body.split_once(':').context("port requires name: f32[N]")?;
-    let shape = dtype.trim().strip_prefix("f32[").and_then(|s| s.strip_suffix(']')).context("native vector execution requires f32[N]")?;
-    let n: usize = shape.trim().parse().context("native vector execution requires one fixed dimension")?;
+    let (name, n, kind) = typed_vector_port(body)?;
+    ensure!(kind == crate::categorical::VectorType::F32, "this port requires f32[N]; categorical types are output contracts");
+    Ok((name, n))
+}
+
+pub fn typed_vector_port(body: &str) -> Result<(String, usize, crate::categorical::VectorType)> {
+    use crate::categorical::VectorType;
+    let (name, dtype) = body.split_once(':').context("port requires name: type[N]")?;
+    let (kind, shape) = dtype.trim().split_once('[').context("native vector execution requires type[N]")?;
+    let kind = match kind {
+        "f32" => VectorType::F32,
+        "logits" => VectorType::Logits,
+        "probabilities" => VectorType::Probabilities,
+        _ => anyhow::bail!("native vector type must be f32, logits or probabilities"),
+    };
+    let shape = shape.strip_suffix(']').context("native vector execution requires type[N]")?;
+    let n: usize = shape
+        .trim()
+        .parse()
+        .context("native vector execution requires one fixed dimension")?;
     ensure!(n > 0 && n <= 16384, "native vector width must be 1..16384");
-    Ok((name.trim().into(), n))
+    Ok((name.trim().into(), n, kind))
 }
 
 pub fn graph(source: &str) -> Result<(String, Graph)> {
     let (mut name, mut input, mut output, mut seed) = (None, None, None, None);
     let mut layers = Vec::new();
+    let mut output_type = crate::categorical::VectorType::F32;
     let mut width = 0;
     let mut names = std::collections::HashSet::new();
     for (i, text) in source.lines().enumerate() {
@@ -90,7 +110,7 @@ pub fn graph(source: &str) -> Result<(String, Graph)> {
         match keyword {
             "model" => { ensure!(name.is_none(), "duplicate model"); name = Some(body.to_string()); },
             "input" => { ensure!(input.is_none() && layers.is_empty(), "input must precede layers and occur once"); width = vector_port(body)?.1; input = Some(width); },
-            "output" => { ensure!(output.is_none(), "duplicate output"); output = Some(vector_port(body)?.1); },
+            "output" => { ensure!(output.is_none(), "duplicate output"); let (_, n, kind) = typed_vector_port(body)?; output = Some(n); output_type = kind; },
             "init" => { ensure!(seed.is_none(), "duplicate init"); seed = Some(body.strip_prefix("seed=").context("native init requires seed=N")?.parse::<u64>()?); },
             "layer" => {
                 ensure!(width > 0, "input must precede layers");
@@ -130,7 +150,7 @@ pub fn graph(source: &str) -> Result<(String, Graph)> {
     ensure!(output == Some(width), "output contract mismatch");
     let total: usize = layers.iter().filter(|l| l.op == "linear").map(|l| l.input*l.output + usize::from(l.bias)*l.output).sum();
     ensure!(total <= 4_000_000, "native model exceeds 4 million parameters");
-    Ok((name.context("missing model")?, Graph { input: input.context("missing input")?, seed: seed.context("missing init seed")?, layers }))
+    Ok((name.context("missing model")?, Graph { output_type, input: input.context("missing input")?, seed: seed.context("missing init seed")?, layers }))
 }
 
 impl Graph {
@@ -151,6 +171,6 @@ impl Graph {
                 "identity" => Layer::Identity, _ => anyhow::bail!("invalid graph plan")
             });
         }
-        Ok(crate::Model { version:1, input:self.input, parameters, layers })
+        Ok(crate::Model { output_type:self.output_type, version:if self.output_type.is_plain(){1}else{2}, input:self.input, parameters, layers })
     }
 }

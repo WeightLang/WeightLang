@@ -41,7 +41,7 @@
     },
     {
       "name": "storage.type.wgt",
-      "match": "\\b(?:f32|prob)\\b"
+      "match": "\\b(?:f32|logits|prob|probabilities)\\b"
     },
     {
       "name": "constant.language.wgt",

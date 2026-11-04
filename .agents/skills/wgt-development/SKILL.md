@@ -27,6 +27,13 @@ examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原�
 
 - parameter p: prob = 0.7 使用可训练 logit，初值必须在 (0,1)；frozen p: prob = 1 支持精确端点。
   读取为 f32[1] 概率，底层参数/梯度暴露 logit；不得 write(prob) 或直接作为 linear 的参数。
+- 互斥类别输出可声明 `output scores: logits[N]` 或 `output choices: probabilities[N]`（N=1..16384）；只按真实 forward 语义声明，raw linear 输出使用 logits。模型返回、局部变量/函数参数、制品/训练断点和 AOT 保留类型。
+  `scores.probabilities` 对 logits 做减最大值稳定 softmax，对 probabilities 验证并保持原值；每项有限且严格 [0,1]，f64 累加总和绝对容差 1e-5，不静默归一化。
+  普通 f32 后缀拒绝，显式 `softmax(x)` 保留；独立二分类 logit 未实现，标量 prob 不变。loss 的 log_softmax/CE 仍直接消费 logits；CPU 梯度已实现，GPU 新类型路径未验证。
+  `sample from net(x)` 按声明转换/验证，新概率路径按实际总质量抽样并跳过零项；旧 f32 保持 logits 解释与原 RNG 规则，无 tape/不提交写入。
+  `let {action,log_prob}=sample from net(x);` 或字段别名 `action:a` 用同一次forward/RNG绑定动作和稳定自然对数概率；仅声明形式，字段/绑定不可重复。logits直接f64 log-sum-exp，probabilities返回log(p_action)-log(sum(p))，旧f32动作/RNG不变。例子 examples/native_training/sample_record/model.wgt。
+  完整例子 examples/native_training/categorical/model.wgt；契约 docs/reference.zh-CN.md、docs/native-training.md。
+- 普通函数文件IO用 `save KIND VALUE to PATH [overwrite];`、`load KIND from PATH`，KIND为text/json/model/checkpoint；load model必填using优化器，checkpoint恢复记录状态。父目录须存在，默认拒绝覆盖，显式overwrite只原子替换普通可写文件；64MiB/文件、按编码字节消耗operation budget，host policy下拒绝直接IO。JSON拒绝句柄/非有限数，UTF-8文本，JSONL继续流式batch/close。断言用`assert CONDITION [, MESSAGE];`，严格bool且仅失败求消息，旧assert(cond,msg)保持急求值兼容。详见docs/file-io.md与examples/native_training/file_io/model.wgt。
 - 普通 f32 权重不默认限制到 [0,1]；当前没有 0/1 布尔参数或自定义权重范围声明。区间含零不能防止除零，普通脚本的除零和非有限结果报错。
 - mix p { then { a } else { b } } 用于 forward/loss 张量混合，每支一个表达式。
   与 route 相同，推理在精确端点短路内联分支；训练/VJP 保留完整梯度。提前 let 的计算不会省略。

@@ -143,7 +143,9 @@
   ],
   "types": [
     "f32",
-    "prob"
+    "logits",
+    "prob",
+    "probabilities"
   ],
   "constants": [
     "false",

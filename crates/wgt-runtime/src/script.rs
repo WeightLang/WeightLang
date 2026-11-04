@@ -47,6 +47,7 @@ pub enum Value {
     Bool(bool),
     Null,
     List(Vec<Value>),
+    CategoricalVector(crate::categorical::VectorType, Vec<Value>),
     Object(BTreeMap<String, Value>),
     Model(usize),
     Adaptive(usize),
@@ -89,7 +90,7 @@ impl Value {
         }
     }
     pub fn list(&self) -> Result<&[Value]> {
-        if let Self::List(v) = self {
+        if let Self::List(v) | Self::CategoricalVector(_, v) = self {
             Ok(v)
         } else {
             bail!("expected list")
@@ -121,7 +122,7 @@ impl Value {
             Self::Text(s) => serde_json::json!(s),
             Self::Bool(b) => serde_json::json!(b),
             Self::Null => serde_json::Value::Null,
-            Self::List(v) => {
+            Self::List(v) | Self::CategoricalVector(_, v) => {
                 serde_json::Value::Array(v.iter().map(Self::json).collect::<Result<_>>()?)
             }
             Self::Object(v) => serde_json::Value::Object(
@@ -156,6 +157,17 @@ fn number(n: f64) -> Result<Value> {
 fn vector(v: Vec<f32>) -> Value {
     Value::List(v.into_iter().map(|n| Value::Number(n as f64)).collect())
 }
+fn typed_vector(v: Vec<f32>, kind: crate::categorical::VectorType) -> Result<Value> {
+    let values: Vec<f64> = v.iter().map(|x| *x as f64).collect();
+    if kind == crate::categorical::VectorType::Probabilities {
+        crate::categorical::validate_probabilities(&values)?;
+    } else {
+        crate::categorical::validate_finite(&values)?;
+    }
+    if kind == crate::categorical::VectorType::F32 { return Ok(vector(v)); }
+    Ok(Value::CategoricalVector(kind, values.into_iter().map(Value::Number).collect()))
+}
+
 pub type Env = HashMap<String, Value>;
 pub enum Flow {
     Next,
@@ -405,14 +417,22 @@ impl Runtime {
     /// Keep the original f32 subtraction, f64 exponentiation and single RNG draw unchanged.
     pub fn sample_model(&mut self, model: Value, input: Value) -> Result<Value> {
         self.tick()?;
-        let logits = if let Value::Adaptive(index) = model {
+        let (logits, kind) = if let Value::Adaptive(index) = model {
             let mut session = self.adaptive[index].lock()?;
             let result = session.evaluate(&input.vector()?, self.remaining);
             self.remaining = self.remaining.saturating_sub(session.steps());
-            result?
+            (result?, session.program().output_type)
         } else {
-            self.models[model.model()?].lock()?.predict(&input.vector()?)?
+            let mut session=self.models[model.model()?].lock()?;
+            let kind=session.session.output_type();
+            (session.predict(&input.vector()?)?,kind)
         };
+        if !kind.is_plain() {
+            let values:Vec<f64>=logits.iter().map(|x|*x as f64).collect();
+            let probabilities=crate::categorical::probabilities(kind,&values)?;
+            let action=crate::categorical::sample_probabilities(&probabilities,random(&mut self.rng))?;
+            return number(action as f64);
+        }
         let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let probabilities: Vec<f64> = logits.iter().map(|n| ((*n - max) as f64).exp()).collect();
         let mut draw = random(&mut self.rng) * probabilities.iter().sum::<f64>();
@@ -497,6 +517,19 @@ impl Runtime {
             .with_context(|| format!("{name}()"))
     }
     fn builtin(&mut self, name: &str, a: &[Value]) -> Result<Value> {
+        if name == "__probabilities" {
+            let [Value::CategoricalVector(kind, values)] = a else {
+                bail!(".probabilities requires logits[N] or probabilities[N]; use softmax(x) for an ordinary f32 vector")
+            };
+            let work = values.len() as u64;
+            ensure!(self.remaining >= work, "operation budget exhausted");
+            self.remaining -= work;
+            let input = values.iter().map(Value::number).collect::<Result<Vec<_>>>()?;
+            let output = crate::categorical::probabilities(*kind, &input)?;
+            return Ok(Value::CategoricalVector(crate::categorical::VectorType::Probabilities,
+                output.into_iter().map(Value::Number).collect()));
+        }
+
         let entry = prelude::builtin(name).with_context(|| format!("unknown function: {name}"))?;
         let arity = entry.arity.as_ref().expect("builtin arity in prelude");
         ensure!(
@@ -704,14 +737,14 @@ impl Runtime {
                         .run(&input, self.remaining)
                         .map(<[f32]>::to_vec);
                     self.remaining = self.remaining.saturating_sub(session.steps());
-                    return Ok(vector(result?));
+                    return typed_vector(result?, session.program().output_type);
                 }
                 let model = a[0].model()?;
                 let mut session = self.models[model].lock()?;
                 let expected = session.session.report().input;
                 ensure!(input.len() == expected,
                     "input shape mismatch: expected f32[{expected}], got f32[{}]", input.len());
-                Ok(vector(session.predict(&input)?))
+                { let kind=session.session.output_type(); typed_vector(session.predict(&input)?,kind) }
             }
             "fit" => {
                 if let Value::Adaptive(index) = a[0] {

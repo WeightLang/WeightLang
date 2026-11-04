@@ -15,6 +15,8 @@ pub mod optimization;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Program {
+    #[serde(default, skip_serializing_if = "crate::categorical::VectorType::is_plain")]
+    pub output_type: crate::categorical::VectorType,
     pub version: u32,
     pub input: String,
     pub registers: Vec<Register>,
@@ -92,6 +94,7 @@ pub enum Instruction {
         input: String,
     },
     Softmax { out: String, input: String },
+    ValidateProbabilities { out: String, input: String },
     Neg { out: String, input: String },
     Mean { out: String, input: String },
     Gate { out: String, probability: String, input: String },
@@ -171,7 +174,8 @@ fn names<'a>(items: impl Iterator<Item = &'a str>) -> Result<HashMap<String, usi
 
 impl AdaptiveSession {
     pub fn prepare(program: Program, budget_bytes: usize) -> Result<Self> {
-        ensure!(program.version == 1, "unsupported adaptive IR version");
+        ensure!(matches!(program.version, 1 | 2), "unsupported adaptive IR version");
+        ensure!(program.version >= 2 || (program.output_type.is_plain() && !program.instructions.iter().any(|i| matches!(i, Instruction::ValidateProbabilities { .. }))), "categorical output metadata and validation require adaptive IR version 2");
         ensure!(!program.instructions.is_empty(), "empty adaptive program");
         if let Some(loss) = &program.loss {
             ensure!(loss.loss.is_none() && loss.parameters.is_empty(), "loss must be a parameter-free tensor program");
@@ -329,6 +333,7 @@ impl AdaptiveSession {
                     | Instruction::Tanh { out, input }
                     | Instruction::Sigmoid { out, input }
                     | Instruction::Softmax { out, input }
+                    | Instruction::ValidateProbabilities { out, input }
                     | Instruction::Neg { out, input }
                     | Instruction::Relu { out, input } => {
                         let (r, x) = (dest(out)?, reg(input)?);
@@ -342,6 +347,7 @@ impl AdaptiveSession {
                             Instruction::Exp { .. } => 6,
                             Instruction::Log { .. } => 7,
                             Instruction::LogSoftmax { .. } => 8,
+                            Instruction::ValidateProbabilities { .. } => 9,
                             _ => 2,
                         };
                         Op::Unary(r, x, kind)
@@ -606,6 +612,7 @@ impl AdaptiveSession {
                 }
                 Op::Unary(r, x, kind) => {
                     self.ready(x)?;
+                    if kind == 9 { let values: Vec<f64> = self.registers[x].iter().map(|v| *v as f64).collect(); crate::categorical::validate_probabilities(&values)?; }
                     let max = if kind == 3 || kind == 8 { self.registers[x].iter().copied().fold(f32::NEG_INFINITY, f32::max) } else { 0. };
                     let total: f64 = if kind == 3 || kind == 8 { self.registers[x].iter().map(|v| (f64::from(*v) - f64::from(max)).exp()).sum() } else { 1. };
                     for (i, v) in self.registers[x].iter().enumerate() {
@@ -614,7 +621,7 @@ impl AdaptiveSession {
                             1 => 1. / (1. + (-v).exp()),
                             3 => ((f64::from(*v) - f64::from(max)).exp() / total) as f32,
                             4 => -v,
-                            5 => *v,
+                            5 | 9 => *v,
                             6 => v.exp(),
                             7 => v.ln(),
                             8 => (f64::from(*v)-f64::from(max)-total.ln()) as f32,
@@ -679,6 +686,7 @@ impl AdaptiveSession {
                 }
                 Op::Return(r) => {
                     self.ready(r)?;
+                    if self.program.output_type == crate::categorical::VectorType::Probabilities { let values: Vec<f64> = self.registers[r].iter().map(|v| *v as f64).collect(); crate::categorical::validate_probabilities(&values)?; }
                     return Ok((r, wrote));
                 }
             }

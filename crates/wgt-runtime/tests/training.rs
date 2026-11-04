@@ -78,6 +78,7 @@ fn analytic_gradients_match_finite_differences() {
 #[test]
 fn shared_parameters_accumulate_and_frozen_weights_stay_fixed() {
     let model = Model {
+        output_type: Default::default(),
         version: 1,
         input: 1,
         parameters: vec![

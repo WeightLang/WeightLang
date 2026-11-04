@@ -3,7 +3,7 @@ use super::*;
 
 pub fn index(object: Value, index: Value) -> Result<Value> {
     match object {
-        Value::List(v) => v
+        Value::List(v) | Value::CategoricalVector(_, v) => v
             .get(index.integer()?)
             .cloned()
             .context("list index out of bounds"),
@@ -28,7 +28,7 @@ pub(crate) fn slice_bounds(len: usize, start: Option<f64>, end: Option<f64>) -> 
 }
 
 pub fn slice(object: Value, start: Option<Value>, end: Option<Value>) -> Result<Value> {
-    let Value::List(values) = object else { bail!("slice requires list") };
+    let values = object.list()?;
     let (start, end) = slice_bounds(values.len(),
         start.as_ref().map(Value::number).transpose()?,
         end.as_ref().map(Value::number).transpose()?)?;

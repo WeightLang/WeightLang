@@ -241,7 +241,8 @@ impl Trainer {
             })
             .collect();
         Ok(Model {
-            version: 1,
+            output_type: self.session.output_type,
+            version: if self.session.output_type.is_plain() { 1 } else { 2 },
             input: self.session.report.input,
             parameters,
             layers,
@@ -393,6 +394,7 @@ pub fn mlp(widths: &[usize], activation: &str, seed: u64) -> Result<Model> {
         }
     }
     Ok(Model {
+        output_type: Default::default(),
         version: 1,
         input: widths[0],
         parameters,

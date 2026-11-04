@@ -481,9 +481,10 @@ impl Parser {
             ensure!(left.height() <= 128, "expression tree depth exceeds 128");
             if self.take(".") {
                 let operation = self.next()?;
-                ensure!(!operation.quoted && operation.text == "mean",
-                    "line {}: expected postfix mean", operation.line);
-                left = Expr::BuiltinCall("mean".into(), vec![left]);
+                ensure!(!operation.quoted && matches!(operation.text.as_str(), "mean" | "probabilities"),
+                    "line {}: expected postfix mean or probabilities", operation.line);
+                let name = if operation.text == "probabilities" { "__probabilities" } else { "mean" };
+                left = Expr::BuiltinCall(name.into(), vec![left]);
                 continue;
             }
             if self.take("[") {
