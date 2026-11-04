@@ -4,6 +4,8 @@
 
 ## attention 本地验证记录
 
+最终 IR 安全校验后，`wgt check` 已实际通过此专题中的完整 attention 模型；syntax-tour 中抽取的 T10/T11 也通过检查。`tensor-geometry.md` 与 learnable 专题中的三个完整模型均通过解析。workspace all-targets 构建报告 0 errors、4 warnings；standard/custom ops 相关检查 8 项通过。这些结果来自主会话实测记录。
+
 真实 service 的 native-cpu 路径完成 100 步 SGD，MSE 从 `0.046146184` 降至 `0.00000076705595`，并验证权重 roundtrip、同 SGD 续训和资源释放。debug 单机 1000 次 evaluate 共 `2.033213 ms`（约 `2.03 μs/次`，含返回 `Vec`）；managed tensor 计量为 1128 B，其中参数 96 B、tape 1056 B，charged work 为 98。这些数值只描述该次运行，不是 benchmark 优势、进程 RSS 或真实峰值内存。
 
 当前 kernel 使用朴素 f64 累加而非 BLAS，并复用 `AxisGroups`。将 `let k = q` 已验证输出和梯度相同且 work 更少；目前没有全局 CSE 或活跃区间复用，compiled workspace 各 register 常驻，session 仍保留 reference buffers，因此不宣称内存最优。

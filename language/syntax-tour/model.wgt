@@ -482,7 +482,7 @@ fn loss(prediction, target) {
 # transpose 仅 rank2；matmul [M,K]@[K,N]->[M,N]，无广播。
 # softmax(x,axis) 的 axis 是非负整常量，沿轴独立稳定归一化并用 f64 累加；softmax(x)/log_softmax(x) 仍为 rank1。
 # scale(x,literal) 接受有限有符号数值字面量，不广播并保持 shape。
-# 最终 IR 安全校验后的验证：core 7 suites/30 tests、真实 service 1 项、macro fixture 编译 1 项通过。
+# 最终 IR 安全校验后的验证：core 7 suites/30 tests、真实 service 1 项、macro fixture 编译 1 项通过；本文件 T01 与抽取 T10/T11 均通过 wgt check。
 # service native-cpu 100步 SGD：MSE 0.046146184 -> 0.00000076705595；权重 roundtrip、同 SGD 续训及资源释放通过。
 # 该验证只覆盖本固定 shape fixture，不表示完整 Transformer、多头 attention、动态 batch 或 GPU 已验证。
 # debug 单机 1000 次 evaluate 为 2.033213ms（约 2.03us/次，含返回 Vec）；managed tensor 1128B（参数96B、tape1056B），charged work 98。
