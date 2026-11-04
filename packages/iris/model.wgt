@@ -2,7 +2,7 @@ wgt 0.5
 model iris
 # 特征依次为萼片长/宽、花瓣长/宽，单位 cm；输出为三个类别的原始 logits。
 input features: f32[4]
-output logits: f32[3]
+output scores: logits[3]
 # 共享同一个模型句柄训练；各层独立权重。0.5 原生模型使用 tanh，不复用旧权重。
 layer hidden: linear(out=16)
 layer act: tanh
@@ -14,7 +14,7 @@ init seed=42
 fn accuracy(net, rows) {
     let correct = 0;
     for row in rows {
-        let logits = predict(net, row["input"]);
+        let logits = net(row["input"]);
         let best = 0;
         for i in range(1, 3) {
             if logits[i] > logits[best] { best = i; }

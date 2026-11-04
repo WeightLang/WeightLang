@@ -19,8 +19,8 @@ names mapped to 0/1/2, stratified split with seed 42, 40 train and 10 test per c
 shuffled; no feature normalization. JSONL migration preserves every row and label.
 
 ```sh
-weightc check packages/iris/iris.wgt
-weightc legacy-build packages/iris/iris.wgt -o weights/new-iris-05
+weightc check packages/iris/model.wgt
+weightc legacy-build packages/iris/model.wgt -o weights/new-iris-05
 wgt add weightlang/iris --version v0.5.0
 ```
 
