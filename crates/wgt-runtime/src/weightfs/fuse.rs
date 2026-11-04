@@ -72,6 +72,15 @@ impl Mount {
                 Err(e) => return Err(e.into()),
             }
         }
+        Self::mount_at(model, path, uid)
+    }
+
+    // Take ownership of the newly created directory before any fallible setup.
+    fn mount_at<T: Weights>(model: Arc<Mutex<T>>, path: PathBuf, uid: u32) -> Result<Self> {
+        let mut mount = Self {
+            path,
+            session: None,
+        };
         let entries = model
             .lock()
             .map_err(|_| anyhow::anyhow!("poisoned model"))?
@@ -84,9 +93,9 @@ impl Mount {
             uid,
             gid: unsafe { libc::getegid() },
         };
-        match fuser::Session::new(
+        let mut session = fuser::Session::new(
             filesystem,
-            &path,
+            &mount.path,
             &[
                 MountOption::FSName("weightfs".into()),
                 MountOption::Subtype("weightfs".into()),
@@ -95,28 +104,13 @@ impl Mount {
                 MountOption::NoDev,
                 MountOption::NoExec,
             ],
-        ) {
-            Ok(mut session) => {
-                let unmount = session.unmount_callable();
-                match std::thread::Builder::new()
-                    .name("weightfs".into())
-                    .spawn(move || session.run())
-                {
-                    Ok(thread) => Ok(Self {
-                        path,
-                        session: Some((unmount, thread)),
-                    }),
-                    Err(error) => {
-                        let _ = fs::remove_dir(&path);
-                        Err(error.into())
-                    }
-                }
-            }
-            Err(e) => {
-                let _ = fs::remove_dir(&path);
-                Err(e.into())
-            }
-        }
+        )?;
+        let unmount = session.unmount_callable();
+        let thread = std::thread::Builder::new()
+            .name("weightfs".into())
+            .spawn(move || session.run())?;
+        mount.session = Some((unmount, thread));
+        Ok(mount)
     }
 }
 impl Drop for Mount {
@@ -473,5 +467,46 @@ impl<T: Weights> Filesystem for WeightFs<T> {
     ) {
         self.handles.remove(&fh);
         reply.ok();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poisoned_model_removes_new_mount_directory() {
+        let parent = PathBuf::from("/tmp/weightlang");
+        fs::create_dir_all(&parent).unwrap();
+        let path = parent.join(format!(
+            "weightfs-poisoned-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&path).unwrap();
+        let model = crate::training::Trainer::new(
+            crate::training::mlp(&[1, 1], "identity", 42).unwrap(),
+            std::path::Path::new("."),
+            1048576,
+            crate::training::Optimizer::Sgd,
+        )
+        .unwrap();
+        let model = Arc::new(Mutex::new(model));
+        let shared = Arc::clone(&model);
+        assert!(std::thread::spawn(move || {
+            let _guard = shared.lock().unwrap();
+            panic!("poison the model lock");
+        })
+        .join()
+        .is_err());
+        // Failure occurs before FUSE is opened; no mount privileges are required.
+        let error = Mount::mount_at(model, path.clone(), 0).err().unwrap();
+        let removed = !path.exists();
+        if !removed {
+            fs::remove_dir(&path).unwrap();
+        }
+        assert_eq!(error.to_string(), "poisoned model");
+        assert!(removed, "failed setup must remove its new mount directory");
+        assert!(parent.is_dir(), "shared parent directory must be preserved");
     }
 }
