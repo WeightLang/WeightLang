@@ -337,6 +337,13 @@ impl Runtime {
                 let p=self.eval(p,env)?;
                 if self.draw_probability(p)? { self.eval(a,env) } else { self.eval(b,env) }
             }
+            Expr::SampleFrom(name, input) => {
+                self.tick()?; // Model lookup has the same budget cost as the former argument.
+                let model = env.get(name).cloned()
+                    .with_context(|| format!("undefined variable: {name}"))?;
+                let input = self.eval(input, env)?;
+                self.sample_model(model, input)
+            }
             Expr::Number(n) => number(*n),
             Expr::Text(s) => Ok(Value::Text(s.clone())),
             Expr::Bool(b) => Ok(Value::Bool(*b)),
@@ -390,6 +397,32 @@ impl Runtime {
             }
         }
     }
+    /// Categorical inference deliberately uses evaluate, which does not commit forward writes.
+    /// Keep the original f32 subtraction, f64 exponentiation and single RNG draw unchanged.
+    pub fn sample_model(&mut self, model: Value, input: Value) -> Result<Value> {
+        self.tick()?;
+        let logits = if let Value::Adaptive(index) = model {
+            let mut session = self.adaptive[index].lock()?;
+            let result = session.evaluate(&input.vector()?, self.remaining);
+            self.remaining = self.remaining.saturating_sub(session.steps());
+            result?
+        } else {
+            self.models[model.model()?].lock()?.predict(&input.vector()?)?
+        };
+        let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let probabilities: Vec<f64> = logits.iter().map(|n| ((*n - max) as f64).exp()).collect();
+        let mut draw = random(&mut self.rng) * probabilities.iter().sum::<f64>();
+        let mut action = logits.len() - 1;
+        for (i, p) in probabilities.iter().enumerate() {
+            draw -= p;
+            if draw <= 0. {
+                action = i;
+                break;
+            }
+        }
+        number(action as f64)
+    }
+
     pub fn draw_probability(&mut self, probability: Value) -> Result<bool> {
         let p=probability.number()?;
         ensure!(p.is_finite() && (0. ..=1.).contains(&p),"sample probability must be in [0,1]");
@@ -737,27 +770,6 @@ impl Runtime {
                     },
                     a[4].float()?,
                 )? as f64)
-            }
-            "sample" => {
-                let logits = if let Value::Adaptive(index)=a[0] {
-                    let mut session=self.adaptive[index].lock()?;
-                    let result=session.evaluate(&a[1].vector()?,self.remaining);
-                    self.remaining=self.remaining.saturating_sub(session.steps());
-                    result?
-                } else { self.models[a[0].model()?].lock()?.predict(&a[1].vector()?)? };
-                let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                let probabilities: Vec<f64> =
-                    logits.iter().map(|n| ((*n - max) as f64).exp()).collect();
-                let mut draw = random(&mut self.rng) * probabilities.iter().sum::<f64>();
-                let mut action = logits.len() - 1;
-                for (i, p) in probabilities.iter().enumerate() {
-                    draw -= p;
-                    if draw <= 0. {
-                        action = i;
-                        break;
-                    }
-                }
-                number(action as f64)
             }
             "gae" => {
                 let (rewards, values, next) = (a[0].vector()?, a[1].vector()?, a[2].vector()?);

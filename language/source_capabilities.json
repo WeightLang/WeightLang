@@ -16,5 +16,6 @@
   },
   "prelude": "language/prelude.json",
   "slicing": {"syntax": "x[start:end]", "bounds": "zero-based half-open; no clamping", "defaults": {"start": 0, "end": "length"}, "ordinary": "lists; runtime integer endpoints; empty allowed", "tensor": "1D f32; compile-time numeric endpoints; empty rejected", "steps": false, "negative_indices": false, "multi_axis": false, "legacy_slice": "slice(x,start,length) unchanged"},
+  "categorical_sampling": {"syntax": "sample from model(input)", "context": "ordinary_function", "model": "local model handle variable or function parameter", "input": "one expression evaluated once; finite f32 vector matching model input", "output": "zero-based categorical index from logits softmax", "forward_writes": "discarded", "optimizer_updates": false, "rng": "one script RNG draw per successful sample", "legacy_function": "sample(model,input) rejected with migration diagnostic"},
   "conformance": "language/conformance.json"
 }

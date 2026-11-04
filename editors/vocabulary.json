@@ -114,7 +114,6 @@
     "reverse",
     "route",
     "rsqrt",
-    "sample",
     "save",
     "save_checkpoint",
     "save_model",

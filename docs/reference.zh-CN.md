@@ -92,6 +92,16 @@ fn main() {
 
 ## 普通函数、训练与数据
 
+WGT 0.5 普通函数还支持 `let action = sample from net(input);`：`net` 必须是当前函数内的模型句柄变量或参数，
+只接受一个输入表达式，按模型输入宽度转换为有限 f32 向量。模型查找在输入求值之前，输入只求值一次；
+不支持 `sample from factory()(x)`、限定名或任意模型表达式。括号属于采样语法，`net(input)` 不会先按普通调用执行；
+整个采样结果可继续参与索引、后缀或二元运算，必要时用括号分组。
+返回零基类别索引，范围为 `[0, output_width)` 的整数数值。模型输出按 logits 处理，用减最大值的 softmax 权重抽样；
+每次成功抽样消耗一次脚本 RNG，受 `seed` 和操作预算控制。它执行无 tape 推理，不提交 forward 中显式 `write`，
+不更新权重或优化器；普通 `net(input)` 则提交 forward 写入。forward/loss 中拒绝此离散表达式。
+旧 `sample(net,input)` 函数入口已移除，会提示迁移到 `sample from net(input)`；二选一 `sample p { ... }` 语法保留。
+例如 `fn choose(net,x) { return sample from net(x); }`，可运行完整训练示例见 [reinforce/model.wgt](../examples/native_training/reinforce.wgt)。
+
 值包括有限数值、bool、字符串、null、列表、JSON 对象和不透明资源句柄。
 `let name = expr;` 绑定变量，`name = expr;` 修改已有绑定。
 支持函数调用、列表/对象索引、一元 `- !`、算术 `+ - * / %`、比较及短路 `&& ||`。

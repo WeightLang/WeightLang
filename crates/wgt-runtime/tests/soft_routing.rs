@@ -107,7 +107,7 @@ fn main() {
     assert(after<before*0.1,\"classification failed\");
     reinforce(m,[[-1],[1]],[0,1],[1,1],0.1);
     seed(42);
-    let action=sample(m,[1]);
+    let action=sample from m([1]);
     assert(action==0 || action==1,\"invalid sampled action\");
     return predict(m,[0]);
 }";

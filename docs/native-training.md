@@ -95,7 +95,7 @@ fn main() {
 | `fit(model,inputs,targets,lr,loss)` | 一个批次一次更新，返回更新前损失；lr 正有限；loss 为 mse/cross_entropy |
 | `train(model,inputs,targets,rate,max_norm)` | forward 自定义损失的批次平均梯度、全局 L2 裁剪及原子更新；等价 train 语句，见[原生 RL](reinforcement-learning.md) |
 | `reinforce(model,observations,actions,advantages,lr)` | 一批观测的策略梯度更新，返回更新前的 mean(-advantage*log pi(action)) |
-| `sample(model,observation)` | 将模型输出视为 logits，稳定 softmax 后由脚本 RNG 抽取动作索引；forward 模型使用无 tape 的端点短路推理，不提交 write |
+| `sample from model(observation)` | 将模型输出视为 logits，稳定 softmax 后由脚本 RNG 抽取动作索引；forward 模型使用无 tape 的端点短路推理，不提交 write |
 | `gae(rewards,values,next_values,terminated,truncated,gamma,lambda)` | 同长度一维列表；后两种标记是 bool，gamma/lambda 在 [0,1]；返回优势列表 |
 | `hf_dataset(dataset,config,split)` | Rust 原生 Hugging Face 分页数据流；全部参数必填，首次 batch 联网；HF_TOKEN 可选，详见 [数据集契约](datasets.md#原生数据集加载器wgt-05当前源码) |
 | `jsonl(path)` | 打开 UTF-8 JSON Lines 数据流；每行一个 JSON 值，不允许空行 |

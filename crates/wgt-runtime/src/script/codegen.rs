@@ -6,6 +6,10 @@ fn expr(e: &Expr) -> String {
     let value = match e {
         Expr::Mix(..) => "anyhow::bail!(\"mix is only available in tensor forward/loss functions\")".into(),
         Expr::Sample(p,a,b) => format!("{{ let p={}; if rt.draw_probability(p)? {{ {} }} else {{ {} }} }}",expr(p),expr(a),expr(b)),
+        Expr::SampleFrom(name, input) => format!(
+            "{{ rt.tick()?; let model = env.get({name:?}).cloned().context({error:?})?; let input = {input}; rt.sample_model(model, input)? }}",
+            error = format!("undefined variable: {name}"), input = expr(input)
+        ),
         Expr::Number(n) => format!("Value::Number({n:?})"),
         Expr::Text(s) => format!("Value::Text({s:?}.into())"),
         Expr::Bool(b) => format!("Value::Bool({b})"),

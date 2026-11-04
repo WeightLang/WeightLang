@@ -17,6 +17,7 @@ pub enum Expr {
     Unary(String, Box<Expr>),
     Binary(String, Box<Expr>, Box<Expr>),
     Sample(Box<Expr>, Box<Expr>, Box<Expr>),
+    SampleFrom(String, Box<Expr>),
     Mix(Box<Expr>, Box<Expr>, Box<Expr>),
 }
 impl Expr {
@@ -26,7 +27,7 @@ impl Expr {
             Self::Binary(_, a, b) | Self::Index(a, b) => a.height().max(b.height()),
             Self::Slice(x, start, end) => start.iter().chain(end.iter())
                 .map(|e| e.height()).fold(x.height(), usize::max),
-            Self::Unary(_, a) => a.height(),
+            Self::Unary(_, a) | Self::SampleFrom(_, a) => a.height(),
             Self::List(v) | Self::Call(_, v) | Self::BuiltinCall(_, v) => v.iter().map(Self::height).max().unwrap_or(0),
             _ => 0,
         }
@@ -390,6 +391,19 @@ impl Parser {
                     self.expect("]")?;
                     Expr::BuiltinCall("one_hot".into(), vec![self.expr(7)?, Expr::Number(classes as f64)])
                 }
+                "sample" if self.take("from") => {
+                    let model = self.next()?;
+                    ensure!(
+                        !model.quoted && !model.text.starts_with("__")
+                            && model.text.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                            && model.text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                        "line {}: sample from requires a model handle variable", model.line
+                    );
+                    self.expect("(")?;
+                    let mut args = self.arguments(")")?;
+                    ensure!(args.len() == 1, "sample from expects exactly one input expression");
+                    Expr::SampleFrom(model.text, Box::new(args.remove(0)))
+                }
                 "mix" | "sample" if t.text=="mix" || self.sample_block() => {
                     let sampling=t.text=="sample";
                     let probability = self.expr(0)?;
@@ -408,6 +422,7 @@ impl Parser {
                     if sampling { Expr::Sample(Box::new(probability),Box::new(yes),Box::new(no)) }
                     else { Expr::Mix(Box::new(probability),Box::new(yes),Box::new(no)) }
                 }
+                "sample" => bail!("line {}: sample(model, input) was removed; use sample from model(input)", t.line),
                 "true" => Expr::Bool(true),
                 "false" => Expr::Bool(false),
                 "null" => Expr::Null,

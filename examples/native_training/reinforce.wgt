@@ -16,7 +16,7 @@ fn main() {
         let actions = [];
         let rewards = [];
         for episode in range(0, 32) {
-            let action = sample(policy, [1]);
+            let action = sample from policy([1]);
             observations = append(observations, [1]);
             actions = append(actions, action);
             rewards = append(rewards, environment(action));

@@ -59,7 +59,7 @@ wgt run examples/native_training/soft_routing.wgt --compiled
   完整示例：[prob_mix_loss.wgt](../examples/native_training/prob_mix_loss.wgt)。
 - `reinforce(model,observations,actions,advantages,lr)`：forward 模型支持相同的策略梯度目标；
   advantage 是外部常量，不反传进环境或抽样决策。
-- `sample(model,observation)`：forward 模型输出 logits，经 softmax 抽样；不提交 forward 写回，
+- `sample from model(observation)`：forward 模型输出 logits，经 softmax 抽样；不提交 forward 写回，
   使用无 tape 的短路推理，只消耗脚本 RNG 和指令预算，不更新模型或优化器。
 - `predict(model,input)`：保持已有语义，执行并提交 forward 的显式 write；不执行优化器。
 
@@ -118,7 +118,7 @@ fit 按批次轴取平均，targets 为目标声明宽度（未声明则同输�
 普通 main/辅助函数可写 `sample p { then { a } else { b } }`；p 是有限 f64 且在 [0,1]，
 先且仅求值 p 一次，只执行选中的表达式，返回其结果。分支可嵌套、可选尾随分号，无块内 let/return。
 p=0/1 不消耗随机数，否则从 seed/random 的同一局部流抽取一次，按 random()<p 选择 then。
-支持括号概率表达式 `sample (p+q) {...}`，现有 `sample(model,observation)` 调用不变。
+支持括号概率表达式 `sample (p+q) {...}`，类别采样使用 `sample from model(observation)`，旧 `sample(model,observation)` 已移除。
 这是离散采样，不隐式反传；在 forward/loss 中使用明确报错。策略梯度仍由 reinforce 显式接收动作/优势。
 完整例子：[sample_branch.wgt](../examples/native_training/sample_branch.wgt)。
 

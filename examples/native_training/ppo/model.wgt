@@ -38,8 +38,8 @@ fn main() {
         for episode in range(0, 24) {
             let x0 = [1,0];
             let x1 = [0,1];
-            let a0 = sample(policy, x0);
-            let a1 = sample(policy, x1);
+            let a0 = sample from policy(x0);
+            let a1 = sample from policy(x1);
             let v0 = predict(critic, x0)[0];
             let v1 = predict(critic, x1)[0];
             let reward = environment(a0, a1);

@@ -32,7 +32,7 @@ script/prelude.rs 直接消费它，编辑器快照由它生成，领域实现�
   `slice(x,start,length)` 保持旧张量长度语义：`slice(x,1,1)` 等价 `x[1:2]`。
   契约见 docs/reference.zh-CN.md；可运行例子 examples/native_training/slicing/model.wgt。
 - sample p { then { a } else { b } } 仅用于普通函数，概率为 [0,1] 标量，仅执行一边。
-  seed 控制 RNG，精确端点不抽随机数；forward/loss 中拒绝，既有 sample(model,observation) 保留。
+  seed 控制 RNG，精确端点不抽随机数；forward/loss 中拒绝，类别采样使用 sample from model(observation)，旧 sample(model,observation) 已移除。
 - mix/sample 分支可嵌套、可选尾随分号，不支持块内 let/return；普通 if 仍要求 bool。
 
 完整可运行例子：examples/native_training/prob_mix_loss.wgt、sample_branch.wgt、lazy_routing.wgt。

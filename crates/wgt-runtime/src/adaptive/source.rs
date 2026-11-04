@@ -159,7 +159,7 @@ impl Lower {
                 ensure!(start < end, "empty tensor slices are unsupported (tensor shapes must be nonzero)");
                 (I::Slice { out: out.into(), input: x, start }, end - start)
             },
-            Expr::Sample(..) => bail!("sample blocks are discrete host expressions; use mix for differentiable forward/loss"),
+            Expr::Sample(..) | Expr::SampleFrom(..) => bail!("sample expressions are discrete host expressions; use mix for differentiable forward/loss"),
             Expr::Unary(op,x) if op=="-" => {
                 let x=self.value(x)?; let len=self.size(&x)?;
                 (I::Neg{out:out.into(),input:x},len)

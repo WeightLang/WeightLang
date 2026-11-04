@@ -18,7 +18,7 @@ fn main() {
     let selected = predict(model, [1, 1e20]);
     assert(selected[0] > 1e19, "unused branch was evaluated");
     # 抽样也走无 tape 的推理短路；这里只有一个输出类别，必定返回索引 0。
-    assert(sample(model, [1, 1e20]) == 0, "sample evaluated unused branch");
+    assert(sample from model([1, 1e20]) == 0, "sample evaluated unused branch");
     # p=0 时真正执行右侧专家，不做近似概率阈值处理。
     let other = predict(model, [0, 1]);
     assert(other[0] > 1e29, "selected branch was skipped");

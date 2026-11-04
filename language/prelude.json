@@ -1279,23 +1279,6 @@
       "implementation": "crates/wgt-runtime/src/script.rs"
     },
     {
-      "name": "sample",
-      "kind": "function",
-      "contexts": [
-        "ordinary_function"
-      ],
-      "signature": "sample(model,observation)",
-      "purpose": "将模型输出视为 logits，稳定 softmax 后由脚本 RNG 抽取动作索引；forward 模型使用无 tape 的端点短路推理，不提交 write",
-      "documentation": "docs/native-training.md",
-      "arity": {
-        "min": 2,
-        "max": 2
-      },
-      "defaults": {},
-      "implementation": "crates/wgt-runtime/src/script.rs",
-      "status": "legacy; retained until an equivalent categorical syntax is available"
-    },
-    {
       "name": "gae",
       "kind": "function",
       "contexts": [
