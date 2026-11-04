@@ -1,0 +1,5 @@
+{"split":"train","input":[-1],"target":[-1]}
+{"split":"test","input":[-0.5],"target":[0]}
+{"split":"train","input":[0],"target":[1]}
+{"split":"test","input":[0.25],"target":[1.5]}
+{"split":"train","input":[1],"target":[3]}
