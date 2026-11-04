@@ -7,6 +7,7 @@ const grammar = path.join(root, 'editors/tree-sitter-wgt');
 const run = (bin, args, cwd = root) => execFileSync(bin, args, {cwd, encoding: 'utf8'});
 run(process.execPath, ['scripts/generate_editor_support.cjs', '--check']);
 console.log(run('tree-sitter', ['test'], grammar));
+console.log(run(process.execPath, ['scripts/test_source_conformance.cjs']));
 function wgtFiles(dir) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, {withFileTypes: true}).flatMap(entry => {

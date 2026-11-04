@@ -687,6 +687,22 @@
     "fields": {}
   },
   {
+    "type": "operators_declaration",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "parameter",
     "named": true,
     "fields": {
@@ -832,6 +848,10 @@
         },
         {
           "type": "model_declaration",
+          "named": true
+        },
+        {
+          "type": "operators_declaration",
           "named": true
         },
         {
@@ -1064,6 +1084,10 @@
   },
   {
     "type": "on",
+    "named": false
+  },
+  {
+    "type": "operators",
     "named": false
   },
   {

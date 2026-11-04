@@ -138,6 +138,12 @@ node scripts/test_editor_support.cjs
 修改生成器及 scripts/editor-templates/，不要直接修改生成的词表、TextMate、Vim、Emacs、
 Kate、GtkSourceView 或高亮查询。Tree-sitter 结构规则在 grammar.js；结构变更后提交生成的 C/JSON。
 编辑器解析器允许部分旧语法以便阅读迁移材料，不替代 weightc check。
+`operators NAME` 有独立声明节点，`target` 与 `operators` 均标记为关键字。
+`.5`、`//` 等宽松词法规则仅用于编辑器结构恢复，不表示 Rust 接受这些源码表达式。
+[上下文规格](../language/source_capabilities.json) 与[共同语料](../language/conformance.json)
+分别声明 Rust 接受与编辑器结构接受的预期；语义负例无需在编辑器中产生 ERROR。
+运行 `cargo test -p weightlang-runtime --test source_conformance` 验证 Rust 一侧，
+`node scripts/test_source_conformance.cjs` 验证编辑器一侧（也包含在编辑器总检查中）。
 
 测试覆盖具体 TextMate scope、仓库源码遍历、Tree-sitter 语料和四种查询。
 新增 0.5 样例覆盖训练循环、自更新 forward、嵌套花括号、逻辑运算与字符串转义。

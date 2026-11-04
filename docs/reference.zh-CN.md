@@ -9,6 +9,16 @@
 `std/` 根目录的旧图源码作为迁移材料保留，不能因为文件头改为 0.5 就宣称可执行；
 分类子目录中的原生标准库示例可单独运行，完整目录见[标准库](standard-library.md)。不支持的声明显式报错，不回退 Python。
 
+## 语法与能力边界的机器可读规格
+
+[上下文能力规格](../language/source_capabilities.json) 记录当前源码 edition、解析入口及普通函数、
+张量 forward/loss、模型声明和编辑器的边界；[共同正负语料](../language/conformance.json)
+由 Rust 与编辑器本地测试共同读取。这是已测试边界的有限规格，不是完整内置函数表。
+普通函数与 forward/loss 共用函数 parser，但张量 lowering（转换为张量指令）另行限制表达式、
+控制流与形状；顶层模型声明由独立解析入口处理。函数解析成功不代表运行时调用有效。
+[primitive_specs.json](../language/primitive_specs.json) 描述制品 graph 原语，供制品验证使用，
+不能当作当前源码全部可调用内置函数的清单，也不改变旧制品的读取兼容性。
+
 ## 编译单元与入口
 
 首个非空、非注释行必须恰好是 `wgt 0.5`，版本头只能出现一次。

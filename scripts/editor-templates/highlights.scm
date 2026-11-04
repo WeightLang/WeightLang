@@ -6,7 +6,7 @@
 (operator) @operator
 (punctuation) @punctuation.delimiter
 ["(" ")" "[" "]" "{" "}"] @punctuation.bracket
-["fn" "model" "block" "layer" "input" "output" "const" "dim"] @keyword
+["fn" "model" "operators" "block" "layer" "input" "output" "target" "const" "dim"] @keyword
 ["wgt" "require" "use" "import" "inherit" "freeze" "unfreeze" "data" "init" "train" "config" "parameter" "share" "adapter" "frozen" "precision" "wtype" "weight" "return"] @keyword
 (clause) @keyword
 (script_keyword) @keyword

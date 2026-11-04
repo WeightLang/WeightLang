@@ -5,6 +5,10 @@ description: 编写和验证本仓库当前原生 WGT 0.5 模型、训练与概�
 
 以 docs/reference.zh-CN.md、docs/differentiable-programs.md 和 Rust 实现为准；不是已发布功能承诺。
 只接受 wgt 0.5，模型、forward、loss 和 main 可在同文件；执行不得依赖 Python。
+语境能力见 language/source_capabilities.json；共同正负语料在 language/conformance.json。
+函数共用 parser 不表示普通 fn 与 tensor forward/loss 语义相同；模型声明独立解析。
+language/primitive_specs.json 是制品 graph 原语域，不是源码内置表。编辑器容错不证明源码有效。
+本地运行 cargo test -p weightlang-runtime --test source_conformance 与 node scripts/test_source_conformance.cjs。
 
 - parameter p: prob = 0.7 使用可训练 logit，初值必须在 (0,1)；frozen p: prob = 1 支持精确端点。
   读取为 f32[1] 概率，底层参数/梯度暴露 logit；不得 write(prob) 或直接作为 linear 的参数。

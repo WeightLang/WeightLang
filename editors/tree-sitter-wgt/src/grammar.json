@@ -62,6 +62,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "operators_declaration"
+        },
+        {
+          "type": "SYMBOL",
           "name": "block_declaration"
         },
         {
@@ -261,6 +265,23 @@
           "content": {
             "type": "SYMBOL",
             "name": "_item"
+          }
+        }
+      ]
+    },
+    "operators_declaration": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "operators"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
           }
         }
       ]

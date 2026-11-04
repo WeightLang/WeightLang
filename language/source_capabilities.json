@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "source_edition": "0.5",
+  "release_status": "unreleased",
+  "scope": "Tested context boundaries, not an exhaustive builtin or grammar specification",
+  "domains": {
+    "source": {"authority": ["crates/wgt-runtime/src/source.rs", "crates/wgt-runtime/src/script/parse.rs", "crates/wgt-runtime/src/adaptive/source.rs"]},
+    "artifact_graph": {"specification": "language/primitive_specs.json", "consumer": "crates/wgt/src/primitives.rs", "source_builtin_catalog": false}
+  },
+  "contexts": {
+    "ordinary_function": {"parser": "script/parse.rs", "values": "finite f64, bool, string, null, lists and runtime handles", "validation": "parsing does not resolve every runtime call"},
+    "tensor_forward": {"parser": "script/parse.rs", "lowering": "adaptive/source.rs", "values": "fixed f32 vectors", "for_loop": false, "sample_expression": false},
+    "tensor_loss": {"parser": "script/parse.rs", "lowering": "adaptive/source.rs", "result": "f32[1]", "sample_expression": false},
+    "model_declaration": {"parser": "source.rs", "shares_function_parser": false},
+    "editor": {"parser": "editors/tree-sitter-wgt/grammar.js", "validation": "balanced structure with recovery; does not enforce edition, call validity or tensor semantics"}
+  },
+  "conformance": "language/conformance.json"
+}
