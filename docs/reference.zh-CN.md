@@ -27,9 +27,9 @@
 
 ## 无需 import 的内置入口
 
-[language/prelude.json](../language/prelude.json) 是唯一手写内置目录，集中名称、签名、默认值、
-用途、适用上下文与实现路径。Rust 的 [script/prelude.rs](../crates/wgt-runtime/src/script/prelude.rs)
-直接读取它驱动普通函数名称保留、参数数量检查及兼容别名；编辑器生成器从同一目录生成快照。
+[std/prelude.wgt](../std/prelude.wgt) 是公开原生函数与张量 intrinsic 的权威声明源，集中参数、默认值、上下文、用途和 Rust 实现绑定。
+语法、类型、常量、顺序层及内部 lowering 保存在 [language/prelude_metadata.json](../language/prelude_metadata.json)，合并生成 [language/prelude.json](../language/prelude.json) 供注册和编辑器读取。
+`native` 声明没有 WGT 函数体，仅专用声明前端接受，普通源码拒绝。`wgt check` 支持声明模块，构建强校验完整契约且不执行声明。详见[预导入声明](prelude.md)。
 `ordinary_function` 供解释与 AOT 共用；`tensor_forward` / `tensor_loss` 是独立张量转换契约，
 不能因名字出现在目录中就用于普通函数。`write` 等标注为语句，`positive` 只用于张量条件。
 目录也列出 `true`、`false`、`null` 常量及 `f32`、`prob`、`logits`、`probabilities` 声明类型；这些不是可调用函数。
@@ -104,8 +104,8 @@ fn main() {
     # 构造只初始化；以下所有步共享同一组参数。
     let net = Regression("adam");
     for step in range(0, 100) {
-        # fit 输入为 [样本, 特征]，MSE 对样本与输出元素取平均。
-        fit(net, [[0], [1]], [[1], [3]], 0.03, "mse");
+        # 输入按 [样本, 特征] 排列；MSE 对样本与输出元素取平均。
+        train net on [[0], [1]] against [[1], [3]] { rate: 0.03; loss: mse; };
     }
     return net([1]);
 }
@@ -207,7 +207,7 @@ checkpoint 使用保存的优化器。值、路径各求值一次；相对路径
 
 训练、流式 JSONL、强化学习、保存与 benchmark 的完整内置签名、默认值及限制见
 [原生训练](native-training.md#内置接口)。常用模型调用为 `net(input)`；显式训练使用
-`fit(model,inputs,targets,rate,loss)`，不会由推理调用隐式触发。
+`train model on inputs against targets {rate:rate; loss:mse;}`，不会由推理调用隐式触发。表达式形式返回更新前的 f32 批次平均损失；`rate` 必填，`loss` 默认 `mse`，也可选 `cross_entropy` 或 `loss`。`clip` 可选且当前仅 CPU 支持。旧 `fit(...)` / `train(...)` 调用和 tuple 训练形式拒绝。
 
 ### 统一括号切片 `x[start:end]`
 
@@ -250,7 +250,7 @@ fn main() {
 WGT 0.5 新增 `devices()`、`training_device(model,device,memory_bytes,max_batch)`、
 `training_status(model)`、`wgsl_kernel(source,entry,device,memory_bytes)`、
 `wgsl_run(kernel,input,output_count,workgroups)`，参数全部必填，没有隐式设备回退。
-顺序模型可显式选择 GPU 执行 fit/reinforce；forward/loss 程序仍仅 CPU。
+顺序模型可显式选择 GPU 执行 MSE、交叉熵和 REINFORCE 训练；forward/loss 程序仍仅 CPU。
 自定义 WGSL 为普通函数的显式计算，不参与自动求导；固定一维 f32 输入/输出缓冲，
 workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 完整签名、设备/预算限制、宿主策略、AOT、有效例子见 [原生 WGSL 与 GPU 训练](wgsl.md)。
@@ -291,7 +291,7 @@ workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 
 局部张量的长度由表达式推导，重复赋值不能改变长度；输入不可覆盖。
 同一模型内 forward 与 layer 不混用。模型通过 `Name(optimizer)` 构造，optimizer 必填
-`"none"`、`"sgd"` 或 `"adam"`；后两者允许 `fit` / `reinforce` 优化整个已执行 forward 的非冻结初始参数。
+`"none"`、`"sgd"` 或 `"adam"`；后两者允许声明式 `train` / `reinforce` 优化整个已执行 forward 的非冻结初始参数。
 普通 `handle(input)` 执行并提交成功写入；失败回滚，步数计入外层操作预算。
 无需 `register`、标签、`jump` 或 `branch` 源码指令，这些仅存在于内部 IR。
 
@@ -303,7 +303,7 @@ workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 比较使用精确 0/1，无 0.999 等近似阈值。混合向量门不会按元素拆分专家执行。
 forward 中也可写 `mix p { then { a } else { b } }`，等价于 `route(p,a,b)`；
 分支内各为一个张量表达式，可选尾随分号。`mix` 和 `then` 是保留名称。
-fit/reinforce 和显式 VJP 记录梯度时仍计算两边，包括 frozen 门，以保留完整数学梯度。
+train/reinforce 和显式 VJP 记录梯度时仍计算两边，包括 frozen 门，以保留完整数学梯度。
 短路示例：[lazy_routing/model.wgt](../examples/native_training/lazy_routing/model.wgt)。
 路由选择梯度为 a-b，门梯度为 x；标量门梯度在特征轴求和。
 普通 if 保持硬分支；源文件文本、宿主函数、I/O 和离散控制决策不因此可微。
@@ -321,11 +321,11 @@ forward 工作内存、`resource_state()` 和普通脚本的 `execution_start/re
 
 ## 静态用户训练策略
 
-`train MODEL on (INPUTS,TARGETS) using STRATEGY;` 调用同编译单元的同步普通用户函数
+`train MODEL on INPUTS against TARGETS using STRATEGY;` 调用同编译单元的同步普通用户函数
 `fn STRATEGY(model,inputs,targets)`，恰好三参，支持前向声明；拒绝内置函数、模型构造器、缺失函数、错误形参数与async函数。
-目标静态绑定声明，不受局部同名值影响；三个实参从左到右各求值一次，策略只调用一次，return由语句丢弃。
-没有默认超参、函数值或捕获；超参写在策略函数内，using与rate/clip不能混用，既有rate/clip语句保持可用。
-策略自行决定differentiate/at/commit及更新次数，语句不隐式优化、额外提交或重试；每个commit原子，整个策略函数不自动回滚。
+目标静态绑定声明，不受局部同名值影响；三个实参从左到右各求值一次，策略只调用一次，并返回策略实际结果。
+返回值限纯数据，允许 null，最大嵌套深度 32、计量 1 MiB，拒绝资源句柄；超参写在策略函数内，using与配置块不能混用。
+策略自行决定differentiate/at/commit及更新次数，语句不隐式提交或重试；每个commit原子，整个策略函数不自动回滚，失败不撤销此前成功的显式提交。
 完整例子 [train_strategy/model.wgt](../examples/native_training/train_strategy/model.wgt) 及限制见
 [原生训练](native-training.md#静态训练策略-train--using)。本语法不使普通host函数自动可微，也不扩展GPU训练范围。
 
@@ -502,7 +502,7 @@ q 在 [0,1]，裁剪边界有限且有序；余弦要求等长非零向量。
 `log_cosh(x,y)`、`diff(x)`、`ema(x,alpha)`、`moving_mean(x,window)`。
 激活处理有限 f64 标量；其余接受非空一维有限 f64 列表。所有参数必填；
 完整参数范围、形状、公式与计费见[分段激活、稳健损失与信号处理](standard-library.md#分段激活稳健损失与信号处理)。
-这些普通脚本函数不新增声明式图层支持、张量梯度或 `fit` 训练目标。
+这些普通脚本函数不新增声明式图层支持、张量梯度或训练目标。
 
 ## 概率与分支语法的完整契约
 
@@ -510,7 +510,7 @@ q 在 [0,1]，裁剪边界有限且有序；余弦要求等长非零向量。
 `sample p { then { a } else { b } }` 及 `fn loss(prediction,target)` 的参数、表示、梯度、
 执行边界和可运行例子统一见[可微程序语法](differentiable-programs.md#概率混合自定义损失与采样语法)。
 forward/loss 新增 `square(x)`（等长平方）、`mean(x)`（唯一向量轴平均为 f32[1]）、
-等长逐元素 `a-b` 和 `-a`；全部无默认参数或广播。自定义损失通过 `fit(...,"loss")` 调用，
+等长逐元素 `a-b` 和 `-a`；全部无默认参数或广播。自定义损失通过训练配置块的 `loss: loss` 调用，
 其表达式与模型共同求导；普通 sample 块不建立梯度图，forward/loss 中明确拒绝。
 
 数据标准库新增 `zeros(count)`、`ones(count)`、`full(count,value)`、
@@ -531,16 +531,15 @@ N 为 1..1000000 整数字面量，index 是运行时 [0,N) 整数；优先级�
 所有参数必填，输入非空一维有限 f64 列表；双分布必须等长，温度有限且>0。
 分布逐项在 [0,1]，总和允许 1e-9 绝对误差，计算前修正该误差；任意权重须显式归一化。
 零概率、公式、预算和例子见[概率分布分析](standard-library.md#概率分布分析)。
-这些是普通脚本分析函数，不提供张量自动微分或新的 `fit` 目标。
+这些是普通脚本分析函数，不提供张量自动微分或新的训练目标。
 
 现有路由示例优先使用 `mix`；独立可训练标量门使用 `prob`。固定类别数的独热编码优先写 `onehot[N] index`，动态类别数保留 `one_hot(index,classes)`。
 
 ## 原生 RL 训练语法
 
-当前 WGT 0.5 支持 `train MODEL on (INPUTS,TARGETS) rate RATE clip MAX_NORM;`，
-等价 `train(model,inputs,targets,rate,max_norm)`，函数形式返回更新前批次平均损失。
-所有参数必填，仅含 fn loss 且使用 sgd/adam 的 forward 模型支持；rate/max_norm 为有限正 f32。
-整批求导取平均、全局 L2 梯度裁剪，然后原子提交一次更新；失败不改变参数或优化器。
+当前 WGT 0.5 内置训练使用 `train MODEL on INPUTS against TARGETS {rate:RATE; loss:LOSS; clip:MAX_NORM;}`；
+`rate` 必填且为有限正 f32，`loss` 默认 mse，可选 mse/cross_entropy/loss，`clip` 可选。
+表达式形式返回更新前 f32 批次平均损失。自定义 `fn loss` 和全局 L2 梯度裁剪目前仅 CPU forward 训练支持；裁剪后原子提交一次更新，失败不改变参数或优化器。
 `target NAME: f32[N]` 可指定损失第二参数宽度（1..16384），NAME 须匹配 fn loss 第二形参；
 未声明时沿用输出宽度。它不改变 forward 输入，也不改变内置 MSE 的目标契约。
 新增 forward/loss 数字向量字面量、detach、exp、log、log_softmax、sum、minimum、clip。

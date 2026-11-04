@@ -13,13 +13,13 @@ init seed=42
 fn graph_and_training_share_one_compilation_unit_and_weights() {
     let source = format!(
         "{GRAPH}
-fn loss(model) {{ return fit(model, [[0], [1]], [[1], [3]], 0.05, \"mse\"); }}
+fn loss(model) {{ return train model on [[0], [1]] against [[1], [3]] {rate:0.05;loss:mse;}; }}
 fn main() {{
     let model = Regression(\"sgd\");
     let before = loss(model);
     for step in range(0, 300) {{ loss(model); }}
     let after = loss(model);
-    assert(after < before * 0.001, \"training did not update declared model\");
+    assert after < before * 0.001, \"training did not update declared model\";
     return model([1]);
 }}"
     );

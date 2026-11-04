@@ -36,7 +36,7 @@ fn native_release_roundtrip_verifies_source_weights_checkpoint_and_lock() {
         "module github.com/example/native\nwgt 0.5\n",
     )
     .unwrap();
-    let text="wgt 0.5\nmodel Net\ninput x: f32[1]\noutput y: f32[1]\nlayer fc: linear(out=1)\ninit seed=7\nfn main() { let net = Net(\"sgd\"); fit(net, [[0]], [[1]], 0.1, \"mse\"); return net; }";
+    let text="wgt 0.5\nmodel Net\ninput x: f32[1]\noutput y: f32[1]\nlayer fc: linear(out=1)\ninit seed=7\nfn main() { let net = Net(\"sgd\"); train net on [[0]] against [[1]] {rate:0.1;loss:mse;}; return net; }";
     fs::create_dir(project.join("net")).unwrap();
     fs::write(project.join("net/model.wgt"), text).unwrap();
     for args in [

@@ -1,5 +1,7 @@
 //! Source prelude registry. Domain implementations remain in their own modules.
-//! `language/prelude.json` is the single handwritten catalog, also consumed by editors.
+//! Public callables originate in `std/prelude.wgt`; the generated JSON also serves editors.
+#[path = "prelude_declarations.rs"]
+pub mod declarations;
 use serde::Deserialize;
 use std::sync::LazyLock;
 
@@ -50,7 +52,7 @@ pub fn migration(name: &str) -> Option<&'static str> {
         "save" | "save_checkpoint" | "checkpoint" => "save checkpoint net to path;",
         "load" | "restore" | "load_checkpoint" => "load checkpoint from path",
         "assert" => "assert condition, message;",
-        "train" => "train net on (inputs, targets) rate learning_rate clip max_norm;",
+        "train" => "train net on inputs against targets { loss: loss; rate: learning_rate; clip: max_norm; };",
         _ => return None,
     })
 }

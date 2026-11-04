@@ -13,16 +13,17 @@ description: 编写和验证本仓库当前原生 WGT 0.5 模型、训练与概�
 连续声明 `let a=expr, b=expr;` 在共用 parser 展开为原有 Stmt::Let 序列；从左到右各求值一次，后项可引用前项，无整组回滚。host/async/forward/loss 继承原有作用域和重名规则；纯 operator 在支持它的工作区同样展开。嵌套调用/列表/record 的逗号不分隔声明；无元组/新赋值语法或尾逗号，sample 解构及 collect/learn 须独立声明。完整例子 examples/native_training/continuous_let/model.wgt；验证 tests/continuous_let.rs 与真实 AOT。
 函数共用 parser 不表示普通 fn 与 tensor forward/loss 语义相同；模型声明独立解析。
 language/primitive_specs.json 是制品 graph 原语域，不是源码内置表。编辑器容错不证明源码有效。
-无需 import 的函数、张量 intrinsic、常量和声明类型统一登记在 language/prelude.json；
-script/prelude.rs 直接消费它，编辑器快照由它生成，领域实现路径见各 entry。
+公开原生函数与张量 intrinsic 的权威声明在 std/prelude.wgt；语法、类型、常量与内部接口在 language/prelude_metadata.json。
+修改后运行 node scripts/generate_prelude.cjs 和 node scripts/generate_editor_support.cjs，生成 language/prelude.json 供运行时和编辑器消费。
+构建和 wgt check std/prelude.wgt 校验完整契约；native 声明没有 WGT 实现体，不能写在普通源码中。完整契约见 docs/prelude.md。
 普通函数与 tensor 上下文分开登记，不自动引入 std 模块。
 原生异步第一阶段见 docs/async-tasks.md 与 examples/native_training/async_tasks/model.wgt：async fn调用冷future，tasks作用域spawn、await只等目标并轮询兄弟任务，作用域join/取消并等待在途IO清理。
 仅纯数据参数/返回值，嵌套async await可用；拒绝嵌套tasks、async内spawn/tasks、模型等资源参数/返回、host/compute活跃上下文。await net(x)没有异步模型执行路径，不能宣称支持。
 资源预算见 docs/compute-budget.md：WGT_HOST_POLICY 单次解析，权限/HTTP/状态共用资源初始化前固定的绝对截止时间；子scope只收紧，错误退出恢复原父deadline与上限但不退已消费额度。HTTP仅固定授权端点GET，不跟重定向、不带环境代理/认证，剩余不足1ms拒绝；不提供POST/SSE/共享异步网络账本或完整沙箱。真实AOT验证用 crates/wgt/tests/resource_execution.rs，不能用compiled::run替代生成二进制。
 await sleep(ms)与await load text from path通过固定两线程/64队列阻塞池执行；文本最多64MiB，metadata后按大小预留共享操作预算，worker按实际字节结算，未用预留恰一次归还。解释/AOT均须真实运行，不把解析通过当并发支持；AOT生成原生future，不回放AST。
-`train model on (inputs,targets) using strategy;` 静态调用同单元同步用户fn strategy(model,inputs,targets)，
-三参各求值一次且左至右、策略调用一次，忽略return；局部同名值不覆盖静态目标，拒绝builtin/构造器/async/错误形参。
-超参写在策略体内，与rate/clip互斥；策略决定零/一/多次显式commit，无额外提交、重试或整函数自动回滚。
+`train model on inputs against targets using strategy` 静态调用同单元同步用户fn strategy(model,inputs,targets)，
+三参各求值一次且左至右、策略调用一次并返回实际结果；局部同名值不覆盖静态目标，拒绝builtin/构造器/async/错误形参。
+结果限纯数据，允许null，最大深度32、计量1MiB，拒绝资源句柄。超参写在策略体内，与配置块互斥；策略决定零/多次显式commit，无隐式提交或重试；失败不撤销已成功commit。
 例examples/native_training/train_strategy/model.wgt；完整契约docs/native-training.md。
 CPU forward 自定义算法：以 none 构造，differentiate(model,inputs,targets) 对受限 fn loss 求批次平均梯度；
 gradient_snapshot(handle) 提供loss/parameters/gradients/names/shapes/state/steps，普通WGT循环自行计算候选参数和状态，
@@ -60,7 +61,7 @@ examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原�
 - 普通 f32 权重不默认限制到 [0,1]；当前没有 0/1 布尔参数或自定义权重范围声明。区间含零不能防止除零，普通脚本的除零和非有限结果报错。
 - mix p { then { a } else { b } } 用于 forward/loss 张量混合，每支一个表达式。
   与 route 相同，推理在精确端点短路内联分支；训练/VJP 保留完整梯度。提前 let 的计算不会省略。
-- fn loss(prediction,target) 是无模型参数的张量损失，返回 f32[1]；显式 fit(m,x,y,lr,"loss") 或 train 才训练。
+- fn loss(prediction,target) 是无模型参数的张量损失，返回 f32[1]；配置 `loss: loss` 的声明式 train 才执行该自定义训练。
   支持 mean、square、减法与已有张量算子；不是任意宿主函数自动微分。
   平均可写 `x.mean`、`square(prediction-target).mean`，等价 `mean(x)`；后缀优先于一元/二元运算。
   普通函数接受非空一维有限 f64 列表并返回标量；forward/loss 的 f32[N] 归约为可微 f32[1]。
@@ -101,9 +102,9 @@ KL/交叉熵 p>0 且 q=0 报错，JS 支持不相交分布。无张量梯度或�
 
 更新既有代码时，route 可等价改写为 mix；独立标量 logit=0 的门可用 prob=0.5 并去掉读取处的 sigmoid。输入相关的 sigmoid(linear(...)) 保留。固定类别独热使用 onehot[N]；模型类别采样目标语法为 decode，待实现后迁移示例。
 
-原生 RL：`train model on (inputs,targets) rate lr clip max_norm;` 等价 train(model,inputs,targets,lr,max_norm)，仅 forward + fn loss，sgd/adam，正有限 lr/max_norm；全批次平均梯度做全局 L2 裁剪后原子更新。`target NAME: f32[N]` 指定 loss 第二形参宽度/名称，默认同输出，不增加 forward 输入。forward/loss 支持有限数字向量常量、detach、exp、log、log_softmax、sum、minimum（相等各半梯度）、clip（有符号字面量边界、端点零梯度）。全部无广播/默认值。完整契约 docs/reinforcement-learning.md，运行例子 examples/native_training/ppo/model.wgt；不支持单独 backward/step、跨调用梯度对象、环境/RNG 全进程续训。
+原生 RL：`train model on inputs against targets {rate:lr; loss:loss; clip:max_norm;}` 使用内置配置块，表达式返回更新前 f32 批次平均损失；rate必填，loss默认mse，可选mse/cross_entropy/loss，clip可选且仅CPU支持。仅 forward + fn loss 使用loss目标，sgd/adam；全批次平均梯度做全局 L2 裁剪后原子更新。旧fit/train调用和tuple形式拒绝。`target NAME: f32[N]` 指定 loss 第二形参宽度/名称，默认同输出，不增加 forward 输入。forward/loss 支持有限数字向量常量、detach、exp、log、log_softmax、sum、minimum（相等各半梯度）、clip（有符号字面量边界、端点零梯度）。全部无广播/默认值。完整契约 docs/reinforcement-learning.md，运行例子 examples/native_training/ppo/model.wgt；不支持单独 backward/step、跨调用梯度对象、环境/RNG 全进程续训。
 
-GPU/WGSL（本地 WGT 0.5）：devices() 枚举 CPU 与硬件 GPU；training_device(model,id,memory_bytes,max_batch) 为顺序模型选择训练后端，training_status(model) 返回实际 device/steps/inference_device/state。fit/reinforce 支持 GPU MSE/CE/REINFORCE + SGD/Adam；forward/loss 仍只在 CPU，predict 仍 CPU。wgsl_kernel(source,entry,id,memory_bytes) 编译字符串，wgsl_run(kernel,input,output_count,[x,y,z]) 调度固定 group0/binding0 只读输入、binding1 读写输出的 f32 缓冲；不参与自动求导、不支持 NPU。启用宿主策略或 compute_budget 时拒绝直接 GPU 训练/WGSL。检查与 AOT 编译不执行 GPU；AOT 继承 gpu feature。完整契约 docs/wgsl.md，真实例子 examples/native_training/gpu/model.wgt 与 wgsl/model.wgt。训练事务合并一次提交并复用同尺寸设备缓冲，每步仍上传和回读；不要声称跨步权重常驻。
+GPU/WGSL（本地 WGT 0.5）：devices() 枚举 CPU 与硬件 GPU；training_device(model,id,memory_bytes,max_batch) 为顺序模型选择训练后端，training_status(model) 返回实际 device/steps/inference_device/state。声明式 train/reinforce 支持 GPU MSE/CE/REINFORCE + SGD/Adam；forward/loss 仍只在 CPU，推理仍 CPU。wgsl_kernel(source,entry,id,memory_bytes) 编译字符串，wgsl_run(kernel,input,output_count,[x,y,z]) 调度固定 group0/binding0 只读输入、binding1 读写输出的 f32 缓冲；不参与自动求导、不支持 NPU。启用宿主策略或 compute_budget 时拒绝直接 GPU 训练/WGSL。检查与 AOT 编译不执行 GPU；AOT 继承 gpu feature。完整契约 docs/wgsl.md，真实例子 examples/native_training/gpu/model.wgt 与 wgsl/model.wgt。训练事务合并一次提交并复用同尺寸设备缓冲，每步仍上传和回读；不要声称跨步权重常驻。
 
 ## 原生测试与评估
 

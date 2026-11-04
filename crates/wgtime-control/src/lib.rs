@@ -115,6 +115,7 @@ impl Runtime {
                 .collect();
             return (function.body)(self, &mut env);
         }
+        ensure!(name != "model", "model(...) loading was removed; use load model from path using optimizer");
         if name == "responses_next" {
             ensure!(
                 self.async_state.context.is_some(),
@@ -165,7 +166,7 @@ impl Runtime {
                     self.strategies.insert(key, strategy);
                     strategy
                 };
-                self.client.call(Request::ExecuteStrategy {
+                let reply = self.client.call(Request::ExecuteStrategy {
                     handle: model.handle,
                     strategy,
                     inputs: serde_json::from_value(args[3].data()?.clone())?,
@@ -173,7 +174,7 @@ impl Runtime {
                     operations: 1_000_000,
                     memory: 256 * 1024 * 1024,
                 })?;
-                Ok(Value::Data(Json::Null))
+                Ok(Value::Data(reply.get("result").context("strategy response missing result")?.clone()))
             }
             "__graph" => {
                 ensure!(args.len() == 2, "graph constructor requires optimizer");
@@ -188,16 +189,16 @@ impl Runtime {
             }
             "__adaptive" => {
                 ensure!(
-                    args.len() == 2 && args[1].text()? == "none",
-                    "adaptive client first slice requires optimizer none"
+                    args.len() == 2,
+                    "adaptive constructor requires optimizer"
                 );
-                let reply = self.client.call(Request::CreateProgram {
+                let reply = self.client.call(Request::CreateTrainingProgram {
                     program: serde_json::from_str(args[0].text()?)?,
                     memory: 256 * 1024 * 1024,
+                    optimizer: args[1].text()?.into(),
                 })?;
-                Ok(Value::Model(ModelLease {
-                    handle: reply["handle"].as_u64().context("missing handle")?,
-                }))
+                let handle = reply["handle"].as_u64().context("missing handle")?;
+                Ok(Value::Model(ModelLease { handle }))
             }
             "mlp" => {
                 ensure!(args.len() == 4, "mlp requires four arguments");
@@ -218,19 +219,20 @@ impl Runtime {
                     handle: reply["handle"].as_u64().context("missing handle")?,
                 }))
             }
-            "fit" => {
-                ensure!(
-                    args.len() == 5 && args[4].text()? == "mse",
-                    "client first slice supports fit MSE only"
-                );
+            "__train_step" => {
+                ensure!(args.len() == 4, "training requires four lowered arguments");
+                let options = args[3].data()?.as_object().context("expected training options")?;
+                let rate = options.get("rate").and_then(Json::as_f64).context("training requires rate")? as f32;
+                let loss = options.get("loss").and_then(Json::as_str).unwrap_or("mse").to_owned();
+                let clip = options.get("clip").map(|v| v.as_f64().context("clip must be numeric").map(|v| v as f32)).transpose()?;
                 let Value::Model(model) = &args[0] else {
                     bail!("expected model lease")
                 };
-                let reply = self.client.call(Request::Train {
+                let reply = self.client.call(Request::TrainStep {
                     handle: model.handle,
                     inputs: serde_json::from_value(args[1].data()?.clone())?,
-                    targets: serde_json::from_value(args[2].data()?.clone())?,
-                    rate: args[3].number()? as f32,
+                    targets: args[2].data()?.clone(),
+                    rate, loss, clip,
                 })?;
                 Ok(Value::Data(reply["loss"].clone()))
             }
@@ -346,6 +348,7 @@ pub fn entry_at(functions: Vec<(&'static str, Function)>, root: &str) -> Result<
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--root" => { runtime.root = args.next().context("missing root")?.into(); }
             "--max-operations" => {
                 runtime.remaining = args.next().context("missing operations")?.parse()?;
             }

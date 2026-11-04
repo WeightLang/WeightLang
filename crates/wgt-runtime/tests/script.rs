@@ -19,7 +19,7 @@ fn main() {
   sum=sum+twice(i);
  }
  while sum<20 {sum=sum+1;}
- assert(false && missing() == 0 || true,"short circuit");
+ assert false && missing() == 0 || true, "short circuit";
  return sum;
 }"#
         ),
@@ -93,19 +93,19 @@ fn main() {
  let m=mlp([1,1],"identity",4,"adam");
  let stream=jsonl("data.jsonl");
  let rows=batch(stream,8);
- assert(len(rows)==1,"tail batch");
- assert(len(batch(stream,8))==0,"EOF");
+ assert len(rows)==1, "tail batch";
+ assert len(batch(stream,8))==0, "EOF";
  close(stream);
- for i in range(0,20) {fit(m,column(rows,"input"),column(rows,"target"),0.1,"mse");}
- save_checkpoint(m, "checkpoint.json");
- save_model(m,"model.json");
- let restored=load_checkpoint("checkpoint.json");
- let inference=load_model("model.json", "sgd");
- assert(m([1])==restored([1]),"checkpoint weights");
- assert(m([1])==inference([1]),"inference weights");
- fit(m,[[1]],[[3]],0.1,"mse");
- fit(restored,[[1]],[[3]],0.1,"mse");
- assert(m([1])==restored([1]),"optimizer resume");
+ for i in range(0,20) {train m on column(rows,"input") against column(rows,"target") {rate:0.1;loss:mse;};}
+ save checkpoint m to "checkpoint.json";
+ save model m to "model.json";
+ let restored=load checkpoint from "checkpoint.json";
+ let inference=load model from "model.json" using "sgd";
+ assert m([1])==restored([1]), "checkpoint weights";
+ assert m([1])==inference([1]), "inference weights";
+ train m on [[1]] against [[3]] {rate:0.1;loss:mse;};
+ train restored on [[1]] against [[3]] {rate:0.1;loss:mse;};
+ assert m([1])==restored([1]), "optimizer resume";
  return true;
 }"#;
     assert_eq!(run(source, &root, 100000).unwrap().result, true);

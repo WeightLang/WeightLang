@@ -11,15 +11,15 @@ agent Actor {policy;learner:update;}
 environment Counter {observation:f32[1];action:f32[1];feedback:f32[1];reset:reset_counter;step:step_counter;}
 fn reset_counter(state,seed){return {state:state,observation:[state]};}
 fn step_counter(state,action){let next=state+action[0];return {state:next,observation:[next],feedback:[next],terminated:next>=2,truncated:false};}
-fn update(actor,batch){let policy=actor.policy;train policy on (batch.x,batch.y) rate 0.1 clip 1;return len(batch);}
+fn update(actor,batch){let policy=actor.policy;train policy on batch.x against batch.y {rate:0.1;clip:1;loss:loss;};return len(batch);}
 "#;
 #[test]
 fn native_agent_default_learner_and_environment_instances_run() {
  let source=format!(r#"{DECL}
 fn main(){{let policy=Policy("sgd");let actor=Actor(policy);let env=Counter(0,7);let other=Counter(10,8);
- assert(env.observation==[0],"constructor reset");assert(other.observation==[10],"instance isolation");
- let first=env.step([1]);assert(!first.terminated && !first.truncated,"ongoing");let second=env.step([1]);assert(second.terminated,"done");
- assert(env.reset()==[0],"reset");let action=actor.act([1]);assert(action>=0 && action<2,"act");
+ assert env.observation==[0], "constructor reset";assert other.observation==[10], "instance isolation";
+ let first=env.step([1]);assert !first.terminated && !first.truncated, "ongoing";let second=env.step([1]);assert second.terminated, "done";
+ assert env.reset()==[0], "reset";let action=actor.act([1]);assert action>=0 && action<2, "act";
  let report=learn actor {{yield {{x:[1],y:[1,0]}};}};return [report,policy([1]),other.observation];}}"#);
  let result=script::run(&source,Path::new("."),100000).unwrap().result;
  assert_eq!(result[0],serde_json::json!(1.));assert_eq!(result[2],serde_json::json!([10.]));
@@ -43,9 +43,9 @@ fn environment_rng_is_independent_and_reset_repeats_the_seed() {
  .replace("let next=state+action[0];","let next=state+random();");
  let source=format!(r#"{source}
 fn main(){{seed(91);let host=random();seed(91);let a=Counter(0,7);let b=Counter(0,7);
- assert(random()==host,"host RNG changed");assert(a.observation==b.observation,"same seed reset");
- let first=a.observation;let x=a.step([0]);let y=b.step([0]);assert(x==y,"instance streams");
- assert(a.reset()==first,"reset seed repeat");return true;}}"#);
+ assert random()==host, "host RNG changed";assert a.observation==b.observation, "same seed reset";
+ let first=a.observation;let x=a.step([0]);let y=b.step([0]);assert x==y, "instance streams";
+ assert a.reset()==first, "reset seed repeat";return true;}}"#);
  assert_eq!(script::run(&source,Path::new("."),100000).unwrap().result,true);
 }
 

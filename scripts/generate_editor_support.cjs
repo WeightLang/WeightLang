@@ -7,7 +7,7 @@ const prelude = JSON.parse(read('language/prelude.json')).entries;
 // The snapshot is generated, never a second handwritten builtin registry.
 const nativeBuiltins = prelude.filter(e => e.kind === 'function' && e.contexts.includes('ordinary_function')).map(e => e.name).sort();
 const vocabulary = {
-  keywords: 'agent environment learn assert async await spawn tasks sleep break checkpoint collect continue else fn for from frozen if import in init input json layer let load mix model onehot operators output overwrite parameter reload return sample save size text then to train on rate clip target using wgt while yield'.split(' '),
+  keywords: 'agent environment learn assert async await spawn tasks sleep break checkpoint collect continue else fn for from frozen if import in init input json layer let load mix model onehot operators output overwrite parameter reload return sample save size text then to train on against rate clip target using wgt while yield'.split(' '),
   builtins: [...new Set(prelude.filter(e => ['function', 'intrinsic', 'layer'].includes(e.kind)).map(e => e.name))].sort(),
   types: prelude.filter(e => e.kind === 'type').map(e => e.name).sort(),
   constants: prelude.filter(e => e.kind === 'constant').map(e => e.name).sort(),

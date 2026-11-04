@@ -73,7 +73,13 @@ impl AdaptiveSession {
             remaining,
             tape_budget,
             LossMode::Builtin,
+            None,
         )
+    }
+
+    pub fn train_builtin_clipped(&mut self, inputs: &[Vec<f32>], objective: Objective<'_>, rate: f32, clip: Option<f32>, remaining: &mut u64, tape_budget: usize) -> Result<f32> {
+        ensure!(clip.is_none_or(|v| v.is_finite() && v > 0.), "gradient clip norm must be positive and finite");
+        self.train_step_impl(inputs, objective, rate, remaining, tape_budget, LossMode::Builtin, clip)
     }
 
     pub fn train_custom(
@@ -91,6 +97,7 @@ impl AdaptiveSession {
             remaining,
             tape_budget,
             LossMode::Custom { clip: None },
+            None,
         )
     }
 
@@ -115,6 +122,7 @@ impl AdaptiveSession {
             remaining,
             tape_budget,
             LossMode::Custom { clip: Some(clip) },
+            None,
         )
     }
 
@@ -126,6 +134,7 @@ impl AdaptiveSession {
         remaining: &mut u64,
         tape_budget: usize,
         mode: LossMode,
+        builtin_clip: Option<f32>,
     ) -> Result<f32> {
         self.ensure_mutable()?;
         self.ensure_idle()?;
@@ -240,7 +249,7 @@ impl AdaptiveSession {
             loss.is_finite() && gradients.iter().flatten().all(|v| v.is_finite()),
             "nonfinite loss or gradient"
         );
-        if let LossMode::Custom { clip: Some(limit) } = mode {
+        if let Some(limit) = match mode { LossMode::Custom { clip } => clip, LossMode::Builtin => builtin_clip } {
             let norm = gradients
                 .iter()
                 .flatten()

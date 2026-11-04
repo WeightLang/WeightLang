@@ -166,23 +166,49 @@ impl Connection {
                     serde_json::json!({"output": trainer.predict(&input)?, "steps": trainer.steps()}),
                 )
             }
-            Request::Train {
-                handle,
-                inputs,
-                targets,
-                rate,
-            } => {
-                ensure!(
-                    !inputs.is_empty() && inputs.len() <= 65536,
-                    "invalid batch size"
-                );
-                let trainer = &mut self
-                    .sessions
-                    .get_mut(&handle)
-                    .context("unknown session or foreign owner")?
-                    .0;
-                let loss = trainer.step(&inputs, Objective::Mse(&targets), rate)?;
-                Ok(serde_json::json!({"loss": loss, "steps": trainer.steps()}))
+            Request::CreateTrainingProgram { program, memory, optimizer } => {
+                ensure!(self.adaptive.len()+self.sessions.len()<64 && memory>0 && memory<=MAX_SESSION_BYTES && self.reserved.checked_add(memory).is_some_and(|n| n<=MAX_CONNECTION_BYTES), "program admission budget exceeded");
+                ensure!(matches!(optimizer.as_str(), "none"|"sgd"|"adam"), "unknown optimizer");
+                let mut session = weightlang_runtime::adaptive::AdaptiveSession::prepare(serde_json::from_value(program)?, memory)?;
+                match optimizer.as_str() { "sgd"=>session.set_optimizer(Optimizer::Sgd)?, "adam"=>session.set_optimizer(Optimizer::Adam)?, _=>{} }
+                let handle = shared.next.fetch_add(1, Ordering::Relaxed);
+                self.adaptive.insert(handle,(session,memory));
+                self.reserved += memory;
+                Ok(serde_json::json!({"handle":handle}))
+            }
+            Request::TrainStep { handle, inputs, targets, rate, loss, clip } => {
+                ensure!(!inputs.is_empty() && inputs.len() <= 65536, "invalid batch size");
+                ensure!(rate.is_finite() && rate > 0., "learning rate must be positive and finite");
+                ensure!(clip.is_none_or(|v| v.is_finite() && v > 0.), "gradient clip norm must be positive and finite");
+                ensure!(matches!(loss.as_str(), "mse" | "cross_entropy" | "loss"), "unknown training loss");
+                let matrix: Vec<Vec<f32>> = if loss == "cross_entropy" { Vec::new() } else { serde_json::from_value(targets.clone())? };
+                let actions: Vec<usize> = if loss == "cross_entropy" {
+                    let classes = if let Some((session,_)) = self.adaptive.get(&handle) {session.output_len()}
+                        else {self.sessions.get(&handle).context("unknown session or foreign owner")?.0.session.report().output};
+                    targets.as_array().context("class targets must be a list")?.iter().map(|value| {
+                        if let Some(index)=value.as_u64() {
+                            let index=usize::try_from(index).context("class index out of range")?;
+                            ensure!(index<classes,"class index out of range");Ok(index)
+                        } else {
+                            let index=value.as_f64().context("class index must be numeric")?;
+                            ensure!(index.is_finite() && index>=0. && index.fract()==0. && index<(classes as f64),"class index must be an integer within output classes");
+                            Ok(index as usize)
+                        }
+                    }).collect::<Result<Vec<_>>>()?
+                } else { Vec::new() };
+                let advantages = vec![1.; inputs.len()];
+                let objective = || if loss == "cross_entropy" { Objective::Policy { actions: &actions, advantages: &advantages } } else { Objective::Mse(&matrix) };
+                let value = if let Some((session, _)) = self.adaptive.get_mut(&handle) {
+                    let mut remaining = 10_000_000;
+                    if loss == "loss" {
+                        if let Some(limit) = clip { session.train_clipped(&inputs, &matrix, rate, limit, &mut remaining, 64*1024*1024)? }
+                        else { session.train_custom(&inputs, &matrix, rate, &mut remaining, 64*1024*1024)? }
+                    } else { session.train_builtin_clipped(&inputs, objective(), rate, clip, &mut remaining, 64*1024*1024)? }
+                } else {
+                    ensure!(loss != "loss", "custom loss requires a forward model with fn loss");
+                    self.sessions.get_mut(&handle).context("unknown session or foreign owner")?.0.step_clipped(&inputs, objective(), rate, clip)?
+                };
+                Ok(serde_json::json!({"loss":value}))
             }
             Request::Drop { handle } => {
                 let bytes = if let Some((_, bytes)) = self.sessions.remove(&handle) {
@@ -226,25 +252,6 @@ impl Connection {
                 self.sessions.insert(handle, (trainer, memory));
                 self.reserved += memory;
                 Ok(serde_json::json!({"handle":handle}))
-            }
-            Request::CreateProgram { program, memory } => {
-                ensure!(
-                    self.adaptive.len() + self.sessions.len() < 64
-                        && memory > 0
-                        && memory <= MAX_SESSION_BYTES
-                        && self
-                            .reserved
-                            .checked_add(memory)
-                            .is_some_and(|n| n <= MAX_CONNECTION_BYTES),
-                    "program admission budget exceeded"
-                );
-                let program = serde_json::from_value(program)?;
-                let session =
-                    weightlang_runtime::adaptive::AdaptiveSession::prepare(program, memory)?;
-                let handle = shared.next.fetch_add(1, Ordering::Relaxed);
-                self.adaptive.insert(handle, (session, memory));
-                self.reserved += memory;
-                Ok(serde_json::json!({"handle": handle}))
             }
             Request::RegisterStrategy { source, entry } => {
                 ensure!(self.strategies.len() < 64, "strategy limit exceeded");
@@ -689,13 +696,14 @@ mod lifecycle_tests {
     }
 
     fn program(memory: usize) -> Request {
-        Request::CreateProgram {
+        Request::CreateTrainingProgram {
             program: serde_json::json!({
                 "version": 1, "input": "x",
                 "registers": [{"name": "x", "len": 1, "shape": [1]}],
                 "parameters": [], "instructions": [{"op": "return", "value": "x"}]
             }),
             memory,
+            optimizer: "none".into(),
         }
     }
 
@@ -826,7 +834,7 @@ mod lifecycle_tests {
             unsafe { libc::memfd_create(c"wgtime-lifecycle-test".as_ptr(), libc::MFD_CLOEXEC) };
         ensure!(fd >= 0, "test memfd creation failed");
         let mut file = unsafe { File::from_raw_fd(fd) };
-        let Request::CreateProgram { program, .. } = program(MAX_SESSION_BYTES) else {
+        let Request::CreateTrainingProgram { program, .. } = program(MAX_SESSION_BYTES) else {
             unreachable!()
         };
         file.write_all(&serde_json::to_vec(&program)?)?;

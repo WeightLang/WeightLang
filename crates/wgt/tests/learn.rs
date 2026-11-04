@@ -12,7 +12,7 @@ output y:f32[1]
 parameter w:f32[1]=[1]
 fn forward(x){return w*x;}
 fn loss(p,t){return sum(square(p-t));}
-fn update(model,batch){train model on (batch.x,batch.y) rate 0.1 clip 1;return len(batch);}
+fn update(model,batch){train model on batch.x against batch.y {rate:0.1;clip:1;loss:loss;};return len(batch);}
 fn main(){let model=Policy("sgd");let update=3;let report=learn model using update {for i in [1,2,3]{yield {x:[i],y:[0]};}};return [report,model([1])];}"#;
  fs::write(&source,text).unwrap();script_compiler::compile(&source,&executable).unwrap();fs::remove_file(source).unwrap();
  let expected=script::run(text,dir.path(),100000).unwrap();

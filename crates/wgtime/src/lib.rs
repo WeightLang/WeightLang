@@ -29,11 +29,14 @@ pub enum Request {
         handle: u64,
         input: Vec<f32>,
     },
-    Train {
+    CreateTrainingProgram { program: serde_json::Value, memory: usize, optimizer: String },
+    TrainStep {
         handle: u64,
         inputs: Vec<Vec<f32>>,
-        targets: Vec<Vec<f32>>,
+        targets: serde_json::Value,
         rate: f32,
+        loss: String,
+        clip: Option<f32>,
     },
     Drop {
         handle: u64,
@@ -70,10 +73,6 @@ pub enum Request {
     CreateGraph {
         graph: serde_json::Value,
         optimizer: String,
-        memory: usize,
-    },
-    CreateProgram {
-        program: serde_json::Value,
         memory: usize,
     },
     RegisterStrategy {

@@ -14,7 +14,7 @@ fn main() {
  let mode = load text from "mode.txt";
  if mode == "initialize" {
   let net = mlp([1,1],"identity",4,"adam");
-  fit(net,[[1]],[[3]],0.01,"mse");
+  train net on [[1]] against [[3]] {rate:0.01;loss:mse;};
   save checkpoint net to "checkpoint.json";
   return net([1]);
  }
@@ -22,10 +22,10 @@ fn main() {
  let net = load checkpoint from "checkpoint.json";
  let alias = net;
  let initial = net([1]);
- fit(net,[[1]],[[3]],0.01,"mse");
+ train net on [[1]] against [[3]] {rate:0.01;loss:mse;};
  reload checkpoint alias from "checkpoint.json";
  assert net([1]) == initial;
- fit(alias,[[1]],[[3]],0.01,"mse");
+ train alias on [[1]] against [[3]] {rate:0.01;loss:mse;};
  save json net([1]) to "result.json" overwrite;
  return load json from "result.json";
 }"#;
@@ -76,6 +76,6 @@ fn main() {
     assert!(String::from_utf8_lossy(&restricted.stderr)
         .contains("host policy requires capability-based I/O"));
     let continuous = script::run(r#"wgt 0.5
-fn main(){ let n=mlp([1,1],"identity",4,"adam"); fit(n,[[1]],[[3]],0.01,"mse"); fit(n,[[1]],[[3]],0.01,"mse"); return n([1]); }"#, dir.path(), 100_000).unwrap();
+fn main(){ let n=mlp([1,1],"identity",4,"adam"); train n on [[1]] against [[3]] {rate:0.01;loss:mse;}; train n on [[1]] against [[3]] {rate:0.01;loss:mse;}; return n([1]); }"#, dir.path(), 100_000).unwrap();
     assert_eq!(actual["result"], continuous.result);
 }

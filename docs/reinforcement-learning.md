@@ -25,22 +25,20 @@ fn loss(prediction, trajectory) {
 fn main() {
     let policy = Policy("adam");
     # 这个固定批次只演示一次更新；完整环境采集见 PPO 示例。
-    train policy on ([[1,0]], [[0,1,-0.6931472,1]]) rate 0.03 clip 0.5;
+    train policy on [[1,0]] against [[0,1,-0.6931472,1]] { loss: loss; rate: 0.03; clip: 0.5; };
     return policy([1,0]);
 }
 ```
 
-完整签名：`train MODEL on (INPUTS, TARGETS) rate RATE clip MAX_NORM;`。
-MODEL、INPUTS、TARGETS、RATE、MAX_NORM 均为必填普通脚本表达式，按此顺序各求值一次。
-语句降低为 `train(model,inputs,targets,rate,max_norm)`，函数形式返回更新前的批次平均损失；
-语句形式丢弃返回值。train 是内置名称，on/rate/clip 在该语句对应位置作为分隔词。
-它仅适用于含 `fn loss`、优化器为 sgd/adam 的 forward 模型；普通顺序模型使用原有 fit/reinforce。
-不支持在 forward/loss 中训练，也不提供可跨调用保存的梯度对象或单独 backward/step 语句。
+内置训练的完整形式为 `train MODEL on INPUTS against TARGETS {rate:RATE; loss:LOSS; clip:MAX_NORM;}`。
+`rate` 必填且转为 f32 后为有限正数；`loss` 默认 `mse`，可选 `cross_entropy` 或自定义 `loss`。
+`clip` 可省略，提供时须为有限正数；梯度全局 L2 裁剪当前仅 CPU 支持。MODEL、INPUTS、TARGETS 和配置字段按源码顺序各求值一次。
+表达式形式返回更新前的 f32 批次平均损失，语句形式忽略该值。一次内置更新在整批成功后原子提交；仅含 `fn loss` 的自定义损失 forward 模型使用 `loss: loss`。
+旧 `fit(...)` / `train(...)` 函数调用和 tuple 训练形式均拒绝。此语法不提供可跨调用保存的梯度对象或单独 backward/step 语句。
 
 inputs 是非空样本列表，每个样本为模型输入宽度的有限 f32 向量；targets 数量必须相同。
-rate、max_norm 转为 f32 后必须为有限正数，均无默认值。
 整批先从同一组参数求导并取平均，然后对所有非冻结参数的梯度一起计算 L2 范数：
-大于 max_norm 时统一缩放，随后提交一次 SGD/Adam 更新。这里的 clip 是梯度范数上限，
+超过 MAX_NORM 时统一缩放，随后提交一次 SGD/Adam 更新。这里的 clip 是梯度范数上限，
 与损失内 `clip(ratio,low,high)` 的 PPO 比率裁剪不同。
 任一样本、求导、预算或候选更新失败，权重和优化器状态均不提交；操作预算仍按实际执行扣除。
 沿用现有每样本模型/损失 tape 共享 64 MiB 预算和指令计费，不是整个进程的内存/FLOP 上限。
@@ -68,6 +66,8 @@ PPO 的旧概率、动作和优势来自固定采样批次。先完整采集，�
 现有 gae 接收单条顺序轨迹，不能直接传交错的并行环境数据。
 
 ## forward/loss 可微表达式
+
+自定义 `using` 策略形式 `train MODEL on INPUTS against TARGETS using STRATEGY` 调用同编译单元同步函数 `fn STRATEGY(model,inputs,targets)`，返回策略实际结果。参数按源码顺序各求值一次且策略只调用一次；返回值限纯数据（允许 null，最大深度 32、计量 1 MiB，拒绝资源句柄）。策略可零次或多次显式提交，语句不隐式提交；失败不撤销先前成功的显式提交。内置配置块与 `using` 互斥。
 
 以下全部为当前固定 f32 向量运算，无隐式广播、无默认参数。
 普通 main 中已有 log/exp/sum/clip/log_softmax 仍遵循普通数值/列表契约，不建立梯度图。

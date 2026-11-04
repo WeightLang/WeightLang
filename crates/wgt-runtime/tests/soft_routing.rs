@@ -101,14 +101,14 @@ frozen b: f32[2] = [0.1,-0.1]
 fn forward(x) { return linear(x,w,b); }
 fn main() {
     let m=Classifier(\"sgd\");
-    let before=fit(m,[[-1],[1]],[0,1],0.1,\"cross_entropy\");
-    for i in range(0,100) { fit(m,[[-1],[1]],[0,1],0.1,\"cross_entropy\"); }
-    let after=fit(m,[[-1],[1]],[0,1],0.1,\"cross_entropy\");
-    assert(after<before*0.1,\"classification failed\");
+    let before=train m on [[-1],[1]] against [0,1] {rate:0.1;loss:cross_entropy;};
+    for i in range(0,100) { train m on [[-1],[1]] against [0,1] {rate:0.1;loss:cross_entropy;}; }
+    let after=train m on [[-1],[1]] against [0,1] {rate:0.1;loss:cross_entropy;};
+    assert after<before*0.1, \"classification failed\";
     reinforce(m,[[-1],[1]],[0,1],[1,1],0.1);
     seed(42);
     let action=sample from m([1]);
-    assert(action==0 || action==1,\"invalid sampled action\");
+    assert action==0 || action==1, \"invalid sampled action\";
     return m([0]);
 }";
     let report = script::run(source, Path::new("."), 100000).unwrap();
@@ -208,16 +208,16 @@ fn checkpoints_resume_exactly_and_exports_load_without_training() {
         "{PROGRAM}
 fn main() {{
     let m=Router(\"adam\");
-    fit(m,[[0,0]],[[0,0]],0.01,\"mse\");
-    save_checkpoint(m, \"checkpoint.json\");
-    save_model(m,\"model.json\");
-    let restored=load_checkpoint(\"checkpoint.json\");
-    let exported=load_model(\"model.json\",\"none\");
-    assert(m([0,0])==exported([0,0]),\"export mismatch\");
-    let a=fit(m,[[0,0]],[[0,0]],0.01,\"mse\");
-    let b=fit(restored,[[0,0]],[[0,0]],0.01,\"mse\");
-    assert(a==b,\"loss mismatch\");
-    assert(m([0,0])==restored([0,0]),\"Adam resume mismatch\");
+    train m on [[0,0]] against [[0,0]] {{rate:0.01;loss:mse;}};
+    save checkpoint m to \"checkpoint.json\";
+    save model m to \"model.json\";
+    let restored=load checkpoint from \"checkpoint.json\";
+    let exported=load model from \"model.json\" using \"none\";
+    assert m([0,0])==exported([0,0]), \"export mismatch\";
+    let a=train m on [[0,0]] against [[0,0]] {{rate:0.01;loss:mse;}};
+    let b=train restored on [[0,0]] against [[0,0]] {{rate:0.01;loss:mse;}};
+    assert a==b, \"loss mismatch\";
+    assert m([0,0])==restored([0,0]), \"Adam resume mismatch\";
     return true;
 }}"
     );

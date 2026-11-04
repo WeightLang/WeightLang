@@ -20,15 +20,15 @@ fn compiled_gpu_and_wgsl() {
         ),
     ] {
         let text = text.replace("return model([1]);", r#"
-            save_checkpoint(model, "checkpoint.json");
-            let restored = load_checkpoint("checkpoint.json");
-            assert(training_status(restored)["device"] == "cpu", "restore must select CPU");
-            assert(training_status(restored)["steps"] == 100, "optimizer step lost");
-            assert(restored([1]) == model([1]), "checkpoint weight mismatch");
+            save checkpoint model to "checkpoint.json";
+            let restored = load checkpoint from "checkpoint.json";
+            assert training_status(restored)["device"] == "cpu", "restore must select CPU";
+            assert training_status(restored)["steps"] == 100, "optimizer step lost";
+            assert restored([1]) == model([1]), "checkpoint weight mismatch";
             training_device(restored, hardware[1]["id"], 67108864, 4);
-            let a = fit(model, [[0],[1]], [[1],[3]], 0.05, "mse");
-            let b = fit(restored, [[0],[1]], [[1],[3]], 0.05, "mse");
-            assert(a == b && model([1]) == restored([1]), "Adam continuation mismatch");
+            let a = train model on [[0],[1]] against [[1],[3]] {rate:0.05;loss:mse;};
+            let b = train restored on [[0],[1]] against [[1],[3]] {rate:0.05;loss:mse;};
+            assert a == b && model([1]) == restored([1]), "Adam continuation mismatch";
             return restored([1]);
         "#);
         let case = dir.path().join(name);
@@ -71,7 +71,7 @@ fn compiled_and_interpreted_share_semantics_without_source_or_toolchain_at_run_t
     let text = r#"wgt 0.5
 fn factorial(n) { if n <= 1 { return 1; } return n * factorial(n - 1); }
 fn early() { for i in range(0, 5) { while true { return 7; } } }
-fn bump(model) { return fit(model, [[0], [1]], [[1], [3]], 0.05, "mse"); }
+fn bump(model) { return train model on [[0], [1]] against [[1], [3]] {rate:0.05;loss:mse;}; }
 fn main() {
     let reader = jsonl("case.jsonl");
     let rows = batch(reader, 1);
@@ -84,8 +84,8 @@ fn main() {
     if mode == 5 { return false || 2; }
     if mode == 6 { absent = random(); }
     if mode == 7 { return factorial(); }
-    assert(true || unknown(), "short circuit");
-    assert(!(false && unknown()), "short circuit");
+    assert true || unknown(), "short circuit";
+    assert !(false && unknown()), "short circuit";
     let n = 0;
     for i in range(0, 10) {
         if i == 2 { continue; }
@@ -98,8 +98,8 @@ fn main() {
     seed(17);
     let model = mlp([1,1], "identity", 42, "adam");
     for step in range(0, 100) { bump(model); }
-    save_model(model, "model.json");
-    save_checkpoint(model, "checkpoint.json");
+    save model model to "model.json";
+    save checkpoint model to "checkpoint.json";
     metric("summary", [n, scoped, early(), factorial(5), random(), "x" + "y"]);
     return model([0.25]);
 }
@@ -197,7 +197,7 @@ fn unified_model_and_forward_match_in_native_executables() {
     fs::create_dir_all(&root).unwrap();
     let dir = tempfile::tempdir_in(root).unwrap();
     for (name, text) in [
-        ("graph", "wgt 0.5\nmodel Net\ninput x: f32[1]\noutput y: f32[1]\nlayer fc: linear(out=1)\ninit seed=7\nfn main() { let m = Net(\"sgd\"); for i in range(0, 100) { fit(m, [[0], [1]], [[1], [3]], 0.05, \"mse\"); } return m([1]); }"),
+        ("graph", "wgt 0.5\nmodel Net\ninput x: f32[1]\noutput y: f32[1]\nlayer fc: linear(out=1)\ninit seed=7\nfn main() { let m = Net(\"sgd\"); for i in range(0, 100) { train m on [[0], [1]] against [[1], [3]] {rate:0.05;loss:mse;}; } return m([1]); }"),
         ("forward", include_str!("../../../examples/self_modifying/model.wgt")),
         ("working-memory", include_str!("../../../examples/native_training/working_memory/model.wgt")),
     ] {

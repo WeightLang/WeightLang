@@ -19,10 +19,6 @@ fn registry_covers_dispatch_and_preserves_contexts() {
                 }
             }
         }
-        if let Some(target) = &entry.legacy_alias_for {
-            let target = prelude::builtin(target).expect("alias target");
-            assert_eq!(entry.arity.as_ref().unwrap().min, target.arity.as_ref().unwrap().min);
-        }
     }
     parse(include_str!("../../../examples/native_training/persistence/model.wgt")).unwrap();
     assert!(!prelude::is_builtin("linear"));
@@ -35,38 +31,39 @@ fn registry_covers_dispatch_and_preserves_contexts() {
 
 #[test]
 fn persistence_names_preserve_optimizer_and_reject_wrong_artifact() {
-    let parent = std::env::temp_dir().join("weightlang");
+    let parent = std::env::var_os("CLAUDE_JOB_DIR").map(|p| std::path::PathBuf::from(p).join("tmp"))
+        .unwrap_or_else(|| std::env::temp_dir().join("weightlang"));
     std::fs::create_dir_all(&parent).unwrap();
     let root = parent.join(format!("prelude-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     std::fs::create_dir(&root).unwrap();
     let execute = |body: &str| run(&format!("wgt 0.5\nfn main() {{{body}}}"), &root, 100_000);
     execute(r#"
         let net = mlp([1,2,1], "tanh", 7, "adam");
-        fit(net, [[1]], [[2]], 0.03, "mse");
-        save_checkpoint(net, "checkpoint.json");
-        save_model(net, "model.json");
-        let legacy = restore("checkpoint.json");
-        let fresh = load_model("model.json", "sgd");
-        let old = model("model.json", "sgd");
-        assert(predict(fresh,[1]) == predict(old,[1]), "legacy model alias");
-        fit(net, [[1]], [[2]], 0.03, "mse");
-        fit(legacy, [[1]], [[2]], 0.03, "mse");
-        assert(predict(net,[1]) == predict(legacy,[1]), "legacy optimizer restore");
-        save(net, "expected.json");
+        train net on [[1]] against [[2]] { loss: mse; rate: 0.03; };
+        save checkpoint net to "checkpoint.json";
+        save model net to "model.json";
+        let legacy = load checkpoint from "checkpoint.json";
+        let fresh = load model from "model.json" using "sgd";
+        let old = load model from "model.json" using "sgd";
+        assert fresh([1]) == old([1]), "independent model loads";
+        train net on [[1]] against [[2]] { loss: mse; rate: 0.03; };
+        train legacy on [[1]] against [[2]] { loss: mse; rate: 0.03; };
+        assert net([1]) == legacy([1]), "checkpoint optimizer restore";
+        save checkpoint net to "expected.json";
     "#).unwrap();
     // A separate runtime has no in-memory optimizer to accidentally reuse.
     execute(r#"
-        let net = load_checkpoint("checkpoint.json");
-        fit(net, [[1]], [[2]], 0.03, "mse");
-        save_checkpoint(net, "actual.json");
+        let net = load checkpoint from "checkpoint.json";
+        train net on [[1]] against [[2]] { loss: mse; rate: 0.03; };
+        save checkpoint net to "actual.json";
     "#).unwrap();
     assert_eq!(std::fs::read(root.join("expected.json")).unwrap(), std::fs::read(root.join("actual.json")).unwrap());
     for (body, diagnostic) in [
-        (r#"load_model("checkpoint.json", "adam");"#, "use load_checkpoint"),
-        (r#"load_checkpoint("model.json");"#, "use load_model"),
-        (r#"restore("model.json");"#, "use load_model"),
-        (r#"load_checkpoint("checkpoint.json", "sgd");"#, "expected 1..=1 arguments"),
-        (r#"save_checkpoint(load_checkpoint("checkpoint.json"), "checkpoint.json");"#, "exists"),
+        (r#"load model from "checkpoint.json" using "adam";"#, "checkpoint"),
+        (r#"load checkpoint from "model.json";"#, "model"),
+        (r#"load checkpoint from "checkpoint.json" using "sgd";"#, "expected ;"),
+        (r#"restore("model.json");"#, "load checkpoint"),
+        (r#"let net = load checkpoint from "checkpoint.json"; save checkpoint net to "checkpoint.json";"#, "exists"),
     ] {
         let error = format!("{:#}", execute(body).unwrap_err());
         assert!(error.contains(diagnostic), "{error}");
@@ -79,15 +76,15 @@ parameter weight: f32[1,1] = [1]
 fn forward(x) { return linear(x,weight); }
 fn main() {
     let net = Forward("adam");
-    fit(net,[[1]],[[2]],0.03,"mse");
-    save_checkpoint(net,"forward-checkpoint.json");
-    save_model(net,"forward-model.json");
-    let restored = load_checkpoint("forward-checkpoint.json");
-    let fresh = load_model("forward-model.json","none");
-    assert(predict(net,[1]) == predict(fresh,[1]),"forward model reload");
-    fit(net,[[1]],[[2]],0.03,"mse");
-    fit(restored,[[1]],[[2]],0.03,"mse");
-    assert(predict(net,[1]) == predict(restored,[1]),"forward optimizer reload");
+    train net on [[1]] against [[2]] { loss: mse; rate: 0.03; };
+    save checkpoint net to "forward-checkpoint.json";
+    save model net to "forward-model.json";
+    let restored = load checkpoint from "forward-checkpoint.json";
+    let fresh = load model from "forward-model.json" using "none";
+    assert net([1]) == fresh([1]), "forward model reload";
+    train net on [[1]] against [[2]] { loss: mse; rate: 0.03; };
+    train restored on [[1]] against [[2]] { loss: mse; rate: 0.03; };
+    assert net([1]) == restored([1]), "forward optimizer reload";
 }
 "#;
     run(forward, &root, 100_000).unwrap();

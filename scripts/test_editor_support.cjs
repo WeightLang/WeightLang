@@ -19,6 +19,8 @@ const files = ['examples/native_training', 'examples/self_modifying'].flatMap(di
 files.push(path.join(root, 'editors/vscode/media/example.wgt'));
 run('tree-sitter', ['parse', '--quiet', ...files], grammar);
 const sample = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/forward.wgt');
+const vocabulary = JSON.parse(fs.readFileSync(path.join(root, 'editors/vocabulary.json'), 'utf8'));
+assert(vocabulary.keywords.includes('against'), 'against must be highlighted as a training keyword');
 for (const query of ['highlights', 'outline', 'indents', 'brackets']) {
   const captures = run('tree-sitter', ['query', `queries/${query}.scm`, sample], grammar);
   assert(captures.includes('capture:'), `${query}: no captures`);
@@ -40,7 +42,7 @@ set rtp^=${root}/editors/vim
 syntax enable
 new
 setfiletype wgt
-call setline(1, ['fn main() {', 'let x = true && false;', 'return "escaped \\"# text"; # comment', 'predict(x, [1]);'])
+call setline(1, ['fn main() {', 'let x = true && false;', 'return "escaped \\"# text"; # comment', 'len(x);'])
 call assert_equal('wgtKeywords', synIDattr(synID(1, 1, 1), 'name'))
 call assert_equal('wgtConstants', synIDattr(synID(2, 9, 1), 'name'))
 call assert_equal('wgtOperator', synIDattr(synID(2, 14, 1), 'name'))

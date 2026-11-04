@@ -1,1 +1,0 @@
-{"model":"../../weights/native_evaluation/model.json","input":[0.25],"expected":[1.5],"atol":0.01}

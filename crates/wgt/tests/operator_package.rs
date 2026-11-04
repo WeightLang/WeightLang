@@ -137,10 +137,10 @@ fn source_operator_release_lock_install_train_and_tamper_detection() {
     let source=include_str!("../../../examples/native_training/custom_operators/model.wgt")
         .replace("./ops.wgt","github.com/example/operators/Activations")
         .replace("return net([1, 2]);",r#"
-            save_checkpoint(net, "checkpoint.json"); save_model(net,"model.json");
-            let restored=load_checkpoint("checkpoint.json"); let loaded=load_model("model.json", "none");
-            assert(net([1,2])==loaded([1,2]),"portable model");
-            assert(fit(net,[[1,2]],[[0,0]],0.03,"loss")==fit(restored,[[1,2]],[[0,0]],0.03,"loss"),"Adam restore");
+            save checkpoint net to "checkpoint.json"; save model net to "model.json";
+            let restored=load checkpoint from "checkpoint.json"; let loaded=load model from "model.json" using "none";
+            assert net([1,2])==loaded([1,2]), "portable model";
+            assert train net on [[1,2]] against [[0,0]] {rate:0.03;loss:loss;}==train restored on [[1,2]] against [[0,0]] {rate:0.03;loss:loss;}, "Adam restore";
             return net([1,2]);
         "#);
     let deps = BTreeMap::from([(
@@ -150,7 +150,7 @@ fn source_operator_release_lock_install_train_and_tamper_detection() {
     weightlang_runtime::script::run_with_dependencies(&source, dir.path(), 100000, deps).unwrap();
     // The model is self-contained after lowering; no source library is needed to load it.
     fs::remove_dir_all(module.join("Activations")).unwrap();
-    let loaded = "wgt 0.5\nfn main() { return predict(model(\"model.json\",\"none\"),[1,2]); }";
+    let loaded = "wgt 0.5\nfn main() { return model(\"model.json\",\"none\")([1,2]); }";
     weightlang_runtime::script::run(loaded, dir.path(), 10000).unwrap();
     assert!(registry::verify(&manifest, &lock, &cache).is_err());
     registry::fetch(&manifest, &lock, &cache, true, &remote).unwrap();

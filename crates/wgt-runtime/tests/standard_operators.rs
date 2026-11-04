@@ -7,7 +7,7 @@ fn evaluate(
     width: usize,
     output: usize,
 ) -> anyhow::Result<serde_json::Value> {
-    let source = format!("wgt 0.5\nimport act from \"std/activation/operators\"\nimport losses from \"std/loss/operators\"\nmodel Probe\ninput x: f32[{width}]\noutput y: f32[{output}]\nfn forward(x) {{ return {body}; }}\nfn main() {{ let net=Probe(\"sgd\"); return net({input}); }}");
+    let source = format!("wgt 0.5\nimport act from \"std/activation\"\nimport losses from \"std/loss\"\nmodel Probe\ninput x: f32[{width}]\noutput y: f32[{output}]\nfn forward(x) {{ return {body}; }}\nfn main() {{ let net=Probe(\"sgd\"); return net({input}); }}");
     Ok(script::run(&source, Path::new("."), 100000)?.result)
 }
 
@@ -88,17 +88,31 @@ fn bundled_imports_are_exact_closed_and_do_not_use_working_directory() {
             "{error:#}"
         );
     }
-    for path in ["std/activation/operators", "std/loss/operators"] {
+    for path in ["std/activation", "std/loss"] {
         let source = script::operators::standard_source(path).unwrap();
         script::operators::library(source).unwrap();
     }
-    let source = "wgt 0.5\nimport ops from \"std/activation/operators\"\nimport ops from \"std/loss/operators\"\nfn main() { return true; }";
+    for path in ["std/activation/operators", "std/loss/operators"] {
+        let text=format!("wgt 0.5\nimport ops from \"{path}\"\nfn main(){{return null;}}");
+        assert!(script::parse_with_imports(&text,Path::new("."),&BTreeMap::new()).unwrap_err().to_string().contains("internal /operators import was removed"));
+    }
+    let source = "wgt 0.5\nimport ops from \"std/activation\"\nimport ops from \"std/loss\"\nfn main() { return true; }";
     assert!(script::parse_with_imports(source, Path::new("."), &BTreeMap::new()).is_err());
 }
 
 #[test]
 fn real_example_trains_and_codegen_embeds_the_computation() {
-    let source = include_str!("../../../examples/native_training/standard_operators/model.wgt");
+    let source = r#"wgt 0.5
+import activation from "std/activation"
+import loss_ops from "std/loss"
+model Probe
+input x:f32[1]
+output y:f32[1]
+parameter gain:f32[1]=[1]
+fn forward(x){return activation.squared_relu(x*gain);}
+fn loss(prediction,target){return square(prediction-target).mean;}
+fn main(){let net=Probe("sgd");let before=train net on [[2]] against [[0]] {rate:0.01;loss:loss;};let after=train net on [[2]] against [[0]] {rate:0.01;loss:loss;};assert after<before;return net([2]);}
+"#;
     // Bundled imports do not depend on the source tree being present at runtime.
     script::run(source, Path::new("/does/not/exist"), 100000).unwrap();
     let rust = script::codegen::rust_source(source, "/does/not/exist").unwrap();

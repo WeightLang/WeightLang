@@ -124,14 +124,14 @@ fn example_trains_and_prob_loss_checkpoint_resumes() {
     let source=format!("{MODEL}
 fn main() {{
     let a=Choice(\"adam\");
-    fit(a,[[2,2]],[[1,1]],0.03,\"loss\");
-    save_checkpoint(a, \"checkpoint.json\");
-    save_model(a,\"model.json\");
-    let b=load_checkpoint(\"checkpoint.json\");
-    let c=load_model(\"model.json\",\"none\");
-    assert(a([2,2])==c([2,2]),\"prob export changed output\");
-    assert(fit(a,[[2,2]],[[1,1]],0.03,\"loss\")==fit(b,[[2,2]],[[1,1]],0.03,\"loss\"),\"loss resume mismatch\");
-    assert(a([2,2])==b([2,2]),\"Adam resume mismatch\");
+    train a on [[2,2]] against [[1,1]] {{rate:0.03;loss:loss;}};
+    save checkpoint a to \"checkpoint.json\";
+    save model a to \"model.json\";
+    let b=load checkpoint from \"checkpoint.json\";
+    let c=load model from \"model.json\" using \"none\";
+    assert a([2,2])==c([2,2]), \"prob export changed output\";
+    assert train a on [[2,2]] against [[1,1]] {{rate:0.03;loss:loss;}}==train b on [[2,2]] against [[1,1]] {{rate:0.03;loss:loss;}}, \"loss resume mismatch\";
+    assert a([2,2])==b([2,2]), \"Adam resume mismatch\";
     return true;
 }}"
     );
@@ -151,7 +151,7 @@ fn main() {
  seed(9); let expected=random(); seed(9);
  let a=sample 0 { then { 1/0 } else { 3 } };
  let b=sample 1 { then { sample 1 { then { 4 } else { 1/0 } } } else { 1/0 } };
- assert(random()==expected,\"endpoints consumed RNG\");
+ assert random()==expected, \"endpoints consumed RNG\";
  return a+b;
 }";
     assert_eq!(
@@ -174,11 +174,11 @@ fn onehot_syntax_shape_precedence_and_errors() {
     let source = r#"wgt 0.5
 fn main() {
  let action=sample 1 { then { 2 } else { 1/0 } };
- assert(onehot[4] action == [0,0,1,0], "encoding");
- assert(onehot[4] (action+1) == [0,0,0,1], "index expression");
- assert(onehot[1] 0 == [1], "single class");
- assert((onehot[4] 2)[2] == 1, "result indexing");
- assert(onehot[4] [2,0][0] == one_hot(2,4), "operand indexing");
+ assert onehot[4] action == [0,0,1,0], "encoding";
+ assert onehot[4] (action+1) == [0,0,0,1], "index expression";
+ assert onehot[1] 0 == [1], "single class";
+ assert (onehot[4] 2)[2] == 1, "result indexing";
+ assert onehot[4] [2,0][0] == one_hot(2,4), "operand indexing";
  return true;
 }"#;
     assert_eq!(

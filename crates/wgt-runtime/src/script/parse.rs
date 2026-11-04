@@ -199,7 +199,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
         let is_async = parser.take("async");
         parser.expect("fn")?;
         let name = parser.name()?;
-        if let Some(replacement) = super::prelude::migration(&name) {
+        if let Some(replacement) = super::prelude::migration(&name).filter(|_| name != "model") {
             bail!("line {}: {name} is reserved for migration; use {replacement}", parser.line());
         }
         ensure!(
@@ -266,35 +266,6 @@ impl Parser {
         };
         let mut values=vec![Expr::Text(plan)];values.extend(args.iter().cloned().map(Expr::Name));
         Ok((name,Function{is_async:false,args,body:vec![Statement{line,kind:Stmt::Return(Expr::BuiltinCall(builtin.into(),values))}]}))
-    }
-    fn train_statement(&self) -> bool {
-        if !self
-            .tokens
-            .get(self.pos + 1)
-            .is_some_and(|t| !t.quoted && t.text == "(")
-        {
-            return true;
-        }
-        let mut depth = 0;
-        for (i, t) in self.tokens.iter().enumerate().skip(self.pos + 1) {
-            if t.quoted {
-                continue;
-            }
-            match t.text.as_str() {
-                "(" => depth += 1,
-                ")" => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return self
-                            .tokens
-                            .get(i + 1)
-                            .is_some_and(|t| !t.quoted && t.text == "on");
-                    }
-                }
-                _ => {}
-            }
-        }
-        false
     }
     fn sample_block(&self) -> bool {
         if !self.is("(") {
@@ -487,32 +458,6 @@ impl Parser {
             let message = if self.take(",") { Some(self.expr(0)?) } else { None };
             self.expect(";")?;
             Stmt::Assert(condition, message)
-        } else if self.is("train") && self.train_statement() {
-            self.expect("train")?;
-            let model = self.expr(0)?;
-            self.expect("on")?;
-            self.expect("(")?;
-            let inputs = self.expr(0)?;
-            self.expect(",")?;
-            let targets = self.expr(0)?;
-            self.expect(")")?;
-            if self.take("using") {
-                let strategy = self.name()?;
-                ensure!(!self.is("rate") && !self.is("clip"), "train using cannot be combined with rate or clip");
-                self.expect(";")?;
-                Stmt::Eval(Expr::StaticCall(strategy, vec![model, inputs, targets]))
-            } else {
-                self.expect("rate")?;
-                let rate = self.expr(0)?;
-                self.expect("clip")?;
-                let clip = self.expr(0)?;
-                ensure!(!self.is("using"), "train rate/clip cannot be combined with using");
-                self.expect(";")?;
-                Stmt::Eval(Expr::BuiltinCall(
-                    "__train".into(),
-                    vec![model, inputs, targets, rate, clip],
-                ))
-            }
         } else if self.take("if") {
             let condition = self.expr(0)?;
             let yes = self.block()?;
@@ -582,6 +527,35 @@ impl Parser {
             Expr::Text(t.text)
         } else {
             match t.text.as_str() {
+                "train" => {
+                    let model = self.expr(0)?;
+                    self.expect("on")?;
+                    let inputs = self.expr(0)?;
+                    self.expect("against")?;
+                    let targets = self.expr(0)?;
+                    if self.take("using") {
+                        Expr::StaticCall(self.name()?, vec![model, inputs, targets])
+                    } else {
+                        self.expect("{")?;
+                        let mut fields = Vec::new();
+                        let mut names = std::collections::HashSet::new();
+                        while !self.take("}") {
+                            let name = self.name()?;
+                            ensure!(matches!(name.as_str(), "loss" | "rate" | "clip"), "unknown training option: {name}");
+                            ensure!(names.insert(name.clone()), "duplicate training option: {name}");
+                            self.expect(":")?;
+                            let value = if name == "loss" {
+                                let loss = self.name()?;
+                                ensure!(matches!(loss.as_str(), "mse" | "cross_entropy" | "loss"), "unknown training loss: {loss}");
+                                Expr::Text(loss)
+                            } else { self.expr(0)? };
+                            fields.extend([Expr::Text(name), value]);
+                            self.expect(";")?;
+                        }
+                        ensure!(names.contains("rate"), "training requires rate");
+                        Expr::BuiltinCall("__train_step".into(), vec![model, inputs, targets, Expr::BuiltinCall("__record".into(), fields)])
+                    }
+                }
                 "await" | "spawn" => Expr::BuiltinCall(format!("__{}", t.text), vec![self.expr(7)?]),
                 "load" => {
                     let format = self.next()?;
@@ -719,7 +693,8 @@ impl Parser {
                             name.truncate(name.find('.').unwrap_or(name.len()));
                         }
                         if self.take("(") {
-                            if let Some(replacement) = super::prelude::migration(&name) {
+                            ensure!(name != "fit", "line {}: fit(...) was removed; use train net on inputs against targets {{rate:...;loss:mse;}}", t.line);
+                            if let Some(replacement) = super::prelude::migration(&name).filter(|_| name != "model") {
                                 bail!("line {}, column {}: {name}(...) was removed; use {replacement}", t.line, t.column);
                             }
                             Expr::Call(name, self.arguments(")")?)

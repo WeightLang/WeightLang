@@ -14,17 +14,17 @@ fn outside(x) { return twice(x); }
 fn main() {
  let first=mlp([2,1],"identity",4,"adam");
  let second=mlp([2,1],"identity",5,"sgd");
- assert(first([1,2])==predict(first,[1,2]),"compatibility");
- assert(infer(second,[1,2])==predict(second,[1,2]),"parameter");
+ assert first([1,2])==first([1,2]), "compatibility";
+ assert infer(second,[1,2])==second([1,2]), "parameter";
  let twice=first;
- assert(twice([1,2])==first([1,2]),"local model shadows function");
- assert(outside(3)==6,"callee does not capture caller locals");
+ assert twice([1,2])==first([1,2]), "local model shadows function";
+ assert outside(3)==6, "callee does not capture caller locals";
  let len=second;
- assert(len([1,2])==second([1,2]),"model shadows builtin");
+ assert len([1,2])==second([1,2]), "model shadows builtin";
  let mean=0;
  let one_hot=0;
- assert([2,4].mean==3,"postfix mean is syntax");
- assert(onehot[2] 1 == [0,1],"onehot is syntax");
+ assert [2,4].mean==3, "postfix mean is syntax";
+ assert onehot[2] 1 == [0,1], "onehot is syntax";
  return true;
 }"#), true);
 }
@@ -50,15 +50,15 @@ fn direct_calls_preserve_checkpoints_and_stateful_predict_transactions() {
     let pure = r#"wgt 0.5
 fn main() {
  let net=mlp([1,1],"identity",42,"adam");
- fit(net,[[1]],[[2]],0.01,"mse");
+ train net on [[1]] against [[2]] {rate:0.01;loss:mse;};
  save(net,"before.json");
  let actual=net([3]);
  save(net,"after.json");
  let restored=restore("before.json");
- assert(restored([3])==actual,"checkpoint restore");
- save_model(net,"model.json");
+ assert restored([3])==actual, "checkpoint restore";
+ save model net to "model.json";
  let loaded=model("model.json","adam");
- assert(loaded([3])==actual,"model restore");
+ assert loaded([3])==actual, "model restore";
  return true;
 }"#;
     assert_eq!(run(pure, &root, 100_000).unwrap().result, true);
@@ -76,8 +76,8 @@ fn forward(x) {
 fn main() {
  let direct=Memory("adam");
  let legacy=Memory("adam");
- assert(direct([2])==predict(legacy,[2]),"first transaction");
- assert(direct([3])==predict(legacy,[3]),"second transaction");
+ assert direct([2])==legacy([2]), "first transaction";
+ assert direct([3])==legacy([3]), "second transaction";
  save(direct,"direct.json");
  save(legacy,"legacy.json");
  return direct([1]);

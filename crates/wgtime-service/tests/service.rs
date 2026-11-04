@@ -77,6 +77,19 @@ fn predict(client: &mut Client, handle: u64, input: &[f32]) -> Result<Vec<f32>> 
     )?)
 }
 #[test]
+fn unified_ce_indices_reject_before_update() -> Result<()> {
+ let server=Server::new()?;let mut client=server.client()?;let handle=create(&mut client,&[1,2])?;
+ let control=create(&mut client,&[1,2])?;let before=predict(&mut client,handle,&[1.])?;
+ for targets in [serde_json::json!([-1]),serde_json::json!([0.5]),serde_json::json!([2]),serde_json::json!([u64::MAX])] {
+  assert!(client.call(Request::TrainStep{handle,inputs:vec![vec![1.]],targets,rate:0.1,loss:"cross_entropy".into(),clip:None}).is_err());
+  assert_eq!(before,predict(&mut client,handle,&[1.])?);
+ }
+ let trained=client.call(Request::TrainStep{handle,inputs:vec![vec![1.],vec![2.]],targets:serde_json::json!([0.0,1.0]),rate:0.1,loss:"cross_entropy".into(),clip:None})?;
+ let reference=client.call(Request::TrainStep{handle:control,inputs:vec![vec![1.],vec![2.]],targets:serde_json::json!([0.0,1.0]),rate:0.1,loss:"cross_entropy".into(),clip:None})?;
+ assert_eq!(trained,reference);assert_eq!(predict(&mut client,handle,&[1.])?,predict(&mut client,control,&[1.])?,"failed requests changed Adam state");
+ Ok(())
+}
+#[test]
 fn real_process_isolation_atomic_training_and_baseline() -> Result<()> {
     let cold = Instant::now();
     let server = Server::new()?;
@@ -124,11 +137,13 @@ fn real_process_isolation_atomic_training_and_baseline() -> Result<()> {
     assert_eq!(original, direct.predict(&input)?);
     for _ in 0..12 {
         let expected = direct.step(&[input.clone()], Objective::Mse(&[target.clone()]), 0.01)?;
-        let reply = first.call(Request::Train {
+        let reply = first.call(Request::TrainStep {
             handle,
             inputs: vec![input.clone()],
-            targets: vec![target.clone()],
+            targets: serde_json::json!([target.clone()]),
             rate: 0.01,
+            loss: "mse".into(),
+            clip: None,
         })?;
         assert_eq!(reply["loss"].as_f64().unwrap() as f32, expected);
         assert_eq!(
@@ -196,23 +211,29 @@ fn real_process_isolation_atomic_training_and_baseline() -> Result<()> {
         predict(&mut first, handle, &input)?,
         predict(&mut first, restored, &input)?
     );
-    let a = first.call(Request::Train {
+    let a = first.call(Request::TrainStep {
         handle,
         inputs: vec![input.clone()],
-        targets: vec![target.clone()],
+        targets: serde_json::json!([target.clone()]),
         rate: 0.01,
+        loss: "mse".into(),
+        clip: None,
     })?;
-    let b = first.call(Request::Train {
+    let b = first.call(Request::TrainStep {
         handle: restored,
         inputs: vec![input.clone()],
-        targets: vec![target.clone()],
+        targets: serde_json::json!([target.clone()]),
         rate: 0.01,
+        loss: "mse".into(),
+        clip: None,
     })?;
-    let disk_step = first.call(Request::Train {
+    let disk_step = first.call(Request::TrainStep {
         handle: disk_restored,
         inputs: vec![input.clone()],
-        targets: vec![target.clone()],
+        targets: serde_json::json!([target.clone()]),
         rate: 0.01,
+        loss: "mse".into(),
+        clip: None,
     })?;
     assert_eq!(a, disk_step, "FD checkpoint lost optimizer state");
     assert_eq!(a, b, "checkpoint lost optimizer state");
@@ -222,11 +243,13 @@ fn real_process_isolation_atomic_training_and_baseline() -> Result<()> {
     );
     let before = predict(&mut first, handle, &input)?;
     assert!(first
-        .call(Request::Train {
+        .call(Request::TrainStep {
             handle,
             inputs: vec![input.clone()],
-            targets: vec![vec![f32::MAX; 2]],
-            rate: f32::MAX
+            targets: serde_json::json!([vec![f32::MAX; 2]]),
+            rate: f32::MAX,
+            loss: "mse".into(),
+            clip: None,
         })
         .is_err());
     assert_eq!(
@@ -243,9 +266,10 @@ fn real_process_isolation_atomic_training_and_baseline() -> Result<()> {
 
     let model = "wgt 0.5\nmodel Regression\ninput x: f32[1]\noutput y: f32[1]\nparameter w: f32[1,1] = [0]\nfn forward(x) { return linear(x,w); }\nfn loss(prediction,target) { return square(prediction-target).mean; }\n";
     let program = weightlang_runtime::adaptive::parse(model)?;
-    let hosted = third.call(Request::CreateProgram {
+    let hosted = third.call(Request::CreateTrainingProgram {
         program: serde_json::to_value(program)?,
         memory: 1024 * 1024,
+        optimizer: "none".into(),
     })?["handle"]
         .as_u64()
         .unwrap();
@@ -279,7 +303,7 @@ fn real_process_isolation_atomic_training_and_baseline() -> Result<()> {
         .is_err());
     assert_eq!(
         metrics.as_object().unwrap().len(),
-        3,
+        4,
         "resident parameters or gradients escaped"
     );
 
@@ -452,11 +476,13 @@ fn real_process_isolation_atomic_training_and_baseline() -> Result<()> {
                 training_direct.step(&training_inputs, Objective::Mse(&training_targets), 0.001)?;
             let direct_ns = begin.elapsed().as_nanos();
             let begin = Instant::now();
-            let reply = client.call(Request::Train {
+            let reply = client.call(Request::TrainStep {
                 handle: training_handle,
                 inputs: training_inputs.clone(),
-                targets: training_targets.clone(),
+                targets: serde_json::json!(training_targets),
                 rate: 0.001,
+                loss: "mse".into(),
+                clip: None,
             })?;
             let ipc_ns = begin.elapsed().as_nanos();
             assert_eq!(reply["loss"].as_f64().unwrap() as f32, expected);

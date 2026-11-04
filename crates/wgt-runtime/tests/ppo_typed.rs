@@ -6,7 +6,7 @@ fn typed_ppo_nonuniform_scores_have_explicit_probabilities_and_log_likelihood() 
  let prefix=PPO.split("fn main()").next().unwrap();
  let source=format!(r#"{prefix}
 fn main() {{let policy=Policy("adam");
- train policy on ([[1,0],[0,1]],[[0,1,-0.6931471805599453,1],[0,1,-0.6931471805599453,1]]) rate 0.03 clip 0.5;
+ train policy on [[1,0],[0,1]] against [[0,1,-0.6931471805599453,1],[0,1,-0.6931471805599453,1]] {{rate:0.03;clip:0.5;loss:loss;}};
  let scores=policy([1,0]);let p=scores.probabilities;
  let {{action,log_prob}}=sample from policy([1,0]);return [scores,p,action,log_prob];}}"#);
  let value=script::run(&source,Path::new("."),100000).unwrap().result;

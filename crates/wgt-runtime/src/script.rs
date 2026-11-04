@@ -268,6 +268,27 @@ fn typed_vector(v: Vec<f32>, kind: crate::categorical::VectorType) -> Result<Val
     Ok(Value::CategoricalVector(kind, values.into_iter().map(Value::Number).collect()))
 }
 
+/// Validate borrowed strategy results before cloning/serializing across IPC.
+pub fn validate_strategy_result(value: &Value) -> Result<()> {
+    fn visit(value: &Value, depth: usize, bytes: &mut usize) -> Result<()> {
+        ensure!(depth <= 32, "strategy return nesting exceeds 32");
+        *bytes = bytes.checked_add(64).context("strategy return size overflow")?;
+        match value {
+            Value::Number(n) => ensure!(n.is_finite(), "nonfinite strategy return"),
+            Value::Null | Value::Bool(_) => {},
+            Value::Text(text) => *bytes = bytes.checked_add(text.len()).context("strategy return size overflow")?,
+            Value::List(values) => for value in values { visit(value, depth + 1, bytes)?; },
+            Value::Object(values) => for (key, value) in values {
+                *bytes = bytes.checked_add(key.len()).context("strategy return size overflow")?;
+                visit(value, depth + 1, bytes)?;
+            },
+            _ => bail!("strategy return must be bounded plain data; resource handles cannot cross the model boundary"),
+        }
+        ensure!(*bytes <= 1024*1024, "strategy return exceeds 1 MiB");
+        Ok(())
+    }
+    visit(value, 0, &mut 0)
+}
 pub type Env = HashMap<String, Value>;
 pub enum Flow {
     Next,
@@ -585,7 +606,13 @@ impl Runtime {
                 let value = self.eval(&args[0], env)?;
                 if name == "__await" { self.await_value(value) } else { self.spawn_future(value) }
             }
-            Expr::BuiltinCall(name, args) | Expr::StaticCall(name, args) => {
+            Expr::StaticCall(name, args) => {
+                let args = args.iter().map(|v| self.eval(v, env)).collect::<Result<_>>()?;
+                let result = self.call(name, args)?;
+                validate_strategy_result(&result)?;
+                Ok(result)
+            }
+            Expr::BuiltinCall(name, args) => {
                 let args = args.iter().map(|v| self.eval(v, env)).collect::<Result<_>>()?;
                 self.call(name, args)
             }
@@ -802,6 +829,7 @@ impl Runtime {
                 _ => bail!("loop control escaped function"),
             };
         }
+        ensure!(name != "model", "model(...) loading was removed; use load model from path using optimizer");
         self.builtin(name, &args)
             .with_context(|| format!("{name}()"))
     }
@@ -852,7 +880,7 @@ impl Runtime {
         ) {
             return self.training_device_builtin(name, a);
         }
-        if matches!(name, "fit" | "reinforce") {
+        if matches!(name, "__train_step" | "reinforce") {
             if let Some(Value::Model(index)) = a.first() {
                 if !self.models[*index].lock()?.backend().is_cpu() {
                     self.resources.allow_direct_gpu_training()?;
@@ -1210,7 +1238,22 @@ impl Runtime {
                 let kind = session.session.output_type();
                 typed_vector(session.predict(&input)?, kind)
             }
-            "fit" => {
+            "__train_step" => {
+                let options = a[3].json()?;
+                let options = options.as_object().context("expected training options")?;
+                let rate = options.get("rate").and_then(serde_json::Value::as_f64).context("training requires rate")?;
+                let loss = options.get("loss").and_then(serde_json::Value::as_str).unwrap_or("mse");
+                let clip = options.get("clip").map(|v| v.as_f64().context("clip must be numeric")).transpose()?;
+                ensure!(rate.is_finite() && rate > 0. && (rate as f32).is_finite(), "learning rate must be positive and finite");
+                ensure!(clip.is_none_or(|v| v.is_finite() && v > 0. && (v as f32).is_finite()), "gradient clip norm must be positive and finite");
+                let lowered = vec![a[0].clone(), a[1].clone(), a[2].clone(), number(rate)?, Value::Text(loss.into())];
+                if let Some(limit) = clip {
+                    if let Value::Adaptive(index) = a[0] {
+                        if loss == "loss" { return number(self.adaptive[index].lock()?.train_clipped(&a[1].matrix()?, &a[2].matrix()?, rate as f32, limit as f32, &mut self.remaining, 64*1024*1024)? as f64); }
+                    }
+                }
+                let a = lowered.as_slice();
+                let clip = clip.map(|v| v as f32);
                 if let Value::Adaptive(index) = a[0] {
                     let x = a[1].matrix()?;
                     let rate = a[3].float()?;
@@ -1222,10 +1265,11 @@ impl Runtime {
                             &mut self.remaining,
                             64 * 1024 * 1024,
                         )?,
-                        "mse" => self.adaptive[index].lock()?.train_step(
+                        "mse" => self.adaptive[index].lock()?.train_builtin_clipped(
                             &x,
                             Objective::Mse(&a[2].matrix()?),
                             rate,
+                            clip,
                             &mut self.remaining,
                             64 * 1024 * 1024,
                         )?,
@@ -1235,13 +1279,14 @@ impl Runtime {
                                 .iter()
                                 .map(Value::integer)
                                 .collect::<Result<Vec<_>>>()?;
-                            self.adaptive[index].lock()?.train_step(
+                            self.adaptive[index].lock()?.train_builtin_clipped(
                                 &x,
                                 Objective::Policy {
                                     actions: &actions,
                                     advantages: &vec![1.; x.len()],
                                 },
                                 rate,
+                                clip,
                                 &mut self.remaining,
                                 64 * 1024 * 1024,
                             )?
@@ -1254,10 +1299,11 @@ impl Runtime {
                 let x = a[1].matrix()?;
                 let rate = a[3].float()?;
                 let loss = match a[4].text()? {
-                    "mse" => self.models[model].lock()?.step(
+                    "mse" => self.models[model].lock()?.step_clipped(
                         &x,
                         Objective::Mse(&a[2].matrix()?),
                         rate,
+                        clip,
                     )?,
                     "cross_entropy" => {
                         let actions = a[2]
@@ -1265,31 +1311,18 @@ impl Runtime {
                             .iter()
                             .map(Value::integer)
                             .collect::<Result<Vec<_>>>()?;
-                        self.models[model].lock()?.step(
+                        self.models[model].lock()?.step_clipped(
                             &x,
                             Objective::Policy {
                                 actions: &actions,
                                 advantages: &vec![1.; x.len()],
                             },
                             rate,
+                            clip,
                         )?
                     }
                     _ => bail!("loss must be mse or cross_entropy"),
                 };
-                number(loss as f64)
-            }
-            "__train" => {
-                let Value::Adaptive(index) = a[0] else {
-                    bail!("train requires a forward model with fn loss")
-                };
-                let loss = self.adaptive[index].lock()?.train_clipped(
-                    &a[1].matrix()?,
-                    &a[2].matrix()?,
-                    a[3].float()?,
-                    a[4].float()?,
-                    &mut self.remaining,
-                    64 * 1024 * 1024,
-                )?;
                 number(loss as f64)
             }
             "reinforce" => {

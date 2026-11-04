@@ -8,7 +8,7 @@
 模型先声明 `model`、`input/output ...: f32[N]` 及显式初值的 `parameter/frozen`，
 然后用 `fn forward(x)` 表达张量计算、`write`、`if positive(...)` 和 `while`。
 同文件 main 调用 `模型名("none"|"sgd"|"adam")` 与 `predict`；这里的竖线表示三选一字符串。
-sgd/adam 可由 `fit`/`reinforce` 训练整个 forward，见[可微程序](differentiable-programs.md)。输入不含 batch；当前仅 CPU。
+sgd/adam 可由声明式 `train` / `reinforce` 训练整个 forward，见[可微程序](differentiable-programs.md)。输入不含 batch；当前仅 CPU。
 可执行且带轴、状态、梯度说明的完整示例：[model.wgt](../examples/self_modifying/model.wgt)。
 
 ```sh
@@ -63,7 +63,7 @@ JSON 传输命令 `forward` 接收 input、parameters（默认空映射）、tap
 `release` 释放 tape，`parameters` 读取当前参数。每会话最多 64 个活动 tape。
 API 详情以 `crates/wgt-runtime/src/adaptive/transport.rs` 为准。
 高层普通函数暂不暴露 VJP/外部优化器接口；`predict` 用于提交推理状态。
-高层 `fit`/`reinforce` 已接通此 VJP；训练不提交 forward 中的 write，最终状态梯度为零。
+声明式 `train` / `reinforce` 已接通此 VJP；训练不提交 forward 中的 write，最终状态梯度为零。
 `gate`/`route` 对门与各输入求导；`softmax` 使用完整向量 Jacobian 的 VJP，不是逐项 sigmoid 导数。
 记录 tape 时禁用推理端点短路，保留另一分支对门梯度的贡献；frozen 也不改变此数学契约。
 
@@ -71,7 +71,7 @@ API 详情以 `crates/wgt-runtime/src/adaptive/transport.rs` 为准。
 
 prob 的原生参数存储为 logit（frozen 为概率）；读取表达式自动转换，write 禁止改写 prob。
 mix 保留 route 的推理短路与完整 VJP。fn loss 是无模型参数的张量子程序，
-其输入梯度回传到模型输出；fit(...,"loss") 才执行训练。详见[语法契约](differentiable-programs.md#概率混合自定义损失与采样语法)。
+其输入梯度回传到模型输出；在训练配置块中使用 `loss: loss` 才执行自定义损失训练。详见[语法契约](differentiable-programs.md#概率混合自定义损失与采样语法)。
 
 ## 临时工作内存与分段执行
 

@@ -119,7 +119,7 @@ fn train_syntax_and_target_contract_reject_invalid_programs() {
             "target trajectory: f32[4]",
             "target trajectory: f32[4]\ntarget trajectory: f32[4]",
         ),
-        ("rate 0.03 clip 0.5", "rate 0.03"),
+        ("rate:0.03;clip:0.5;loss:loss;", "clip:0.5;loss:loss;"),
         ("clip(ratio, 0.8, 1.2)", "clip(ratio, 1.2, 0.8)"),
         (
             "minimum(ratio * advantage, clip(ratio, 0.8, 1.2) * advantage)",
@@ -130,7 +130,7 @@ fn train_syntax_and_target_contract_reject_invalid_programs() {
     }
     let no_loss="wgt 0.5\nmodel Test\ninput x: f32[1]\noutput y: f32[1]\ntarget t: f32[2]\nfn forward(x){return x;}";
     assert!(parse(no_loss).is_err());
-    let bad="wgt 0.5\nfn main(){let m=mlp([1,2],\"relu\",1,\"adam\");train m on ([[1]],[[1]]) rate 0.1 clip 1;}";
+    let bad="wgt 0.5\nfn main(){let m=mlp([1,2],\"relu\",1,\"adam\");train m on [[1]] against [[1]] {rate:0.1;clip:1;loss:loss;};}";
     assert!(script::run(bad, Path::new("."), 10000).is_err());
 }
 #[test]
@@ -144,19 +144,25 @@ fn rl_loss_and_optimizer_survive_export_and_restore() {
         r#"{prefix}
 fn main() {{
     let a=Policy("adam"); let xs=[[1,0]]; let ys=[[0,1,-0.6931472,1]];
-    train (a) on (xs,ys) rate (0.03) clip (0.5);
-    save_checkpoint(a, "checkpoint.json"); save_model(a,"model.json");
-    let b=load_checkpoint("checkpoint.json"); let c=load_model("model.json", "none");
-    assert(a([1,0])==c([1,0]),"export mismatch");
-    let loss_a=train(a,xs,ys,0.03,0.5);
-    let loss_b=train(b,xs,ys,0.03,0.5);
-    assert(loss_a==loss_b,"loss mismatch");
-    assert(a([1,0])==b([1,0]),"Adam mismatch");
+    train (a) on xs against ys {{rate:(0.03);clip:(0.5);loss:loss;}};
+    save checkpoint a to "checkpoint.json"; save model a to "model.json";
+    let b=load checkpoint from "checkpoint.json"; let c=load model from "model.json" using "none";
+    assert a([1,0])==c([1,0]), "export mismatch";
+    let loss_a=train a on xs against ys {{rate:0.03;clip:0.5;loss:loss;}};
+    let loss_b=train b on xs against ys {{rate:0.03;clip:0.5;loss:loss;}};
+    assert loss_a==loss_b, "loss mismatch";
+    assert a([1,0])==b([1,0]), "Adam mismatch";
     return true;
 }}
 "#
     );
-    let result = script::run(&text, &root, 10000);
+    // Loading the serialized model charges its bytes to the operation budget.
+    let result = script::run(&text, &root, 100_000);
+    let checkpoint_bytes = std::fs::metadata(root.join("checkpoint.json")).unwrap().len();
+    let model_bytes = std::fs::metadata(root.join("model.json")).unwrap().len();
+    // Two writes and two reads each charge actual file bytes once, in addition to training.
+    assert!(2 * (checkpoint_bytes + model_bytes) > 10_000);
+    println!("rl persistence checkpoint={checkpoint_bytes} model={model_bytes} IO={}", 2*(checkpoint_bytes+model_bytes));
     std::fs::remove_dir_all(&root).unwrap();
     assert_eq!(result.unwrap().result, true);
 }

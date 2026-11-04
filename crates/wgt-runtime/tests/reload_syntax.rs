@@ -23,13 +23,13 @@ fn main(){
  let original=net([1]);
  save model net to "model.json";
  save checkpoint net to "checkpoint.json";
- fit(net,[[1]],[[3]],0.01,"mse"); let next=net([1]);
+ train net on [[1]] against [[3]] {rate:0.01;loss:mse;}; let next=net([1]);
  reload model net from "model.json" using "adam";
  assert alias([1])==original;
- fit(alias,[[1]],[[3]],0.01,"mse"); assert net([1])==next;
+ train alias on [[1]] against [[3]] {rate:0.01;loss:mse;}; assert net([1])==next;
  reload checkpoint alias from "checkpoint.json";
  assert net([1])==original;
- fit(net,[[1]],[[3]],0.01,"mse"); assert alias([1])==next;
+ train net on [[1]] against [[3]] {rate:0.01;loss:mse;}; assert alias([1])==next;
  return true;
 }"#,
         &root,

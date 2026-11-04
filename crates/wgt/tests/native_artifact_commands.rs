@@ -29,7 +29,7 @@ fn fail(output: Output, expected: &str) {
     );
 }
 fn fixture(root: &Path) {
-    fs::write(root.join("model.wgt"), "wgt 0.5\nfn main() { let net = mlp([1,1], \"identity\", 42, \"adam\"); fit(net, [[0]], [[1]], 0.05, \"mse\"); return net; }").unwrap();
+    fs::write(root.join("model.wgt"), "wgt 0.5\nfn main() { let net = mlp([1,1], \"identity\", 42, \"adam\"); train net on [[0]] against [[1]] {rate:0.05;loss:mse;}; return net; }").unwrap();
     ok(Command::new(env!("CARGO_BIN_EXE_weightc"))
         .current_dir(root)
         .env("PATH", "/nonexistent")

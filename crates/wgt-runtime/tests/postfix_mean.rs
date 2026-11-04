@@ -10,16 +10,16 @@ fn postfix_mean_precedence_values_and_budget_match_calls() {
 fn values() { return [2, 4, 6]; }
 fn main() {
     let x = [1, 3];
-    assert(x.mean == 2, "variable");
-    assert(values().mean == 4, "call");
-    assert((x).mean == 2, "parentheses");
-    assert([[1, 3], [4, 8]][1].mean == 6, "index");
-    assert(-x.mean + 3 * [2, 4].mean == 7, "precedence");
-    assert(x . mean == 2, "whitespace");
-    assert([1.5, 2.5, 2e0, 2.E0].mean == 2, "decimal lexer");
+    assert x.mean == 2, "variable";
+    assert values().mean == 4, "call";
+    assert (x).mean == 2, "parentheses";
+    assert [[1, 3], [4, 8]][1].mean == 6, "index";
+    assert -x.mean + 3 * [2, 4].mean == 7, "precedence";
+    assert x . mean == 2, "whitespace";
+    assert [1.5, 2.5, 2e0, 2.E0].mean == 2, "decimal lexer";
     seed(7); let expected = mean([random(), random()]);
     seed(7); let actual = [random(), random()].mean;
-    assert(actual == expected, "evaluate operand once");
+    assert actual == expected, "evaluate operand once";
     return true;
 }"#;
     assert_eq!(
@@ -124,14 +124,14 @@ fn postfix_mean_checkpoint_resume_and_model_export_preserve_behavior() {
         r#"{model}
 fn main() {{
     let a = MeanEnergy("adam");
-    fit(a, [[1,3]], [[2]], 0.01, "loss");
-    save_checkpoint(a, "checkpoint.json");
-    save_model(a, "model.json");
-    let b = load_checkpoint("checkpoint.json");
-    let c = load_model("model.json", "none");
-    assert(a([1,3]) == c([1,3]), "export");
-    assert(fit(a, [[1,3]], [[2]], 0.01, "loss") == fit(b, [[1,3]], [[2]], 0.01, "loss"), "resume loss");
-    assert(a([1,3]) == b([1,3]), "resume parameters");
+    train a on [[1,3]] against [[2]] {{rate:0.01;loss:loss;}};
+    save checkpoint a to "checkpoint.json";
+    save model a to "model.json";
+    let b = load checkpoint from "checkpoint.json";
+    let c = load model from "model.json" using "none";
+    assert a([1,3]) == c([1,3]), "export";
+    assert train a on [[1,3]] against [[2]] {{rate:0.01;loss:loss;}} == train b on [[1,3]] against [[2]] {{rate:0.01;loss:loss;}}, "resume loss";
+    assert a([1,3]) == b([1,3]), "resume parameters";
     return true;
 }}"#
     );

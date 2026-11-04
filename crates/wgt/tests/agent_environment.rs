@@ -16,7 +16,7 @@ agent Actor {policy;learner:update;}
 environment Counter {observation:f32[1];action:f32[1];feedback:f32[1];reset:reset_env;step:step_env;}
 fn reset_env(state,seed){return {state:state,observation:[state]};}
 fn step_env(state,action){let next=state+action[0];return {state:next,observation:[next],feedback:[next],terminated:next>=3,truncated:false};}
-fn update(actor,batch){let model=actor.policy;train model on (batch.x,batch.y) rate 0.1 clip 1;return len(batch);}
+fn update(actor,batch){let model=actor.policy;train model on batch.x against batch.y {rate:0.1;clip:1;loss:loss;};return len(batch);}
 fn main(){let model=Policy("sgd");let actor=Actor(model);let env=Counter(0,7);let report=learn actor {for i in [1,2,3]{let t=env.step([1]);yield {x:[i],y:[0]};}};return [report,model([1]),env.reset()];}"#;
  fs::write(&source,text).unwrap();script_compiler::compile(&source,&executable).unwrap();fs::remove_file(source).unwrap();
  let expected=script::run(text,dir.path(),100000).unwrap();

@@ -46,7 +46,7 @@ fn main() {{
  let net=Policy("adam"); seed(23);
  let x=[random(),random(),random()]; let expected=draw(net,x); let tail=random();
  seed(23); let actual=sample from net([random(),random(),random()]);
- assert(actual==expected,"single input evaluation"); assert(random()==tail,"RNG advancement");
+ assert actual==expected, "single input evaluation"; assert random()==tail, "RNG advancement";
  let sample=0; seed(23); return sample from net(x);
 }}"#
     );
@@ -66,12 +66,12 @@ fn loss(p,t) { return mean(square(p-t)); }
 fn main() {
  # Independent constructors give the control and sampled model equal initial weights and Adam state.
  let sampled=Stateful("adam"); let control=Stateful("adam");
- for i in range(0,4) { let action=sample from sampled([1,2,3]); assert(action>=0 && action<3,"class range"); }
- assert(sampled([0,0,0])==control([0,0,0]),"sample committed write");
- assert(train(sampled,[[1,2,3]],[[0,0,0]],0.01,1)==train(control,[[1,2,3]],[[0,0,0]],0.01,1),"optimizer changed");
- assert(sampled([0,0,0])==control([0,0,0]),"training states differ");
+ for i in range(0,4) { let action=sample from sampled([1,2,3]); assert action>=0 && action<3, "class range"; }
+ assert sampled([0,0,0])==control([0,0,0]), "sample committed write";
+ assert train sampled on [[1,2,3]] against [[0,0,0]] { loss: loss; rate: 0.01; clip: 1; }==train control on [[1,2,3]] against [[0,0,0]] { loss: loss; rate: 0.01; clip: 1; }, "optimizer changed";
+ assert sampled([0,0,0])==control([0,0,0]), "training states differ";
  let written=sampled([1,2,3]);
- assert(sampled([0,0,0])==written,"ordinary call must commit write");
+ assert sampled([0,0,0])==written, "ordinary call must commit write";
  return true;
 }"#;
     assert_eq!(
@@ -121,9 +121,9 @@ fn sampling_rejects_old_calls_invalid_models_and_inputs() {
 fn probability_blocks_keep_lazy_branches_endpoints_and_rng() {
     let text = r#"wgt 0.5
 fn main(){seed(7);let next=random();seed(7);
- assert(sample 0 {then{1/0}else{2}}==2,"zero");
- assert(sample (1) {then{3}else{1/0}}==3,"one");
- assert(random()==next,"endpoint RNG");
+ assert sample 0 {then{1/0}else{2}}==2, "zero";
+ assert sample (1) {then{3}else{1/0}}==3, "one";
+ assert random()==next, "endpoint RNG";
  return sample 0.5 {then{true}else{false}};
 }"#;
     assert!(script::run(text, Path::new("."), 1000)

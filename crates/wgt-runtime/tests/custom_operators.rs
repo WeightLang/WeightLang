@@ -27,7 +27,7 @@ fn tensor_helpers_are_hygienic_differentiable_and_portable() {
     let mut reloaded = AdaptiveSession::prepare(serde_json::from_str(&ir).unwrap(), 65536).unwrap();
     assert_eq!(reloaded.run(&[1., 2.], 1000).unwrap(), [16., 72.]);
     assert!(reloaded.run(&[1., 2.], 1).is_err());
-    let source = format!("{SOURCE}\nfn main() {{ let m=Custom(\"adam\"); let a=fit(m,[[1,2]],[[0,0]],0.01,\"loss\"); let b=fit(m,[[1,2]],[[0,0]],0.01,\"loss\"); assert(b<a,\"gradient update\"); return true; }}");
+    let source = format!("{SOURCE}\nfn main() {{ let m=Custom(\"adam\"); let a=train m on [[1,2]] against [[0,0]] {{rate:0.01;loss:loss;}}; let b=train m on [[1,2]] against [[0,0]] {{rate:0.01;loss:loss;}}; assert b<a, \"gradient update\"; return true; }}");
     assert_eq!(
         script::run(&source, Path::new("."), 10000).unwrap().result,
         true

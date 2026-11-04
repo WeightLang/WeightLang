@@ -1364,7 +1364,7 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
         path.join(toolchain::PIN),
         format!("{}\n", toolchain::CURRENT),
     )?;
-    fs::write(path.join("model.wgt"), "wgt 0.5\n# One feature and one output; all iterations update the same initialized model.\nfn main() {\n    let model = mlp([1, 4, 1], \"tanh\", 42, \"adam\");\n    for step in range(0, 100) {\n        let loss = fit(model, [[0], [1]], [[0], [1]], 0.03, \"mse\");\n    }\n    metric(\"training_steps\", 100);\n    return model;\n}\n")?;
+    fs::write(path.join("model.wgt"), "wgt 0.5\n# One feature and one output; all iterations update the same initialized model.\nfn main() {\n    let model = mlp([1, 4, 1], \"tanh\", 42, \"adam\");\n    for step in range(0, 100) {\n        let loss = train model on [[0], [1]] against [[0], [1]] {rate:0.03;loss:mse;};\n    }\n    metric(\"training_steps\", 100);\n    return model;\n}\n")?;
     project_ignore::initialize(path)?;
     println!(
         "created {} (wgt sync; wgt script model.wgt; weightc legacy-build model.wgt)",

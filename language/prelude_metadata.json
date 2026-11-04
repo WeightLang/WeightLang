@@ -1,0 +1,428 @@
+{
+  "schema_version": 1,
+  "source_edition": "0.5",
+  "scope": "Implicit source functions, intrinsics, constants and declaration types. No std modules are imported. Contexts are separate contracts; ordinary functions are shared by interpreter and AOT. Parameters are required unless defaults explicitly say otherwise.",
+  "entries": [
+    {
+      "name": "agent",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "agent NAME { policy; [critic;] [learner: FUNCTION;] }",
+      "purpose": "声明专用agent构造计划，显式模型别名及可选默认二参learner，不训练。",
+      "defaults": {},
+      "documentation": "docs/agents-environments.md",
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "environment",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "environment NAME { observation: f32[N]; action: f32[A]; feedback: f32[F]; reset: FUNCTION; step: FUNCTION; }",
+      "purpose": "声明同步WGT环境状态与reset/step schema；实例构造reset一次。",
+      "defaults": {},
+      "documentation": "docs/agents-environments.md",
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "learn",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "[let report =] learn TARGET [using FUNCTION] { BODY }",
+      "purpose": "整批collect成功后释放目标policy保护并调用一次具名同步二参learner。",
+      "defaults": {},
+      "documentation": "docs/agents-environments.md",
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "__agent",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__agent(plan,policy[,critic])",
+      "purpose": "Compiler-only agent constructor; source __ names rejected.",
+      "arity": {
+        "min": 2,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+    },
+    {
+      "name": "__environment",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__environment(plan,state,seed)",
+      "purpose": "Compiler-only environment constructor; source __ names rejected.",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+    },
+    {
+      "name": "__record",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__record(field,value,...)",
+      "purpose": "Compiler-only bounded finite record literal; source __ names rejected.",
+      "arity": {
+        "min": 0,
+        "max": 512
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+    },
+    {
+      "name": "async",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "async fn name(args) { BODY }",
+      "purpose": "创建冷用户future；显式纯数据参数与返回值；第一阶段拒绝资源/模型异步执行。",
+      "defaults": {},
+      "documentation": "docs/async-tasks.md",
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "tasks",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "tasks { BODY }",
+      "purpose": "同步函数内有界任务作用域，正常join、失败取消并等待在途IO；首期不支持嵌套。",
+      "defaults": {},
+      "documentation": "docs/async-tasks.md",
+      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+    },
+    {
+      "name": "await",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "await FUTURE_OR_TASK",
+      "purpose": "驱动冷future或等待作用域task，拒绝任意同步值。",
+      "defaults": {},
+      "documentation": "docs/async-tasks.md",
+      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+    },
+    {
+      "name": "spawn",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "spawn FUTURE",
+      "purpose": "在tasks内启动作用域子任务，禁止默认脱离。",
+      "defaults": {},
+      "documentation": "docs/async-tasks.md",
+      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+    },
+    {
+      "name": "sleep",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "await sleep(milliseconds)",
+      "purpose": "仅async fn：固定阻塞池等待0..30000整数毫秒，返回null；不是定时器reactor。",
+      "defaults": {},
+      "documentation": "docs/async-tasks.md",
+      "implementation": "crates/wgt-runtime/src/script/async_runtime.rs"
+    },
+    {
+      "name": "reload",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "reload model TARGET from PATH using OPTIMIZER; | reload checkpoint TARGET from PATH;",
+      "purpose": "同句柄同结构原子重载；model新优化器，checkpoint恢复状态，运行时revision递增并使旧梯度失效。",
+      "documentation": "docs/file-io.md",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+    },
+    {
+      "name": "save",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "save KIND VALUE to PATH [overwrite];",
+      "purpose": "显式原子保存 model/checkpoint/json/text；默认拒绝覆盖，父目录必须存在，路径按脚本根目录解析。",
+      "documentation": "docs/file-io.md",
+      "defaults": {
+        "overwrite": false
+      },
+      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+    },
+    {
+      "name": "load",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "load KIND from PATH [using OPTIMIZER]",
+      "purpose": "读取 model/checkpoint/json/text；model必填using新优化器，checkpoint恢复已记录优化器，不执行训练或main。",
+      "documentation": "docs/file-io.md",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+    },
+    {
+      "name": "assert",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "assert CONDITION [, MESSAGE];",
+      "purpose": "条件必须bool且仅求值一次；仅失败时求消息。兼容两实参assert(condition,message)保持急求值。",
+      "documentation": "docs/file-io.md",
+      "defaults": {
+        "message": "assertion failed"
+      },
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "__record_field",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__record_field(value,field)",
+      "purpose": "Compiler-only record field projection; source __ calls rejected. RecordBatch columns retain row order and charge traversal; plain indexed lists are rejected.",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "__probabilities",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__probabilities(value)",
+      "purpose": "Compiler-only target for typed value.probabilities; source calls with __ prefix are rejected. Stable softmax for logits, strict validation and identity for probabilities, ordinary f32 rejected.",
+      "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "__graph",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__graph(plan,optimizer)",
+      "purpose": "Compiler-only sequential model construction.",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "__adaptive",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__adaptive(plan,optimizer)",
+      "purpose": "Compiler-only forward model construction.",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "true",
+      "kind": "constant",
+      "contexts": [
+        "ordinary_function",
+        "tensor_condition"
+      ],
+      "signature": "true",
+      "purpose": "Boolean literal.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "false",
+      "kind": "constant",
+      "contexts": [
+        "ordinary_function",
+        "tensor_condition"
+      ],
+      "signature": "false",
+      "purpose": "Boolean literal.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "null",
+      "kind": "constant",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "null",
+      "purpose": "Null value; also the implicit function return.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "f32",
+      "kind": "type",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "f32[N] / f32[O,I]",
+      "purpose": "Fixed-shape 32-bit floating-point tensor; supported ranks depend on declaration.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "logits",
+      "kind": "type",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "output scores: logits[N]",
+      "purpose": "Finite, nonempty mutually exclusive category scores. Explicit output metadata survives model persistence and function values. .probabilities applies stable softmax along the category axis. Output declarations only; no binary logit type.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/categorical.rs"
+    },
+    {
+      "name": "probabilities",
+      "kind": "type",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "output choices: probabilities[N] / value.probabilities",
+      "purpose": "Finite mutually exclusive category vector, each value strictly in [0,1], sum within absolute 1e-5 of 1. Conversion validates and preserves values; no renormalization. Sampling scales by actual total mass and skips zero-mass entries. CPU native implementation; GPU categorical path not verified.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/categorical.rs"
+    },
+    {
+      "name": "prob",
+      "kind": "type",
+      "contexts": [
+        "forward_parameter_declaration"
+      ],
+      "signature": "prob",
+      "purpose": "Probability parameter represented by a logit; trainable initial value strictly in (0,1), frozen permits endpoints; reads f32[1]. Initializer required.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/adaptive/source.rs"
+    },
+    {
+      "name": "linear",
+      "kind": "layer",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "linear(in=previous_width,out,bias=1) / linear(out)",
+      "purpose": "Sequential affine layer; out required, in defaults to preceding width, bias defaults to 1.",
+      "defaults": {
+        "in": "previous width",
+        "bias": 1
+      },
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "relu",
+      "kind": "layer",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "relu",
+      "purpose": "Sequential activation preserving vector width.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "tanh",
+      "kind": "layer",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "tanh",
+      "purpose": "Sequential activation preserving vector width.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "sigmoid",
+      "kind": "layer",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "sigmoid",
+      "purpose": "Sequential activation preserving vector width.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "identity",
+      "kind": "layer",
+      "contexts": [
+        "model_declaration"
+      ],
+      "signature": "identity",
+      "purpose": "Sequential activation preserving vector width.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/source.rs"
+    },
+    {
+      "name": "__predict",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__predict(internal)",
+      "purpose": "Compiler lowering only; unavailable in source",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
+      "name": "__train_step",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__train_step(model,inputs,targets,options)",
+      "arity": {
+        "min": 4,
+        "max": 4
+      },
+      "purpose": "Compiler-only train block lowering; source __ calls rejected.",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    }
+  ]
+}

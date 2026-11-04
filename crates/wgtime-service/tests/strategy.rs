@@ -18,12 +18,24 @@ fn execute(s: &Strategy, m: &mut AdaptiveSession) -> anyhow::Result<serde_json::
     )
 }
 #[test]
+fn bounded_actual_results_and_resource_rejection() {
+ for (body,expected) in [("return null;",serde_json::Value::Null),("return 17;",serde_json::json!(17.)),("return {value:17,trace:[1,2]};",serde_json::json!({"value":17.,"trace":[1.,2.]}))] {
+  assert_eq!(execute(&Strategy::compile(&source(body)).unwrap(),&mut session()).unwrap()["result"],expected);
+ }
+ let mut m=session();
+ let strategy=Strategy::compile(&source("step(net,inputs,targets);return net;")).unwrap();
+ assert!(execute(&strategy,&mut m).unwrap_err().to_string().contains("strategy return"));
+ assert_eq!(m.parameter("w").unwrap(),[1.]);
+ let deep=format!("return {}0{};","[".repeat(34),"]".repeat(34));
+ assert!(execute(&Strategy::compile(&source(&deep)).unwrap(),&mut session()).unwrap_err().to_string().contains("nesting"));
+}
+#[test]
 fn zero_multi_commit_and_error_preserve_explicit_commits() {
     let mut m = session();
     let s = Strategy::compile(&source("return inputs;")).unwrap();
     let metrics = execute(&s, &mut m).unwrap();
     assert_eq!(metrics["commits"], 0);
-    assert_eq!(metrics.as_object().unwrap().len(), 3);
+    assert_eq!(metrics.as_object().unwrap().len(), 4);
     assert_eq!(m.parameter("w").unwrap(), [0.]);
     let s = Strategy::compile(&source(
         "step(net,inputs,targets); step(net,inputs,targets);",
@@ -106,7 +118,7 @@ fn existing_sam_is_resident_and_matches_direct_wgt() {
     for _ in 0..6 {
         let metrics = execute(&strategy, &mut m).unwrap();
         assert_eq!(metrics["commits"], 1);
-        assert_eq!(metrics.as_object().unwrap().len(), 3);
+        assert_eq!(metrics.as_object().unwrap().len(), 4);
     }
     let actual = m.evaluate(&[3.], 100000).unwrap();
     assert_eq!(report.result, serde_json::json!([actual[0] as f64]));

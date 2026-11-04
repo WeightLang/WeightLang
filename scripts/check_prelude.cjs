@@ -6,6 +6,7 @@ const root = path.resolve(__dirname, '..');
 const read = p => fs.readFileSync(path.resolve(root, p), 'utf8');
 const catalog = JSON.parse(read(process.argv[2] || 'language/prelude.json'));
 const entries = catalog.entries;
+assert.deepEqual(catalog, require('./generate_prelude.cjs').catalog(), 'stale generated prelude catalog');
 const keys = entries.map(e => `${e.kind}:${e.name}`);
 assert.equal(new Set(keys).size, keys.length, 'duplicate kind/name');
 assert.equal(JSON.parse(read('language/source_capabilities.json')).prelude, 'language/prelude.json');

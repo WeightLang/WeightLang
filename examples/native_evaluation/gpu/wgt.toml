@@ -1,3 +1,0 @@
-[project]
-module = "local/native-evaluation-gpu"
-edition = "0.5"

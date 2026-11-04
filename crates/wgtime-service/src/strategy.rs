@@ -119,7 +119,8 @@ impl Strategy {
             compiler.code.push(Op::Return);
             for op in &compiler.code {
                 if let Op::Call(target, n) = op {
-                    if let Some((_, arity)) = PURE.iter().find(|(s, _)| *s == target) {
+                    if target == "__record" { ensure!(n % 2 == 0, "invalid record fields"); }
+                    else if let Some((_, arity)) = PURE.iter().find(|(s, _)| *s == target) {
                         ensure!(n == arity, "invalid strategy builtin arity: {target}");
                     } else {
                         let called = program
@@ -186,8 +187,10 @@ impl Strategy {
             vm.reserve(json_size(parameters)?)?;
             args.push(from_json(parameters));
         }
-        vm.call(self, &self.entry, args)?;
-        Ok(serde_json::json!({"commits":vm.commits,"loss":vm.loss,"remaining":*vm.remaining}))
+        let result = vm.call(self, &self.entry, args)?;
+        weightlang_runtime::script::validate_strategy_result(&result)?;
+        let result = json(&result)?;
+        Ok(serde_json::json!({"commits":vm.commits,"loss":vm.loss,"remaining":*vm.remaining,"result":result}))
     }
 }
 struct Compiler {
@@ -630,6 +633,15 @@ impl Vm<'_> {
             return Ok(Value::Null);
         }
         match name {
+            "__record" => {
+                let mut record = std::collections::BTreeMap::new();
+                for pair in args.chunks(2) {
+                    let key = pair[0].text()?.to_owned();
+                    self.reserve(key.len().checked_add(size(&pair[1])?).context("record size overflow")?)?;
+                    ensure!(record.insert(key, pair[1].clone()).is_none(), "duplicate record field");
+                }
+                Ok(Value::Object(record))
+            }
             "len" => number(args[0].list()?.len() as f64),
             "range" => {
                 let a = args[0].integer()?;

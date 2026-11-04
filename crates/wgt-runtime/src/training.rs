@@ -107,6 +107,11 @@ impl Trainer {
         objective: Objective<'_>,
         rate: f32,
     ) -> Result<f32> {
+        self.step_clipped(inputs, objective, rate, None)
+    }
+
+    pub fn step_clipped(&mut self, inputs: &[Vec<f32>], objective: Objective<'_>, rate: f32, clip: Option<f32>) -> Result<f32> {
+        ensure!(clip.is_none_or(|v| v.is_finite() && v > 0.), "gradient clip norm must be positive and finite");
         self.session.ensure_mutable()?;
         ensure!(
             rate.is_finite() && rate > 0.,
@@ -123,6 +128,7 @@ impl Trainer {
             .context("revision overflow")?;
         #[cfg(feature = "gpu")]
         if let TrainingBackend::Gpu(gpu) = &mut self.backend {
+            ensure!(clip.is_none(), "gradient clipping is currently CPU-only");
             let rule = match self.optimizer {
                 Optimizer::Sgd => gpu::UpdateRule::Sgd,
                 Optimizer::Adam => gpu::UpdateRule::Adam {
@@ -146,7 +152,15 @@ impl Trainer {
             self.session.revision = revision;
             return Ok(loss);
         }
-        let (loss, gradients) = self.gradients(inputs, objective)?;
+        let (loss, mut gradients) = self.gradients(inputs, objective)?;
+        if let Some(limit) = clip {
+            let norm = gradients.iter().enumerate().filter(|(i, _)| !self.session.parameters[*i].frozen)
+                .flat_map(|(_, values)| values).map(|g| f64::from(*g).powi(2)).sum::<f64>().sqrt();
+            if norm > f64::from(limit) {
+                let scale = f64::from(limit) / norm;
+                for g in gradients.iter_mut().flatten() { *g = (f64::from(*g) * scale) as f32; }
+            }
+        }
         let (mut first, mut second) = (self.first.clone(), self.second.clone());
         let mut updates = Vec::new();
         for (i, parameter) in self.session.parameters.iter().enumerate() {

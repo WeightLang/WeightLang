@@ -269,8 +269,8 @@ pub fn imports(source: &str) -> Result<Vec<(String, String)>> {
 /// traversal, symlinks and package shadowing without probing the filesystem.
 pub fn standard_source(path: &str) -> Option<&'static str> {
     match path {
-        "std/activation/operators" => Some(include_str!("../../../../std/activation/operators.wgt")),
-        "std/loss/operators" => Some(include_str!("../../../../std/loss/operators.wgt")),
+        "std/activation" => Some(include_str!("../../../../std/activation/operators.wgt")),
+        "std/loss" => Some(include_str!("../../../../std/loss/operators.wgt")),
         _ => None,
     }
 }
@@ -285,6 +285,7 @@ pub(crate) fn link(
     for (alias, path) in imports {
         let standard = path.starts_with("std/");
         let source = if standard {
+            ensure!(!matches!(path.as_str(), "std/activation/operators" | "std/loss/operators"), "internal /operators import was removed; use std/activation or std/loss");
             standard_source(&path)
                 .with_context(|| format!("unsupported native standard operator module: {path}; legacy block modules require graph migration"))?
                 .to_owned()

@@ -9,6 +9,24 @@
 命令签名中的 SOURCE/FILE.wgt 表示路径占位符，模型入口应传入实际的 `model.wgt` 路径。
 
 `wgt run FILE.wgt` 是当前本地脚本解释入口；目标架构中，编译后的程序将通过轻量 IPC client 调用机器级唯一 `wgtime` 服务执行模型加载、推理、反向传播、权重更新与 checkpoint 操作，不嵌入执行核心。训练和推理状态归服务端；服务和客户端接线尚未实现。
+## 统一训练入口契约（本轮实现中）
+
+监督训练使用同一个表达式入口，作为语句时忽略返回值：
+
+```wgt
+let loss = train net on inputs against targets {loss:mse; rate:0.01;};
+train net on inputs against targets {loss:loss; rate:0.01; clip:1.0;};
+let metrics = train net on inputs against targets using momentum;
+```
+
+内置更新返回本次更新前的批次平均标量损失；不自动打印或包装成 metrics。`rate` 必填且正有限；`loss` 默认 `mse`，可选 `cross_entropy` 或使用模型 `fn loss` 的 `loss`。`clip` 省略表示不裁剪，提供时必须正有限；当前仅 CPU 训练支持，对批次平均梯度做全局 L2 裁剪后原子提交，不是逐元素截断。没有默认学习率，也不重新选择模型已经配置的优化器。未知字段、重复字段和缺失必填项在解析时拒绝；损失、形状与模型能力不匹配在执行时明确报错。
+
+模型、inputs、targets、配置字段表达式按源码顺序各求值一次；未执行分支不训练。配置中的 loss 名是固定选择，不是字符串求值或任意宿主回调。成功内置更新只有一次提交，失败保持权重、优化器状态和步数；执行工作仍计入预算。检查与编译不执行训练。
+
+`using strategy` 保留用户定义同步 WGT 策略和既有返回值，不限制为 SGD/Adam，不隐式插入更新。策略函数接收 `(model, inputs, targets)`，自行管理 differentiate/候选参数/commit/release；SAM 可保留多次求梯度与显式提交语义，策略中已成功提交的更新不会因后续错误自动撤销。默认轻客户端向服务注册策略，在服务内处理参数、梯度和优化器状态，客户端只接收原有指标，不传回梯度计算。内置配置块与 `using` 互斥。
+
+这是破坏性升级：旧 `fit(...)`、`train(...)` 以及 `train net on (inputs,targets) rate ... clip ...` 不再是合法源码；真实例子与回归随实现迁移。上述为本轮实现契约，下面尚未迁移的旧签名不作为新语法支持证明；完成后删除旧签名并记录实际验证范围。
+
 当前只保留原生训练路径；旧 Python 训练入口已删除。
 当前不是全部模型算子已经迁移，也不是已发布功能。
 
@@ -126,8 +144,7 @@ fn main() {
 | `mlp(widths,activation,seed,optimizer)` | 新建 CPU f32 顺序网络；widths 是包括输入输出的 2..64 个整数，每个 1..16384，最多 4000000 参数；隐藏层 activation 为 relu/tanh/sigmoid/identity，输出层始终 linear；optimizer 为 sgd/adam |
 | `load model from PATH using OPTIMIZER` | 加载原生顺序 IR 或 forward Program IR JSON，创建新优化器；不是普通 .wgt 模型解析器，也不接受传统 manifest 制品 |
 | `net(input)` | 输入单个 f32 向量，返回输出列表；不隐式训练，forward 模型可通过显式 `write` 提交参数更新 |
-| `fit(model,inputs,targets,lr,loss)` | 一个批次一次更新，返回更新前损失；lr 正有限；loss 为 mse/cross_entropy，forward 模型还可用 `loss` 调用同文件 `fn loss` |
-| `train(model,inputs,targets,rate,max_norm)` | forward 自定义损失的批次平均梯度、全局 L2 裁剪及原子更新；等价 train 语句，见[原生 RL](reinforcement-learning.md) |
+| `train model on inputs against targets { ... }` | 使用上文统一训练配置块；顺序模型支持 SGD/Adam，forward 自定义损失与 `clip` 目前仅 CPU 支持，见[原生 RL](reinforcement-learning.md) |
 | `reinforce(model,observations,actions,advantages,lr)` | 一批观测的策略梯度更新，返回更新前的 mean(-advantage*log pi(action)) |
 | 类别采样 | 目标语法为 `decode policy(input) {method:sample;}`；等待 parser/runtime 实现后补齐完整契约 |
 | `gae(rewards,values,next_values,terminated,truncated,gamma,lambda)` | 同长度一维列表；后两种标记是 bool，gamma/lambda 在 [0,1]；返回优势列表 |
@@ -149,8 +166,8 @@ fn main() {
 
 声明式顺序模型支持单向量 linear/relu/tanh/sigmoid/identity；`fn forward` 模型还支持
 可微 gate/route/softmax、显式写回与实际执行的循环/分支计算，详见[可微程序](differentiable-programs.md)。
-两类模型均可用 fit/reinforce、SGD/Adam；训练输入是向量的列表，逐样本
-建立 tape 并累加梯度。MSE 在样本及输出维度平均；交叉熵 targets 是每样本一个类别整数，
+两类模型均可用声明式 `train` / `reinforce` 与 SGD/Adam；训练输入是向量的列表，逐样本
+建立 tape 并累加梯度。训练裁剪仅支持 CPU。MSE 在样本及输出维度平均；交叉熵 targets 是每样本一个类别整数，
 输入模型应输出未经 softmax 的 logits。REINFORCE 的 advantages 是显式常量，不对优势求导。
 
 SGD 无 momentum/weight decay；Adam 固定 beta1=0.9、beta2=0.999、eps=1e-8，无 weight decay。
@@ -166,14 +183,14 @@ SGD 无 momentum/weight decay；Adam 固定 beta1=0.9、beta2=0.999、eps=1e-8�
 ## 静态训练策略 `train ... using`
 
 ```wgt
-train net on (inputs, targets) using momentum;
+train net on inputs against targets using momentum;
 ```
 
 `momentum` 必须是同编译单元声明的同步普通用户函数，签名为 `fn momentum(model,inputs,targets)`，
 恰好三个必填形参。函数可以在调用后声明；内置函数、模型构造器、缺失名称、错误形参数和 async 函数均拒绝。
 `using` 绑定声明函数，局部同名变量不改变目标；不提供函数值或捕获。
 模型表达式、inputs、targets 从左到右各求值一次，策略只调用一次，return 值由语句丢弃。
-超参数在策略函数内显式定义；`using` 不能与 `rate`/`clip` 混用，既有 `train ... rate ... clip ...;` 保持可用。
+超参数在策略函数内显式定义；`using` 不能与配置块混用。
 
 策略自行调用 differentiate/differentiate_at/commit_gradients，可选择零次、一次或多次更新。
 高层语句不添加优化器、梯度裁剪或额外提交，不隐式重试；只有每次显式 commit 是原子的，

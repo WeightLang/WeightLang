@@ -32,7 +32,7 @@ gate 推理时 p 全为 0 直接返回同形状零向量，跳过 x 表达式；
 实际选择的表达式及 p 的错误照常报错；失败仍回滚本次 forward 写入。
 完整例子：[lazy_routing/model.wgt](../examples/native_training/lazy_routing/model.wgt)。
 
-训练（fit/reinforce）和显式 VJP（Rust/JSON forward）仍计算两边，即使 p=0/1 或来自 frozen 参数。
+训练（声明式 train/reinforce）和显式 VJP（Rust/JSON forward）仍计算两边，即使 p=0/1 或来自 frozen 参数。
 这是为了保留 dp=a-b、gate 的 dp=x 等完整梯度，不提供伪造的零梯度。
 因此推理因短路成功的程序，若未选分支存在溢出，求梯度时仍可能报错。
 if positive(x) 仍是硬分支，只沿执行路径反传，比较和循环次数本身无梯度。
@@ -51,10 +51,10 @@ wgt run examples/native_training/soft_routing/model.wgt --compiled
 ```
 
 - `模型名(optimizer)`：optimizer 必填 none/sgd/adam 字符串；只初始化，不训练。
-- `fit(model,inputs,targets,lr,loss)`：forward 模型支持与顺序模型相同的 mse/cross_entropy；
+- `train model on inputs against targets {rate: lr; loss: mse;}`：forward 模型支持与顺序模型相同的 mse/cross_entropy；
   inputs 是单向量样本列表，MSE targets 同形状，CE targets 为类别整数列表；空批次拒绝。
-  lr 为正有限 f32；CE 模型输出 logits，而非先做 softmax 的概率。返回更新前批次平均损失。
-  使用 `"loss"` 可调用同文件 `fn loss(prediction,target)`；两参数均为单样本输出宽度的 f32 向量，
+  rate 为正有限 f32；CE 模型输出 logits，而非先做 softmax 的概率。表达式返回更新前 f32 批次平均损失。
+  配置 `loss: loss` 可调用同文件 `fn loss(prediction,target)`；两参数均为单样本输出宽度的 f32 向量，
   返回 f32[1]，按样本求梯度再求批次平均。损失函数使用受限张量表达式，不能读取模型参数。
   完整示例：[prob_mix_loss/model.wgt](../examples/native_training/prob_mix_loss/model.wgt)。
 - `reinforce(model,observations,actions,advantages,lr)`：forward 模型支持相同的策略梯度目标；
@@ -113,8 +113,8 @@ prob 无向量形状或默认初值，不能通过 write 改写，也不能直�
 可以调用[纯张量算子](custom-operators.md)，梯度包含展开后的原语计算。
 使用 forward 张量算子和 let/if/while/return；新增 square(x)、mean(x)、a-b、-a。
 square 返回逐元素平方，mean 沿唯一特征轴平均；减法要求等长，无广播。
-例如 `return mean(square(prediction-target));`，用 `fit(m,x,y,lr,"loss")` 执行。
-fit 按批次轴取平均，targets 为目标声明宽度（未声明则同输出形状）的向量列表；仅 forward 模型支持。
+例如 `return mean(square(prediction-target));`，用 `train m on x against y {rate: lr; loss: loss;}` 执行。
+训练按批次轴取平均，targets 为目标声明宽度（未声明则同输出形状）的向量列表；仅 forward 模型支持，且当前仅 CPU 支持自定义 forward 损失训练。
 损失定义不是宿主回调，不能在 main 中直接调用；构造/检查/编译不会训练。
 模型与损失 tape 共享每样本 64 MiB 张量预算，损失指令也扣除脚本预算；预算不含会话寄存器和优化器。
 整批成功才更新权重和优化器；损失程序保存在 Program/训练断点中，重载后可继续使用。
@@ -150,4 +150,4 @@ f32[N] 沿唯一特征轴归约为 f32[1]，N>0；每项梯度为上游梯度除
 完整[语法契约](reference.zh-CN.md#后缀平均-expressionmean)及
 [训练例子](../examples/native_training/postfix_mean/model.wgt)。
 
-原生 RL 扩展：`train ... on (...) rate ... clip ...;`、独立 target 声明、常量向量、detach、exp/log/log_softmax/sum/minimum/clip 的完整签名和梯度边界见[原生强化学习](reinforcement-learning.md)。
+原生 RL 扩展：声明式 `train ... on ... against ... { ... }`、`using` 策略、独立 target 声明、常量向量、detach、exp/log/log_softmax/sum/minimum/clip 的完整签名和梯度边界见[原生强化学习](reinforcement-learning.md)。

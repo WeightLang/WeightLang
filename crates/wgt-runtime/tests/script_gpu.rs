@@ -7,11 +7,11 @@ fn cpu_selection_preserves_steps_and_weights() {
         r#"wgt 0.5
 fn main() {
     let m = mlp([1,1], "identity", 42, "adam");
-    fit(m, [[1]], [[2]], 0.01, "mse");
+    train m on [[1]] against [[2]] {rate:0.01;loss:mse;};
     let before = m([1]);
     let state = training_device(m, "cpu", 1048576, 8);
-    assert(state["device"] == "cpu" && state["steps"] == 1, "state lost");
-    assert(m([1]) == before, "weights changed");
+    assert state["device"] == "cpu" && state["steps"] == 1, "state lost";
+    assert m([1]) == before, "weights changed";
     return training_status(m);
 }"#,
         Path::new("."),
