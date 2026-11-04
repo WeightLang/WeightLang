@@ -79,6 +79,7 @@ pub fn run_with_dependencies(
     dependencies: BTreeMap<String, String>,
 ) -> Result<Report> {
     let mut runtime = Runtime {
+        permissions: permissions::Permissions::from_env()?,
         program: HashMap::new(),
         compiled: functions.into_iter().map(|(n, f)| (n.into(), f)).collect(),
         root: root.into(),

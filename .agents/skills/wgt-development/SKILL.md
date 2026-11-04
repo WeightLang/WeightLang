@@ -84,3 +84,20 @@ KL/交叉熵 p>0 且 q=0 报错，JS 支持不相交分布。无张量梯度或�
 
 `wgt test` 发现 tests/*.wgt 的无参 test_* 函数，每个测试独立运行且不执行 main。
 语法与示例见 references/native-testing.md；完整契约 docs/native-testing.md。
+
+
+<!-- permissions-foundation -->
+宿主权限底座在解释执行与 AOT 执行入口读取一次 `WGT_HOST_POLICY`（JSON，最多 1 MiB），
+拒绝未知字段、无效预算及提供者校验失败；失败不会退回无权限限制模式。
+启用策略即禁止直接路径的模型/断点/数据 I/O；权限检查不能由脚本绕过。
+`work`、`workspace_bytes`、`calls`、`deadline_ms` 必填，前三者是预算上限信息，
+权限底座自身只执行直接 I/O 拒绝和协作式 deadline；计算计费需要完整资源提供者。
+`work`、`workspace_bytes`、`deadline_ms` 最大 1000000000，`calls` 最大 10000；0 允许，
+0 毫秒在执行检查点立即超时。deadline 继承同一绝对截止时间，复制子运行时不续期。
+最小权限运行时拒绝非空设备/文件/输出/网络授权、非零 I/O 额度及 CPU/地址空间硬限制；
+完整资源运行时将同一份已解析策略交给提供者，继续执行设备、文件和进程隔离检查。
+协作式 deadline 不会中断正在进行的阻塞系统调用，也不等同于 OS 沙箱。
+最小有效策略：`{"work":100,"workspace_bytes":4096,"calls":2,"deadline_ms":10000}`；
+用 `wgt 0.5
+fn main() { return 7; }` 验证基本执行，直接 `jsonl("data.jsonl")` 在策略下应拒绝。
+此处描述本地实现与分阶段接线，不表示设备/隔离扩展已经随权限底座发布。

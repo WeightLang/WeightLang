@@ -2,6 +2,7 @@
 pub mod codegen;
 pub mod compiled;
 mod benchmark;
+mod permissions;
 mod dataset;
 mod optimization;
 mod math;
@@ -243,6 +244,7 @@ fn execute_program(
     entry: &str,
 ) -> Result<(Runtime, Value)> {
     let mut runtime = Runtime {
+        permissions: permissions::Permissions::from_env()?,
         program,
         compiled: HashMap::new(),
         root: root.into(),
@@ -261,6 +263,7 @@ fn execute_program(
     Ok((runtime, result))
 }
 pub struct Runtime {
+    permissions: permissions::Permissions,
     dependencies: BTreeMap<String, String>,
     program: Program,
     compiled: HashMap<String, compiled::Function>,
@@ -278,6 +281,7 @@ pub struct Runtime {
 }
 impl Runtime {
     pub fn tick(&mut self) -> Result<()> {
+        self.permissions.check_deadline()?;
         self.remaining = self
             .remaining
             .checked_sub(1)
@@ -551,6 +555,7 @@ impl Runtime {
         if name == "benchmark" {
             return self.benchmark(a);
         }
+        ensure!(self.permissions.allows_legacy_io() || !["dependency", "load_model", "save_model", "jsonl", "hf_dataset", "batch", "save_checkpoint", "load_checkpoint"].contains(&name), "host policy requires capability-based I/O");
         match name {
             "entropy" | "normalize_probabilities" | "kl_divergence" | "js_divergence" | "cross_entropy_probs" | "temperature_softmax" => {
                 let n = a[0].list()?.len() as u64;
