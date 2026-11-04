@@ -49,7 +49,7 @@ fn main() {
         total = total + score(i);
     }
     while total < 20 { total = total + 1; }
-    assert(total == 20, "unexpected control flow");
+    assert total == 20, "unexpected control flow";
     return total;
 }
 ```
@@ -82,9 +82,10 @@ fn main() {
 
 完整内置目录在 [language/prelude.json](../language/prelude.json)，同时驱动运行时名称与参数数量检查、编辑器快照；领域实现仍保留在目录所指的模块中。
 
-持久化推荐 `save_model(model,path)` / `load_model(path,optimizer)` 和
-`save_checkpoint(model,path)` / `load_checkpoint(path)`。`load_model` 必须显式指定新优化器，
-不会恢复训练状态；`load_checkpoint` 使用断点保存的优化器、步数和矩，不接受 optimizer 参数。
+普通函数中保存模型使用 `save model VALUE to PATH;`，保存训练断点使用
+`save checkpoint VALUE to PATH;`。读取表达式为 `load model from PATH using OPTIMIZER` 和
+`load checkpoint from PATH`；前者必须显式指定新优化器，不恢复训练状态，后者使用断点保存的优化器、步数和矩。
+这些语句默认拒绝覆盖已有目标，路径父目录须预先存在。完整文件语法与边界见[file-io.md](file-io.md)。
 旧 `model(path,optimizer)`、`save(model,path)`、`restore(path)` 仅作为 legacy 兼容别名保留，
 参数及行为与对应新名完全一致；新旧名称均不能被源码函数或模型声明覆盖。
 完整可运行例子见 [persistence/model.wgt](../examples/native_training/persistence/model.wgt)。
@@ -291,11 +292,11 @@ cargo build -p weightlang-wgt --bin weightc
 `source.wgt`（入口快照）、`manifest.json`（格式 weightlang.native-build.v1、源码/模型 SHA256、
 编译器版本、更新步数、预算和指标）。最后发布 manifest 作为完成标记；消费者应拒绝没有
 完成标记的构建目录。推理使用 `wgt-native DIRECTORY/model.json BUDGET_BYTES --device cpu`。
-断点可通过脚本 `load_checkpoint(path)` 恢复，再训练并返回模型到新的输出目录。
+断点可通过脚本 `load checkpoint from PATH` 恢复，再训练并返回模型到新的输出目录。
 
 已有输出目录或符号链接一律拒绝，不提供覆盖选项。构建预留目标目录，同盘暂存产物；
 执行失败时删除空预留目录，发布中失败保留部分输出供诊断，不宣称整个目录原子发布。
-脚本显式 save/save_model 的外部写入不在构建回滚范围内。
+脚本显式 save 语句和兼容 `save_model` API 的外部写入不在构建回滚范围内。
 
 零更新标记 initialized，有优化器更新历史标记 updated；updated 不意味着通过任务质量验收。
 恢复断点的步数包含历史更新。入口快照与哈希并不包含数据、外部模型依赖或脚本 RNG/数据进度，

@@ -14,7 +14,7 @@ fn momentum(parameters, gradients, state, rate, beta) {
     # 状态完全由 WGT 定义：[算法版本, 每参数速度]；beta=0 即普通 SGD。
     let velocities = [];
     if state != null {
-        assert(state[0] == 1, "unsupported momentum state version");
+        assert state[0] == 1, "unsupported momentum state version";
         velocities = state[1];
     }
     let candidates = [];
@@ -54,19 +54,19 @@ fn main() {
         metric("loss", update_once(net, inputs, targets, 0.02, 0.9));
     }
     # 调用方需先创建 weights/custom_momentum；已有文件拒绝覆盖。
-    save_checkpoint(net, "../../../weights/custom_momentum/step20.json");
-    let resumed = load_checkpoint("../../../weights/custom_momentum/step20.json");
+    save checkpoint net to "../../../weights/custom_momentum/step20.json";
+    let resumed = load checkpoint from "../../../weights/custom_momentum/step20.json";
     let a = update_once(net, inputs, targets, 0.02, 0.9);
     let b = update_once(resumed, inputs, targets, 0.02, 0.9);
-    assert(a == b, "resumed pre-update loss");
-    assert(net([3]) == resumed([3]), "resumed momentum weights");
+    assert a == b, "resumed pre-update loss";
+    assert net([3]) == resumed([3]), "resumed momentum weights";
     let ga = differentiate(net, inputs, targets);
     let gb = differentiate(resumed, inputs, targets);
     let sa = gradient_snapshot(ga);
     let sb = gradient_snapshot(gb);
-    assert(sa["state"] == sb["state"], "resumed velocity state");
-    assert(sa["steps"] == 21, "committed custom step count");
-    assert(sa["loss"] < initial, "custom momentum must learn");
+    assert sa["state"] == sb["state"], "resumed velocity state";
+    assert sa["steps"] == 21, "committed custom step count";
+    assert sa["loss"] < initial, "custom momentum must learn";
     release_gradient(ga);
     release_gradient(gb);
     return net([3]);

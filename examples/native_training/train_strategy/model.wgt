@@ -18,8 +18,8 @@ fn main() {
     }
     let gradient = differentiate(net,inputs,targets);
     let snapshot = gradient_snapshot(gradient);
-    assert(snapshot["steps"] == 20, "strategy controls commits");
-    assert(snapshot["loss"] < 10, "custom strategy learns");
+    assert snapshot["steps"] == 20, "strategy controls commits";
+    assert snapshot["loss"] < 10, "custom strategy learns";
     release_gradient(gradient);
     return net([3]);
 }

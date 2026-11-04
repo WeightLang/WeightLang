@@ -4,15 +4,15 @@ wgt 0.5
 fn main() {
     let net = mlp([1, 2, 1], "tanh", 7, "adam");
     fit(net, [[1]], [[2]], 0.03, "mse");
-    save_model(net, "../../../weights/persistence/model.json");
-    save_checkpoint(net, "../../../weights/persistence/checkpoint.json");
+    save model net to "../../../weights/persistence/model.json";
+    save checkpoint net to "../../../weights/persistence/checkpoint.json";
     # 推理模型加载只恢复结构和权重；sgd 是新建的优化器。
-    let inference = load_model("../../../weights/persistence/model.json", "sgd");
-    assert(net([1]) == inference([1]), "model reload mismatch");
+    let inference = load model from "../../../weights/persistence/model.json" using "sgd";
+    assert net([1]) == inference([1]), "model reload mismatch";
     # 断点恢复 Adam 步数和矩；相同下一批次必须产生相同更新。
-    let resumed = load_checkpoint("../../../weights/persistence/checkpoint.json");
+    let resumed = load checkpoint from "../../../weights/persistence/checkpoint.json";
     fit(net, [[1]], [[2]], 0.03, "mse");
     fit(resumed, [[1]], [[2]], 0.03, "mse");
-    assert(net([1]) == resumed([1]), "checkpoint resume mismatch");
+    assert net([1]) == resumed([1]), "checkpoint resume mismatch";
     return resumed([1]);
 }

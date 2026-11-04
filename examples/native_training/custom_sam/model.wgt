@@ -29,7 +29,7 @@ fn sam_step(net, inputs, targets, rate, rho, beta) {
     let sharp = gradient_snapshot(second);
     let previous = [];
     if sharp["state"] != null {
-        assert(sharp["state"][0] == 1, "SAM momentum state version");
+        assert sharp["state"][0] == 1, "SAM momentum state version";
         previous = sharp["state"][1];
     }
     let candidates = [];
@@ -61,16 +61,16 @@ fn main() {
     sam_step(net, inputs, targets, 0.1, 0.1, 0);
     let g = differentiate(net, inputs, targets);
     let s = gradient_snapshot(g);
-    assert(s["steps"] == 1, "SAM commits once");
+    assert s["steps"] == 1, "SAM commits once";
     let error = s["parameters"][0][0] - 1.05;
-    assert(error*error < 0.000000000001, "SAM updates original base");
+    assert error*error < 0.000000000001, "SAM updates original base";
     release_gradient(g);
-    save_checkpoint(net, "../../../weights/custom_sam/step1.json");
-    let resumed = load_checkpoint("../../../weights/custom_sam/step1.json");
+    save checkpoint net to "../../../weights/custom_sam/step1.json";
+    let resumed = load checkpoint from "../../../weights/custom_sam/step1.json";
     for epoch in range(0, 5) {
         sam_step(net, inputs, targets, 0.1, 0.1, 0.9);
         sam_step(resumed, inputs, targets, 0.1, 0.1, 0.9);
     }
-    assert(net([3]) == resumed([3]), "SAM checkpoint resume");
+    assert net([3]) == resumed([3]), "SAM checkpoint resume";
     return net([3]);
 }

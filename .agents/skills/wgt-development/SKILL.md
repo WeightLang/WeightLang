@@ -24,8 +24,8 @@ forward-training.v2 checkpoint保存自定义状态和步数，仍读旧v1；不
 differentiate_at(gradient,candidates) 在临时参数上复用首次句柄保留的同一f32批次求一阶梯度，
 新快照parameters/state/steps仍是原提交基准，loss/gradients来自临时点；不写live模型，保留批次与绑定计入64MiB。
 examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原子提交定义可修改SAM+SGD/动量，无高阶AD或SAM专用对象。
-保存推理模型用 save_model(model,path)，加载用 load_model(path,optimizer) 创建新优化器；
-保存训练断点用 save_checkpoint(model,path)，load_checkpoint(path) 恢复原优化器状态。
+普通函数中保存推理模型用 `save model VALUE to PATH;`，读取用 `load model from PATH using OPTIMIZER` 创建新优化器；
+保存训练断点用 `save checkpoint VALUE to PATH;`，读取用 `load checkpoint from PATH` 恢复原优化器状态。
 旧 model/save/restore 仅为 legacy 别名，新例子使用新名；所有参数必填，保存拒绝已有目标。
 本地运行 cargo test -p weightlang-runtime --test source_conformance 与 node scripts/test_source_conformance.cjs。
 
