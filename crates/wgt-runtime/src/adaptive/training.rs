@@ -32,7 +32,8 @@ struct CustomCheckpoint {
 }
 
 impl AdaptiveSession {
-    pub fn set_optimizer(&mut self, optimizer: Optimizer) {
+    pub fn set_optimizer(&mut self, optimizer: Optimizer) -> Result<()> {
+        self.ensure_mutable()?;
         self.custom_optimizer = None;
         let zeros = || {
             self.program
@@ -47,6 +48,7 @@ impl AdaptiveSession {
             first: zeros(),
             second: zeros(),
         });
+        Ok(())
     }
 
     /// All samples start from identical parameters; commit only a finite full batch.
@@ -73,6 +75,7 @@ impl AdaptiveSession {
     }
 
     fn train_step_impl(&mut self, inputs:&[Vec<f32>], objective:Objective<'_>, rate:f32, remaining:&mut u64, tape_budget:usize, custom:bool, clip:Option<f32>) -> Result<f32> {
+        self.ensure_mutable()?;
         let mut loss_session=if custom {
             let program=self.program.loss.as_ref().context("fit loss requires fn loss(prediction,target)")?;
             let session=Self::prepare((**program).clone(),tape_budget)?;

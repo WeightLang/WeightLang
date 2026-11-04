@@ -84,6 +84,7 @@ impl Session {
     /// Validate every write before changing any storage. Overlapping aliases are rejected.
     /// No heap allocation on success. Every nonempty batch increments revision once.
     pub fn write_parameters(&mut self, writes: &[ParameterWrite<'_>]) -> Result<()> {
+        self.ensure_mutable()?;
         if writes.is_empty() {
             return Ok(());
         }

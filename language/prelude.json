@@ -4,6 +4,87 @@
   "scope": "Implicit source functions, intrinsics, constants and declaration types. No std modules are imported. Contexts are separate contracts; ordinary functions are shared by interpreter and AOT. Parameters are required unless defaults explicitly say otherwise.",
   "entries": [
     {
+      "name": "agent",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "agent NAME { policy; [critic;] [learner: FUNCTION;] }",
+      "purpose": "声明专用agent构造计划，显式模型别名及可选默认二参learner，不训练。",
+      "defaults": {},
+      "documentation": "docs/agents-environments.md",
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "environment",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "environment NAME { observation: f32[N]; action: f32[A]; feedback: f32[F]; reset: FUNCTION; step: FUNCTION; }",
+      "purpose": "声明同步WGT环境状态与reset/step schema；实例构造reset一次。",
+      "defaults": {},
+      "documentation": "docs/agents-environments.md",
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "learn",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "[let report =] learn TARGET [using FUNCTION] { BODY }",
+      "purpose": "整批collect成功后释放目标policy保护并调用一次具名同步二参learner。",
+      "defaults": {},
+      "documentation": "docs/agents-environments.md",
+      "implementation": "crates/wgt-runtime/src/script/parse.rs"
+    },
+    {
+      "name": "__agent",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__agent(plan,policy[,critic])",
+      "purpose": "Compiler-only agent constructor; source __ names rejected.",
+      "arity": {
+        "min": 2,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+    },
+    {
+      "name": "__environment",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__environment(plan,state,seed)",
+      "purpose": "Compiler-only environment constructor; source __ names rejected.",
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+    },
+    {
+      "name": "__record",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__record(field,value,...)",
+      "purpose": "Compiler-only bounded finite record literal; source __ names rejected.",
+      "arity": {
+        "min": 0,
+        "max": 512
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/agents.rs"
+    },
+    {
       "name": "async",
       "kind": "syntax",
       "contexts": [

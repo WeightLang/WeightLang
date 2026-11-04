@@ -2,6 +2,34 @@
   "schema_version": 1,
   "cases": [
     {
+      "id": "ordinary-native-agent",
+      "context": "ordinary_function",
+      "rust_accepts": true,
+      "editor_accepts": true,
+      "source": "wgt 0.5\nagent Actor {policy;learner:update;}\nfn update(actor,batch){return len(batch);}\nfn main(){return 0;}\n"
+    },
+    {
+      "id": "ordinary-record-literal",
+      "context": "ordinary_function",
+      "rust_accepts": true,
+      "editor_accepts": true,
+      "source": "wgt 0.5\nfn main(){let row={state:0,observation:[1]};return row.state;}\n"
+    },
+    {
+      "id": "agent-missing-policy",
+      "context": "ordinary_function",
+      "rust_accepts": false,
+      "editor_accepts": true,
+      "source": "wgt 0.5\nagent Actor {critic;}\nfn main(){return 0;}\n"
+    },
+    {
+      "id": "ordinary-native-environment",
+      "context": "ordinary_function",
+      "rust_accepts": true,
+      "editor_accepts": true,
+      "source": "wgt 0.5\nenvironment Counter {observation:f32[1];action:f32[1];feedback:f32[1];reset:r;step:s;}\nfn r(state,seed){return {state:state,observation:[state]};}\nfn s(state,action){return {state:state,observation:[state],feedback:[0],terminated:false,truncated:false};}\nfn main(){return 0;}\n"
+    },
+    {
       "id": "ordinary-native-async",
       "context": "ordinary_function",
       "rust_accepts": true,

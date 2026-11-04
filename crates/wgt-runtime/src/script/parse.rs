@@ -12,6 +12,7 @@ pub enum Expr {
     Call(String, Vec<Expr>),
     /// A syntax-generated call, unaffected by local value bindings.
     BuiltinCall(String, Vec<Expr>),
+    /// A train strategy bound to a declared synchronous user function.
     StaticCall(String, Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
     Slice(Box<Expr>, Option<Box<Expr>>, Option<Box<Expr>>),
@@ -24,7 +25,9 @@ pub enum Expr {
 impl Expr {
     fn height(&self) -> usize {
         1 + match self {
-            Self::Sample(p,a,b) | Self::Mix(p,a,b) => p.height().max(a.height()).max(b.height()),
+            Self::Sample(p, a, b) | Self::Mix(p, a, b) => {
+                p.height().max(a.height()).max(b.height())
+            }
             Self::Binary(_, a, b) | Self::Index(a, b) => a.height().max(b.height()),
             Self::Slice(x, start, end) => start.iter().chain(end.iter())
                 .map(|e| e.height()).fold(x.height(), usize::max),
@@ -46,6 +49,7 @@ pub enum Stmt {
     LetSample(Vec<(String, String)>, String, Expr),
     Tasks(Vec<Statement>),
     Collect(String, Vec<Statement>),
+    Learn(Option<String>, Expr, String, Vec<Statement>),
     Yield(Vec<(String, Expr)>),
     ForBatches(String, Expr, Expr, Vec<Statement>),
     Set(String, Expr),
@@ -62,7 +66,7 @@ pub enum Stmt {
 }
 #[derive(Clone, Debug)]
 pub struct Function {
-    pub is_async:bool,
+    pub is_async: bool,
     pub args: Vec<String>,
     pub body: Vec<Statement>,
 }
@@ -133,7 +137,11 @@ pub fn parse_functions(source: &str) -> Result<Program> {
             let mut previous = ch;
             while let Some(&(i, c)) = chars.peek() {
                 // A dot before a name starts a postfix operation, not a decimal.
-                if c == '.' && text[i + 1..].starts_with(|c: char| c.is_ascii_alphabetic() && c != 'e' && c != 'E' || c == '_') {
+                if c == '.'
+                    && text[i + 1..].starts_with(|c: char| {
+                        c.is_ascii_alphabetic() && c != 'e' && c != 'E' || c == '_'
+                    })
+                {
                     break;
                 }
                 if !(c.is_ascii_digit()
@@ -181,7 +189,12 @@ pub fn parse_functions(source: &str) -> Result<Program> {
     };
     let mut program = Program::new();
     while parser.pos < parser.tokens.len() {
-        let is_async=parser.take("async");
+        if parser.is("agent") || parser.is("environment") {
+            let (name,function)=parser.instance_declaration()?;
+            ensure!(!super::prelude::is_builtin(&name) && program.insert(name.clone(),function).is_none(), "duplicate or reserved declaration: {name}");
+            continue;
+        }
+        let is_async = parser.take("async");
         parser.expect("fn")?;
         let name = parser.name()?;
         ensure!(
@@ -201,11 +214,11 @@ pub fn parse_functions(source: &str) -> Result<Program> {
             }
         }
         parser.expect(")")?;
-        ensure!(!is_async || !matches!(name.as_str(),"main"|"forward"|"loss"),"async {name} is unavailable; entry and tensor functions must be synchronous");
+        ensure!(!is_async || !matches!(name.as_str(), "main" | "forward" | "loss"), "async {name} is unavailable; entry and tensor functions must be synchronous");
         let body = parser.block()?;
         ensure!(
             program
-                .insert(name.clone(), Function { is_async,args, body })
+                .insert(name.clone(), Function { is_async, args, body })
                 .is_none(),
             "duplicate function: {name}"
         );
@@ -220,28 +233,85 @@ struct Parser {
     depth: usize,
 }
 impl Parser {
+    fn instance_declaration(&mut self) -> Result<(String,Function)> {
+        let line=self.line(); let agent=self.take("agent"); if !agent {self.expect("environment")?;}
+        let name=self.name()?;self.expect("{")?;
+        let mut fields=std::collections::BTreeMap::new();
+        while !self.take("}") {
+            let field=self.name()?;
+            let value=if agent && matches!(field.as_str(),"policy"|"critic") {String::new()} else {
+                self.expect(":")?;
+                if !agent && matches!(field.as_str(),"observation"|"action"|"feedback") {
+                    self.expect("f32")?;self.expect("[")?;let width=self.next()?.text.parse::<usize>().context("environment width must be an integer")?;
+                    ensure!((1..=16384).contains(&width),"environment width must be 1..16384");self.expect("]")?;width.to_string()
+                } else {self.name()?}
+            };
+            self.expect(";")?;ensure!(fields.insert(field,value).is_none(),"line {line}: duplicate declaration field");
+        }
+        let (args,plan,builtin)=if agent {
+            ensure!(fields.contains_key("policy") && fields.keys().all(|k|matches!(k.as_str(),"policy"|"critic"|"learner")),"agent requires policy; optional critic and learner only");
+            let critic=fields.contains_key("critic");let learner=fields.get("learner").cloned();
+            let args=if critic {vec!["policy".into(),"critic".into()]}else{vec!["policy".into()]};
+            (args,serde_json::to_string(&super::agents::AgentPlan{learner,critic})?,"__agent")
+        } else {
+            ensure!(fields.len()==5,"environment requires observation, action, feedback, reset and step");
+            let get=|name:&str|fields.get(name).with_context(||format!("environment missing {name}"));
+            let plan=super::agents::EnvironmentPlan{observation:get("observation")?.parse()?,action:get("action")?.parse()?,feedback:get("feedback")?.parse()?,reset:get("reset")?.clone(),step:get("step")?.clone()};
+            (vec!["state".into(),"seed".into()],serde_json::to_string(&plan)?,"__environment")
+        };
+        let mut values=vec![Expr::Text(plan)];values.extend(args.iter().cloned().map(Expr::Name));
+        Ok((name,Function{is_async:false,args,body:vec![Statement{line,kind:Stmt::Return(Expr::BuiltinCall(builtin.into(),values))}]}))
+    }
     fn train_statement(&self) -> bool {
-        if !self.tokens.get(self.pos+1).is_some_and(|t| !t.quoted && t.text=="(") { return true; }
-        let mut depth=0;
-        for (i,t) in self.tokens.iter().enumerate().skip(self.pos+1) {
-            if t.quoted {continue;}
+        if !self
+            .tokens
+            .get(self.pos + 1)
+            .is_some_and(|t| !t.quoted && t.text == "(")
+        {
+            return true;
+        }
+        let mut depth = 0;
+        for (i, t) in self.tokens.iter().enumerate().skip(self.pos + 1) {
+            if t.quoted {
+                continue;
+            }
             match t.text.as_str() {
-                "("=>depth+=1,
-                ")"=>{depth-=1;if depth==0 {return self.tokens.get(i+1).is_some_and(|t| !t.quoted && t.text=="on");}},
-                _=>{},
+                "(" => depth += 1,
+                ")" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return self
+                            .tokens
+                            .get(i + 1)
+                            .is_some_and(|t| !t.quoted && t.text == "on");
+                    }
+                }
+                _ => {}
             }
         }
         false
     }
     fn sample_block(&self) -> bool {
-        if !self.is("(") { return true; }
-        let mut depth=0;
-        for (i,t) in self.tokens[self.pos..].iter().enumerate() {
-            if t.quoted {continue;}
+        if !self.is("(") {
+            return true;
+        }
+        let mut depth = 0;
+        for (i, t) in self.tokens[self.pos..].iter().enumerate() {
+            if t.quoted {
+                continue;
+            }
             match t.text.as_str() {
-                "("=>depth+=1,
-                ")"=>{depth-=1; if depth==0 {return self.tokens.get(self.pos+i+1).is_some_and(|t| !t.quoted && t.text=="{");}},
-                _=>{},
+                "(" => depth += 1,
+                ")" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return self
+                            .tokens
+                            .get(self.pos + i + 1)
+                            .is_some_and(|t| !t.quoted && t.text == "{");
+                    }
+                }
+                _ => {}
             }
         }
         false
@@ -313,7 +383,9 @@ impl Parser {
     }
     fn statement(&mut self) -> Result<Statement> {
         let line = self.line();
-        let kind = if self.take("tasks") {Stmt::Tasks(self.block()?)} else if self.take("let") {
+        let kind = if self.take("tasks") {
+            Stmt::Tasks(self.block()?)
+        } else if self.take("let") {
             if self.take("{") {
                 let mut bindings = Vec::new();
                 while !self.take("}") {
@@ -340,12 +412,24 @@ impl Parser {
                     let body = self.block()?;
                     self.expect(";")?;
                     Stmt::Collect(name, body)
+                } else if self.take("learn") {
+                    let model = self.expr(0)?;
+                    let learner = if self.take("using") { self.name()? } else { String::new() };
+                    let body = self.block()?;
+                    self.expect(";")?;
+                    Stmt::Learn(Some(name), model, learner, body)
                 } else {
                     let value = self.expr(0)?;
                     self.expect(";")?;
                     Stmt::Let(name, value)
                 }
             }
+        } else if self.take("learn") {
+            let model = self.expr(0)?;
+            let learner = if self.take("using") { self.name()? } else { String::new() };
+            let body = self.block()?;
+            self.take(";");
+            Stmt::Learn(None, model, learner, body)
         } else if self.take("yield") {
             self.expect("{")?;
             let mut fields = Vec::new();
@@ -402,9 +486,12 @@ impl Parser {
         } else if self.is("train") && self.train_statement() {
             self.expect("train")?;
             let model = self.expr(0)?;
-            self.expect("on")?; self.expect("(")?;
-            let inputs = self.expr(0)?; self.expect(",")?;
-            let targets = self.expr(0)?; self.expect(")")?;
+            self.expect("on")?;
+            self.expect("(")?;
+            let inputs = self.expr(0)?;
+            self.expect(",")?;
+            let targets = self.expr(0)?;
+            self.expect(")")?;
             if self.take("using") {
                 let strategy = self.name()?;
                 ensure!(!self.is("rate") && !self.is("clip"), "train using cannot be combined with rate or clip");
@@ -491,7 +578,7 @@ impl Parser {
             Expr::Text(t.text)
         } else {
             match t.text.as_str() {
-                "await"|"spawn"=>Expr::BuiltinCall(format!("__{}",t.text),vec![self.expr(7)?]),
+                "await" | "spawn" => Expr::BuiltinCall(format!("__{}", t.text), vec![self.expr(7)?]),
                 "load" => {
                     let format = self.next()?;
                     ensure!(!format.quoted && matches!(format.text.as_str(), "model" | "checkpoint" | "json" | "text"), "line {}: expected load model, checkpoint, json or text", t.line);
@@ -504,14 +591,32 @@ impl Parser {
                     }
                     Expr::BuiltinCall(format!("__load_{}", format.text), args)
                 }
+                "{" => {
+                    let mut args=Vec::new();let mut names=std::collections::HashSet::new();
+                    while !self.take("}") {
+                        let name=self.name()?;ensure!(names.insert(name.clone()),"duplicate record field");self.expect(":")?;
+                        args.push(Expr::Text(name));args.push(self.expr(0)?);
+                        if self.take("}") {break;}self.expect(",")?;
+                    }
+                    Expr::BuiltinCall("__record".into(),args)
+                }
                 "onehot" => {
                     self.expect("[")?;
                     let size = self.next()?;
                     ensure!(!size.quoted, "onehot classes must be an integer literal");
-                    let classes: usize = size.text.parse().context("onehot classes must be an integer literal")?;
-                    ensure!((1..=1_000_000).contains(&classes), "onehot classes must be 1..1000000");
+                    let classes: usize = size
+                        .text
+                        .parse()
+                        .context("onehot classes must be an integer literal")?;
+                    ensure!(
+                        (1..=1_000_000).contains(&classes),
+                        "onehot classes must be 1..1000000"
+                    );
                     self.expect("]")?;
-                    Expr::BuiltinCall("one_hot".into(), vec![self.expr(7)?, Expr::Number(classes as f64)])
+                    Expr::BuiltinCall(
+                        "one_hot".into(),
+                        vec![self.expr(7)?, Expr::Number(classes as f64)],
+                    )
                 }
                 "sample" if self.take("from") => {
                     let model = self.next()?;
@@ -526,8 +631,8 @@ impl Parser {
                     ensure!(args.len() == 1, "sample from expects exactly one input expression");
                     Expr::SampleFrom(model.text, Box::new(args.remove(0)))
                 }
-                "mix" | "sample" if t.text=="mix" || self.sample_block() => {
-                    let sampling=t.text=="sample";
+                "mix" | "sample" if t.text == "mix" || self.sample_block() => {
+                    let sampling = t.text == "sample";
                     let probability = self.expr(0)?;
                     self.expect("{")?;
                     self.expect("then")?;
@@ -541,8 +646,11 @@ impl Parser {
                     self.take(";");
                     self.expect("}")?;
                     self.expect("}")?;
-                    if sampling { Expr::Sample(Box::new(probability),Box::new(yes),Box::new(no)) }
-                    else { Expr::Mix(Box::new(probability),Box::new(yes),Box::new(no)) }
+                    if sampling {
+                        Expr::Sample(Box::new(probability), Box::new(yes), Box::new(no))
+                    } else {
+                        Expr::Mix(Box::new(probability), Box::new(yes), Box::new(no))
+                    }
                 }
                 "sample" => bail!("line {}: sample(model, input) was removed; use sample from model(input)", t.line),
                 "true" => Expr::Bool(true),
@@ -578,14 +686,30 @@ impl Parser {
                         // Without call parentheses, dots belong to the postfix expression below.
                         let mut end = self.pos;
                         let mut name = t.text;
-                        while self.tokens.get(end).is_some_and(|t| !t.quoted && t.text == ".") {
-                            let Some(part) = self.tokens.get(end + 1) else { break; };
-                            if part.quoted || !part.text.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') { break; }
+                        while self
+                            .tokens
+                            .get(end)
+                            .is_some_and(|t| !t.quoted && t.text == ".")
+                        {
+                            let Some(part) = self.tokens.get(end + 1) else {
+                                break;
+                            };
+                            if part.quoted
+                                || !part
+                                    .text
+                                    .starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                            {
+                                break;
+                            }
                             name.push('.');
                             name.push_str(&part.text);
                             end += 2;
                         }
-                        if self.tokens.get(end).is_some_and(|t| !t.quoted && t.text == "(") {
+                        if self
+                            .tokens
+                            .get(end)
+                            .is_some_and(|t| !t.quoted && t.text == "(")
+                        {
                             self.pos = end;
                         } else {
                             name.truncate(name.find('.').unwrap_or(name.len()));

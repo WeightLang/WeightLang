@@ -184,6 +184,7 @@ impl Runtime {
             adaptive: Vec::new(),
             readers: Vec::new(),
             gradients: optimization::Gradients::default(),
+            agents: Vec::new(), environments: Vec::new(),
             rng: self.rng,
             gpu_benchmark_restricted: self.gpu_benchmark_restricted,
             metrics: BTreeMap::new(),

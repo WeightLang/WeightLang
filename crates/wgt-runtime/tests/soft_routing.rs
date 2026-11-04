@@ -130,7 +130,7 @@ fn disabled_optimizer_bad_checkpoints_and_tape_exhaustion_are_rejected() {
             65536
         )
         .is_err());
-    s.set_optimizer(Optimizer::Adam);
+    s.set_optimizer(Optimizer::Adam).unwrap();
     assert!(s
         .train_step(
             &[vec![0., 0.]],
@@ -157,8 +157,8 @@ fn failed_batch_rolls_back_weights_optimizer_and_forward_writes() {
     let source = PROGRAM.replace("return gate", "write(a, mul(a, a)); return gate");
     let mut s = session(&source);
     let mut control = session(&source);
-    s.set_optimizer(Optimizer::Adam);
-    control.set_optimizer(Optimizer::Adam);
+    s.set_optimizer(Optimizer::Adam).unwrap();
+    control.set_optimizer(Optimizer::Adam).unwrap();
     let before = serde_json::to_value(s.program()).unwrap();
     assert!(s
         .train_step(

@@ -95,6 +95,7 @@ pub fn run_with_dependencies(
         gradients: super::optimization::Gradients::default(),
         rng: 0,
         metrics: BTreeMap::new(),
+        agents: Vec::new(), environments: Vec::new(),
         async_state:super::async_runtime::AsyncState::default(),
     };
     let result = runtime.call("main", Vec::new())?.json()?;

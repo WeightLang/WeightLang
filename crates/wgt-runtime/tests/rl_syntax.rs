@@ -66,15 +66,15 @@ fn detached_paths_ties_clip_endpoints_and_extreme_logits() {
 fn clipped_update_is_global_and_failed_batch_keeps_optimizer() {
     let text="wgt 0.5\nmodel Test\ninput x: f32[2]\noutput y: f32[2]\nparameter w: f32[2] = [0,0]\nfn forward(x){return w+x;}\nfn loss(p,t){return sum(square(p-t));}\n";
     let mut s = session(text);
-    s.set_optimizer(Optimizer::Sgd);
+    s.set_optimizer(Optimizer::Sgd).unwrap();
     s.train_clipped(&[vec![0., 0.]], &[vec![3., 4.]], 1., 1., &mut 1000, 1 << 20)
         .unwrap();
     let w = s.parameter("w").unwrap();
     assert!((w[0] - 0.6).abs() < 1e-6 && (w[1] - 0.8).abs() < 1e-6);
     let mut a = session(PPO);
     let mut b = session(PPO);
-    a.set_optimizer(Optimizer::Adam);
-    b.set_optimizer(Optimizer::Adam);
+    a.set_optimizer(Optimizer::Adam).unwrap();
+    b.set_optimizer(Optimizer::Adam).unwrap();
     let x = vec![vec![1., 0.], vec![0., 1.]];
     let y = vec![vec![0., 1., -0.6931472, 1.]; 2];
     let mut invalid = y.clone();

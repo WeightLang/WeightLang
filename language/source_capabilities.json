@@ -94,7 +94,7 @@
     "conversion": "typed_value.probabilities",
     "plain_f32_conversion": "rejected; explicit softmax(x) remains available",
     "probability_range": "finite and strictly [0,1]",
-    "sum_absolute_tolerance": 0.00001,
+    "sum_absolute_tolerance": 1.0e-05,
     "sum_accumulator": "f64",
     "normalization": "logits stable softmax subtracts maximum; probabilities validate and preserve values",
     "metadata": "runtime values and model/optimizer-checkpoint output contracts; missing artifact field defaults to f32",
@@ -170,5 +170,20 @@
     "model_device_async": false,
     "aot": "native Rust future control flow; no AST replay",
     "documentation": "docs/async-tasks.md"
+  },
+  "agent_environment": {
+    "declarations": [
+      "agent NAME { policy; [critic;] [learner: FUNCTION;] }",
+      "environment NAME { observation:f32[N]; action:f32[A]; feedback:f32[F]; reset:FUNCTION; step:FUNCTION; }"
+    ],
+    "learn": "[let report =] learn target [using learner] { BODY }",
+    "learner": "static synchronous two-parameter user function; original target and full RecordBatch",
+    "updates": "policy identity protected while collecting; unlock before learner; no automatic optimizer",
+    "environment": "constructor reset once; fixed state schema; complete validation before committing state/observation/done/RNG",
+    "termination": "terminated and truncated independent; either requires reset before step",
+    "rng": "instance-local; reset replays original seed; host stream unchanged",
+    "checkpoint": "model policy only; no agent/environment snapshot",
+    "async": false,
+    "documentation": "docs/agents-environments.md"
   }
 }

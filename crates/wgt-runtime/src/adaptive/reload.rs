@@ -4,6 +4,7 @@ use anyhow::{ensure, Context, Result};
 impl AdaptiveSession {
     /// Replace validated state without changing the enclosing Mounted identity.
     pub(crate) fn reload_candidate(&mut self, mut candidate: Self) -> Result<()> {
+        self.ensure_mutable()?;
         let structure = |session: &Self| -> Result<serde_json::Value> {
             let mut value = serde_json::to_value(session.program())?;
             for parameter in value["parameters"]
@@ -53,6 +54,19 @@ mod tests {
             1024 * 1024,
         )
         .unwrap()
+    }
+    #[test]
+    fn collecting_live_identity_rejects_reload_before_swap() {
+        let mut current=session(1.);
+        let token=current.begin_collection().unwrap();
+        assert!(current.reload_candidate(session(2.)).is_err());
+        assert_eq!(current.parameter("w").unwrap(),[1.]);
+        assert_eq!(current.revision(),0);
+        drop(token);
+        current.reload_candidate(session(2.)).unwrap();
+        let token=current.begin_collection().unwrap();
+        assert!(current.reload_candidate(session(3.)).is_err());
+        drop(token);
     }
     #[test]
     fn rejected_structure_preserves_state_and_revision() {

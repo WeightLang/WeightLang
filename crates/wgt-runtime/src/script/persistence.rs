@@ -180,8 +180,8 @@ fn prepare_model(
                 .text()?
             {
                 "none" => {}
-                "sgd" => session.set_optimizer(crate::training::Optimizer::Sgd),
-                "adam" => session.set_optimizer(crate::training::Optimizer::Adam),
+                "sgd" => session.set_optimizer(crate::training::Optimizer::Sgd)?,
+                "adam" => session.set_optimizer(crate::training::Optimizer::Adam)?,
                 _ => bail!("forward optimizer must be none, sgd or adam"),
             }
         }

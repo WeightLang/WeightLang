@@ -5,6 +5,9 @@ description: 编写和验证本仓库当前原生 WGT 0.5 模型、训练与概�
 
 以 docs/reference.zh-CN.md、docs/differentiable-programs.md 和 Rust 实现为准；不是已发布功能承诺。
 只接受 wgt 0.5，模型、forward、loss 和 main 可在同文件；执行不得依赖 Python。
+原生`agent Actor {policy; [critic;] learner:update;}`显式模型别名；`learn actor {...yield record;}`整批后一次静态同步二参learner(actor,batch)，using可覆盖，无默认报错，普通model必须using。采集按policy identity拒绝所有写/重载/optimizer reset，错误/return释放且不调用learner；learner前释放，可自行多步更新。
+原生environment声明observation/action/feedback固定f32宽度及reset/step；Ctor(state,seed)构造reset一次，reset->{state,observation}，step->{state,observation,feedback,terminated,truncated}；同步纯WGT，state固定schema，有界有限记录字面量，全部验证后state/RNG原子提交。结束后拒step至reset，实例RNG隔离，reset重放seed，不影响host RNG。actor.act仅类别sample，logprob先取actor.policy局部变量。资源递归拒save json/async，无agent/env整实例checkpoint，仅显式policy checkpoint。完整签名/限制docs/agents-environments.md，真实例子examples/native_training/agent_environment/model.wgt。
+
 语境能力见 language/source_capabilities.json；共同正负语料在 language/conformance.json。
 函数共用 parser 不表示普通 fn 与 tensor forward/loss 语义相同；模型声明独立解析。
 language/primitive_specs.json 是制品 graph 原语域，不是源码内置表。编辑器容错不证明源码有效。

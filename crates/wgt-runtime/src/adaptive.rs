@@ -157,6 +157,7 @@ pub struct AdaptiveSession {
     output_len: usize,
     managed_bytes: usize,
     revision: u64,
+    collection: crate::collection::CollectionState,
     steps: u64,
     optimizer: Option<training::State>,
     custom_optimizer: Option<optimization::CustomState>,
@@ -174,6 +175,8 @@ fn names<'a>(items: impl Iterator<Item = &'a str>) -> Result<HashMap<String, usi
 }
 
 impl AdaptiveSession {
+    pub fn begin_collection(&self) -> Result<crate::collection::CollectionToken> { self.collection.begin() }
+    pub(crate) fn ensure_mutable(&self) -> Result<()> { self.collection.ensure_mutable() }
     pub fn prepare(program: Program, budget_bytes: usize) -> Result<Self> {
         ensure!(matches!(program.version, 1 | 2), "unsupported adaptive IR version");
         ensure!(program.version >= 2 || (program.output_type.is_plain() && !program.instructions.iter().any(|i| matches!(i, Instruction::ValidateProbabilities { .. }))), "categorical output metadata and validation require adaptive IR version 2");
@@ -429,6 +432,7 @@ impl AdaptiveSession {
             output_len,
             managed_bytes,
             revision: 0,
+            collection: crate::collection::CollectionState::default(),
             steps: 0,
             optimizer: None,
             custom_optimizer: None,
@@ -468,6 +472,7 @@ impl AdaptiveSession {
 
     /// Replace one live parameter between executions; existing tapes remain snapshots.
     pub fn replace_parameter(&mut self, name: &str, values: &[f32]) -> Result<()> {
+        self.ensure_mutable()?;
         let p = self.program.parameters.iter_mut().find(|p| p.name == name)
             .context("unknown parameter")?;
         ensure!(!p.frozen, "frozen parameter");
@@ -492,6 +497,7 @@ impl AdaptiveSession {
     /// arithmetic, undefined registers, fallthrough and exhausted budgets roll back
     /// all weight writes. max_steps counts every instruction, including jumps.
     pub fn run(&mut self, input: &[f32], max_steps: u64) -> Result<&[f32]> {
+        if self.program.instructions.iter().any(|i| matches!(i, Instruction::Write { .. })) { self.ensure_mutable()?; }
         self.begin(input, max_steps)?;
         let result = self.execute(max_steps, None).and_then(|(r, wrote)| {
             if wrote {

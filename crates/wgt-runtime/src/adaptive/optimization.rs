@@ -249,6 +249,7 @@ impl AdaptiveSession {
         values: Vec<Vec<f32>>,
         state: serde_json::Value,
     ) -> Result<f32> {
+        self.ensure_mutable()?;
         ensure!(
             self.optimizer.is_none(),
             "custom optimization requires optimizer none"

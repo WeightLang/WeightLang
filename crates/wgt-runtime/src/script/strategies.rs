@@ -17,7 +17,10 @@ pub(super) fn validate(program: &Program) -> Result<()> {
                     function.args.len() == 3,
                     "train strategy {name} must have exactly three parameters"
                 );
-                ensure!(!function.is_async,"train strategy {name} must be synchronous");
+                ensure!(
+                    !function.is_async,
+                    "train strategy {name} must be synchronous"
+                );
                 for arg in args {
                     expression(arg, program)?;
                 }
@@ -50,7 +53,8 @@ pub(super) fn validate(program: &Program) -> Result<()> {
     fn block(body: &[Statement], program: &Program) -> Result<()> {
         for statement in body {
             match &statement.kind {
-                Stmt::Let(_, e) | Stmt::LetSample(_,_,e)
+                Stmt::Let(_, e)
+                | Stmt::LetSample(_, _, e)
                 | Stmt::Set(_, e)
                 | Stmt::Eval(e)
                 | Stmt::Return(e) => expression(e, program)?,
@@ -63,12 +67,42 @@ pub(super) fn validate(program: &Program) -> Result<()> {
                     expression(e, program)?;
                     block(b, program)?;
                 }
-                Stmt::Assert(e,message) => { expression(e,program)?; if let Some(m)=message { expression(m,program)?; } }
-                Stmt::Tasks(body)|Stmt::Collect(_,body) => block(body,program)?,
-                Stmt::Yield(fields) => { for (_,e) in fields { expression(e,program)?; } }
-                Stmt::ForBatches(_,a,b,body) => {expression(a,program)?;expression(b,program)?;block(body,program)?;}
-                Stmt::Save(_,a,b,_) => { expression(a,program)?; expression(b,program)?; }
-                Stmt::Reload(_,a,b,optimizer) => { expression(a,program)?; expression(b,program)?; if let Some(e)=optimizer {expression(e,program)?;} }
+                Stmt::Tasks(b) | Stmt::Collect(_, b) => block(b, program)?,
+                Stmt::Learn(_, target, learner, body) => {
+                    expression(target, program)?;
+                    if !learner.is_empty() {
+                        let function=program.get(learner).with_context(||format!("unknown learner function: {learner}"))?;
+                        ensure!(!function.is_async && function.args.len()==2, "learner must be a synchronous user function with two parameters");
+                    }
+                    block(body, program)?;
+                }
+                Stmt::Yield(fields) => {
+                    for (_, e) in fields {
+                        expression(e, program)?;
+                    }
+                }
+                Stmt::ForBatches(_, a, b, body) => {
+                    expression(a, program)?;
+                    expression(b, program)?;
+                    block(body, program)?;
+                }
+                Stmt::Assert(e, message) => {
+                    expression(e, program)?;
+                    if let Some(m) = message {
+                        expression(m, program)?;
+                    }
+                }
+                Stmt::Save(_, a, b, _) => {
+                    expression(a, program)?;
+                    expression(b, program)?;
+                }
+                Stmt::Reload(_, a, b, optimizer) => {
+                    expression(a, program)?;
+                    expression(b, program)?;
+                    if let Some(e) = optimizer {
+                        expression(e, program)?;
+                    }
+                }
                 Stmt::Break | Stmt::Continue => {}
             }
         }

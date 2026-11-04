@@ -95,6 +95,47 @@
         {
           "type": "SYMBOL",
           "name": "function_declaration"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "instance_declaration"
+        }
+      ]
+    },
+    "instance_declaration": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "agent"
+            },
+            {
+              "type": "STRING",
+              "value": "environment"
+            }
+          ]
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_newline"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "body"
         }
       ]
     },
@@ -188,6 +229,22 @@
       "members": [
         {
           "type": "STRING",
+          "value": "learn"
+        },
+        {
+          "type": "STRING",
+          "value": "collect"
+        },
+        {
+          "type": "STRING",
+          "value": "yield"
+        },
+        {
+          "type": "STRING",
+          "value": "size"
+        },
+        {
+          "type": "STRING",
           "value": "tasks"
         },
         {
@@ -252,10 +309,6 @@
         },
         {
           "type": "STRING",
-          "value": "assert"
-        },
-        {
-          "type": "STRING",
           "value": "save"
         },
         {
@@ -265,6 +318,10 @@
         {
           "type": "STRING",
           "value": "reload"
+        },
+        {
+          "type": "STRING",
+          "value": "assert"
         },
         {
           "type": "STRING",

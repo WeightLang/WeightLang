@@ -1,5 +1,9 @@
 # 原生 WGT 训练脚本（本地实验实现）
 
+原生专用 `agent` / `environment` 声明、默认 `learn actor { ... }` 整批采集/自定义学习器与同步环境生命周期见
+[agent/environment](agents-environments.md)，完整监督例子 [agent_environment/model.wgt](../examples/native_training/agent_environment/model.wgt)。
+环境反馈不限定奖励，learner使用现有train或显式梯度提交；无整实例checkpoint或异步环境支持。
+
 `wgt run FILE.wgt` 在 Rust 进程内解析并执行脚本，不启动 Python、不加载 Python 回调，
 无需 PyTorch。`wgt-native script FILE.wgt` 是同一执行器的独立入口。
 当前只保留原生训练路径；旧 Python 训练入口已删除。

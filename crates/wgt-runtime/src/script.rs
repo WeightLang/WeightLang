@@ -10,6 +10,7 @@ pub(crate) mod file_io;
 mod persistence;
 pub mod record_schema;
 pub mod records;
+pub mod agents;
 mod optimization;
 mod strategies;
 mod math;
@@ -63,6 +64,8 @@ pub enum Value {
     Reader(usize),
     Gradient(u64),
     Future(usize),
+    Agent(usize),
+    Environment(usize),
     Task(usize),
 }
 impl Value {
@@ -269,6 +272,7 @@ fn execute_program(
         gradients: optimization::Gradients::default(),
         rng: 0,
         metrics: BTreeMap::new(),
+        agents: Vec::new(), environments: Vec::new(),
         async_state:async_runtime::AsyncState::default(),
     };
     let result = runtime.call(entry, Vec::new())?;
@@ -290,6 +294,8 @@ pub struct Runtime {
     gradients: optimization::Gradients,
     rng: u64,
     metrics: BTreeMap<String, serde_json::Value>,
+    agents: Vec<agents::Agent>,
+    environments: Vec<agents::Environment>,
     async_state:async_runtime::AsyncState,
 }
 impl Runtime {
@@ -332,6 +338,20 @@ impl Runtime {
                 for (field, binding) in bindings {
                     env.insert(binding.clone(), if field == "action" { action.clone() } else { log_prob.clone() });
                 }
+            }
+            Stmt::Learn(name, target, learner, body) => {
+                let target = self.eval(target, env)?;
+                let learner = self.resolve_learner(&target, if learner.is_empty() {None}else{Some(learner)})?;
+                let token = self.begin_collection(&target)?;
+                let previous = env.insert("__collect".into(), Value::RecordBatch(Default::default()));
+                let result = self.block(body, env);
+                let batch = env.remove("__collect").expect("active collector");
+                if let Some(previous) = previous { env.insert("__collect".into(), previous); }
+                drop(token);
+                let flow = result?;
+                if !matches!(flow, Flow::Next) { return Ok(flow); }
+                let report = self.call(&learner, vec![target, batch])?;
+                if let Some(name) = name { env.insert(name.clone(), report); }
             }
             Stmt::Collect(name, body) => {
                 let previous = env.insert("__collect".into(), Value::RecordBatch(records::RecordBatch::default()));
@@ -544,6 +564,24 @@ impl Runtime {
         logits[action] as f64 - max - sum.ln()
     }
 
+    pub fn validate_learner(&self, learner: &str) -> Result<()> {
+        if let Some(function) = self.program.get(learner) {
+            ensure!(!function.is_async && function.args.len() == 2, "learner must be a synchronous user function with two parameters");
+        } else if let Some(function) = self.compiled.get(learner) {
+            ensure!(function.async_body.is_none() && function.args.len() == 2, "learner must be a synchronous user function with two parameters");
+        } else { bail!("unknown learner function: {learner}"); }
+        Ok(())
+    }
+
+    pub fn begin_collection(&self, target: &Value) -> Result<crate::collection::CollectionToken> {
+        match target {
+            Value::Agent(i) => self.begin_collection(&self.agents[*i].policy),
+            Value::Adaptive(index) => self.adaptive[*index].lock()?.begin_collection(),
+            Value::Model(index) => self.models[*index].lock()?.session.begin_collection(),
+            _ => bail!("learn requires a model or agent"),
+        }
+    }
+
     pub fn record_chunk(&mut self, batch: &records::RecordBatch, range: std::ops::Range<usize>) -> Result<records::RecordBatch> {
         batch.chunk(range, &mut self.remaining)
     }
@@ -557,6 +595,8 @@ impl Runtime {
 
     pub fn record_field(&mut self, value: Value, field: &str) -> Result<Value> {
         match value {
+            Value::Environment(i) => match field {"observation"=>Ok(self.environments[i].observation.clone()),_=>bail!("environment field must be observation")},
+            Value::Agent(i) => match field {"policy"=>Ok(self.agents[i].policy.clone()),"critic"=>self.agents[i].critic.clone().context("agent has no critic"),_=>bail!("agent field must be policy or critic")},
             Value::RecordBatch(batch) => batch.project(field, &mut self.remaining),
             Value::Object(fields) => fields.get(field).cloned().with_context(|| format!("missing record field: {field}")),
             _ => bail!("field projection requires a record or record batch"),
@@ -572,6 +612,9 @@ impl Runtime {
     /// Resolve source calls in the current function's environment before named functions.
     /// Model handles are the only callable values; functions retain their existing scope.
     pub fn call_in_env(&mut self, name: &str, args: Vec<Value>, env: &Env) -> Result<Value> {
+        if let Some((base,method))=name.split_once('.') {
+            if let Some(instance)=env.get(base) { return self.instance_method(instance.clone(),method,args); }
+        }
         let Some(value) = env.get(name) else {
             return self.call(name, args);
         };
@@ -635,6 +678,7 @@ impl Runtime {
             .with_context(|| format!("{name}()"))
     }
     fn builtin(&mut self, name: &str, a: &[Value]) -> Result<Value> {
+        if matches!(name,"__agent"|"__environment"|"__record") { return self.agent_builtin(name,a); }
         if self.async_state.context.is_some(){ensure!(["sqrt","exp","log","min","max","len","seed","random","assert"].contains(&name),"{name}: builtin unavailable in first native async stage; resource creation and synchronous I/O are forbidden");}
         if let Some(format) = name.strip_prefix("__load_") { return self.load_file(format, a); }
         if name == "__record_field" {
@@ -803,8 +847,8 @@ impl Runtime {
                 let mut session = crate::adaptive::AdaptiveSession::prepare(program, 64*1024*1024)?;
                 match a[1].text()? {
                     "none" => {},
-                    "sgd" => session.set_optimizer(Optimizer::Sgd),
-                    "adam" => session.set_optimizer(Optimizer::Adam),
+                    "sgd" => session.set_optimizer(Optimizer::Sgd)?,
+                    "adam" => session.set_optimizer(Optimizer::Adam)?,
                     _ => bail!("forward optimizer must be none, sgd or adam"),
                 }
                 let index = self.adaptive.len(); self.adaptive.push(crate::weightfs::Mounted::auto(session)?); Ok(Value::Adaptive(index))
@@ -819,8 +863,8 @@ impl Runtime {
                     let mut session = crate::adaptive::AdaptiveSession::prepare(serde_json::from_value(value)?,64*1024*1024)?;
                     match a[1].text()? {
                         "none" => {},
-                        "sgd" => session.set_optimizer(Optimizer::Sgd),
-                        "adam" => session.set_optimizer(Optimizer::Adam),
+                        "sgd" => session.set_optimizer(Optimizer::Sgd)?,
+                        "adam" => session.set_optimizer(Optimizer::Adam)?,
                         _ => bail!("forward optimizer must be none, sgd or adam"),
                     }
                     let index=self.adaptive.len(); self.adaptive.push(crate::weightfs::Mounted::auto(session)?);

@@ -545,6 +545,32 @@
     }
   },
   {
+    "type": "instance_declaration",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "body",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "layer_declaration",
     "named": true,
     "fields": {
@@ -843,6 +869,10 @@
           "named": true
         },
         {
+          "type": "instance_declaration",
+          "named": true
+        },
+        {
           "type": "layer_declaration",
           "named": true
         },
@@ -962,6 +992,10 @@
     "named": false
   },
   {
+    "type": "agent",
+    "named": false
+  },
+  {
     "type": "as",
     "named": false
   },
@@ -994,6 +1028,10 @@
     "named": false
   },
   {
+    "type": "collect",
+    "named": false
+  },
+  {
     "type": "comment",
     "named": true,
     "extra": true
@@ -1020,6 +1058,10 @@
   },
   {
     "type": "else",
+    "named": false
+  },
+  {
+    "type": "environment",
     "named": false
   },
   {
@@ -1084,6 +1126,10 @@
   },
   {
     "type": "layer",
+    "named": false
+  },
+  {
+    "type": "learn",
     "named": false
   },
   {
@@ -1155,6 +1201,10 @@
     "named": false
   },
   {
+    "type": "size",
+    "named": false
+  },
+  {
     "type": "spawn",
     "named": false
   },
@@ -1212,6 +1262,10 @@
   },
   {
     "type": "wtype",
+    "named": false
+  },
+  {
+    "type": "yield",
     "named": false
   },
   {

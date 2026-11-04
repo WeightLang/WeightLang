@@ -1,5 +1,8 @@
 {
   "keywords": [
+    "agent",
+    "environment",
+    "learn",
     "async",
     "await",
     "spawn",

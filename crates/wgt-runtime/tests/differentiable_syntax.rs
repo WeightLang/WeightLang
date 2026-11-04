@@ -33,7 +33,7 @@ fn probability_reads_and_gradients_follow_logit_parameterization() {
 #[test]
 fn custom_loss_matches_builtin_mse_and_rejects_failed_batches_atomically() {
     let mut custom=session(MODEL); let mut builtin=session(MODEL);
-    custom.set_optimizer(Optimizer::Adam); builtin.set_optimizer(Optimizer::Adam);
+    custom.set_optimizer(Optimizer::Adam).unwrap(); builtin.set_optimizer(Optimizer::Adam).unwrap();
     let x=vec![vec![2.,2.],vec![1.,3.]]; let y=vec![vec![1.,2.],vec![2.,1.]];
     for _ in 0..3 {
         let a=custom.train_custom(&x,&y,0.03,&mut 10000,65536).unwrap();

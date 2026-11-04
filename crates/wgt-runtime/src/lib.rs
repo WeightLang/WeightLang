@@ -4,6 +4,7 @@ pub mod weightfs;
 pub mod source;
 pub mod execution;
 pub mod adaptive;
+pub mod collection;
 pub mod categorical;
 pub mod training;
 pub mod tasks;
@@ -117,6 +118,7 @@ pub struct Session {
     output_type: categorical::VectorType,
     names: HashMap<String, usize>,
     revision: u64,
+    collection: collection::CollectionState,
     parameters: Vec<Tensor>,
     ops: Vec<Op>,
     left: Vec<f32>,
@@ -148,6 +150,8 @@ fn zero_buffer(len: usize) -> Result<Vec<f32>> {
 }
 
 impl Session {
+    pub fn begin_collection(&self) -> Result<collection::CollectionToken> { self.collection.begin() }
+    pub(crate) fn ensure_mutable(&self) -> Result<()> { self.collection.ensure_mutable() }
     /// Validate all static contracts and the managed tensor budget before allocating arenas.
     /// File offsets are byte offsets into immutable little-endian f32 files.
     /// The budget excludes IR metadata, JSON parsing, OS page cache and a 4 KiB I/O stack buffer.
@@ -350,6 +354,7 @@ impl Session {
             output_type: model.output_type,
             names,
             revision: 0,
+            collection: collection::CollectionState::default(),
             parameters,
             ops,
             left: zero_buffer(maximum)?,

@@ -125,6 +125,29 @@ logits 的 log probability 直接用 f64 减最大值和 log-sum-exp 计算，�
 完整例子见 [sample_record/model.wgt](../examples/native_training/sample_record/model.wgt)。
 条件必须 bool，无隐式数值或张量真假转换；函数参数按位置传递，参数数目严格匹配。
 
+## 原生 agent、environment 与 learn
+
+`agent NAME { policy; [critic;] [learner: FUNCTION;] }` 声明专用构造器，显式传入已有模型句柄，
+例如 `let actor=Predictor(policy);`。policy/critic 保留别名，不隐式训练；learner 为同步二参具名用户函数。
+`let report=learn actor { ... yield {field:value}; ... };` 整批完成后先释放目标 policy 写保护，
+再调用一次 learner(actor,batch)，返回其报告；`using other` 可覆盖，无默认时报错，普通模型必须显式 using。
+learner 自行决定训练/提交次数。采集失败或 return 不调用 learner；同 identity 所有别名写入均拒绝，
+包括训练、自定义提交、优化器重置、reload、weightfs 和含 Write IR 的 forward；只读求值/采样/保存允许。
+
+`environment NAME { observation:f32[N]; action:f32[A]; feedback:f32[F]; reset:RESET; step:STEP; }`
+构造签名 NAME(initial_state,seed)，宽度1..16384，seed整数0..1000000000。构造调用一次reset。
+RESET(state,seed) 返回 `{state,observation}`；STEP(state,action) 返回
+`{state,observation,feedback,terminated,truncated}`，均为同步二参函数；feedback不限定为reward。
+`env.observation` 读最近观测，`env.reset()` 返回初观测，`env.step(action)` 返回完整反馈记录。
+真正终止与截断标志独立保留，任一结束后 step 必须等 reset；state 首次reset后固定schema/shape。
+state/观测/反馈/标志全部验证后原子提交，失败保留实例state/observation/done/RNG；外部IO不能回滚。
+各实例seed/RNG隔离，不改变host RNG，reset重放原seed。`actor.act(obs)` 只读类别采样，
+同次log_prob需先取 `let policy=actor.policy;` 再结构化sample；不支持sample限定callee。
+普通记录字面量 `{field:expression,...}` 左到右一次求值、字段唯一、有限有界普通数据，不自动可微。
+agent/env资源及嵌套容器不能save json或传入异步；无整实例checkpoint，仅显式保存actor.policy模型状态。
+完整签名、预算、保存边界及有效例子见[专题](agents-environments.md)与
+[agent_environment/model.wgt](../examples/native_training/agent_environment/model.wgt)。
+
 ## 记录批次与对齐小批次
 
 普通函数支持声明 `let batch = collect { ... };`。块内 `yield {name: expression, ...};` 每次追加一条记录，

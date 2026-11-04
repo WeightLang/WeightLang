@@ -37,7 +37,7 @@
     },
     {
       "name": "keyword.control.wgt",
-      "match": "\\b(?:async|await|spawn|tasks|sleep|save|load|reload|checkpoint|json|text|to|using|overwrite|assert|break|collect|continue|else|fn|for|from|frozen|if|import|in|init|input|layer|let|mix|model|onehot|operators|output|parameter|return|sample|then|train|on|rate|clip|target|wgt|while|yield|size)\\b"
+      "match": "\\b(?:agent|environment|learn|async|await|spawn|tasks|sleep|save|load|reload|checkpoint|json|text|to|using|overwrite|assert|break|collect|continue|else|fn|for|from|frozen|if|import|in|init|input|layer|let|mix|model|onehot|operators|output|parameter|return|sample|then|train|on|rate|clip|target|wgt|while|yield|size)\\b"
     },
     {
       "name": "storage.type.wgt",

@@ -107,6 +107,7 @@ impl Trainer {
         objective: Objective<'_>,
         rate: f32,
     ) -> Result<f32> {
+        self.session.ensure_mutable()?;
         ensure!(
             rate.is_finite() && rate > 0.,
             "learning rate must be positive and finite"
@@ -250,6 +251,7 @@ impl Trainer {
     }
 
     pub(crate) fn reload_candidate(&mut self, mut candidate: Self) -> Result<()> {
+        self.session.ensure_mutable()?;
         let structure = |model: Model| -> Result<serde_json::Value> {
             let mut value = serde_json::to_value(model)?;
             for parameter in value["parameters"].as_array_mut().context("missing parameters")? {
