@@ -101,3 +101,6 @@ KL/交叉熵 p>0 且 q=0 报错，JS 支持不相交分布。无张量梯度或�
 用 `wgt 0.5
 fn main() { return 7; }` 验证基本执行，直接 `jsonl("data.jsonl")` 在策略下应拒绝。
 此处描述本地实现与分阶段接线，不表示设备/隔离扩展已经随权限底座发布。
+
+  `let {action,log_prob}=sample from net(x);` 或字段别名 `action:a` 用同一次forward/RNG绑定动作和稳定自然对数概率；仅声明形式，字段/绑定不可重复。logits直接f64 log-sum-exp，probabilities返回log(p_action)-log(sum(p))，旧f32动作/RNG不变。例子 examples/native_training/sample_record/model.wgt。
+- 记录批次：`let batch=collect {for i in range(0,35){yield {observation:[i],target:[i*2]};}};`，声明形式非任意表达式；字段左到右一次求值、同字段/种类/固定同质shape，整条追加。`batch.observation`投影，`batch[i]`取记录，保留.mean/.probabilities后缀，同名字段用`batch[i]["mean"]`。`for part in batch size 16`顺序对齐切分，保留尾批/空批零次/size正整数；yield归同函数最近collect，return穿透并清理。100k行/256字段/64层/1m节点及1m文本字节；不接受句柄，不自动可微。完整运行例子examples/native_training/ppo/model.wgt与docs/reference.zh-CN.md记录批次节。

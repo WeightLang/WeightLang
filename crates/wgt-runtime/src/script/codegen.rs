@@ -59,6 +59,13 @@ fn block(body: &[Statement]) -> String {
     for statement in body {
         let inner = match &statement.kind {
             Stmt::Let(n,e) => format!("let value = {}; env.insert({n:?}.into(),value);",expr(e)),
+            Stmt::LetSample(bindings,n,input) => {
+                let assignments = bindings.iter().map(|(field,binding)| format!("env.insert({binding:?}.into(), {}.clone());", if field == "action" { "action" } else { "log_prob" })).collect::<String>();
+                format!("rt.tick()?; rt.tick()?; let model = env.get({n:?}).cloned().context({error:?})?; let input = {input}; let (action,log_prob) = rt.sample_model_result(model,input)?; {assignments}", error=format!("undefined variable: {n}"), input=expr(input))
+            }
+            Stmt::Collect(n,body) => format!("let previous=env.insert(\"__collect\".into(),Value::RecordBatch(Default::default())); let result={body}; let batch=env.remove(\"__collect\").expect(\"active collector\"); if let Some(previous)=previous {{ env.insert(\"__collect\".into(),previous); }} let flow=result?; if !matches!(flow,Flow::Next) {{ return Ok(flow); }} env.insert({n:?}.into(),batch);", body=block(body)),
+            Stmt::Yield(fields) => format!("ensure!(env.contains_key(\"__collect\"),\"yield requires a lexical collect block\"); let fields=vec![{}]; rt.yield_record(env,fields)?;", fields.iter().map(|(n,e)|format!("({n:?}.into(),{})",expr(e))).collect::<Vec<_>>().join(",")),
+            Stmt::ForBatches(n,e,size,body) => format!("let values={}; let size={}.integer()?; let Value::RecordBatch(batch)=values else {{ anyhow::bail!(\"size iteration requires a record batch\") }}; for range in weightlang_runtime::script::record_schema::chunks(batch.rows.len(),size).map_err(anyhow::Error::msg)? {{ rt.tick()?; let value=rt.record_chunk(&batch,range)?; env.insert({n:?}.into(),Value::RecordBatch(value)); match {}? {{ Flow::Break=>break, Flow::Return(v)=>return Ok(Flow::Return(v)), _=>{{}} }} }}",expr(e),expr(size),block(body)),
             Stmt::Set(n,e) => format!("ensure!(env.contains_key({n:?}), {:?}); let value = {}; env.insert({n:?}.into(),value);", format!("assignment to undeclared variable: {n}"), expr(e)),
             Stmt::Eval(e) => format!("let _ = {};",expr(e)),
             Stmt::Assert(e,message) => format!("if !{}.boolean()? {{ let message = {}; anyhow::bail!(\"{{}}\", message.text()?); }}", expr(e), message.as_ref().map(expr).unwrap_or_else(|| "Value::Text(\"assertion failed\".into())".into())),

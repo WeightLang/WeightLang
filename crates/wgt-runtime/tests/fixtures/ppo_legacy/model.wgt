@@ -1,0 +1,73 @@
+wgt 0.5
+model Policy
+input observation: f32[2]
+output logits: f32[2]
+# 两列对应两个时间步的 one-hot 观测，两行对应动作；所有 rollout/epoch 共享同一组权重。
+# 零 logits 是均匀随机策略，尚未训练。独立价值网络在 main 中初始化。
+parameter weights: f32[2,2] = [0,0,0,0]
+# 每条训练样本：动作 one-hot[2]、采样时的旧 log_prob、GAE advantage。
+target trajectory: f32[4]
+fn forward(observation) { return linear(observation, weights); }
+fn loss(prediction, trajectory) {
+    let log_probs = log_softmax(prediction);
+    # 动作是离散常量；对被选动作的 log_prob 求导，不对采样过程求导。
+    let selected = sum(log_probs * slice(trajectory, 0, 2));
+    let old_log_prob = detach(slice(trajectory, 2, 1));
+    let advantage = detach(slice(trajectory, 3, 1));
+    let ratio = exp(selected - old_log_prob);
+    let surrogate = minimum(ratio * advantage, clip(ratio, 0.8, 1.2) * advantage);
+    # 唯一向量轴为动作轴，sum 归约至 f32[1]；负熵项鼓励探索。
+    let negative_entropy = sum(softmax(prediction) * log_probs);
+    return -surrogate + [0.01] * negative_entropy;
+}
+# 两步延迟奖励：只有两次都选动作 1 才得到最终奖励；第一步没有即时奖励。
+fn environment(first, second) {
+    if first == 1 && second == 1 { return 1; }
+    return 0;
+}
+fn main() {
+    seed(7);
+    let policy = Policy("adam");
+    let critic = mlp([2, 8, 1], "tanh", 19, "adam");
+    let initial = softmax(predict(policy, [1,0]))[1] * softmax(predict(policy, [0,1]))[1];
+    for iteration in range(0, 40) {
+        let observations = [];
+        let targets = [];
+        let returns = [];
+        # 整批采集完成才训练，所有旧概率来自同一个策略版本。
+        for episode in range(0, 24) {
+            let x0 = [1,0];
+            let x1 = [0,1];
+            let a0 = sample from policy(x0);
+            let a1 = sample from policy(x1);
+            let v0 = predict(critic, x0)[0];
+            let v1 = predict(critic, x1)[0];
+            let reward = environment(a0, a1);
+            let advantages = gae([0,reward], [v0,v1], [v1,0], [false,true], [false,false], 0.99, 0.95);
+            observations = append(append(observations, x0), x1);
+            targets = append(targets, concat(onehot[2] a0, [log_softmax(predict(policy,x0))[a0], advantages[0]]));
+            targets = append(targets, concat(onehot[2] a1, [log_softmax(predict(policy,x1))[a1], advantages[1]]));
+            returns = append(append(returns, [advantages[0]+v0]), [advantages[1]+v1]);
+        }
+        # 固定轨迹做多轮小批次更新；不重新计算旧 log_prob 或 advantage。
+        for epoch in range(0, 4) {
+            for minibatch in range(0, 3) {
+                let xs = [];
+                let ys = [];
+                for j in range(0, 16) {
+                    let i = minibatch * 16 + j;
+                    xs = append(xs, observations[i]);
+                    ys = append(ys, targets[i]);
+                }
+                train policy on (xs, ys) rate 0.03 clip 0.5;
+            }
+        }
+        fit(critic, observations, returns, 0.03, "mse");
+    }
+    # 这里可精确算成功概率；随机策略为 0.25，不以训练批次偶然奖励代替评估。
+    let success = softmax(predict(policy, [1,0]))[1] * softmax(predict(policy, [0,1]))[1];
+    metric("initial_success_probability", initial);
+    metric("final_success_probability", success);
+    assert(success > 0.85, "PPO did not learn delayed reward");
+    return success;
+}

@@ -2,6 +2,7 @@
   "keywords": [
     "assert",
     "break",
+    "collect",
     "continue",
     "else",
     "fn",
@@ -30,7 +31,9 @@
     "clip",
     "target",
     "wgt",
-    "while"
+    "while",
+    "yield",
+    "size"
   ],
   "builtins": [
     "add",

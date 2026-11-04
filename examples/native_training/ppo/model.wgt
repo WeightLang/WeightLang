@@ -31,38 +31,30 @@ fn main() {
     let critic = mlp([2, 8, 1], "tanh", 19, "adam");
     let initial = softmax(policy([1,0]))[1] * softmax(policy([0,1]))[1];
     for iteration in range(0, 40) {
-        let observations = [];
-        let targets = [];
-        let returns = [];
+        # 每行同时拥有观测、策略目标和价值目标，记录字段按样本对齐。
         # 整批采集完成才训练，所有旧概率来自同一个策略版本。
+        let rollout = collect {
         for episode in range(0, 24) {
             let x0 = [1,0];
             let x1 = [0,1];
-            let a0 = sample from policy(x0);
-            let a1 = sample from policy(x1);
+            let {action: a0, log_prob: lp0} = sample from policy(x0);
+            let {action: a1, log_prob: lp1} = sample from policy(x1);
             let v0 = critic(x0)[0];
             let v1 = critic(x1)[0];
             let reward = environment(a0, a1);
             let advantages = gae([0,reward], [v0,v1], [v1,0], [false,true], [false,false], 0.99, 0.95);
-            observations = append(append(observations, x0), x1);
-            targets = append(targets, concat(onehot[2] a0, [log_softmax(policy(x0))[a0], advantages[0]]));
-            targets = append(targets, concat(onehot[2] a1, [log_softmax(policy(x1))[a1], advantages[1]]));
-            returns = append(append(returns, [advantages[0]+v0]), [advantages[1]+v1]);
+            # target 仍是 loss 已实现的 f32[4] 契约；记录本身不自动求导。
+            yield {observation: x0, target: concat(onehot[2] a0, [lp0, advantages[0]]), value_target: [advantages[0]+v0]};
+            yield {observation: x1, target: concat(onehot[2] a1, [lp1, advantages[1]]), value_target: [advantages[1]+v1]};
         }
-        # 固定轨迹做多轮小批次更新；不重新计算旧 log_prob 或 advantage。
+        };
+        # 48 行按顺序共同切成三批，每轮四个 epoch 共 12 次更新；尾批也会保留。
         for epoch in range(0, 4) {
-            for minibatch in range(0, 3) {
-                let xs = [];
-                let ys = [];
-                for j in range(0, 16) {
-                    let i = minibatch * 16 + j;
-                    xs = append(xs, observations[i]);
-                    ys = append(ys, targets[i]);
-                }
-                train policy on (xs, ys) rate 0.03 clip 0.5;
+            for minibatch in rollout size 16 {
+                train policy on (minibatch.observation, minibatch.target) rate 0.03 clip 0.5;
             }
         }
-        fit(critic, observations, returns, 0.03, "mse");
+        fit(critic, rollout.observation, rollout.value_target, 0.03, "mse");
     }
     # 这里可精确算成功概率；随机策略为 0.25，不以训练批次偶然奖励代替评估。
     let success = softmax(policy([1,0]))[1] * softmax(policy([0,1]))[1];

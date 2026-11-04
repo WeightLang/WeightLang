@@ -60,6 +60,9 @@ fn main() {
   支持前向函数引用与有界递归；无默认参数、关键字参数或可变参数。不能覆盖内置函数名。
 - `if bool { ... } else { ... }`、`while bool { ... }`、`for name in list { ... }`；else 可省略。
   `break;` / `continue;` 只作用于最近的循环；不支持 `else if` 简写，可嵌套 if。
+- `let batch = collect { ... yield {field: expression, ...}; ... };` 采集独立记录批次；这是声明形式，不是任意表达式。
+  `batch.field` 投影列，`batch[i]` 取记录、`batch[i].field` 取字段。`for part in batch size 16 { ... }` 按序共同分块，保留尾批，空批零次；size 只求值一次且为正整数，不默认洗牌。
+  首行确定字段及递归固定形状，后续行须一致；yield 左到右求值后整条追加，不部分写入。细节及上限见[记录批次](reference.zh-CN.md#记录批次与对齐小批次)。
 - 值为有限 f64、bool、字符串、null、列表、JSON 对象、模型/数据流句柄。
   JSON 对象来自数据和指标结果，当前无对象字面量。列表按值传递；句柄副本指向同一资源。
   原生训练张量为 f32，转换溢出报错。

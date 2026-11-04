@@ -41,6 +41,11 @@ pub struct Statement {
 #[derive(Clone, Debug)]
 pub enum Stmt {
     Let(String, Expr),
+    /// Explicit structured sampling; ordinary SampleFrom expressions stay scalar.
+    LetSample(Vec<(String, String)>, String, Expr),
+    Collect(String, Vec<Statement>),
+    Yield(Vec<(String, Expr)>),
+    ForBatches(String, Expr, Expr, Vec<Statement>),
     Set(String, Expr),
     Eval(Expr),
     Assert(Expr, Option<Expr>),
@@ -301,11 +306,51 @@ impl Parser {
     fn statement(&mut self) -> Result<Statement> {
         let line = self.line();
         let kind = if self.take("let") {
-            let name = self.name()?;
-            self.expect("=")?;
-            let value = self.expr(0)?;
+            if self.take("{") {
+                let mut bindings = Vec::new();
+                while !self.take("}") {
+                    let field = self.name()?;
+                    ensure!(matches!(field.as_str(), "action" | "log_prob"), "line {line}: sample result field must be action or log_prob");
+                    let binding = if self.take(":") { self.name()? } else { field.clone() };
+                    ensure!(!bindings.iter().any(|(f, b)| f == &field || b == &binding), "line {line}: duplicate sample field or binding");
+                    bindings.push((field, binding));
+                    if self.take("}") { break; }
+                    self.expect(",")?;
+                }
+                ensure!(!bindings.is_empty(), "line {line}: sample binding must not be empty");
+                self.expect("=")?;
+                let value = self.expr(0)?;
+                let Expr::SampleFrom(model, input) = value else {
+                    bail!("line {line}: structured binding requires sample from model(input)");
+                };
+                self.expect(";")?;
+                Stmt::LetSample(bindings, model, *input)
+            } else {
+                let name = self.name()?;
+                self.expect("=")?;
+                if self.take("collect") {
+                    let body = self.block()?;
+                    self.expect(";")?;
+                    Stmt::Collect(name, body)
+                } else {
+                    let value = self.expr(0)?;
+                    self.expect(";")?;
+                    Stmt::Let(name, value)
+                }
+            }
+        } else if self.take("yield") {
+            self.expect("{")?;
+            let mut fields = Vec::new();
+            while !self.take("}") {
+                let name = self.name()?;
+                ensure!(!fields.iter().any(|(field,_)| field == &name), "line {line}: duplicate record field");
+                self.expect(":")?;
+                fields.push((name, self.expr(0)?));
+                if self.take("}") { break; }
+                self.expect(",")?;
+            }
             self.expect(";")?;
-            Stmt::Let(name, value)
+            Stmt::Yield(fields)
         } else if self.take("assert") {
             // Preserve the published two-argument function's eager evaluation.
             let start = self.pos;
@@ -357,10 +402,12 @@ impl Parser {
             let name = self.name()?;
             self.expect("in")?;
             let values = self.expr(0)?;
+            let size = if self.take("size") { Some(self.expr(0)?) } else { None };
             self.loops += 1;
             let body = self.block()?;
             self.loops -= 1;
-            Stmt::For(name, values, body)
+            if let Some(size) = size { Stmt::ForBatches(name, values, size, body) }
+            else { Stmt::For(name, values, body) }
         } else if self.take("return") {
             let value = if self.is(";") {
                 Expr::Null
@@ -504,10 +551,17 @@ impl Parser {
             ensure!(left.height() <= 128, "expression tree depth exceeds 128");
             if self.take(".") {
                 let operation = self.next()?;
-                ensure!(!operation.quoted && matches!(operation.text.as_str(), "mean" | "probabilities"),
-                    "line {}: expected postfix mean or probabilities", operation.line);
-                let name = if operation.text == "probabilities" { "__probabilities" } else { "mean" };
-                left = Expr::BuiltinCall(name.into(), vec![left]);
+                ensure!(
+                    !operation.quoted && operation.text.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') && !operation.text.starts_with("__"),
+                    "line {}: expected field name or postfix operation",
+                    operation.line
+                );
+                if matches!(operation.text.as_str(), "mean" | "probabilities") {
+                    let name = if operation.text == "probabilities" { "__probabilities" } else { "mean" };
+                    left = Expr::BuiltinCall(name.into(), vec![left]);
+                } else {
+                    left = Expr::BuiltinCall("__record_field".into(), vec![left, Expr::Text(operation.text)]);
+                }
                 continue;
             }
             if self.take("[") {

@@ -7,6 +7,7 @@ pub fn index(object: Value, index: Value) -> Result<Value> {
             .get(index.integer()?)
             .cloned()
             .context("list index out of bounds"),
+        Value::RecordBatch(batch) => batch.rows.get(index.integer()?).cloned().context("record batch index out of bounds"),
         Value::Object(v) => v
             .get(index.text()?)
             .cloned()

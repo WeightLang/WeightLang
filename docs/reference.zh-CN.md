@@ -106,7 +106,39 @@ WGT 0.5 普通函数还支持 `let action = sample from net(input);`：`net` 必
 `let name = expr;` 绑定变量，`name = expr;` 修改已有绑定。
 支持函数调用、列表/对象索引、一元 `- !`、算术 `+ - * / %`、比较及短路 `&& ||`。
 数值运算产生无穷大或 NaN 时报错，包括数字除以零及对零取余；不会隐式替换除数。
+同次采样可用声明语句 `let {action, log_prob} = sample from net(input);` 同时绑定动作与当时的自然对数概率；
+支持 `let {action: a, log_prob: lp} = sample from net(input);`，也可只选择一个字段。
+字段只能为 `action` / `log_prob`，字段和绑定变量均不得重复，空绑定拒绝；这不是通用对象解构表达式。
+模型与输入的求值顺序、一次 forward、一次 RNG 和不提交写入的规则与标量形式相同；取得概率不会再次调用模型。
+logits 的 log probability 直接用 f64 减最大值和 log-sum-exp 计算，避免先 softmax 后取 log 的下溢；
+显式 probabilities 按实际抽样分布返回 `log(p_action) - log(sum(p))`，零概率类别不会被选中。
+旧 f32 的动作沿用原有采样算术；其 log probability 用同次输出的 f64 稳定公式，舍入可能与旧 f32 `log_softmax` 有差异。
+两个字段全部计算成功后才绑定变量。forward/loss 不支持此声明；解释和 AOT 共用采样核心。
+完整例子见 [sample_record/model.wgt](../examples/native_training/sample_record/model.wgt)。
 条件必须 bool，无隐式数值或张量真假转换；函数参数按位置传递，参数数目严格匹配。
+
+## 记录批次与对齐小批次
+
+普通函数支持声明 `let batch = collect { ... };`。块内 `yield {name: expression, ...};` 每次追加一条记录，
+字段表达式从左到右各求值一次，完整校验通过后才追加。首条记录确定字段名称、值种类及递归固定列表形状；
+之后字段集合、种类和形状必须相同，字段书写顺序可不同。列表必须同质，不自动补字段、广播或填充。
+字段允许有限数字、bool、字符串、null、列表和已有普通对象，拒绝资源句柄、类别类型向量和嵌套记录批次。
+最多 100000 行、每记录 256 字段、64 层值嵌套、1000000 个值节点，以及字段名/字符串合计 1000000 UTF-8 字节。
+构造、列投影和分块复制按访问节点消耗操作预算，失败不退还预算。
+
+`batch.observation` 返回按行对齐的普通列列表，`batch[i]` 返回一条普通对象，`batch[i].observation` 取字段。
+普通索引列表不自动变为记录批次，缺失字段报错。无行批次尚无 schema，列投影返回空列表。
+`.mean` / `.probabilities` 仍是已有后缀操作；同名记录字段用 `batch[i]["mean"]` 等字符串索引访问。
+记录批次可作为函数参数/返回值；输出 JSON 为记录数组，JSON 重载仍是普通列表，不恢复批次类型。
+
+`for minibatch in batch size 16 { ... }` 只接受记录批次，batch 和 size 各求值一次；size 必须为正整数。
+所有字段按同一行范围切分，默认保持原顺序、不洗牌；最后不足 size 的批次保留，空批次零迭代。
+它与 `batch(reader,n)` 数据读取接口独立，普通 `for item in list` 不变。
+`yield` 属于同一函数中词法最近的 collect，不能从被调用函数向调用者 yield；嵌套 collect 完成后恢复外层。
+`break` / `continue` 作用于最近循环；`return` 穿透 collect 返回当前函数，未完成批次不绑定到变量。
+错误同样丢弃未完成批次并恢复外层收集状态；已经发生的 RNG、文件或环境副作用不回滚。
+collect/yield/分块不支持 tensor forward/loss，不使记录自动可微；PPO 示例仍显式组装既有 f32[4] target。
+完整例子见 [ppo/model.wgt](../examples/native_training/ppo/model.wgt)。
 
 普通函数内的模型句柄可直接写 `net(input)`，包括函数参数 `fn infer(net, x) { return net(x); }`。
 仅接受一个符合模型输入宽度的有限 f32 向量，返回模型输出列表；无默认参数、多输入或广播。

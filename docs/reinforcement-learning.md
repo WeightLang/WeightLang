@@ -57,6 +57,13 @@ NAME 必须与 `fn loss(prediction,NAME)` 的第二个参数同名，必须存�
 loss 不能访问模型参数、普通辅助函数或 I/O；不能在 main 中直接调用。
 
 PPO 的旧概率、动作和优势来自固定采样批次。先完整采集，再更新；多轮优化期间不重算旧概率。
+普通函数可用 `let {action,log_prob}=sample from policy(observation);` 从同次只读模型评估取得动作和稳定旧概率，
+不会再执行一次策略调用或 RNG；也支持 `action:a`、`log_prob:lp` 别名。
+概率为实际抽样分布的自然对数；logits 使用 f64 log-sum-exp，显式 probabilities 用实际总质量归一化解释。
+完整例子见 [sample_record/model.wgt](../examples/native_training/sample_record/model.wgt)。
+[PPO 示例](../examples/native_training/ppo/model.wgt) 用 `collect` / `yield` 同时收集 observation、显式 f32[4] target、value_target，
+`for minibatch in rollout size 16` 按同一行范围切分所有字段，不默认洗牌且保留尾批。
+每批 48 条、4 个 epoch 保持 12 次策略更新；记录只是有界数据容器，不自动转换为可微具名目标。
 环境终止时不 bootstrap；时间截断时使用最终观测价值，而非 reset 后的观测价值。
 现有 gae 接收单条顺序轨迹，不能直接传交错的并行环境数据。
 

@@ -1,0 +1,17 @@
+wgt 0.5
+model Policy
+input observation: f32[3]
+output logits: f32[3]
+# 三个元素是互斥动作轴，identity 直接把输入作为 logits；此示例没有训练权重。
+fn forward(observation) { return observation; }
+fn main() {
+    let policy = Policy("adam");
+    seed(7);
+    # 动作和旧概率来自同一次只读 forward，只抽一次 RNG；不会再次评估策略。
+    let {action: selected, log_prob: old_log_prob} = sample from policy([1000,999,-1000]);
+    assert(selected >= 0 && selected < 3, "invalid action");
+    assert(old_log_prob <= 0, "invalid log probability");
+    metric("action", selected);
+    metric("old_log_prob", old_log_prob);
+    return [selected, old_log_prob];
+}

@@ -4,20 +4,121 @@
   "release_status": "unreleased",
   "scope": "Tested context boundaries, not an exhaustive builtin or grammar specification",
   "domains": {
-    "source": {"authority": ["crates/wgt-runtime/src/source.rs", "crates/wgt-runtime/src/script/parse.rs", "crates/wgt-runtime/src/adaptive/source.rs"]},
-    "artifact_graph": {"specification": "language/primitive_specs.json", "consumer": "crates/wgt/src/primitives.rs", "source_builtin_catalog": false}
+    "source": {
+      "authority": [
+        "crates/wgt-runtime/src/source.rs",
+        "crates/wgt-runtime/src/script/parse.rs",
+        "crates/wgt-runtime/src/adaptive/source.rs"
+      ]
+    },
+    "artifact_graph": {
+      "specification": "language/primitive_specs.json",
+      "consumer": "crates/wgt/src/primitives.rs",
+      "source_builtin_catalog": false
+    }
   },
   "contexts": {
-    "ordinary_function": {"parser": "script/parse.rs", "values": "finite f64, bool, string, null, lists and runtime handles", "validation": "parsing does not resolve every runtime call"},
-    "tensor_forward": {"parser": "script/parse.rs", "lowering": "adaptive/source.rs", "values": "fixed f32 vectors", "for_loop": false, "sample_expression": false},
-    "tensor_loss": {"parser": "script/parse.rs", "lowering": "adaptive/source.rs", "result": "f32[1]", "sample_expression": false},
-    "model_declaration": {"parser": "source.rs", "shares_function_parser": false},
-    "editor": {"parser": "editors/tree-sitter-wgt/grammar.js", "validation": "balanced structure with recovery; does not enforce edition, call validity or tensor semantics"}
+    "ordinary_function": {
+      "parser": "script/parse.rs",
+      "values": "finite f64, bool, string, null, lists and runtime handles",
+      "validation": "parsing does not resolve every runtime call"
+    },
+    "tensor_forward": {
+      "parser": "script/parse.rs",
+      "lowering": "adaptive/source.rs",
+      "values": "fixed f32 vectors",
+      "for_loop": false,
+      "sample_expression": false
+    },
+    "tensor_loss": {
+      "parser": "script/parse.rs",
+      "lowering": "adaptive/source.rs",
+      "result": "f32[1]",
+      "sample_expression": false
+    },
+    "model_declaration": {
+      "parser": "source.rs",
+      "shares_function_parser": false
+    },
+    "editor": {
+      "parser": "editors/tree-sitter-wgt/grammar.js",
+      "validation": "balanced structure with recovery; does not enforce edition, call validity or tensor semantics"
+    }
   },
   "prelude": "language/prelude.json",
-  "assert_syntax": {"syntax":"assert CONDITION [, MESSAGE];", "context":"ordinary_function", "condition":"strict bool; evaluated once", "message":"string; evaluated only on failure; default assertion failed", "legacy":"assert(condition,message) remains eager"},
-  "slicing": {"syntax": "x[start:end]", "bounds": "zero-based half-open; no clamping", "defaults": {"start": 0, "end": "length"}, "ordinary": "lists; runtime integer endpoints; empty allowed", "tensor": "1D f32; compile-time numeric endpoints; empty rejected", "steps": false, "negative_indices": false, "multi_axis": false, "legacy_slice": "slice(x,start,length) unchanged"},
-  "categorical_vectors": {"output_types":["logits[N]","probabilities[N]"],"width":"1..16384","axis":"one mutually exclusive category axis","conversion":"typed_value.probabilities","plain_f32_conversion":"rejected; explicit softmax(x) remains available","probability_range":"finite and strictly [0,1]","sum_absolute_tolerance":0.00001,"sum_accumulator":"f64","normalization":"logits stable softmax subtracts maximum; probabilities validate and preserve values","metadata":"runtime values and model/optimizer-checkpoint output contracts; missing artifact field defaults to f32","gradient":"softmax VJP for logits; identity for validated probabilities","cross_entropy":"existing logits input contract unchanged","gpu":"new categorical path unverified"},
-  "categorical_sampling": {"syntax": "sample from model(input)", "context": "ordinary_function", "model": "local model handle variable or function parameter", "input": "one expression evaluated once; finite f32 vector matching model input", "output": "zero-based categorical index; explicit logits stable softmax, probabilities validate and sample actual mass, legacy f32 retains logits interpretation", "forward_writes": "discarded", "optimizer_updates": false, "rng": "one script RNG draw per successful sample", "legacy_function": "sample(model,input) rejected with migration diagnostic"},
-  "conformance": "language/conformance.json"
+  "assert_syntax": {
+    "syntax": "assert CONDITION [, MESSAGE];",
+    "context": "ordinary_function",
+    "condition": "strict bool; evaluated once",
+    "message": "string; evaluated only on failure; default assertion failed",
+    "legacy": "assert(condition,message) remains eager"
+  },
+  "slicing": {
+    "syntax": "x[start:end]",
+    "bounds": "zero-based half-open; no clamping",
+    "defaults": {
+      "start": 0,
+      "end": "length"
+    },
+    "ordinary": "lists; runtime integer endpoints; empty allowed",
+    "tensor": "1D f32; compile-time numeric endpoints; empty rejected",
+    "steps": false,
+    "negative_indices": false,
+    "multi_axis": false,
+    "legacy_slice": "slice(x,start,length) unchanged"
+  },
+  "categorical_vectors": {
+    "output_types": [
+      "logits[N]",
+      "probabilities[N]"
+    ],
+    "width": "1..16384",
+    "axis": "one mutually exclusive category axis",
+    "conversion": "typed_value.probabilities",
+    "plain_f32_conversion": "rejected; explicit softmax(x) remains available",
+    "probability_range": "finite and strictly [0,1]",
+    "sum_absolute_tolerance": 1.0e-05,
+    "sum_accumulator": "f64",
+    "normalization": "logits stable softmax subtracts maximum; probabilities validate and preserve values",
+    "metadata": "runtime values and model/optimizer-checkpoint output contracts; missing artifact field defaults to f32",
+    "gradient": "softmax VJP for logits; identity for validated probabilities",
+    "cross_entropy": "existing logits input contract unchanged",
+    "gpu": "new categorical path unverified"
+  },
+  "categorical_sampling": {
+    "syntax": "sample from model(input)",
+    "context": "ordinary_function",
+    "model": "local model handle variable or function parameter",
+    "input": "one expression evaluated once; finite f32 vector matching model input",
+    "output": "zero-based categorical index; explicit logits stable softmax, probabilities validate and sample actual mass, legacy f32 retains logits interpretation",
+    "forward_writes": "discarded",
+    "optimizer_updates": false,
+    "rng": "one script RNG draw per successful sample",
+    "legacy_function": "sample(model,input) rejected with migration diagnostic"
+  },
+  "conformance": "language/conformance.json",
+  "sample_record": {
+    "syntax": "let {action,log_prob}=sample from model(input);",
+    "aliases": "action:a, log_prob:lp",
+    "context": "ordinary_function declaration only",
+    "evaluation": "one model evaluation and RNG draw; scalar sample stays scalar",
+    "log_probability": "stable f64 logits log-sum-exp or log(p_action)-log(sum(p))",
+    "writes": "discarded"
+  },
+  "record_batches": {
+    "collect": "let batch=collect { ... yield {field:expression}; ... };",
+    "projection": "batch.field; batch[i].field",
+    "chunks": "for part in batch size positive_integer",
+    "order": "preserved, no implicit shuffle; tail retained; empty zero chunks",
+    "schema": "same field set, kinds and homogeneous fixed list shapes",
+    "limits": {
+      "rows": 100000,
+      "fields": 256,
+      "depth": 64,
+      "nodes": 1000000,
+      "utf8_text_bytes": 1000000
+    },
+    "scope": "yield belongs to nearest lexical collect in same function; return propagates",
+    "tensor_lowering": false
+  }
 }

@@ -4,6 +4,8 @@ pub mod compiled;
 mod benchmark;
 mod permissions;
 mod dataset;
+pub mod record_schema;
+pub mod records;
 mod optimization;
 mod math;
 pub mod testing;
@@ -50,6 +52,7 @@ pub enum Value {
     List(Vec<Value>),
     CategoricalVector(crate::categorical::VectorType, Vec<Value>),
     Object(BTreeMap<String, Value>),
+    RecordBatch(records::RecordBatch),
     Model(usize),
     Adaptive(usize),
     Reader(usize),
@@ -126,6 +129,7 @@ impl Value {
             Self::List(v) | Self::CategoricalVector(_, v) => {
                 serde_json::Value::Array(v.iter().map(Self::json).collect::<Result<_>>()?)
             }
+            Self::RecordBatch(batch) => serde_json::Value::Array(batch.rows.iter().map(Self::json).collect::<Result<_>>()?),
             Self::Object(v) => serde_json::Value::Object(
                 v.iter()
                     .map(|(k, v)| Ok((k.clone(), v.json()?)))
@@ -306,6 +310,47 @@ impl Runtime {
                 let value = self.eval(expr, env)?;
                 env.insert(name.clone(), value);
             }
+            Stmt::LetSample(bindings, name, input) => {
+                self.tick()?; // Match the scalar sampling expression's evaluation cost.
+                self.tick()?; // Model lookup precedes input effects.
+                let model = env.get(name).cloned()
+                    .with_context(|| format!("undefined variable: {name}"))?;
+                let input = self.eval(input, env)?;
+                let (action, log_prob) = self.sample_model_result(model, input)?;
+                for (field, binding) in bindings {
+                    env.insert(binding.clone(), if field == "action" { action.clone() } else { log_prob.clone() });
+                }
+            }
+            Stmt::Collect(name, body) => {
+                let previous = env.insert("__collect".into(), Value::RecordBatch(records::RecordBatch::default()));
+                let result = self.block(body, env);
+                let batch = env.remove("__collect").expect("active collector");
+                if let Some(previous) = previous { env.insert("__collect".into(), previous); }
+                let flow = result?;
+                if !matches!(flow, Flow::Next) { return Ok(flow); }
+                env.insert(name.clone(), batch);
+            }
+            Stmt::Yield(fields) => {
+                ensure!(env.contains_key("__collect"), "yield requires a lexical collect block");
+                let fields = fields.iter().map(|(name,value)| Ok((name.clone(), self.eval(value, env)?)))
+                    .collect::<Result<Vec<_>>>()?;
+                self.yield_record(env, fields)?;
+            }
+            Stmt::ForBatches(name, values, size, body) => {
+                let values = self.eval(values, env)?;
+                let size = self.eval(size, env)?.integer()?;
+                let Value::RecordBatch(batch) = values else { bail!("size iteration requires a record batch") };
+                for range in record_schema::chunks(batch.rows.len(), size).map_err(anyhow::Error::msg)? {
+                    self.tick()?;
+                    let value = batch.chunk(range, &mut self.remaining)?;
+                    env.insert(name.clone(), Value::RecordBatch(value));
+                    match self.block(body, env)? {
+                        Flow::Break => break,
+                        Flow::Return(v) => return Ok(Flow::Return(v)),
+                        _ => {}
+                    }
+                }
+            }
             Stmt::Set(name, expr) => {
                 ensure!(
                     env.contains_key(name),
@@ -426,6 +471,13 @@ impl Runtime {
     /// Categorical inference deliberately uses evaluate, which does not commit forward writes.
     /// Keep the original f32 subtraction, f64 exponentiation and single RNG draw unchanged.
     pub fn sample_model(&mut self, model: Value, input: Value) -> Result<Value> {
+        let (action, _) = self.sample_model_result(model, input)?;
+        Ok(action)
+    }
+
+    /// Both fields describe one evaluation and one random draw. Sampling never
+    /// commits forward writes. The legacy f32 action path retains its arithmetic.
+    pub fn sample_model_result(&mut self, model: Value, input: Value) -> Result<(Value, Value)> {
         self.tick()?;
         let (logits, kind) = if let Value::Adaptive(index) = model {
             let mut session = self.adaptive[index].lock()?;
@@ -433,15 +485,20 @@ impl Runtime {
             self.remaining = self.remaining.saturating_sub(session.steps());
             (result?, session.program().output_type)
         } else {
-            let mut session=self.models[model.model()?].lock()?;
-            let kind=session.session.output_type();
-            (session.predict(&input.vector()?)?,kind)
+            let mut session = self.models[model.model()?].lock()?;
+            let kind = session.session.output_type();
+            (session.predict(&input.vector()?)?, kind)
         };
-        if !kind.is_plain() {
-            let values:Vec<f64>=logits.iter().map(|x|*x as f64).collect();
-            let probabilities=crate::categorical::probabilities(kind,&values)?;
-            let action=crate::categorical::sample_probabilities(&probabilities,random(&mut self.rng))?;
-            return number(action as f64);
+        if kind != crate::categorical::VectorType::F32 {
+            let values: Vec<f64> = logits.iter().map(|x| *x as f64).collect();
+            let probabilities = crate::categorical::probabilities(kind, &values)?;
+            let action = crate::categorical::sample_probabilities(&probabilities, random(&mut self.rng))?;
+            let log_prob = if kind == crate::categorical::VectorType::Probabilities {
+                values[action].ln() - values.iter().sum::<f64>().ln()
+            } else {
+                Self::sample_log_probability(&logits, action)
+            };
+            return Ok((number(action as f64)?, number(log_prob)?));
         }
         let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let probabilities: Vec<f64> = logits.iter().map(|n| ((*n - max) as f64).exp()).collect();
@@ -454,7 +511,32 @@ impl Runtime {
                 break;
             }
         }
-        number(action as f64)
+        Ok((number(action as f64)?, number(Self::sample_log_probability(&logits, action))?))
+    }
+
+    fn sample_log_probability(logits: &[f32], action: usize) -> f64 {
+        let max = logits.iter().map(|x| *x as f64).fold(f64::NEG_INFINITY, f64::max);
+        let sum: f64 = logits.iter().map(|x| (*x as f64 - max).exp()).sum();
+        logits[action] as f64 - max - sum.ln()
+    }
+
+    pub fn record_chunk(&mut self, batch: &records::RecordBatch, range: std::ops::Range<usize>) -> Result<records::RecordBatch> {
+        batch.chunk(range, &mut self.remaining)
+    }
+
+    pub fn yield_record(&mut self, env: &mut Env, fields: Vec<(String, Value)>) -> Result<()> {
+        let Some(Value::RecordBatch(batch)) = env.get_mut("__collect") else {
+            bail!("yield requires a lexical collect block")
+        };
+        batch.push(fields, &mut self.remaining)
+    }
+
+    pub fn record_field(&mut self, value: Value, field: &str) -> Result<Value> {
+        match value {
+            Value::RecordBatch(batch) => batch.project(field, &mut self.remaining),
+            Value::Object(fields) => fields.get(field).cloned().with_context(|| format!("missing record field: {field}")),
+            _ => bail!("field projection requires a record or record batch"),
+        }
     }
 
     pub fn draw_probability(&mut self, probability: Value) -> Result<bool> {
@@ -527,6 +609,9 @@ impl Runtime {
             .with_context(|| format!("{name}()"))
     }
     fn builtin(&mut self, name: &str, a: &[Value]) -> Result<Value> {
+        if name == "__record_field" {
+            return self.record_field(a[0].clone(), a[1].text()?);
+        }
         if name == "__probabilities" {
             let [Value::CategoricalVector(kind, values)] = a else {
                 bail!(".probabilities requires logits[N] or probabilities[N]; use softmax(x) for an ordinary f32 vector")
@@ -604,7 +689,7 @@ impl Runtime {
                     .cloned()
                     .context("dependency is not declared or resolved; run with wgt")?,
             )),
-            "len" => number(a[0].list()?.len() as f64),
+            "len" => number(match &a[0] { Value::RecordBatch(batch) => batch.rows.len(), value => value.list()?.len() } as f64),
             "range" => {
                 let (start, end) = (a[0].integer()?, a[1].integer()?);
                 ensure!(

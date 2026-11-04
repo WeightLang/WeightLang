@@ -4,6 +4,21 @@
   "scope": "Implicit source functions, intrinsics, constants and declaration types. No std modules are imported. Contexts are separate contracts; ordinary functions are shared by interpreter and AOT. Parameters are required unless defaults explicitly say otherwise.",
   "entries": [
     {
+      "name": "__record_field",
+      "kind": "internal",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "__record_field(value,field)",
+      "purpose": "Compiler-only record field projection; source __ calls rejected. RecordBatch columns retain row order and charge traversal; plain indexed lists are rejected.",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script.rs"
+    },
+    {
       "name": "assert",
       "kind": "syntax",
       "contexts": [
