@@ -38,15 +38,63 @@ pub enum Request {
     Drop {
         handle: u64,
     },
-    RegisterTensor { count: usize, shape: Vec<usize>, dtype: String },
-    PredictTensor { handle: u64, tensor: u64, start: usize, count: usize },
-    PredictBinary { handle: u64, tensor: u64, start: usize, count: usize },
-    ReleaseTensor { tensor: u64 },
-    CreateProgram { program: serde_json::Value, memory: usize },
-    RegisterStrategy { source: String, entry: String },
-    ExecuteStrategy { handle: u64, strategy: u64, inputs: Vec<Vec<f32>>, targets: Vec<Vec<f32>>, operations: u64, memory: usize },
-    Checkpoint { handle: u64 },
-    Restore { checkpoint: u64, memory: usize },
+    RegisterTensor {
+        count: usize,
+        shape: Vec<usize>,
+        dtype: String,
+    },
+    PredictTensor {
+        handle: u64,
+        tensor: u64,
+        start: usize,
+        count: usize,
+    },
+    PredictBinary {
+        handle: u64,
+        tensor: u64,
+        start: usize,
+        count: usize,
+    },
+    ReleaseTensor {
+        tensor: u64,
+    },
+    PersistFd {
+        handle: u64,
+        checkpoint: bool,
+    },
+    LoadFd {
+        checkpoint: bool,
+        optimizer: String,
+        memory: usize,
+    },
+    CreateGraph {
+        graph: serde_json::Value,
+        optimizer: String,
+        memory: usize,
+    },
+    CreateProgram {
+        program: serde_json::Value,
+        memory: usize,
+    },
+    RegisterStrategy {
+        source: String,
+        entry: String,
+    },
+    ExecuteStrategy {
+        handle: u64,
+        strategy: u64,
+        inputs: Vec<Vec<f32>>,
+        targets: Vec<Vec<f32>>,
+        operations: u64,
+        memory: usize,
+    },
+    Checkpoint {
+        handle: u64,
+    },
+    Restore {
+        checkpoint: u64,
+        memory: usize,
+    },
     Stats,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -85,6 +133,18 @@ pub fn receive<T: DeserializeOwned>(stream: &mut UnixStream) -> Result<T> {
     stream.read_exact(&mut bytes)?;
     Ok(serde_json::from_slice(&bytes)?)
 }
+/// Fixed-width hot inference frame; all descriptors are still validated by the service.
+pub fn receive_request(stream:&mut UnixStream)->Result<Request>{
+    let mut header=[0u8;4];stream.read_exact(&mut header)?;
+    let size=u32::from_le_bytes(header);
+    if size==u32::MAX {
+        let mut bytes=[0u8;32];stream.read_exact(&mut bytes)?;
+        let field=|i:usize|u64::from_le_bytes(bytes[i..i+8].try_into().unwrap());
+        return Ok(Request::PredictBinary{handle:field(0),tensor:field(8),start:usize::try_from(field(16))?,count:usize::try_from(field(24))?});
+    }
+    ensure!(size as usize<=MAX_FRAME,"IPC frame exceeds limit");
+    let mut bytes=vec![0;size as usize];stream.read_exact(&mut bytes)?;Ok(serde_json::from_slice(&bytes)?)
+}
 #[cfg(target_os = "linux")]
 pub fn peer_uid(stream: &UnixStream) -> Result<u32> {
     use std::os::fd::AsRawFd;
@@ -114,6 +174,8 @@ pub fn peer_uid(stream: &UnixStream) -> Result<u32> {
 pub struct Client {
     stream: UnixStream,
     pub transmitted_bytes: u64,
+    endpoint: std::path::PathBuf,
+    expected_uid: u32,
 }
 impl Client {
     #[cfg(target_os = "linux")]
@@ -129,21 +191,66 @@ impl Client {
         let mut client = Self {
             stream,
             transmitted_bytes: 0,
+            endpoint: endpoint.to_owned(),
+            expected_uid,
         };
         client.call(Request::Hello { protocol: PROTOCOL })?;
         Ok(client)
     }
     #[cfg(target_os = "linux")]
-    pub fn register_tensor(&mut self, tensor: &buffer::SealedTensor, shape: Vec<usize>) -> Result<u64> {
-        let request = Request::RegisterTensor { count: tensor.count, shape, dtype: "f32".into() };
+    pub fn reconnect(&self) -> Result<Self> {
+        Self::connect(&self.endpoint, self.expected_uid)
+    }
+    #[cfg(target_os = "linux")]
+    pub fn register_tensor(
+        &mut self,
+        tensor: &buffer::SealedTensor,
+        shape: Vec<usize>,
+    ) -> Result<u64> {
+        let request = Request::RegisterTensor {
+            count: tensor.count,
+            shape,
+            dtype: "f32".into(),
+        };
         self.transmitted_bytes += send(&mut self.stream, &request)? as u64;
         tensor.send(&self.stream)?;
         let reply: Reply = receive(&mut self.stream)?;
-        ensure!(reply.error.is_none(), "wgtime: {}", reply.error.unwrap_or_default());
-        reply.value.context("missing buffer response")?["tensor"].as_u64().context("missing tensor handle")
+        ensure!(
+            reply.error.is_none(),
+            "wgtime: {}",
+            reply.error.unwrap_or_default()
+        );
+        reply.value.context("missing buffer response")?["tensor"]
+            .as_u64()
+            .context("missing tensor handle")
     }
-    pub fn predict_into(&mut self, handle: u64, tensor: u64, start: usize, count: usize, output: &mut Vec<f32>) -> Result<()> {
-        self.transmitted_bytes += send(&mut self.stream, &Request::PredictBinary { handle, tensor, start, count })? as u64;
+    pub fn call_with_file(
+        &mut self,
+        request: Request,
+        file: &std::fs::File,
+    ) -> Result<serde_json::Value> {
+        use std::os::fd::AsRawFd;
+        self.transmitted_bytes += send(&mut self.stream, &request)? as u64;
+        buffer::send_fd(&self.stream, file.as_raw_fd())?;
+        let reply: Reply = receive(&mut self.stream)?;
+        ensure!(
+            reply.error.is_none(),
+            "wgtime: {}",
+            reply.error.unwrap_or_default()
+        );
+        reply.value.context("missing fd response")
+    }
+    pub fn predict_into(
+        &mut self,
+        handle: u64,
+        tensor: u64,
+        start: usize,
+        count: usize,
+        output: &mut Vec<f32>,
+    ) -> Result<()> {
+        let mut frame=[0u8;36];frame[..4].copy_from_slice(&u32::MAX.to_le_bytes());
+        for (index,value) in [handle,tensor,start as u64,count as u64].iter().enumerate(){frame[4+index*8..12+index*8].copy_from_slice(&value.to_le_bytes());}
+        self.stream.write_all(&frame)?;self.transmitted_bytes+=frame.len() as u64;
         let mut header = [0u8; 8];
         self.stream.read_exact(&mut header)?;
         let status = u32::from_le_bytes(header[..4].try_into().unwrap());
@@ -156,7 +263,8 @@ impl Client {
         }
         ensure!(size % 4 == 0, "invalid f32 payload");
         output.resize(size / 4, 0.);
-        let bytes = unsafe { std::slice::from_raw_parts_mut(output.as_mut_ptr().cast::<u8>(), size) };
+        let bytes =
+            unsafe { std::slice::from_raw_parts_mut(output.as_mut_ptr().cast::<u8>(), size) };
         self.stream.read_exact(bytes)?;
         ensure!(output.iter().all(|n| n.is_finite()), "nonfinite response");
         Ok(())

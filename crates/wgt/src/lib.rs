@@ -23,6 +23,8 @@ pub mod precision;
 
 pub mod source_check;
 pub mod script_compiler;
+pub mod client_compiler;
+mod client_async_codegen;
 pub mod script_dependencies;
 
 pub mod package_artifact;

@@ -202,6 +202,7 @@ checkpoint 使用保存的优化器。值、路径各求值一次；相对路径
 控制流为 `if condition { ... } else { ... }`、`while condition { ... }`、
 `for name in list { ... }`、`break;`、`continue;`、`return expr;`。
 当前函数内共享变量环境，if/for 不创建词法局部作用域；重复 let 覆盖绑定。
+普通脚本可导入 `module NAME` 普通脚本模块：固定标准模块用逻辑名，本地开发模块用相对 `./module.wgt` 路径；模块可导出普通及 async 函数，不是 forward/loss 的张量算子，也不能在那里调用。纯张量 `operators NAME` 库是另一套仅供 forward/loss 的导入机制，见[自定义算子](custom-operators.md)。`std/openresponses/harness` 提供 `next(session,profile)`、`submit(session,results)` 与 `finished(step)` 协议辅助；显式工具映射和调用循环由普通 WGT 控制流负责。解释执行、默认编译和显式轻客户端 AOT 已覆盖双 worker 闭环及共享账本；AOT 在不保留模型源码、且 PATH 无构建工具链时运行。性能与吞吐尚未验收；`wgtime` 完整模型执行迁移仍按[OpenResponses 专题](openresponses.md)中的边界处理。
 无任意 Python、shell 或宿主回调。源码函数嵌套与求值均有预算限制。
 
 训练、流式 JSONL、强化学习、保存与 benchmark 的完整内置签名、默认值及限制见

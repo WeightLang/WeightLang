@@ -1,8 +1,8 @@
 # 原生 OpenResponses 客户端与 harness
 
-本文记录协议研究、已有候选代码与待定契约，尚未发布。用户最新架构要求是：可复用执行核心由机器级唯一 `wgtime` service 进程宿主；WGT 编译程序仅为轻量 IPC client，不内嵌推理核心或创建 GPU context，连接失败不得回退到内嵌运行时。HTTP、OpenResponses 会话和工具循环明确保留在客户端 WGT 控制层；`wgtime` 仅负责权重 forward/backward、参数更新及其资源预算。客户端控制层不因此获得内嵌权重执行的回退路径。
+本文记录本地实现与已验证范围，尚未发布。用户最新架构要求是：可复用执行核心由机器级唯一 `wgtime` service 进程宿主；WGT 编译程序仅为轻量 IPC client，不内嵌推理核心或创建 GPU context，连接失败不得回退到内嵌运行时。HTTP、OpenResponses 会话和工具循环明确保留在客户端 WGT 控制层；`wgtime` 仅负责权重 forward/backward、参数更新及其资源预算。客户端控制层不因此获得内嵌权重执行的回退路径。
 
-协议核心已通过首批本地测试；WGT bridge、真实客户端 AOT 与多 agent 没有完成整体验证，不能宣称当前可用。下面接口是客户端控制层候选契约，必须完成控制层/模型执行核心的依赖分离与 IPC 接线验证。
+协议核心、显式 WGT 工具闭环、平级双 worker 和真实客户端 AOT 已通过本地功能测试。性能与吞吐验收尚未完成；没有测试真实付费 provider。下面接口属于客户端控制层，不代表 OpenResponses 服务端或全部模态/端点已实现。
 
 协议基线为 OpenResponses `2026-04-24`，OpenAPI 3.1.0；官方源码固定到
 [`dce9ddb91921427c2ba06901c7dfaf0cc7056799`](https://github.com/openresponses/openresponses/tree/dce9ddb91921427c2ba06901c7dfaf0cc7056799)。
@@ -18,11 +18,11 @@
 
 provider HTTP、认证、会话历史、pending calls 和显式 WGT 工具循环归客户端控制层所有。工具调用权重模型时必须通过 `wgtime` IPC，不能转向客户端内嵌模型执行。网络/工具账本在客户端所有 worker 间共享；推理预算由服务另行计账，二者不是已经实现的统一总沙箱。失败 POST 与副作用工具不会因为 IPC 重连而自动重放。
 
-目标依赖方向是客户端控制层依赖轻量 `wgtime-client`，后者依赖纯 IPC wire；权重/设备执行核心只由 service 链接。当前候选 bridge 尚位于 weightlang-runtime crate，不能据此声称最终编译程序已排除模型执行核心；抽离与依赖图/产物验证仍待统一架构接线，禁止循环依赖。
+目标依赖方向是`wgtime-control` 客户端控制层依赖轻量 `wgtime` IPC client/wire crate；权重/设备执行核心只由 service 链接。协议核心已物理迁入 `wgtime-control`，旧 weightlang-runtime 仅重导出这一份实现。轻量控制 crate 独立测试通过，`cargo tree -p wgtime-control --depth 1` 不包含 runtime/service。控制层 async/tasks 已接线，双 worker harness 已通过默认编译与显式轻客户端 AOT 的无源码运行验证。`wgtime-control` 依赖树无 runtime/service，协议与纯任务调度均仅保留一份实现。模型执行的完整迁移范围仍以 wgtime 专题为准，禁止循环依赖。
 
 无论最终归属如何，单个 harness 的子 worker 必须共享总额度，用户会话与 mutable state 必须隔离；共享权重注册/复用键不允许合并 harness 历史、工具权限、随机数或可变训练状态。不能将权重实例共享等同于会话共享。IPC 消息需要携带不可伪造的归属/租约信息并由 service 校验，不能仅信任客户端数据中的 user/parent/session 字段。
 
-固定标准库 `std/openresponses/harness` 的导入与下面 responses_* API 在此架构下均待重新接线、未实现完成。现有候选代码的纯数据参数限制和本地 session 索引只是进程内保护，不证明跨用户 IPC 隔离。
+固定标准库 `std/openresponses/harness` 与下面 responses_* API 已接到客户端控制层。会话使用不能转换为 JSON 的 opaque handle，每次调用检查控制层生成的 worker 身份；子 worker 不接受父会话句柄或数字伪造句柄。这保护客户端任务归属，跨用户服务隔离仍由 wgtime IPC 认证另行保证。
 
 ## 实现范围
 
@@ -34,7 +34,7 @@ provider HTTP、认证、会话历史、pending calls 和显式 WGT 工具循环
 
 ## WGT 接口契约
 
-以下是本地新增接口，整体行为仍待解释/AOT 测试闭合。普通函数与对象/列表表达式复用现有 WGT 0.5 语法，不新增 agent/tool 声明。
+以下是本地新增接口，核心闭环已通过解释、默认轻客户端编译与显式轻客户端编译测试。普通函数与对象/列表表达式复用现有 WGT 0.5 语法，不新增 agent/tool 声明。
 
 | 签名 | 目的与约束 |
 | --- | --- |
@@ -57,7 +57,7 @@ status 为 `tools` 时 calls 每项含 call_id/name/arguments；为 `completed` 
 
 ## WGT harness 循环示例
 
-下面的完整程序是当前接口候选例子，尚待整体测试；不会执行网络直到显式运行 main。`sum` 是唯一明确映射的工具，模型无法选择其他 WGT 函数。循环回合由执行级 ledger 限制，两个 worker 的配额不分别重置。
+下面程序展示与已验证闭环相同的显式控制结构；独立示例文件见 [addition/model.wgt](../examples/openresponses/addition/model.wgt)。它不会执行网络直到显式运行 main。`sum` 是唯一明确映射的工具，模型无法选择其他 WGT 函数。循环回合由执行级 ledger 限制，两个 worker 的配额不分别重置。
 
 ```wgt
 wgt 0.5
@@ -100,9 +100,9 @@ fn main() {
 }
 ```
 
-执行环境 profile 示例为 `{"local":{"url":"http://127.0.0.1:18080/responses"}}`；有认证时增加 `authorization_env`，值是执行时环境变量名。该 profile 应由宿主建立，不从模型文本生成。标准库可复用普通函数控制流；目前没有完成通用可导入 harness 模块，不能将上例称为已经安装的标准库 API。
+执行环境 profile 示例为 `{"local":{"url":"http://127.0.0.1:18080/responses"}}`；有认证时增加 `authorization_env`，值是执行时环境变量名。该 profile 应由宿主建立，不从模型文本生成。标准库可复用普通函数控制流；下述 `std/openresponses/harness` helper 已在闭环测试导入，不包含业务工具映射。
 
-标准库接线使用 `import harness from "std/openresponses/harness"` 的固定导入，仅提供普通脚本函数，明确拒绝在 forward/loss 内调用。导出 `harness.next(session, profile)`、`harness.submit(session, results)` 与 `harness.finished(step)`，负责状态/结果辅助，绝不默认执行工具。完整循环与显式 add 映射放在 `examples/openresponses/addition/model.wgt`。普通脚本库声明 `module NAME`，可通过逻辑标准库名或显式 `./module.wgt` 本地开发路径导入，支持同一普通/async 函数能力；不能在 forward/loss 调用。没有泛 dynamic dispatch。现有 `operators` 导入是纯张量库，不能把 async/副作用循环混入其中。第一版保留用户具名工具分支，库负责协议回合辅助，不做模型控制的任意函数派发；这一导入边界在实施前需同步到主参考与技能，且需真实解释/AOT验证。
+标准库接线使用 `import harness from "std/openresponses/harness"` 的固定导入，仅提供普通脚本函数，明确拒绝在 forward/loss 内调用。导出 `harness.next(session, profile)`、`harness.submit(session, results)` 与 `harness.finished(step)`，负责状态/结果辅助，绝不默认执行工具。完整循环与显式 add 映射放在 `examples/openresponses/addition/model.wgt`。普通脚本库声明 `module NAME`，可通过逻辑标准库名或显式 `./module.wgt` 本地开发路径导入，支持同一普通/async 函数能力；不能在 forward/loss 调用。首期模块只允许该声明与函数，不允许模块再导入模块，因此嵌套导入与循环依赖直接拒绝；函数内部本模块调用被 alias 限定名改写，保留命名卫生。没有泛 dynamic dispatch。现有 `operators` 导入是纯张量库，不能把 async/副作用循环混入其中。第一版保留用户具名工具分支，库负责协议回合辅助，不做模型控制的任意函数派发；这一导入边界已同步到主参考与技能，并在解释/AOT测试中验证。
 
 ## 工具 JSON Schema 子集
 
@@ -146,8 +146,8 @@ scope 错误取消兄弟任务，退出等待在途阻塞 HTTP 完成和计账�
 
 首批独立 Rust 核心测试通过 5 项，包含 HTTP 工具结果往返、call_id 拒绝、terminal、schema 与共享 grant/预算。接入公共模块后重新执行 `cargo test -p weightlang-runtime --no-default-features openresponses --lib` 为 6 passed，`cargo test -p weightlang-runtime --no-default-features --test openresponses_core` 为 4 passed；`cargo check -p weightlang-runtime --no-default-features` 通过。
 
-`cargo test -p weightlang-wgt --test openresponses -- --nocapture` 已在构建脚本路径修复后通过 1 项：本地分块 SSE、双 worker、具名 WGT 工具执行、call_id 回传、共享请求/工具额度，以及移除 model.wgt、PATH=/nonexistent 后的真实 AOT。此为现有控制层的中间验证，尚未证明最终轻量客户端已排除权重执行核心。固定官方 ResponseResource fixture 已加入 roundtrip 测试。
+`cargo test -p weightlang-wgt --test openresponses -- --nocapture` 已在构建脚本路径修复后通过 1 项：本地分块 SSE、双 worker、具名 WGT 工具执行、call_id 回传、共享请求/工具额度，以及移除 model.wgt、PATH=/nonexistent 后的真实 AOT。最终定向命令 `cargo test -p weightlang-wgt --test openresponses harness_interpreter -- --nocapture` 通过 1 项，覆盖解释、默认 compile（已切轻客户端）及显式 compile_client 三模式。两种编译都在源文件仍存在时完成，再移除 model.wgt，以 PATH=/nonexistent 运行产物；不是声称编译前无需源码。隔离 IPC 假服务只接受父任务与双 worker 的 Hello 握手，不接受任何模型执行请求。固定官方 ResponseResource fixture 已加入 roundtrip 测试。这些是功能验收，不是性能/吞吐验收。
 
-async 对象构造另修正为同步/异步共用借用字段校验、逐节点直接扣 ledger，验证后再 clone；失败前已访问节点照常收费。`record_callbacks` 定向测试通过，覆盖失败计费与两个线程竞争同一原子额度。
+async 对象构造另修正为同步/异步共用借用字段校验、逐节点直接扣 ledger，验证后再 clone；失败前已访问节点照常收费。`record_callbacks` 定向测试通过，覆盖失败计费与两个线程竞争同一原子额度。纯 `record_schema` 与 callback inspect 已迁至 wgtime-control 单份实现，旧 runtime 使用 adapter/re-export；抽取相关回归为 runtime records 3 passed、control record_schema 5 passed。客户端完整 records/collect 分派由运行时主线接线，这里不宣称该迁移已经全部完成。
 
 官方 compliance runner 面向 provider 服务端，首期只复用固定官方 schema/fixtures/场景作本地客户端契约测试，不宣称通过服务端官方认证。不需要付费 API 或真实密钥。

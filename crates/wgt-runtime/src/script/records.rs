@@ -1,6 +1,6 @@
 //! Record batches retain a schema distinct from ordinary indexed lists.
-use super::{record_schema::{BatchSchema, Shape, MAX_DEPTH, MAX_NODES}, Value};
-use anyhow::{bail, ensure, Result};
+use super::{record_schema::{BatchSchema, Shape, RecordValue, Kind}, Value};
+use anyhow::{ensure, Result};
 use std::collections::BTreeMap;
 
 pub const MAX_TEXT_BYTES: usize = 1_000_000;
@@ -12,29 +12,15 @@ pub struct RecordBatch {
     bytes: usize,
 }
 
-fn shape_with(value: &Value, depth: usize, charge: &mut impl FnMut() -> Result<()>, nodes: &mut usize) -> Result<Shape> {
-    ensure!(depth <= MAX_DEPTH, "record value nesting limit exceeded");
-    *nodes += 1;
-    ensure!(*nodes <= MAX_NODES, "record value node limit exceeded");
-    charge()?;
-    Ok(match value {
-        Value::Number(n) => { ensure!(n.is_finite(), "record numbers must be finite"); Shape::Number }
-        Value::Bool(_) => Shape::Bool,
-        Value::Text(s) => { ensure!(s.len() <= MAX_TEXT_BYTES, "record text too large"); Shape::Text }
-        Value::Null => Shape::Null,
-        Value::List(values) => {
-            let mut element = None;
-            for value in values {
-                let candidate = shape_with(value, depth + 1, charge, nodes)?;
-                ensure!(element.as_ref().is_none_or(|s| s == &candidate), "record lists require homogeneous fixed shapes");
-                element = Some(candidate);
-            }
-            Shape::List { len: values.len(), element: element.map(Box::new) }
-        }
-        Value::Object(fields) => Shape::Record(fields.iter().map(|(name,value)|
-            Ok((name.clone(), shape_with(value, depth + 1, charge, nodes)?))).collect::<Result<_>>()?),
-        _ => bail!("record fields cannot contain resource handles or record batches"),
-    })
+impl RecordValue for Value {
+    fn kind(&self)->Option<Kind>{Some(match self {Self::Number(_)=>Kind::Number,Self::Bool(_)=>Kind::Bool,Self::Text(_)=>Kind::Text,Self::Null=>Kind::Null,Self::List(_)=>Kind::List,Self::Object(_)=>Kind::Record,_=>return None})}
+    fn finite(&self)->bool{match self{Self::Number(n)=>n.is_finite(),_=>true}}
+    fn text_bytes(&self)->usize{match self{Self::Text(s)=>s.len(),_=>0}}
+    fn list(&self)->Option<&[Self]>{match self{Self::List(v)=>Some(v),_=>None}}
+    fn fields(&self)->Option<Box<dyn Iterator<Item=(&str,&Self)>+'_>>{match self{Self::Object(v)=>Some(Box::new(v.iter().map(|(k,v)|(k.as_str(),v)))),_=>None}}
+}
+fn shape_with(value:&Value,depth:usize,charge:&mut impl FnMut()->Result<()>,nodes:&mut usize)->Result<Shape>{
+    Ok(super::record_schema::inspect(value,depth,charge,nodes)?.0)
 }
 
 fn shape(value:&Value,depth:usize,remaining:&mut u64,nodes:&mut usize)->Result<Shape>{

@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+[features]
+default = []
+allocation-metrics = []
+# Diagnostic timings and validated fixed-frame echo; absent from default builds.
+latency-probe = []
+
 [[bin]]
 name = "wgtime"
 path = "src/main.rs"

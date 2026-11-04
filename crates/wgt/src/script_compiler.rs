@@ -11,6 +11,12 @@ pub fn compile(source: &Path, output: &Path) -> Result<()> {
     compile_options(source, output, false, false)
 }
 pub fn compile_options(source: &Path, output: &Path, offline: bool, locked: bool) -> Result<()> {
+    compile_backend(source, output, offline, locked, true)
+}
+pub fn compile_client(source: &Path, output: &Path, offline: bool, locked: bool) -> Result<()> {
+    compile_backend(source, output, offline, locked, true)
+}
+fn compile_backend(source: &Path, output: &Path, offline: bool, locked: bool, client: bool) -> Result<()> {
     ensure!(
         output.symlink_metadata().is_err(),
         "output already exists: {}",
@@ -18,7 +24,9 @@ pub fn compile_options(source: &Path, output: &Path, offline: bool, locked: bool
     );
     let source = source.canonicalize()?;
     let dependencies = crate::script_dependencies::prepare(&source, offline, locked)?;
-    let code = weightlang_runtime::script::codegen::rust_source_with_dependencies(
+    let code = if client {
+        crate::client_compiler::source(&fs::read_to_string(&source)?, source.parent().unwrap())?
+    } else { weightlang_runtime::script::codegen::rust_source_with_dependencies(
         &fs::read_to_string(&source)?,
         source
             .parent()
@@ -26,7 +34,7 @@ pub fn compile_options(source: &Path, output: &Path, offline: bool, locked: bool
             .to_str()
             .context("source root must be UTF-8")?,
         &dependencies,
-    )?;
+    )? };
     let runtime = std::env::var_os("WEIGHTLANG_RUNTIME_SOURCE")
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../wgt-runtime"))
@@ -48,11 +56,17 @@ pub fn compile_options(source: &Path, output: &Path, offline: bool, locked: bool
     manifest["package"]["version"] = toml_edit::value("0.0.0");
     manifest["package"]["edition"] = toml_edit::value("2021");
     manifest["workspace"] = toml_edit::Item::Table(toml_edit::Table::new());
+    manifest["dependencies"] = toml_edit::Item::Table(toml_edit::Table::new());
     manifest["dependencies"]["anyhow"] = toml_edit::value("1");
     manifest["dependencies"]["weightlang-runtime"]["path"] =
         toml_edit::value(runtime.to_str().context("runtime path must be UTF-8")?);
     manifest["dependencies"]["weightlang-runtime"]["default-features"] = toml_edit::value(false);
-    if cfg!(feature = "gpu") {
+    if client {
+        manifest["dependencies"].as_table_mut().unwrap().remove("weightlang-runtime");
+        let control = runtime.parent().context("runtime parent missing")?.join("wgtime-control");
+        manifest["dependencies"]["wgtime-control"]["path"] = toml_edit::value(control.to_str().context("control path must be UTF-8")?);
+        manifest["dependencies"]["serde_json"] = toml_edit::value("1");
+    } else if cfg!(feature = "gpu") {
         let mut features = toml_edit::Array::new();
         features.push("gpu");
         manifest["dependencies"]["weightlang-runtime"]["features"] = toml_edit::value(features);

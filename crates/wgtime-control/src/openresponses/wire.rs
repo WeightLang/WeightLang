@@ -85,6 +85,10 @@ pub fn request(value: &Value) -> Result<()> {
         "input must be text or items"
     );
     ensure!(
+        value.get("stream").is_none_or(Value::is_boolean),
+        "stream must be boolean"
+    );
+    ensure!(
         value.get("background").is_none_or(|v| v == false),
         "background responses are unavailable"
     );

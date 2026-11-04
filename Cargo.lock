@@ -1927,6 +1927,7 @@ dependencies = [
  "serde",
  "serde_json",
  "wgpu",
+ "wgtime-control",
 ]
 
 [[package]]
@@ -2106,6 +2107,18 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "wgtime-control"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "wgtime",
 ]
 
 [[package]]

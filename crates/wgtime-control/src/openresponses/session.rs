@@ -10,10 +10,15 @@ pub struct Session {
     tools: BTreeMap<String, Value>,
     pending: BTreeMap<String, Value>,
     finished: bool,
+    seen_calls: std::collections::BTreeSet<String>,
 }
 impl Session {
     pub fn new(mut request: Value, grant: Grant) -> Result<Self> {
         wire::request(&request)?;
+        ensure!(
+            request.get("tools").is_none_or(|v| v.is_array()),
+            "tools must be a list"
+        );
         if let Some(text) = request["input"].as_str() {
             request["input"] = json!([{"type":"message","role":"user","content":text}]);
         }
@@ -58,6 +63,7 @@ impl Session {
             tools,
             pending: BTreeMap::new(),
             finished: false,
+            seen_calls: Default::default(),
         })
     }
     pub fn next(&mut self, alias: &str, endpoint: &Endpoint) -> Result<Value> {
@@ -102,6 +108,18 @@ impl Session {
             }
             ensure!(item["status"] == "completed", "incomplete function call");
             let name = wire::text(item, "name")?;
+            if let Some(choice) = self.request.get("tool_choice") {
+                ensure!(
+                    choice != "none",
+                    "provider called tools with tool_choice none"
+                );
+                if choice.is_object() {
+                    ensure!(
+                        choice["type"] == "function" && choice["name"] == name,
+                        "provider violated explicit function tool choice"
+                    );
+                }
+            }
             let schema = self
                 .tools
                 .get(name)
@@ -111,6 +129,10 @@ impl Session {
             validate(schema, &arguments, 0)?;
             let id = wire::text(item, "call_id")?;
             ensure!(!id.is_empty() && id.len() <= 64, "invalid call_id");
+            ensure!(
+                !self.seen_calls.contains(id),
+                "provider reused an already consumed call_id"
+            );
             ensure!(
                 pending.insert(id.to_owned(), item.clone()).is_none(),
                 "duplicate call_id"
@@ -122,6 +144,7 @@ impl Session {
             .as_array_mut()
             .unwrap()
             .extend(response["output"].as_array().unwrap().iter().cloned());
+        self.seen_calls.extend(pending.keys().cloned());
         self.pending = pending;
         self.finished = calls.is_empty();
         Ok(
@@ -225,7 +248,9 @@ fn check_schema(schema: &Value, depth: usize) -> Result<()> {
             ),
             "minimum" | "maximum" => ensure!(value.is_number(), "numeric schema bound required"),
             "minLength" | "maxLength" | "minItems" | "maxItems" => ensure!(
-                value.as_u64().is_some(),
+                value
+                    .as_f64()
+                    .is_some_and(|n| n >= 0.0 && n.fract() == 0.0 && n <= 1e9),
                 "nonnegative schema bound required"
             ),
             _ => {}
@@ -242,7 +267,9 @@ fn validate(schema: &Value, value: &Value, depth: usize) -> Result<()> {
                 "array" => value.is_array(),
                 "string" => value.is_string(),
                 "number" => value.is_number(),
-                "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+                "integer" => value
+                    .as_f64()
+                    .is_some_and(|n| n.is_finite() && n.fract() == 0.0),
                 "boolean" => value.is_boolean(),
                 "null" => value.is_null(),
                 _ => false,

@@ -38,9 +38,11 @@ examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原�
 旧 model/save/restore 仅为 legacy 别名，新例子使用新名；所有参数必填，保存拒绝已有目标。
 本地运行 cargo test -p weightlang-runtime --test source_conformance 与 node scripts/test_source_conformance.cjs。
 
+普通脚本模块与纯张量算子是两种独立导入机制。普通脚本可导入固定逻辑名 `std/openresponses/harness`，或本地开发路径 `./module.wgt`；模块声明 `module NAME`，导出普通及 async 函数，只能在普通脚本调用，不能用于 forward/loss。harness 提供 `next(session,profile)`、`submit(session,results)`、`finished(step)` 协议辅助，工具映射与循环由 WGT 显式编写。解释执行、默认编译及显式轻客户端 AOT 的双 worker 闭环测试通过；AOT 测试移除模型源码并清空工具链 PATH。性能与吞吐尚未验收，完整模型执行迁移仍按 docs/openresponses.md 的范围说明。候选循环示例 examples/openresponses/addition/model.wgt。
+
 纯张量自定义算子：forward/loss 可调用只含不可重复 let 和最终 return 的 fn；参数全部必填且显式传入，
 不可捕获模型参数/局部变量，不允许递归、状态写入、I/O 或宿主回调。`operators NAME` 声明独立库，
-`import alias from "./ops.wgt"` 或 `"MODULE/LibraryName"` 导入，仅供张量调用 `alias.fn(...)`。
+`import alias from "./ops.wgt"` 或 `"MODULE/LibraryName"` 导入，仅供张量调用 `alias.fn(...)`；这不是普通脚本 module loader。
 算子展开为原生 IR，继承梯度与保存/AOT；release-assets 自动打包库，fetch/锁文件校验源。
 完整签名、原语集合、版本和限制见 docs/custom-operators.md；真实例子 examples/native_training/custom_operators/model.wgt。
 实现与验证入口见 references/custom-operators.md。

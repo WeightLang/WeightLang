@@ -312,7 +312,7 @@ impl AdaptiveSession {
         Ok(serde_json::to_vec(&value)?)
     }
 
-    pub(crate) fn checkpoint_bytes_bounded(&self, limit: usize) -> Result<Vec<u8>> {
+    pub fn checkpoint_bytes_bounded(&self, limit: usize) -> Result<Vec<u8>> {
         self.ensure_idle()?;
         let value = if let Some(state) = &self.custom_optimizer {
             super::optimization::validate_state(&state.value)?;

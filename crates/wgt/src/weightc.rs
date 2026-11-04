@@ -28,6 +28,12 @@ enum Command {
         #[arg(short, long)]
         output: PathBuf,
     },
+    /// Compile the explicit first client-only slice; unsupported constructs are rejected.
+    CompileClient {
+        source: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
     /// Parse a native script without executing it (not full type checking).
     Check { source: PathBuf },
     /// Compatibility model builder; prefer explicit saves inside WGT scripts.
@@ -57,6 +63,10 @@ fn main() -> Result<()> {
                 cli.locked,
             )?;
             println!("compiled: {}", output.display());
+        }
+        Command::CompileClient { source, output } => {
+            weightlang_wgt::script_compiler::compile_client(&source, &output, cli.offline, cli.locked)?;
+            println!("compiled client: {}", output.display());
         }
         Command::Check { source } => {
             let base = std::env::current_dir()?;

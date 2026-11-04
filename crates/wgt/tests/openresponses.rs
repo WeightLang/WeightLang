@@ -3,21 +3,23 @@ use std::{
     fs,
     io::{Read, Write},
     net::TcpListener,
+    path::PathBuf,
     process::Command,
 };
 use weightlang_wgt::script_compiler;
 
 const SOURCE: &str = r#"wgt 0.5
+import harness from "std/openresponses/harness"
 fn add_values(args) { return args.x + args.y; }
 async fn worker(label) {
     responses_restrict(["fake"], ["sum"]);
     let session = responses_session({model:"fake", input:label, stream:true, tools:[{type:"function", name:"sum", strict:true, parameters:{type:"object", properties:{x:{type:"integer"}, y:{type:"integer"}}, required:["x","y"], additionalProperties:false}}]});
-    let step = await responses_next(session, "fake");
+    let step = await harness.next(session, "fake");
     assert step.status == "tools";
     let call = step.calls[0];
     assert call.name == "sum";
     responses_submit(session, [{call_id:call.call_id, output:add_values(call.arguments)}]);
-    let final = await responses_next(session, "fake");
+    let final = await harness.next(session, "fake");
     assert final.status == "completed";
     responses_cancel(session);
     return final.response.output[0].content[0].text;
@@ -33,9 +35,9 @@ fn main() {
         assert second == "3";
     }
     let usage = responses_usage();
-    assert usage.requests == 4;
-    assert usage.tools == 2;
-    assert usage.inflight == 0;
+    assert usage.requests == 4, "shared request count";
+    assert usage.tools == 2, "shared tool count";
+    assert usage.inflight == 0, "inflight cleanup";
     return [usage.requests, usage.tools];
 }
 "#;
@@ -50,7 +52,40 @@ fn harness_interpreter_and_source_free_aot_share_worker_budget() {
     fs::write(&source, SOURCE).unwrap();
     let executable = temp.path().join("program");
     script_compiler::compile(&source, &executable).unwrap();
-    for compiled in [false, true] {
+    let lightweight = temp.path().join("lightweight");
+    script_compiler::compile_client(&source, &lightweight, false, false).unwrap();
+    for mode in 0..3 {
+        let compiled = mode > 0;
+        // Harness-only program needs authenticated service handshakes but must
+        // never send model execution requests. Use an isolated local fake peer.
+        let ipc_root = std::env::var_os("CLAUDE_JOB_DIR")
+            .map(PathBuf::from)
+            .map(|p| p.join("tmp"))
+            .unwrap_or_else(|| PathBuf::from("/tmp/weightlang"));
+        fs::create_dir_all(&ipc_root).unwrap();
+        let ipc_dir = tempfile::tempdir_in(ipc_root).unwrap();
+        let socket = ipc_dir.path().join("s.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let ipc = std::thread::spawn(move || {
+            if mode > 0 {
+                for _ in 0..3 {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    let mut header = [0u8; 4];
+                    stream.read_exact(&mut header).unwrap();
+                    let mut frame = vec![0; u32::from_le_bytes(header) as usize];
+                    stream.read_exact(&mut frame).unwrap();
+                    let request: serde_json::Value = serde_json::from_slice(&frame).unwrap();
+                    assert_eq!(request["Hello"]["protocol"], 1);
+                    assert_eq!(request.as_object().unwrap().len(), 1);
+                    let reply =
+                        serde_json::to_vec(&json!({"value":{"protocol":1},"error":null})).unwrap();
+                    stream
+                        .write_all(&(reply.len() as u32).to_le_bytes())
+                        .unwrap();
+                    stream.write_all(&reply).unwrap();
+                }
+            }
+        });
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let profile = temp.path().join("profiles.json");
         fs::write(&profile,serde_json::to_vec(&json!({"fake":{"url":format!("http://{}/responses",listener.local_addr().unwrap()),"authorization_env":"WGT_TEST_RESPONSE_AUTH"}})).unwrap()).unwrap();
@@ -89,7 +124,11 @@ fn harness_interpreter_and_source_free_aot_share_worker_budget() {
                 if !first {
                     assert_eq!(history[1]["call_id"], "call_1");
                     assert_eq!(history[2]["call_id"], "call_1");
-                    assert_eq!(serde_json::from_str::<f64>(history[2]["output"].as_str().unwrap()).unwrap(), 3.0);
+                    assert_eq!(
+                        serde_json::from_str::<f64>(history[2]["output"].as_str().unwrap())
+                            .unwrap(),
+                        3.0
+                    );
                 }
                 let item = if first {
                     json!({"type":"function_call","id":"fc","call_id":"call_1","status":"completed","name":"sum","arguments":"{\"x\":1,\"y\":2}"})
@@ -113,14 +152,17 @@ fn harness_interpreter_and_source_free_aot_share_worker_budget() {
             }
         });
         let mut command = if compiled {
-            fs::remove_file(&source).unwrap();
-            Command::new(&executable)
+            if source.exists() {
+                fs::remove_file(&source).unwrap();
+            }
+            Command::new(if mode == 2 { &lightweight } else { &executable })
         } else {
             let mut c = Command::new(env!("CARGO_BIN_EXE_wgt"));
             c.arg("run").arg(&source);
             c
         };
         let output = command
+            .env("WGTIME_ENDPOINT", &socket)
             .env("WGT_RESPONSES_PROFILES", &profile)
             .env("WGT_TEST_RESPONSE_AUTH", "Bearer test-only")
             .env_remove("WGT_HOST_POLICY")
@@ -133,25 +175,43 @@ fn harness_interpreter_and_source_free_aot_share_worker_budget() {
             String::from_utf8_lossy(&output.stderr)
         );
         let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(result["result"], json!([4.0, 2.0]));
+        assert_eq!(result["result"][0].as_f64(), Some(4.0));
+        assert_eq!(result["result"][1].as_f64(), Some(2.0));
         server.join().unwrap();
+        ipc.join().unwrap();
     }
 }
 
 #[test]
 fn worker_cannot_escalate_reset_budget_or_forge_session() {
-    let root=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/weightlang/openresponses-tests");
-    fs::create_dir_all(&root).unwrap();let temp=tempfile::tempdir_in(root).unwrap();
-    let profile=temp.path().join("profiles.json");fs::write(&profile,r#"{"fake":{"url":"http://127.0.0.1:1/responses"}}"#).unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.cache/weightlang/openresponses-tests");
+    fs::create_dir_all(&root).unwrap();
+    let temp = tempfile::tempdir_in(root).unwrap();
+    let profile = temp.path().join("profiles.json");
+    fs::write(
+        &profile,
+        r#"{"fake":{"url":"http://127.0.0.1:1/responses"}}"#,
+    )
+    .unwrap();
     let cases=[
         ("responses_restrict([\"fake\"],[\"unauthorized\"]);","child authority exceeds parent grant"),
         ("responses_scope({requests:9,bytes:999,tools:9,rounds:9,concurrency:1,deadline_ms:1000},[\"fake\"],[]);","configured once"),
         ("let s = responses_session({model:\"fake\",input:\"hi\"}); let step=await responses_next(0,\"fake\");","expected response session"),
     ];
-    for (body,error) in cases {
+    for (body, error) in cases {
         let text=format!("wgt 0.5\nasync fn work(){{{body}return null;}}\nfn main(){{responses_scope({{requests:1,bytes:1000,tools:0,rounds:1,concurrency:1,deadline_ms:1000}},[\"fake\"],[]);tasks{{let t=spawn work();return await t;}}}}");
-        let source=temp.path().join("model.wgt");fs::write(&source,text).unwrap();
-        let output=Command::new(env!("CARGO_BIN_EXE_wgt")).arg("run").arg(&source).env("WGT_RESPONSES_PROFILES",&profile).env_remove("WGT_HOST_POLICY").output().unwrap();
-        assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains(error),"{stderr}");
+        let source = temp.path().join("model.wgt");
+        fs::write(&source, text).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_wgt"))
+            .arg("run")
+            .arg(&source)
+            .env("WGT_RESPONSES_PROFILES", &profile)
+            .env_remove("WGT_HOST_POLICY")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(error), "{stderr}");
     }
 }
