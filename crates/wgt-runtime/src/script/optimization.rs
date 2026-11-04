@@ -47,6 +47,28 @@ impl Runtime {
             .entries
             .get(&id)
             .context("gradient handle released or committed")?;
+        if name == "differentiate_at" {
+            ensure!(
+                self.gradients.entries.len() < MAX_HANDLES,
+                "live gradient handle limit exceeded; release or commit gradients"
+            );
+            let next = self
+                .gradients
+                .next
+                .checked_add(1)
+                .context("gradient identity overflow")?;
+            let model = *model;
+            let result = self.adaptive[model].lock()?.differentiate_at_custom(
+                snapshot,
+                &args[1].matrix()?,
+                &mut self.remaining,
+                MEMORY - self.gradients.bytes,
+            )?;
+            self.gradients.bytes += result.bytes;
+            self.gradients.entries.insert(next, (model, result));
+            self.gradients.next = next;
+            return Ok(Value::Gradient(next));
+        }
         if name == "gradient_snapshot" {
             let mut fields = BTreeMap::new();
             fields.insert("loss".into(), number(snapshot.loss as f64)?);

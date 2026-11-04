@@ -506,7 +506,7 @@ impl Runtime {
         );
         let name = entry.legacy_alias_for.as_deref().unwrap_or(name);
 
-        if matches!(name, "differentiate" | "gradient_snapshot" | "commit_gradients" | "release_gradient") {
+        if matches!(name, "differentiate" | "differentiate_at" | "gradient_snapshot" | "commit_gradients" | "release_gradient") {
             return self.optimization_builtin(name, a);
         }
         if name == "benchmark" {

@@ -225,6 +225,11 @@ CPU `forward` 模型可用 `differentiate(model,inputs,targets)` 显式求 `fn l
 完整签名、预算计量、约束和续训示例见[原生训练](native-training.md#wgt-自定义更新算法cpu-forward)及
 [custom_momentum/model.wgt](../examples/native_training/custom_momentum/model.wgt)。目前不支持此接口的顺序/GPU模型，
 不自动执行算法、恢复训练循环或导入含循环的 host 模块。
+`differentiate_at(gradient,candidate_parameters)` 在临时参数上使用首次句柄保存的同一 f32 批次重新求一阶梯度，
+不写真实模型；返回的新句柄仍以原 parameters/state/steps 为提交基准，loss/gradients来自临时点。
+它与原接口共享句柄/内存预算，拒绝过期版本；批次保留与临时绑定副本也计入预算。
+[custom_sam/model.wgt](../examples/native_training/custom_sam/model.wgt) 用两次一阶求导与一次提交定义 SAM+SGD/动量；
+这不提供高阶自动微分、SAM专用对象或GPU自定义优化。完整同批次/状态语义见[原生训练](native-training.md#用普通-wgt-编写-sam)。
 
 ## 实现与验证依据
 

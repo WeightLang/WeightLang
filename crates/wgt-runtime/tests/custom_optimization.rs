@@ -18,6 +18,95 @@ fn gradient(
 }
 
 #[test]
+fn temporary_sam_gradients_keep_original_base_and_commit_once() {
+    let mut m = session();
+    let first = gradient(&mut m);
+    // g=-10, rho=.1 => perturb w to -.1; second g=5*(-.1-2)=-10.5.
+    let second = m
+        .differentiate_at_custom(&first, &[vec![-0.1]], &mut 100000, 1024 * 1024)
+        .unwrap();
+    assert_eq!(second.parameters, [vec![0.]]);
+    assert!((second.gradients[0][0] + 10.5).abs() < 1e-5);
+    assert_eq!(second.state.steps, 0);
+    assert_eq!(m.revision(), 0);
+    assert_eq!(m.parameter("w").unwrap(), [0.]);
+    assert_eq!(m.parameter("b").unwrap(), [0.]);
+    assert!(m
+        .differentiate_at_custom(&first, &[vec![-0.1]], &mut 1, 1024 * 1024)
+        .is_err());
+    assert_eq!(m.revision(), 0);
+    m.commit_custom(&second, vec![vec![1.05]], json!([1, [-10.5]]))
+        .unwrap();
+    assert_eq!(gradient(&mut m).state.steps, 1);
+    assert!(m
+        .differentiate_at_custom(&first, &[vec![-0.1]], &mut 100000, 1024 * 1024)
+        .is_err());
+    assert_eq!(m.parameter("w").unwrap(), [1.05]);
+}
+
+#[test]
+fn temporary_zero_gradient_and_repeated_parameter_uses() {
+    let mut m = session();
+    m.replace_parameter("w", &[2.]).unwrap();
+    let first = gradient(&mut m);
+    assert_eq!(first.gradients, [vec![0.]]);
+    let second = m
+        .differentiate_at_custom(&first, &first.parameters, &mut 100000, 1024 * 1024)
+        .unwrap();
+    assert_eq!(second.gradients, [vec![0.]]);
+    let text = MODEL.replace("linear(x,w,b)", "add(linear(x,w,b),linear(x,w,b))");
+    let mut shared = AdaptiveSession::prepare(parse(&text).unwrap(), 1024 * 1024).unwrap();
+    let first = gradient(&mut shared);
+    assert_eq!(first.names, ["w"]);
+    assert_eq!(first.gradients, [vec![-20.]]);
+    let second = shared
+        .differentiate_at_custom(&first, &[vec![-0.1]], &mut 100000, 1024 * 1024)
+        .unwrap();
+    assert!((second.gradients[0][0] + 22.).abs() < 1e-5);
+}
+
+#[test]
+fn temporary_pass_preserves_forward_state_and_failed_bindings() {
+    let text = MODEL.replace(
+        "return linear(x,w,b);",
+        "write(w,add(w,[1])); return linear(x,w,b);",
+    );
+    let mut m = AdaptiveSession::prepare(parse(&text).unwrap(), 1024 * 1024).unwrap();
+    let first = gradient(&mut m);
+    assert_eq!(first.gradients, [vec![-5.]]);
+    let second = m
+        .differentiate_at_custom(&first, &[vec![-0.1]], &mut 100000, 1024 * 1024)
+        .unwrap();
+    assert!((second.gradients[0][0] + 5.5).abs() < 1e-5);
+    assert_eq!(m.parameter("w").unwrap(), [0.]);
+    assert!(m
+        .differentiate_at_custom(&first, &[vec![f32::MAX]], &mut 100000, 1024 * 1024)
+        .is_err());
+    assert_eq!(m.parameter("w").unwrap(), [0.]);
+    assert_eq!(m.revision(), 0);
+}
+
+#[test]
+fn host_temporary_gradient_reuses_batch_without_consuming_rng() {
+    let source = format!(
+        "{MODEL}\nfn main() {{
+        let net=Regression(\"none\"); seed(9); let expected=random(); seed(9);
+        let g=differentiate(net,[[1],[2]],[[2],[4]]);
+        let second=differentiate_at(g,[[-0.1]]);
+        let s=gradient_snapshot(second);
+        assert(s[\"parameters\"]==[[0]],\"original commit base\");
+        assert(random()==expected,\"differentiation must not consume host RNG\");
+        release_gradient(g); commit_gradients(second,[[1.05]],[1]);
+        return net([1]);
+    }}"
+    );
+    let report =
+        weightlang_runtime::script::run(&source, std::path::Path::new("/tmp/weightlang"), 100000)
+            .unwrap();
+    assert!((report.result[0].as_f64().unwrap() - 1.05).abs() < 0.000001);
+}
+
+#[test]
 fn custom_candidates_match_hand_calculation_and_fail_atomically() {
     let mut m = session();
     let g = gradient(&mut m);
@@ -64,7 +153,9 @@ fn custom_loss_gradient_matches_finite_difference_and_depth_is_bounded() {
     assert!((analytic - (plus - minus) / (2. * eps)).abs() < 0.001);
     let g = gradient(&mut m);
     let mut deep = json!(null);
-    for _ in 0..33 { deep = json!([deep]); }
+    for _ in 0..33 {
+        deep = json!([deep]);
+    }
     let revision = m.revision();
     assert!(m.commit_custom(&g, vec![vec![1.]], deep).is_err());
     assert_eq!(m.revision(), revision);

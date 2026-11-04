@@ -23,6 +23,8 @@ pub struct GradientSnapshot {
     pub gradients: Vec<Vec<f32>>,
     pub state: CustomState,
     pub bytes: usize,
+    pub(crate) inputs: Vec<Vec<f32>>,
+    pub(crate) targets: Vec<Vec<f32>>,
 }
 
 pub fn validate_state(value: &serde_json::Value) -> Result<()> {
@@ -74,6 +76,17 @@ impl AdaptiveSession {
         remaining: &mut u64,
         budget: usize,
     ) -> Result<GradientSnapshot> {
+        self.differentiate_bound(inputs, targets, &BTreeMap::new(), remaining, budget)
+    }
+
+    fn differentiate_bound(
+        &mut self,
+        inputs: &[Vec<f32>],
+        targets: &[Vec<f32>],
+        bindings: &BTreeMap<String, Vec<f32>>,
+        remaining: &mut u64,
+        budget: usize,
+    ) -> Result<GradientSnapshot> {
         ensure!(
             self.optimizer.is_none(),
             "custom optimization requires optimizer none"
@@ -110,8 +123,13 @@ impl AdaptiveSession {
             n.checked_add(p.name.len() + p.shape.len() * std::mem::size_of::<usize>() + 128)
                 .context("gradient metadata overflow")
         })?;
+        let batch_bytes = inputs.iter().chain(targets).try_fold(0usize, |n, row| {
+            n.checked_add(row.len().checked_mul(4).context("batch size overflow")? + 24)
+                .context("batch size overflow")
+        })?;
         let bytes = count
             .checked_mul(12)
+            .and_then(|n| n.checked_add(batch_bytes))
             .and_then(|n| n.checked_add(state_bytes))
             .and_then(|n| n.checked_add(metadata))
             .context("gradient size overflow")?;
@@ -123,7 +141,7 @@ impl AdaptiveSession {
         let mut loss = 0.;
         for (input, target) in inputs.iter().zip(targets) {
             ensure!(*remaining > 0, "operation budget exceeded");
-            let result = self.forward(input, *remaining, budget - bytes);
+            let result = self.forward_with_parameters(input, bindings, *remaining, budget - bytes);
             *remaining = remaining.saturating_sub(self.steps());
             let mut pass = result?;
             let loss_input: Vec<_> = pass.output().iter().chain(target).copied().collect();
@@ -179,7 +197,49 @@ impl AdaptiveSession {
             gradients,
             state,
             bytes,
+            inputs: inputs.to_vec(),
+            targets: targets.to_vec(),
         })
+    }
+
+    /// Evaluate at temporary bindings while retaining the original commit base and batch.
+    pub fn differentiate_at_custom(
+        &mut self,
+        base: &GradientSnapshot,
+        candidates: &[Vec<f32>],
+        remaining: &mut u64,
+        budget: usize,
+    ) -> Result<GradientSnapshot> {
+        ensure!(base.revision == self.revision, "stale gradient snapshot");
+        ensure!(
+            candidates.len() == base.names.len(),
+            "candidate parameter count mismatch"
+        );
+        let mut bindings = BTreeMap::new();
+        for ((name, original), value) in base.names.iter().zip(&base.parameters).zip(candidates) {
+            ensure!(
+                original.len() == value.len() && value.iter().all(|v| v.is_finite()),
+                "invalid temporary parameter"
+            );
+            bindings.insert(name.clone(), value.clone());
+        }
+        let binding_bytes = candidates.iter().try_fold(0usize, |n, v| {
+            n.checked_add(v.len().checked_mul(4).context("binding size overflow")?)
+                .context("binding size overflow")
+        })?;
+        ensure!(
+            binding_bytes <= budget,
+            "temporary bindings exceed byte budget"
+        );
+        let result = self.differentiate_bound(
+            &base.inputs,
+            &base.targets,
+            &bindings,
+            remaining,
+            budget - binding_bytes,
+        )?;
+        // differentiate_bound snapshots live original parameters, never the perturbation.
+        Ok(result)
     }
 
     /// Validate everything before changing any persistent model or optimizer state.

@@ -4,6 +4,22 @@
   "scope": "Implicit source functions, intrinsics, constants and declaration types. No std modules are imported. Contexts are separate contracts; ordinary functions are shared by interpreter and AOT. Parameters are required unless defaults explicitly say otherwise.",
   "entries": [
     {
+      "name": "differentiate_at",
+      "kind": "function",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "differentiate_at(gradient,parameters)",
+      "purpose": "在临时参数上用首次梯度句柄保存的同批数据重新求一阶梯度，不写真实模型；返回新句柄，parameters/state/steps仍为原始提交基准，loss/gradients为临时点结果。共享句柄及内存预算，拒绝过期版本。",
+      "documentation": "docs/native-training.md",
+      "arity": {
+        "min": 2,
+        "max": 2
+      },
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/optimization.rs"
+    },
+    {
       "name": "differentiate",
       "kind": "function",
       "contexts": [

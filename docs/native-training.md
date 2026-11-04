@@ -139,12 +139,13 @@ SGD 无 momentum/weight decay；Adam 固定 beta1=0.9、beta2=0.999、eps=1e-8�
 | 签名 | 契约 |
 | --- | --- |
 | `differentiate(model,inputs,targets)` | 返回不透明梯度句柄；inputs/targets 为逐样本 f32 向量列表，非空且数量相同，形状遵循 forward/loss。参数与梯度均为更新前快照；无隐式优化器或裁剪。 |
+| `differentiate_at(gradient,parameters)` | 使用该句柄保留的原批次，在临时绝对参数上重新求一阶梯度，返回新句柄。真实模型不写入；新快照 parameters/state/steps 保持原提交基准，loss/gradients 是临时点结果。拒绝过期句柄或不匹配候选。 |
 | `gradient_snapshot(gradient)` | 返回对象，字段为 `loss`、`parameters`、`gradients`、`names`、`shapes`、`state`、`steps`。parameters/gradients 按稳定参数顺序，仅含非冻结参数；每个参数是行优先扁平列表。state 初始 null，steps 是已提交自定义更新次数。 |
 | `commit_gradients(gradient,parameters,state)` | parameters 是全部可训练参数的候选绝对值，与快照顺序/长度一致。state 为用户定义的 JSON 兼容数据。检查全部完成后原子替换参数和状态，增加一次 steps，返回快照 loss 并释放句柄。 |
 | `release_gradient(gradient)` | 放弃快照并释放句柄，返回 null；已释放/提交的句柄再次使用报错。 |
 
 最多 16 个存活梯度句柄，总计量预算 64 MiB；释放/成功提交后立即归还句柄预算，Runtime 结束释放全部资源。
-计量包含参数、梯度、候选预留及元数据/状态，剩余预算用于单样本 forward/loss tape；求导结束不保留 tape。
+计量包含参数、梯度、候选预留、保留的 f32 输入/目标批次及元数据/状态；临时求导还预留参数绑定副本，剩余预算用于单样本 forward/loss tape；求导结束不保留 tape。
 它不是进程总内存上限，普通列表副本、解析及分配器开销不在此上限内。
 求导扣除 forward/loss 指令工作量，以及按 tape f32 存储项和参数项计量的反传/归约工作；预算失败不退款。
 普通更新函数继续受脚本操作预算限制。
@@ -162,6 +163,26 @@ SGD 无 momentum/weight decay；Adam 固定 beta1=0.9、beta2=0.999、eps=1e-8�
 ```sh
 mkdir -p weights/custom_momentum
 ./target/debug/wgt run examples/native_training/custom_momentum/model.wgt
+```
+
+### 用普通 WGT 编写 SAM
+
+[custom_sam/model.wgt](../examples/native_training/custom_sam/model.wgt) 先求原始梯度 g，
+用 `rho*g/(sqrt(sum(g*g))+eps)` 构造临时参数，再调用 `differentiate_at`。
+第二次的梯度交给 WGT 自定义基础优化器，从原始 w 计算候选并只提交一次；两次求导均不更新权重、速度或步数。
+没有 SAM 专用关键词/对象，也不对第一次梯度再次求导；这是两次一阶求导，不是高阶自动微分。
+范数仅遍历快照中的非冻结唯一参数；重复参数使用已经由 VJP 汇总，零梯度扰动为零。
+第二次失败或版本改变不会提交任何更新，首次句柄仍可释放；成功提交后其余同版本句柄过期，须释放。
+
+首次求导保存转换后的 f32 批次，二次不能传入另一批次，也不会重新执行 host RNG/环境采样。
+每个样本从相同模型初始状态出发，forward write 只在本次 tape 内参与求导，不提交；冻结参数保持相同。
+当前 tensor forward/loss 没有 RNG 原语。工作预算继续消耗，`resource_state()` 的预算观测会随调用变化，
+因此含资源观测的模型不保证两次前向仅参数不同；这类状态需调用方明确考虑。
+checkpoint 只保存最终提交的原权重候选/基础优化器状态/单次步数，不保存梯度句柄或临时扰动。
+
+```sh
+mkdir -p weights/custom_sam
+./target/debug/wgt run examples/native_training/custom_sam/model.wgt
 ```
 
 ## 强化学习与 benchmark 边界

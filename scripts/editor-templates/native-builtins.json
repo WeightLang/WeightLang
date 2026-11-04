@@ -20,6 +20,7 @@
   "dependency",
   "diff",
   "differentiate",
+  "differentiate_at",
   "dot",
   "elu",
   "ema",

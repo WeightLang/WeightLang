@@ -17,6 +17,9 @@ commit_gradients(handle,candidates,state) 原子提交并释放；release_gradie
 最多16存活句柄、64MiB计量预算，状态最多32层/1MiB且不含资源句柄；普通host程序不自动可微。
 forward-training.v2 checkpoint保存自定义状态和步数，仍读旧v1；不自动执行算法，不支持该路径的顺序/GPU模型。
 完整契约 docs/native-training.md；真实例子 examples/native_training/custom_momentum/model.wgt，beta=0为SGD。
+differentiate_at(gradient,candidates) 在临时参数上复用首次句柄保留的同一f32批次求一阶梯度，
+新快照parameters/state/steps仍是原提交基准，loss/gradients来自临时点；不写live模型，保留批次与绑定计入64MiB。
+examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原子提交定义可修改SAM+SGD/动量，无高阶AD或SAM专用对象。
 保存推理模型用 save_model(model,path)，加载用 load_model(path,optimizer) 创建新优化器；
 保存训练断点用 save_checkpoint(model,path)，load_checkpoint(path) 恢复原优化器状态。
 旧 model/save/restore 仅为 legacy 别名，新例子使用新名；所有参数必填，保存拒绝已有目标。
