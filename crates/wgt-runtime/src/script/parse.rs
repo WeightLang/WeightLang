@@ -12,6 +12,7 @@ pub enum Expr {
     Call(String, Vec<Expr>),
     /// A syntax-generated call, unaffected by local value bindings.
     BuiltinCall(String, Vec<Expr>),
+    StaticCall(String, Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
     Slice(Box<Expr>, Option<Box<Expr>>, Option<Box<Expr>>),
     Unary(String, Box<Expr>),
@@ -28,7 +29,7 @@ impl Expr {
             Self::Slice(x, start, end) => start.iter().chain(end.iter())
                 .map(|e| e.height()).fold(x.height(), usize::max),
             Self::Unary(_, a) | Self::SampleFrom(_, a) => a.height(),
-            Self::List(v) | Self::Call(_, v) | Self::BuiltinCall(_, v) => v.iter().map(Self::height).max().unwrap_or(0),
+            Self::List(v) | Self::Call(_, v) | Self::BuiltinCall(_, v) | Self::StaticCall(_, v) => v.iter().map(Self::height).max().unwrap_or(0),
             _ => 0,
         }
     }
@@ -203,6 +204,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
             "duplicate function: {name}"
         );
     }
+    super::strategies::validate(&program)?;
     Ok(program)
 }
 struct Parser {
@@ -379,10 +381,23 @@ impl Parser {
             self.expect("on")?; self.expect("(")?;
             let inputs = self.expr(0)?; self.expect(",")?;
             let targets = self.expr(0)?; self.expect(")")?;
-            self.expect("rate")?; let rate = self.expr(0)?;
-            self.expect("clip")?; let clip = self.expr(0)?;
-            self.expect(";")?;
-            Stmt::Eval(Expr::BuiltinCall("train".into(),vec![model,inputs,targets,rate,clip]))
+            if self.take("using") {
+                let strategy = self.name()?;
+                ensure!(!self.is("rate") && !self.is("clip"), "train using cannot be combined with rate or clip");
+                self.expect(";")?;
+                Stmt::Eval(Expr::StaticCall(strategy, vec![model, inputs, targets]))
+            } else {
+                self.expect("rate")?;
+                let rate = self.expr(0)?;
+                self.expect("clip")?;
+                let clip = self.expr(0)?;
+                ensure!(!self.is("using"), "train rate/clip cannot be combined with using");
+                self.expect(";")?;
+                Stmt::Eval(Expr::BuiltinCall(
+                    "train".into(),
+                    vec![model, inputs, targets, rate, clip],
+                ))
+            }
         } else if self.take("if") {
             let condition = self.expr(0)?;
             let yes = self.block()?;

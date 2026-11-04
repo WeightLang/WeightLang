@@ -11,6 +11,10 @@ language/primitive_specs.json 是制品 graph 原语域，不是源码内置表�
 无需 import 的函数、张量 intrinsic、常量和声明类型统一登记在 language/prelude.json；
 script/prelude.rs 直接消费它，编辑器快照由它生成，领域实现路径见各 entry。
 普通函数与 tensor 上下文分开登记，不自动引入 std 模块。
+`train model on (inputs,targets) using strategy;` 静态调用同单元同步用户fn strategy(model,inputs,targets)，
+三参各求值一次且左至右、策略调用一次，忽略return；局部同名值不覆盖静态目标，拒绝builtin/构造器/async/错误形参。
+超参写在策略体内，与rate/clip互斥；策略决定零/一/多次显式commit，无额外提交、重试或整函数自动回滚。
+例examples/native_training/train_strategy/model.wgt；完整契约docs/native-training.md。
 CPU forward 自定义算法：以 none 构造，differentiate(model,inputs,targets) 对受限 fn loss 求批次平均梯度；
 gradient_snapshot(handle) 提供loss/parameters/gradients/names/shapes/state/steps，普通WGT循环自行计算候选参数和状态，
 commit_gradients(handle,candidates,state) 原子提交并释放；release_gradient(handle) 放弃快照。

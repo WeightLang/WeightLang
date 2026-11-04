@@ -2,6 +2,27 @@
   "schema_version": 1,
   "cases": [
     {
+      "id": "ordinary-train-strategy",
+      "context": "ordinary_function",
+      "rust_accepts": true,
+      "editor_accepts": true,
+      "source": "wgt 0.5\nfn main(){train net on ([],[]) using strategy;}\nfn strategy(net,x,y){return null;}\n"
+    },
+    {
+      "id": "train-strategy-unknown",
+      "context": "ordinary_function",
+      "rust_accepts": false,
+      "editor_accepts": true,
+      "source": "wgt 0.5\nfn main(){train net on ([],[]) using missing;}\n"
+    },
+    {
+      "id": "train-strategy-arity",
+      "context": "ordinary_function",
+      "rust_accepts": false,
+      "editor_accepts": true,
+      "source": "wgt 0.5\nfn strategy(net,x){return null;}\nfn main(){train net on ([],[]) using strategy;}\n"
+    },
+    {
       "id": "ordinary-collect-records",
       "context": "ordinary_function",
       "rust_accepts": true,

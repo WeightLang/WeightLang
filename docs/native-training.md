@@ -145,6 +145,24 @@ SGD 无 momentum/weight decay；Adam 固定 beta1=0.9、beta2=0.999、eps=1e-8�
 再提交权重和优化器状态；非有限输入、损失、梯度、参数/矩状态均报错，不部分更新。
 `mlp` 使用独立确定性 Xavier uniform 权重、零 bias；不承诺与 Python/PyTorch 的 seed 初始化逐位相同。
 
+## 静态训练策略 `train ... using`
+
+```wgt
+train net on (inputs, targets) using momentum;
+```
+
+`momentum` 必须是同编译单元声明的同步普通用户函数，签名为 `fn momentum(model,inputs,targets)`，
+恰好三个必填形参。函数可以在调用后声明；内置函数、模型构造器、缺失名称、错误形参数和 async 函数均拒绝。
+`using` 绑定声明函数，局部同名变量不改变目标；不提供函数值或捕获。
+模型表达式、inputs、targets 从左到右各求值一次，策略只调用一次，return 值由语句丢弃。
+超参数在策略函数内显式定义；`using` 不能与 `rate`/`clip` 混用，既有 `train ... rate ... clip ...;` 保持可用。
+
+策略自行调用 differentiate/differentiate_at/commit_gradients，可选择零次、一次或多次更新。
+高层语句不添加优化器、梯度裁剪或额外提交，不隐式重试；只有每次显式 commit 是原子的，
+策略函数整体不是自动回滚事务，后续错误不撤销之前成功提交。普通host策略不自动可微。
+此语法也不扩展底层自定义优化器的CPU forward能力范围。
+完整可运行例子为 [train_strategy/model.wgt](../examples/native_training/train_strategy/model.wgt)。
+
 ## WGT 自定义更新算法（CPU forward）
 
 `differentiate(model,inputs,targets)` 要求 CPU `forward` 模型以 `"none"` 构造，且定义受限可微 `fn loss`。

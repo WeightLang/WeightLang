@@ -246,6 +246,16 @@ fit/reinforce 和显式 VJP 记录梯度时仍计算两边，包括 frozen 门�
 普通 if 保持硬分支；源文件文本、宿主函数、I/O 和离散控制决策不因此可微。
 事务、原生一阶自动微分、显式状态及预算细节见[自更新运行时](self-modifying-runtime.md)。
 
+## 静态用户训练策略
+
+`train MODEL on (INPUTS,TARGETS) using STRATEGY;` 调用同编译单元的同步普通用户函数
+`fn STRATEGY(model,inputs,targets)`，恰好三参，支持前向声明；拒绝内置函数、模型构造器、缺失函数、错误形参数与async函数。
+目标静态绑定声明，不受局部同名值影响；三个实参从左到右各求值一次，策略只调用一次，return由语句丢弃。
+没有默认超参、函数值或捕获；超参写在策略函数内，using与rate/clip不能混用，既有rate/clip语句保持可用。
+策略自行决定differentiate/at/commit及更新次数，语句不隐式优化、额外提交或重试；每个commit原子，整个策略函数不自动回滚。
+完整例子 [train_strategy/model.wgt](../examples/native_training/train_strategy/model.wgt) 及限制见
+[原生训练](native-training.md#静态训练策略-train--using)。本语法不使普通host函数自动可微，也不扩展GPU训练范围。
+
 ## 自定义优化器更新
 
 CPU `forward` 模型可用 `differentiate(model,inputs,targets)` 显式求 `fn loss` 的批次平均损失与梯度；

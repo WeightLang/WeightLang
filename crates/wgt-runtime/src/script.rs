@@ -7,6 +7,7 @@ mod dataset;
 pub mod record_schema;
 pub mod records;
 mod optimization;
+mod strategies;
 mod math;
 pub mod testing;
 mod one_hot;
@@ -429,7 +430,7 @@ impl Runtime {
                     .map(|v| self.eval(v, env))
                     .collect::<Result<_>>()?,
             )),
-            Expr::BuiltinCall(name, args) => {
+            Expr::BuiltinCall(name, args) | Expr::StaticCall(name, args) => {
                 let args = args.iter().map(|v| self.eval(v, env)).collect::<Result<_>>()?;
                 self.call(name, args)
             }

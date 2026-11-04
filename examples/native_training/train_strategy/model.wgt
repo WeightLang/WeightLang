@@ -1,0 +1,52 @@
+wgt 0.5
+model Regression
+input x: f32[1]
+output y: f32[1]
+# 单一[输出=1,输入=1]参数，训练策略显式更新。
+parameter w: f32[1,1] = [0]
+fn forward(x) { return linear(x,w); }
+fn loss(prediction,target) { return square(prediction-target).mean; }
+
+fn main() {
+    let net = Regression("none");
+    let inputs = [[1], [2]];
+    let targets = [[2], [4]];
+    # 局部同名值不会改变using绑定的声明函数；支持策略前向声明。
+    let momentum = net;
+    for epoch in range(0, 20) {
+        train net on (inputs, targets) using momentum;
+    }
+    let gradient = differentiate(net,inputs,targets);
+    let snapshot = gradient_snapshot(gradient);
+    assert(snapshot["steps"] == 20, "strategy controls commits");
+    assert(snapshot["loss"] < 10, "custom strategy learns");
+    release_gradient(gradient);
+    return net([3]);
+}
+
+fn momentum(net,inputs,targets) {
+    # 超参由普通函数显式定义；这不是固定优化器枚举。
+    let rate = 0.02;
+    let beta = 0.9;
+    let gradient = differentiate(net,inputs,targets);
+    let snapshot = gradient_snapshot(gradient);
+    let previous = [];
+    if snapshot["state"] != null { previous = snapshot["state"]; }
+    let candidates = [];
+    let velocities = [];
+    for p in range(0,len(snapshot["parameters"])) {
+        let values = [];
+        let velocity = [];
+        for j in range(0,len(snapshot["parameters"][p])) {
+            let old = 0;
+            if snapshot["state"] != null { old = previous[p][j]; }
+            let v = beta*old + snapshot["gradients"][p][j];
+            values = append(values,snapshot["parameters"][p][j] - rate*v);
+            velocity = append(velocity,v);
+        }
+        candidates = append(candidates,values);
+        velocities = append(velocities,velocity);
+    }
+    # 每次commit本身原子；策略函数整体没有自动回滚或隐式重试。
+    metric("loss",commit_gradients(gradient,candidates,velocities));
+}

@@ -22,7 +22,7 @@ fn expr(e: &Expr) -> String {
             "Value::List(vec![{}])",
             v.iter().map(expr).collect::<Vec<_>>().join(",")
         ),
-        Expr::BuiltinCall(n, args) => format!(
+        Expr::BuiltinCall(n, args) | Expr::StaticCall(n, args) => format!(
             "{{ let args = vec![{}]; rt.call({n:?}, args)? }}",
             args.iter().map(expr).collect::<Vec<_>>().join(",")
         ),

@@ -77,7 +77,7 @@
     "conversion": "typed_value.probabilities",
     "plain_f32_conversion": "rejected; explicit softmax(x) remains available",
     "probability_range": "finite and strictly [0,1]",
-    "sum_absolute_tolerance": 1.0e-05,
+    "sum_absolute_tolerance": 0.00001,
     "sum_accumulator": "f64",
     "normalization": "logits stable softmax subtracts maximum; probabilities validate and preserve values",
     "metadata": "runtime values and model/optimizer-checkpoint output contracts; missing artifact field defaults to f32",
@@ -120,5 +120,12 @@
     },
     "scope": "yield belongs to nearest lexical collect in same function; return propagates",
     "tensor_lowering": false
+  },
+  "training_strategy": {
+    "syntax": "train MODEL on (INPUTS,TARGETS) using STRATEGY;",
+    "target": "declared synchronous ordinary user function with exactly three parameters; static binding ignores locals; forward declarations allowed",
+    "evaluation": "MODEL,INPUTS,TARGETS left-to-right once; strategy once; return discarded",
+    "updates": "explicit strategy-controlled zero or more commits; no implicit optimizer, retry or whole-function rollback",
+    "hyperparameters": "defined in strategy body; using mutually exclusive with rate/clip"
   }
 }
