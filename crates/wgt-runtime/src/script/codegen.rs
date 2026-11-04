@@ -18,8 +18,12 @@ fn expr(e: &Expr) -> String {
             "Value::List(vec![{}])",
             v.iter().map(expr).collect::<Vec<_>>().join(",")
         ),
-        Expr::Call(n, args) => format!(
+        Expr::BuiltinCall(n, args) => format!(
             "{{ let args = vec![{}]; rt.call({n:?}, args)? }}",
+            args.iter().map(expr).collect::<Vec<_>>().join(",")
+        ),
+        Expr::Call(n, args) => format!(
+            "{{ let args = vec![{}]; rt.call_in_env({n:?}, args, env)? }}",
             args.iter().map(expr).collect::<Vec<_>>().join(",")
         ),
         Expr::Index(a, b) => format!(

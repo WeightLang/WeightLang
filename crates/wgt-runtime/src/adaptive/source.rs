@@ -103,6 +103,9 @@ impl Lower {
         let out = self.fresh(); self.assign(&out,expr)?; Ok(out)
     }
     fn assign(&mut self, out:&str, expr:&Expr) -> Result<()> {
+        if let Expr::BuiltinCall(name, args) = expr {
+            return self.assign(out, &Expr::Call(name.clone(), args.clone()));
+        }
         if let Expr::Mix(p,a,b)=expr {
             return self.assign(out,&Expr::Call("route".into(),vec![(**p).clone(),(**a).clone(),(**b).clone()]));
         }

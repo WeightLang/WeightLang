@@ -10,6 +10,8 @@ pub enum Expr {
     Name(String),
     List(Vec<Expr>),
     Call(String, Vec<Expr>),
+    /// A syntax-generated call, unaffected by local value bindings.
+    BuiltinCall(String, Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
     Unary(String, Box<Expr>),
     Binary(String, Box<Expr>, Box<Expr>),
@@ -22,7 +24,7 @@ impl Expr {
             Self::Sample(p,a,b) | Self::Mix(p,a,b) => p.height().max(a.height()).max(b.height()),
             Self::Binary(_, a, b) | Self::Index(a, b) => a.height().max(b.height()),
             Self::Unary(_, a) => a.height(),
-            Self::List(v) | Self::Call(_, v) => v.iter().map(Self::height).max().unwrap_or(0),
+            Self::List(v) | Self::Call(_, v) | Self::BuiltinCall(_, v) => v.iter().map(Self::height).max().unwrap_or(0),
             _ => 0,
         }
     }
@@ -308,7 +310,7 @@ impl Parser {
             self.expect("rate")?; let rate = self.expr(0)?;
             self.expect("clip")?; let clip = self.expr(0)?;
             self.expect(";")?;
-            Stmt::Eval(Expr::Call("train".into(),vec![model,inputs,targets,rate,clip]))
+            Stmt::Eval(Expr::BuiltinCall("train".into(),vec![model,inputs,targets,rate,clip]))
         } else if self.take("if") {
             let condition = self.expr(0)?;
             let yes = self.block()?;
@@ -383,7 +385,7 @@ impl Parser {
                     let classes: usize = size.text.parse().context("onehot classes must be an integer literal")?;
                     ensure!((1..=1_000_000).contains(&classes), "onehot classes must be 1..1000000");
                     self.expect("]")?;
-                    Expr::Call("one_hot".into(), vec![self.expr(7)?, Expr::Number(classes as f64)])
+                    Expr::BuiltinCall("one_hot".into(), vec![self.expr(7)?, Expr::Number(classes as f64)])
                 }
                 "mix" | "sample" if t.text=="mix" || self.sample_block() => {
                     let sampling=t.text=="sample";
@@ -463,7 +465,7 @@ impl Parser {
                 let operation = self.next()?;
                 ensure!(!operation.quoted && operation.text == "mean",
                     "line {}: expected postfix mean", operation.line);
-                left = Expr::Call("mean".into(), vec![left]);
+                left = Expr::BuiltinCall("mean".into(), vec![left]);
                 continue;
             }
             if self.take("[") {

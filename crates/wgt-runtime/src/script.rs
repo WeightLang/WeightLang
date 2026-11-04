@@ -389,12 +389,16 @@ impl Runtime {
                     .map(|v| self.eval(v, env))
                     .collect::<Result<_>>()?,
             )),
+            Expr::BuiltinCall(name, args) => {
+                let args = args.iter().map(|v| self.eval(v, env)).collect::<Result<_>>()?;
+                self.call(name, args)
+            }
             Expr::Call(name, args) => {
                 let args = args
                     .iter()
                     .map(|v| self.eval(v, env))
                     .collect::<Result<_>>()?;
-                self.call(name, args)
+                self.call_in_env(name, args, env)
             }
             Expr::Index(object, index) => {
                 let object = self.eval(object, env)?;
@@ -422,6 +426,24 @@ impl Runtime {
         let p=probability.number()?;
         ensure!(p.is_finite() && (0. ..=1.).contains(&p),"sample probability must be in [0,1]");
         Ok(if p==0. {false} else if p==1. {true} else {random(&mut self.rng)<p})
+    }
+
+    /// Resolve source calls in the current function's environment before named functions.
+    /// Model handles are the only callable values; functions retain their existing scope.
+    pub fn call_in_env(&mut self, name: &str, args: Vec<Value>, env: &Env) -> Result<Value> {
+        let Some(value) = env.get(name) else {
+            return self.call(name, args);
+        };
+        (|| {
+            ensure!(
+                matches!(value, Value::Model(_) | Value::Adaptive(_)),
+                "local binding {name} is not callable; expected a model handle"
+            );
+            ensure!(args.len() == 1, "model call expects 1 input, got {}", args.len());
+            self.tick()?;
+            self.builtin("predict", &[value.clone(), args[0].clone()])
+        })()
+        .with_context(|| format!("{name}()"))
     }
 
     pub fn call(&mut self, name: &str, args: Vec<Value>) -> Result<Value> {
@@ -680,14 +702,24 @@ impl Runtime {
                 Ok(Value::Null)
             }
             "predict" => {
+                let input = a[1].vector()?;
                 if let Value::Adaptive(index) = a[0] {
-                    let mut session=self.adaptive[index].lock()?;
-                    let result=session.run(&a[1].vector()?,self.remaining).map(<[f32]>::to_vec);
-                    self.remaining=self.remaining.saturating_sub(session.steps());
+                    let mut session = self.adaptive[index].lock()?;
+                    ensure!(input.len() == session.input_len(),
+                        "input shape mismatch: expected f32[{}], got f32[{}]",
+                        session.input_len(), input.len());
+                    let result = session
+                        .run(&input, self.remaining)
+                        .map(<[f32]>::to_vec);
+                    self.remaining = self.remaining.saturating_sub(session.steps());
                     return Ok(vector(result?));
                 }
                 let model = a[0].model()?;
-                Ok(vector(self.models[model].lock()?.predict(&a[1].vector()?)?))
+                let mut session = self.models[model].lock()?;
+                let expected = session.session.report().input;
+                ensure!(input.len() == expected,
+                    "input shape mismatch: expected f32[{expected}], got f32[{}]", input.len());
+                Ok(vector(session.predict(&input)?))
             }
             "fit" => {
                 if let Value::Adaptive(index) = a[0] {
