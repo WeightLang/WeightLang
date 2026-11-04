@@ -7,5 +7,5 @@ wgt 0.5
 fn main() {
     # 单输入/单输出线性模型；这里仅初始化并前向，不进行训练或保存权重。
     let model = mlp([1, 1], "identity", 42, "sgd");
-    return predict(model, [0.25]);
+    return model([0.25]);
 }

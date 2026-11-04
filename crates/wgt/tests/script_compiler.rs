@@ -40,9 +40,9 @@ fn main() {
     let model = mlp([1,1], "identity", 42, "adam");
     for step in range(0, 100) { bump(model); }
     save_model(model, "model.json");
-    save(model, "checkpoint.json");
+    save_checkpoint(model, "checkpoint.json");
     metric("summary", [n, scoped, early(), factorial(5), random(), "x" + "y"]);
-    return predict(model, [0.25]);
+    return model([0.25]);
 }
 "#;
     fs::write(&source, text).unwrap();
@@ -138,7 +138,7 @@ fn unified_model_and_forward_match_in_native_executables() {
     fs::create_dir_all(&root).unwrap();
     let dir = tempfile::tempdir_in(root).unwrap();
     for (name, text) in [
-        ("graph", "wgt 0.5\nmodel Net\ninput x: f32[1]\noutput y: f32[1]\nlayer fc: linear(out=1)\ninit seed=7\nfn main() { let m = Net(\"sgd\"); for i in range(0, 100) { fit(m, [[0], [1]], [[1], [3]], 0.05, \"mse\"); } return predict(m, [1]); }"),
+        ("graph", "wgt 0.5\nmodel Net\ninput x: f32[1]\noutput y: f32[1]\nlayer fc: linear(out=1)\ninit seed=7\nfn main() { let m = Net(\"sgd\"); for i in range(0, 100) { fit(m, [[0], [1]], [[1], [3]], 0.05, \"mse\"); } return m([1]); }"),
         ("forward", include_str!("../../../examples/self_modifying/model.wgt")),
     ] {
         let source = dir.path().join(format!("{name}.wgt"));

@@ -32,5 +32,5 @@ fn main() {
     # 这些指标只检验合成训练任务，不能视为真实数据的泛化结果。
     assert(last < first * 0.01, "synthetic training did not converge");
     benchmark(model, [0.25], 10, 100, "inference");
-    return predict(model, [0.25]);
+    return model([0.25]);
 }

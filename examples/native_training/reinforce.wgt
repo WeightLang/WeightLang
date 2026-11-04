@@ -9,7 +9,7 @@ fn main() {
     seed(7);
     # 单个常量观测 [feature=1] 映射到两个未归一化动作 logits；从随机初始化开始训练。
     let policy = mlp([1, 2], "identity", 3, "adam");
-    let initial = predict(policy, [1]);
+    let initial = policy([1]);
     let average = 0;
     for iteration in range(0, 80) {
         let observations = [];
@@ -26,7 +26,7 @@ fn main() {
         reinforce(policy, observations, actions, rewards, 0.05);
         average = sum(rewards) / len(rewards);
     }
-    let final = predict(policy, [1]);
+    let final = policy([1]);
     metric("mean_reward_last_batch", average);
     metric("initial_action_margin", initial[1] - initial[0]);
     metric("final_action_margin", final[1] - final[0]);

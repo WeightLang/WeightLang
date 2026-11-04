@@ -76,7 +76,7 @@ fn examples_train_without_python_and_benchmark_reports_scope() {
 #[test]
 fn check_does_not_open_data_or_run_side_effects() {
     parse(
-        "wgt 0.5\nfn main(){ let data=jsonl(\"absent-file\"); save(0,\"never-created\"); }",
+        "wgt 0.5\nfn main(){ let data=jsonl(\"absent-file\"); save_checkpoint(0,\"never-created\"); }",
     )
     .unwrap();
 }
@@ -97,15 +97,15 @@ fn main() {
  assert(len(batch(stream,8))==0,"EOF");
  close(stream);
  for i in range(0,20) {fit(m,column(rows,"input"),column(rows,"target"),0.1,"mse");}
- save(m,"checkpoint.json");
+ save_checkpoint(m,"checkpoint.json");
  save_model(m,"model.json");
- let restored=restore("checkpoint.json");
- let inference=model("model.json","sgd");
- assert(predict(m,[1])==predict(restored,[1]),"checkpoint weights");
- assert(predict(m,[1])==predict(inference,[1]),"inference weights");
+ let restored=load_checkpoint("checkpoint.json");
+ let inference=load_model("model.json","sgd");
+ assert(m([1])==restored([1]),"checkpoint weights");
+ assert(m([1])==inference([1]),"inference weights");
  fit(m,[[1]],[[3]],0.1,"mse");
  fit(restored,[[1]],[[3]],0.1,"mse");
- assert(predict(m,[1])==predict(restored,[1]),"optimizer resume");
+ assert(m([1])==restored([1]),"optimizer resume");
  return true;
 }"#;
     assert_eq!(run(source, &root, 100000).unwrap().result, true);

@@ -35,7 +35,7 @@ fn main() {
     # 这些指标只检验合成训练任务，不能视为真实数据的泛化结果。
     assert(last < first * 0.01, "synthetic training did not converge");
     benchmark(model, [0.25], 10, 100, "inference");
-    return predict(model, [0.25]);
+    return model([0.25]);
 }
 
 ---
@@ -258,9 +258,6 @@ fn main() {
         (qualified_name
           (identifier))
         (arguments
-          (qualified_name
-            (identifier))
-          (punctuation)
           (array
             (number)))))))
 
@@ -298,8 +295,8 @@ fn forward(x) {
 fn main() {
     # 自更新模型通过显式 write 更新状态，不隐式创建外部优化器。
     let model = AdaptiveMemory("none");
-    assert(predict(model, [2, 3])[0] == 3, "first state update");
-    return predict(model, [4, 3]);
+    assert(model([2, 3])[0] == 3, "first state update");
+    return model([4, 3]);
 }
 
 ---
@@ -498,9 +495,6 @@ fn main() {
             (qualified_name
               (identifier))
             (arguments
-              (qualified_name
-                (identifier))
-              (punctuation)
               (array
                 (number)
                 (punctuation)
@@ -516,9 +510,6 @@ fn main() {
         (qualified_name
           (identifier))
         (arguments
-          (qualified_name
-            (identifier))
-          (punctuation)
           (array
             (number)
             (punctuation)

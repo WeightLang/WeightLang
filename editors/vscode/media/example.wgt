@@ -16,5 +16,5 @@ fn main() {
         # 输入和目标均为 [样本, 特征]；仅训练这两个合成样本。
         fit(net, [[0], [1]], [[1], [3]], 0.03, "mse");
     }
-    return predict(net, [1]);
+    return net([1]);
 }

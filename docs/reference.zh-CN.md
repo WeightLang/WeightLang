@@ -86,7 +86,7 @@ fn main() {
         # fit 输入为 [样本, 特征]，MSE 对样本与输出元素取平均。
         fit(net, [[0], [1]], [[1], [3]], 0.03, "mse");
     }
-    return predict(net, [1]);
+    return net([1]);
 }
 ```
 
@@ -123,7 +123,7 @@ WGT 0.5 普通函数还支持 `let action = sample from net(input);`：`net` 必
 无任意 Python、shell 或宿主回调。源码函数嵌套与求值均有预算限制。
 
 训练、流式 JSONL、强化学习、保存与 benchmark 的完整内置签名、默认值及限制见
-[原生训练](native-training.md#内置接口)。常用 `predict(model,input)`、
+[原生训练](native-training.md#内置接口)。常用 `model(input)`、
 `fit(model,inputs,targets,rate,loss)` 没有隐式训练或保存。
 `save_model` 保存模型，`save_checkpoint` 保存优化器断点，两者不能混用。
 
@@ -195,7 +195,7 @@ fn main() {
 局部张量的长度由表达式推导，重复赋值不能改变长度；输入不可覆盖。
 同一模型内 forward 与 layer 不混用。模型通过 `Name(optimizer)` 构造，optimizer 必填
 `"none"`、`"sgd"` 或 `"adam"`；后两者允许 `fit` / `reinforce` 优化整个已执行 forward 的非冻结初始参数。
-普通 `predict(handle,input)` 执行并提交成功写入；失败回滚，步数计入外层操作预算。
+普通 `handle(input)` 执行并提交成功写入；失败回滚，步数计入外层操作预算。
 无需 `register`、标签、`jump` 或 `branch` 源码指令，这些仅存在于内部 IR。
 
 完整可执行示例：[self_modifying/model.wgt](../examples/self_modifying/model.wgt)。

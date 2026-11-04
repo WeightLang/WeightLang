@@ -145,13 +145,13 @@ fn rl_loss_and_optimizer_survive_export_and_restore() {
 fn main() {{
     let a=Policy("adam"); let xs=[[1,0]]; let ys=[[0,1,-0.6931472,1]];
     train (a) on (xs,ys) rate (0.03) clip (0.5);
-    save(a,"checkpoint.json"); save_model(a,"model.json");
-    let b=restore("checkpoint.json"); let c=model("model.json","none");
-    assert(predict(a,[1,0])==predict(c,[1,0]),"export mismatch");
+    save_checkpoint(a,"checkpoint.json"); save_model(a,"model.json");
+    let b=load_checkpoint("checkpoint.json"); let c=load_model("model.json","none");
+    assert(a([1,0])==c([1,0]),"export mismatch");
     let loss_a=train(a,xs,ys,0.03,0.5);
     let loss_b=train(b,xs,ys,0.03,0.5);
     assert(loss_a==loss_b,"loss mismatch");
-    assert(predict(a,[1,0])==predict(b,[1,0]),"Adam mismatch");
+    assert(a([1,0])==b([1,0]),"Adam mismatch");
     return true;
 }}
 "#

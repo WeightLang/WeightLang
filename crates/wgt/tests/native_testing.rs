@@ -109,11 +109,11 @@ fn test_evaluation() {
     assert(batch(reader,1)[0]["ok"], "evaluation flag failed");
     close(reader);
     let net = mlp([1,1], "identity", 42, "sgd");
-    let before = predict(net,[1]);
+    let before = net([1]);
     let timing = benchmark(net, [[[0],[1]],[[1],[3]],0.1,"mse"], 2, 4, "step", "train:cpu");
     assert(timing["repeats"] == 4, "repeat count");
-    assert(predict(net,[1]) != before, "training benchmark must update weights");
-    return mse(predict(net,[1]), [3]);
+    assert(net([1]) != before, "training benchmark must update weights");
+    return mse(net([1]), [3]);
 }
 fn main() { return test_evaluation(); }
 "#;

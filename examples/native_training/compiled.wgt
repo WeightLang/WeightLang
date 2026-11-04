@@ -13,6 +13,6 @@ fn main() {
     metric("training_loss", loss);
     # 权重与优化器由脚本显式保存；编译器不决定模型输出位置、不自动导出。
     save_model(model, "../../weights/native_script/model.json");
-    save(model, "../../weights/native_script/checkpoint.json");
-    return predict(model, [0.25]);
+    save_checkpoint(model, "../../weights/native_script/checkpoint.json");
+    return model([0.25]);
 }

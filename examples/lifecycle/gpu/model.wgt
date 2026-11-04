@@ -1,7 +1,7 @@
 wgt 0.5
 fn main() {
     # 只由启用 gpu 且 WGT_REQUIRE_GPU=1 的测试调用；无设备时不得回退 CPU。
-    let net = model("../out/model.json", "adam");
+    let net = load_model("../out/model.json", "adam");
     let report = benchmark(net, [0.25], 2, 8, "gpu_forward", "gpu");
     assert(report["device"] != "cpu", "GPU benchmark must use hardware GPU");
     assert(report["repeats"] == 8 && report["unit"] == "us", "benchmark contract");

@@ -125,13 +125,13 @@ fn postfix_mean_checkpoint_resume_and_model_export_preserve_behavior() {
 fn main() {{
     let a = MeanEnergy("adam");
     fit(a, [[1,3]], [[2]], 0.01, "loss");
-    save(a, "checkpoint.json");
+    save_checkpoint(a, "checkpoint.json");
     save_model(a, "model.json");
-    let b = restore("checkpoint.json");
-    let c = model("model.json", "none");
-    assert(predict(a, [1,3]) == predict(c, [1,3]), "export");
+    let b = load_checkpoint("checkpoint.json");
+    let c = load_model("model.json", "none");
+    assert(a([1,3]) == c([1,3]), "export");
     assert(fit(a, [[1,3]], [[2]], 0.01, "loss") == fit(b, [[1,3]], [[2]], 0.01, "loss"), "resume loss");
-    assert(predict(a, [1,3]) == predict(b, [1,3]), "resume parameters");
+    assert(a([1,3]) == b([1,3]), "resume parameters");
     return true;
 }}"#
     );

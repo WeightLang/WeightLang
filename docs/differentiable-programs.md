@@ -61,7 +61,7 @@ wgt run examples/native_training/soft_routing.wgt --compiled
   advantage 是外部常量，不反传进环境或抽样决策。
 - `sample from model(observation)`：forward 模型输出 logits，经 softmax 抽样；不提交 forward 写回，
   使用无 tape 的短路推理，只消耗脚本 RNG 和指令预算，不更新模型或优化器。
-- `predict(model,input)`：保持已有语义，执行并提交 forward 的显式 write；不执行优化器。
+- `model(input)`：保持已有语义，执行并提交 forward 的显式 write；不执行优化器。
 
 训练对每个样本从同一组批次起始参数开始计算；write 只在该次计算中生效且保留梯度链。
 不把最终 write 状态当作训练结果提交，最终状态梯度为零；优化器更新初始的非 frozen 参数。
@@ -79,13 +79,13 @@ benchmark/legacy-build 仍只接受原顺序模型，不能据此宣称支持 fo
 ## 保存与加载
 
 - `save_model(model,path)`：forward 模型写出内部 Program IR v1 JSON，包含计算结构、实际参数和
-  frozen 标记，不包含优化器；`model(path,optimizer)` 加载，可选择 none/sgd/adam，后两者新建优化器。
+  frozen 标记，不包含优化器；`load_model(path,optimizer)` 加载，可选择 none/sgd/adam，后两者新建优化器。
   此格式可供 `wgt-native adaptive` 使用，不是原顺序 IR 的 layers 格式。
   当前源码降低出的 Program 包含推理跳过指令，序列化后仍保留短路行为；
   旧的 eager Program 不会在加载时自动重排，需从 WGT 源码重新编译才能跳过分支计算。
-- `save(model,path)`：写出 `weightlang.forward-training.v1` 断点，包括 Program、优化器种类、
+- `save_checkpoint(model,path)`：写出 `weightlang.forward-training.v1` 断点，包括 Program、优化器种类、
   步数及一二阶矩；none 模型也可保存，此时优化器为空。
-- `restore(path)`：识别 forward 与原顺序模型断点，恢复后可继续相同训练；不执行 forward 或 main。
+- `load_checkpoint(path)`：识别 forward 与原顺序模型断点，恢复后可继续相同训练；不执行 forward 或 main。
 
 全部 path 为必填字符串，相对原脚本目录；父目录须已存在，目标存在（含符号链接）即拒绝覆盖。
 沿用同目录临时文件与硬链接发布。模型输出保留于 weights/<experiment>/。

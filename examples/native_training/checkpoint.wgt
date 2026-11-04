@@ -9,13 +9,13 @@ fn main() {
         loss = fit(model, [[-1], [1]], [[-1], [3]], 0.05, "mse");
     }
     assert(loss < 0.0001, "linear regression did not converge");
-    save(model, "../../weights/native_training/checkpoint.json");
+    save_checkpoint(model, "../../weights/native_training/checkpoint.json");
     save_model(model, "../../weights/native_training/model.json");
-    let resumed = restore("../../weights/native_training/checkpoint.json");
+    let resumed = load_checkpoint("../../weights/native_training/checkpoint.json");
     # 相同后续批次下，恢复模型必须延续同一个 Adam 步数和矩状态。
     fit(model, [[0.5]], [[2]], 0.05, "mse");
     fit(resumed, [[0.5]], [[2]], 0.05, "mse");
-    assert(predict(model, [0.25]) == predict(resumed, [0.25]), "resume mismatch");
+    assert(model([0.25]) == resumed([0.25]), "resume mismatch");
     metric("loss_before_save", loss);
-    return predict(resumed, [0.25]);
+    return resumed([0.25]);
 }

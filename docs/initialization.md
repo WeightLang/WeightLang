@@ -14,7 +14,7 @@ init seed=42
 fn main() {
     # 此处只初始化，predict 不训练这个顺序模型。
     let net = Example("sgd");
-    return predict(net, [1]);
+    return net([1]);
 }
 ```
 

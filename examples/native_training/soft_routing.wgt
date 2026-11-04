@@ -28,5 +28,5 @@ fn main() {
     assert(after < before * 0.01, "soft routing did not learn");
     metric("loss_before", before);
     metric("loss_after", after);
-    return predict(model, [-1]);
+    return model([-1]);
 }

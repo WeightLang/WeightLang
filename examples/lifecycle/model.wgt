@@ -32,10 +32,10 @@ fn main() {
     assert(len(inputs) == 3 && len(held_out) == 2, "incorrect data split");
     # 构造仅初始化；restore 恢复 Adam 的步数及两个矩，不重置优化器。
     let net = LifecycleRegression("adam");
-    if config["resume"] { net = restore("out/resume.json"); }
+    if config["resume"] { net = load_checkpoint("out/resume.json"); }
     let initial = 0;
     for i in range(0, len(inputs)) {
-        initial = initial + mse(predict(net, inputs[i]), targets[i]);
+        initial = initial + mse(net(inputs[i]), targets[i]);
     }
     initial = initial / len(inputs);
     # 所有步共享参数；外层样本轴为 3，fit 对样本和输出轴平均 MSE。
@@ -44,24 +44,24 @@ fn main() {
     }
     let final = 0;
     for i in range(0, len(inputs)) {
-        final = final + mse(predict(net, inputs[i]), targets[i]);
+        final = final + mse(net(inputs[i]), targets[i]);
     }
     final = final / len(inputs);
     assert(final < initial * 0.01, "loss must decrease by at least 99 percent");
     let evaluation = 0;
     for row in held_out {
-        evaluation = evaluation + mse(predict(net, row["input"]), row["target"]);
+        evaluation = evaluation + mse(net(row["input"]), row["target"]);
     }
     evaluation = evaluation / len(held_out);
     if config["complete"] { assert(evaluation < 0.000001, "held-out MSE too high"); }
     metric("initial_loss", initial);
     metric("final_loss", final);
     metric("held_out_mse", evaluation);
-    metric("prediction", predict(net, [0.25]));
+    metric("prediction", net([0.25]));
     # 推理 IR 与含优化器的训练断点分开；只显式执行 main 才写入。
     save_model(net, "out/model.json");
-    save(net, "out/checkpoint.json");
+    save_checkpoint(net, "out/checkpoint.json");
     # build 要求模型句柄；run/AOT 的 JSON 报告只能返回普通数值。
     if config["build"] { return net; }
-    return predict(net, [0.25]);
+    return net([0.25]);
 }

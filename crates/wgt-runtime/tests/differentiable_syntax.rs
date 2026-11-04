@@ -72,13 +72,13 @@ fn example_trains_and_prob_loss_checkpoint_resumes() {
 fn main() {{
     let a=Choice(\"adam\");
     fit(a,[[2,2]],[[1,1]],0.03,\"loss\");
-    save(a,\"checkpoint.json\");
+    save_checkpoint(a,\"checkpoint.json\");
     save_model(a,\"model.json\");
-    let b=restore(\"checkpoint.json\");
-    let c=model(\"model.json\",\"none\");
-    assert(predict(a,[2,2])==predict(c,[2,2]),\"prob export changed output\");
+    let b=load_checkpoint(\"checkpoint.json\");
+    let c=load_model(\"model.json\",\"none\");
+    assert(a([2,2])==c([2,2]),\"prob export changed output\");
     assert(fit(a,[[2,2]],[[1,1]],0.03,\"loss\")==fit(b,[[2,2]],[[1,1]],0.03,\"loss\"),\"loss resume mismatch\");
-    assert(predict(a,[2,2])==predict(b,[2,2]),\"Adam resume mismatch\");
+    assert(a([2,2])==b([2,2]),\"Adam resume mismatch\");
     return true;
 }}");
     let result=script::run(&source,&root,10000);

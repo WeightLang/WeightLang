@@ -22,10 +22,10 @@ WGT 用 benchmark 的 mode 明确选择设备，predict 当前仍为 CPU。
 
 ## 评估
 
-测试内使用 `model(path,optimizer)` 加载保存的原生模型，不执行训练，不创建模型制品；
+测试内使用 `load_model(path,optimizer)` 加载保存的原生模型，不执行训练，不创建模型制品；
 可用 `dependency(module)` 解析已锁定依赖路径。相对路径基于测试文件所在目录。
 `jsonl(path)` / `batch(reader,count)` / `close(reader)` 流式读取数据；每批使用普通循环
-调用 `predict(model,input)`，用 `mse`、`cross_entropy`、`argmax` 和计数器归约指标，
+调用 `model(input)`，用 `mse`、`cross_entropy`、`argmax` 和计数器归约指标，
 最后 assert 阈值。必须显式检查空数据集。列表的外层样本轴与内层特征轴不能混淆。
 模型状态、类别编码、阈值和数据切分由测试明确指定，没有隐藏评估回调或 Python。
 完整可运行项目见 [native_evaluation](../examples/native_evaluation/README.md)。

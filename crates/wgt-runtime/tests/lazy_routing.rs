@@ -111,7 +111,7 @@ fn forward(x) {{ let selected=route(p,x,linear(x,large)); write(p,x); return sel
 fn main() {{
     let model=Lazy(\"none\");
     assert(sample from model([1e20])==0,\"invalid action\");
-    return predict(model,[1e20]);
+    return model([1e20]);
 }}"
     );
     let report = script::run(&source, Path::new("."), 1000).unwrap();

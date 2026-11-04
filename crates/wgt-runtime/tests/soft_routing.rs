@@ -109,7 +109,7 @@ fn main() {
     seed(42);
     let action=sample from m([1]);
     assert(action==0 || action==1,\"invalid sampled action\");
-    return predict(m,[0]);
+    return m([0]);
 }";
     let report = script::run(source, Path::new("."), 100000).unwrap();
     assert_eq!(
@@ -209,15 +209,15 @@ fn checkpoints_resume_exactly_and_exports_load_without_training() {
 fn main() {{
     let m=Router(\"adam\");
     fit(m,[[0,0]],[[0,0]],0.01,\"mse\");
-    save(m,\"checkpoint.json\");
+    save_checkpoint(m,\"checkpoint.json\");
     save_model(m,\"model.json\");
-    let restored=restore(\"checkpoint.json\");
-    let exported=model(\"model.json\",\"none\");
-    assert(predict(m,[0,0])==predict(exported,[0,0]),\"export mismatch\");
+    let restored=load_checkpoint(\"checkpoint.json\");
+    let exported=load_model(\"model.json\",\"none\");
+    assert(m([0,0])==exported([0,0]),\"export mismatch\");
     let a=fit(m,[[0,0]],[[0,0]],0.01,\"mse\");
     let b=fit(restored,[[0,0]],[[0,0]],0.01,\"mse\");
     assert(a==b,\"loss mismatch\");
-    assert(predict(m,[0,0])==predict(restored,[0,0]),\"Adam resume mismatch\");
+    assert(m([0,0])==restored([0,0]),\"Adam resume mismatch\");
     return true;
 }}"
     );

@@ -1,7 +1,7 @@
 wgt 0.5
 fn test_held_out_loss() {
     # 加载训练好的 IR；测试不运行 main，也不保存或更新权重。
-    let net = model("../out/model.json", "adam");
+    let net = load_model("../out/model.json", "adam");
     let reader = jsonl("../data.jsonl");
     let rows = batch(reader, 2);
     let count = 0;
@@ -9,7 +9,7 @@ fn test_held_out_loss() {
     while len(rows) > 0 {
         for row in rows {
             if row["split"] == "test" {
-                loss = loss + mse(predict(net, row["input"]), row["target"]);
+                loss = loss + mse(net(row["input"]), row["target"]);
                 count = count + 1;
             }
         }
@@ -21,7 +21,7 @@ fn test_held_out_loss() {
     assert(loss / count < 0.000001, "held-out MSE exceeds threshold");
 }
 fn test_cpu_benchmark() {
-    let net = model("../out/model.json", "adam");
+    let net = load_model("../out/model.json", "adam");
     let report = benchmark(net, [0.25], 2, 8, "cpu_forward", "cpu");
     assert(report["device"] == "cpu", "CPU benchmark device");
     assert(report["repeats"] == 8 && report["unit"] == "us", "benchmark contract");

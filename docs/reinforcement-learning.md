@@ -26,7 +26,7 @@ fn main() {
     let policy = Policy("adam");
     # 这个固定批次只演示一次更新；完整环境采集见 PPO 示例。
     train policy on ([[1,0]], [[0,1,-0.6931472,1]]) rate 0.03 clip 0.5;
-    return predict(policy,[1,0]);
+    return policy([1,0]);
 }
 ```
 

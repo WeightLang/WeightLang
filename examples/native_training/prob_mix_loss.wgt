@@ -29,5 +29,5 @@ fn main() {
     assert(after < before * 0.001, "custom loss did not train probability");
     metric("loss_before", before);
     metric("loss_after", after);
-    return predict(model, [1]);
+    return model([1]);
 }
