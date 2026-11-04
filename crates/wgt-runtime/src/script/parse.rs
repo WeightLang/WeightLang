@@ -13,6 +13,7 @@ pub enum Expr {
     /// A syntax-generated call, unaffected by local value bindings.
     BuiltinCall(String, Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
+    Slice(Box<Expr>, Option<Box<Expr>>, Option<Box<Expr>>),
     Unary(String, Box<Expr>),
     Binary(String, Box<Expr>, Box<Expr>),
     Sample(Box<Expr>, Box<Expr>, Box<Expr>),
@@ -23,6 +24,8 @@ impl Expr {
         1 + match self {
             Self::Sample(p,a,b) | Self::Mix(p,a,b) => p.height().max(a.height()).max(b.height()),
             Self::Binary(_, a, b) | Self::Index(a, b) => a.height().max(b.height()),
+            Self::Slice(x, start, end) => start.iter().chain(end.iter())
+                .map(|e| e.height()).fold(x.height(), usize::max),
             Self::Unary(_, a) => a.height(),
             Self::List(v) | Self::Call(_, v) | Self::BuiltinCall(_, v) => v.iter().map(Self::height).max().unwrap_or(0),
             _ => 0,
@@ -146,7 +149,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
                 }
             }
             ensure!(
-                "(){}[];,.+-*/%<>=!&|".contains(ch),
+                "(){}[];,:.+-*/%<>=!&|".contains(ch),
                 "line {line}: unexpected character {ch}"
             );
             (token, false)
@@ -469,9 +472,20 @@ impl Parser {
                 continue;
             }
             if self.take("[") {
-                let index = self.expr(0)?;
-                self.expect("]")?;
-                left = Expr::Index(Box::new(left), Box::new(index));
+                let start = if self.is(":") { None } else { Some(Box::new(self.expr(0)?)) };
+                if self.take(":") {
+                    ensure!(!self.is(":"), "slice steps are unsupported");
+                    ensure!(!self.is(","), "multi-axis slices are unsupported");
+                    let end = if self.is("]") { None } else { Some(Box::new(self.expr(0)?)) };
+                    ensure!(!self.is(":"), "slice steps are unsupported");
+                    ensure!(!self.is(","), "multi-axis slices are unsupported");
+                    self.expect("]")?;
+                    left = Expr::Slice(Box::new(left), start, end);
+                } else {
+                    ensure!(!self.is(","), "multi-axis indexing is unsupported");
+                    self.expect("]")?;
+                    left = Expr::Index(Box::new(left), start.context("expected index")?);
+                }
                 continue;
             }
             let Some(t) = self.tokens.get(self.pos) else {

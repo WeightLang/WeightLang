@@ -26,6 +26,11 @@ script/prelude.rs 直接消费它，编辑器快照由它生成，领域实现�
   平均可写 `x.mean`、`square(prediction-target).mean`，等价 `mean(x)`；后缀优先于一元/二元运算。
   普通函数接受非空一维有限 f64 列表并返回标量；forward/loss 的 f32[N] 归约为可微 f32[1]。
   不支持其他归约后缀或 axis 参数；完整例子 examples/native_training/postfix_mean/model.wgt。
+- `x[start:end]` 是零基左闭右开一维切片，省略端点默认 0/长度，不裁剪越界值。
+  普通列表允许运行时整数端点和空结果；forward/loss 仅接受编译期数字常量表达式且拒绝空结果，梯度只进入选中区域。
+  可接调用/括号/索引/切片及 `.mean`，不支持负索引、步长、多轴或下标赋值。
+  `slice(x,start,length)` 保持旧张量长度语义：`slice(x,1,1)` 等价 `x[1:2]`。
+  契约见 docs/reference.zh-CN.md；可运行例子 examples/native_training/slicing/model.wgt。
 - sample p { then { a } else { b } } 仅用于普通函数，概率为 [0,1] 标量，仅执行一边。
   seed 控制 RNG，精确端点不抽随机数；forward/loss 中拒绝，既有 sample(model,observation) 保留。
 - mix/sample 分支可嵌套、可选尾随分号，不支持块内 let/return；普通 if 仍要求 bool。

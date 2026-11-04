@@ -117,6 +117,42 @@ fn main() {
 `fit(model,inputs,targets,rate,loss)` 没有隐式训练或保存。
 `save_model` 保存模型，`save_checkpoint` 保存优化器断点，两者不能混用。
 
+### 统一括号切片 `x[start:end]`
+
+WGT 0.5 本地实现支持一维、零基、左闭右开切片；`x[1:3]` 选择索引 1 和 2。
+`x[:end]` 默认 start=0，`x[start:]` 默认 end=长度，`x[:]` 选择全部。
+必须满足 `0 <= start <= end <= 长度`，端点为有限整数；越界报错，不静默裁剪。
+不支持负索引、步长 `x[::2]`、多轴 `x[:,0]` 或下标赋值。这是当前子集，不是完整 Python 切片。
+
+普通函数的操作数必须是列表，端点可为运行时表达式；结果是新列表，保留元素类型，允许空结果
+（包括 `[][0:0]` 和 `x[len(x):]`）。字符串、对象和模型句柄不支持切片。
+forward/loss 的操作数为现有一维 `f32[N]` 张量，端点必须能在编译期计算：数字字面量、
+括号、一元负号及 `+ - * / %` 数字常量表达式；不能引用运行时张量或调用函数。
+张量结果为 `f32[end-start]`，沿唯一向量轴选取；现有 shape 必须非零，因此空张量切片明确拒绝。
+反向传播只向选中的区域累加梯度。
+
+切片、索引和 `.mean` 从左到右结合，优先于一元和二元运算，可跟在调用、括号表达式及其他后缀之后：
+`values()[1:][0]`、`(x-y)[:2].mean`。操作数、start、end 按此顺序各求值一次；
+解释器与 AOT 使用相同边界检查，张量 lowering 复用既有 Slice 指令及其梯度。
+
+原张量函数 **`slice(x,start,length)` 保持不变**：第三个参数是长度，且必须为正整数。
+例如 `slice(x,1,1)` 从第二个元素开始取一个元素，等价于 `x[1:2]`，不是 `x[1:1]`。
+旧函数的 start/length 仍要求数字字面量，不新增普通列表的同名函数。
+
+```wgt
+wgt 0.5
+fn main() {
+    let x = [10,20,30,40];
+    let start = 1;
+    assert(x[start:3] == [20,30], "half-open bounds");
+    assert(x[4:] == [], "empty list slice");
+    return x[:2];
+}
+```
+
+包含列表、forward/loss 和显式训练的完整示例：
+[`slicing/model.wgt`](../examples/native_training/slicing/model.wgt)。
+
 ## 自更新前向函数
 
 同一个模型可用 `fn forward(x)` 定义有状态前向，替代 layer/init 声明。

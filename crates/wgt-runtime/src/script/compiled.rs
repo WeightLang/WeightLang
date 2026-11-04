@@ -14,6 +14,27 @@ pub fn index(object: Value, index: Value) -> Result<Value> {
         _ => bail!("index requires list or object"),
     }
 }
+/// Shared half-open bounds for ordinary lists and tensor lowering. Never clamp.
+pub(crate) fn slice_bounds(len: usize, start: Option<f64>, end: Option<f64>) -> Result<(usize, usize)> {
+    let endpoint = |n: f64| -> Result<usize> {
+        ensure!(n.is_finite() && n >= 0. && n.fract() == 0., "slice endpoints must be nonnegative integers; negative indices are unsupported");
+        ensure!(n <= len as f64, "slice endpoint out of bounds (length {len})");
+        Ok(n as usize)
+    };
+    let start = start.map(endpoint).transpose()?.unwrap_or(0);
+    let end = end.map(endpoint).transpose()?.unwrap_or(len);
+    ensure!(start <= end, "slice start must not exceed end");
+    Ok((start, end))
+}
+
+pub fn slice(object: Value, start: Option<Value>, end: Option<Value>) -> Result<Value> {
+    let Value::List(values) = object else { bail!("slice requires list") };
+    let (start, end) = slice_bounds(values.len(),
+        start.as_ref().map(Value::number).transpose()?,
+        end.as_ref().map(Value::number).transpose()?)?;
+    Ok(Value::List(values[start..end].to_vec()))
+}
+
 pub fn unary(op: &str, value: Value) -> Result<Value> {
     if op == "!" {
         Ok(Value::Bool(!value.boolean()?))

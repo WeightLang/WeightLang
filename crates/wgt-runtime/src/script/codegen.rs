@@ -31,6 +31,12 @@ fn expr(e: &Expr) -> String {
             expr(a),
             expr(b)
         ),
+        Expr::Slice(x, start, end) => {
+            let endpoint = |e: &Option<Box<Expr>>| e.as_ref()
+                .map(|e| format!("Some({})", expr(e))).unwrap_or_else(|| "None".into());
+            format!("{{ let x = {}; let start = {}; let end = {}; compiled::slice(x,start,end)? }}",
+                expr(x), endpoint(start), endpoint(end))
+        }
         Expr::Unary(op, v) => format!("compiled::unary({op:?}, {})?", expr(v)),
         Expr::Binary(op, a, b) => {
             let a = expr(a);

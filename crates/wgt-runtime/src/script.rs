@@ -367,6 +367,12 @@ impl Runtime {
                 let index = self.eval(index, env)?;
                 compiled::index(object, index)
             }
+            Expr::Slice(object, start, end) => {
+                let object = self.eval(object, env)?;
+                let start = start.as_ref().map(|e| self.eval(e, env)).transpose()?;
+                let end = end.as_ref().map(|e| self.eval(e, env)).transpose()?;
+                compiled::slice(object, start, end)
+            }
             Expr::Unary(op, value) => {
                 let value = self.eval(value, env)?;
                 compiled::unary(op, value)

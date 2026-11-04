@@ -70,6 +70,26 @@ pub fn parse(source: &str) -> Result<Program> {
     }
     Ok(lower.program)
 }
+// Endpoints are compile-time scalar arithmetic, never tensor values or host calls.
+fn slice_endpoint(expr: &Expr) -> Result<f64> {
+    let value = match expr {
+        Expr::Number(n) => *n,
+        Expr::Unary(op, x) if op == "-" => -slice_endpoint(x)?,
+        Expr::Binary(op, a, b) => {
+            let a = slice_endpoint(a)?;
+            let b = slice_endpoint(b)?;
+            match op.as_str() {
+                "+" => a + b, "-" => a - b, "*" => a * b,
+                "/" => a / b, "%" => a % b,
+                _ => bail!("tensor slice endpoints must be compile-time numeric expressions"),
+            }
+        }
+        _ => bail!("tensor slice endpoints must be compile-time numeric expressions"),
+    };
+    ensure!(value.is_finite(), "tensor slice endpoint must be finite");
+    Ok(value)
+}
+
 fn scalar_literal(expr: &Expr) -> Result<f32> {
     let n=match expr {
         Expr::Number(n)=>*n,
@@ -130,6 +150,14 @@ impl Lower {
                 let data=items.iter().map(scalar_literal).collect::<Result<Vec<_>>>()?;
                 ensure!(!data.is_empty() && data.len()<=16384,"tensor literal width must be 1..16384");
                 let len=data.len(); (I::Constant{out:out.into(),data},len)
+            },
+            Expr::Slice(x, start, end) => {
+                let x = self.value(x)?;
+                let (start, end) = crate::script::compiled::slice_bounds(self.size(&x)?,
+                    start.as_ref().map(|e| slice_endpoint(e)).transpose()?,
+                    end.as_ref().map(|e| slice_endpoint(e)).transpose()?)?;
+                ensure!(start < end, "empty tensor slices are unsupported (tensor shapes must be nonzero)");
+                (I::Slice { out: out.into(), input: x, start }, end - start)
             },
             Expr::Sample(..) => bail!("sample blocks are discrete host expressions; use mix for differentiable forward/loss"),
             Expr::Unary(op,x) if op=="-" => {

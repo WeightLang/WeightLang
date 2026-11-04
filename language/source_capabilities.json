@@ -15,5 +15,6 @@
     "editor": {"parser": "editors/tree-sitter-wgt/grammar.js", "validation": "balanced structure with recovery; does not enforce edition, call validity or tensor semantics"}
   },
   "prelude": "language/prelude.json",
+  "slicing": {"syntax": "x[start:end]", "bounds": "zero-based half-open; no clamping", "defaults": {"start": 0, "end": "length"}, "ordinary": "lists; runtime integer endpoints; empty allowed", "tensor": "1D f32; compile-time numeric endpoints; empty rejected", "steps": false, "negative_indices": false, "multi_axis": false, "legacy_slice": "slice(x,start,length) unchanged"},
   "conformance": "language/conformance.json"
 }
