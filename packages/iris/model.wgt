@@ -14,8 +14,7 @@ init seed=42
 fn accuracy(net, rows) {
     let correct = 0;
     for row in rows {
-        let logits = net(row["input"]);
-        let best = 0;
+        let logits = net(row["input"]), best = 0;
         for i in range(1, 3) {
             if logits[i] > logits[best] { best = i; }
         }
@@ -24,23 +23,20 @@ fn accuracy(net, rows) {
     return correct;
 }
 fn main() {
-    let net = iris("adam");
-    let reader = jsonl("train.jsonl");
-    let rows = batch(reader, 120);
+    let net = iris("adam"), reader = jsonl("train.jsonl"), rows = batch(reader, 120);
     close(reader);
-    assert(len(rows) == 120, "expected fixed training split");
+    assert len(rows) == 120, "expected fixed training split";
     let loss = 0;
-    # 固定训练设置；test.jsonl 从不传给 fit，不参与调参或选权重。
+    # 固定训练设置；test.jsonl 从不传给 train，不参与调参或选权重。
     for epoch in range(0, 400) {
-        loss = fit(net, column(rows, "input"), column(rows, "target"), 0.01, "cross_entropy");
+        loss = train net on column(rows, "input") against column(rows, "target") { rate: 0.01; loss: cross_entropy; };
     }
     metric("train_correct", accuracy(net, rows));
     metric("train_total", 120);
     metric("final_cross_entropy", loss);
-    let validation = jsonl("test.jsonl");
-    let held_out = batch(validation, 30);
+    let validation = jsonl("test.jsonl"), held_out = batch(validation, 30);
     close(validation);
-    assert(len(held_out) == 30, "expected fixed held-out split");
+    assert len(held_out) == 30, "expected fixed held-out split";
     metric("test_correct", accuracy(net, held_out));
     metric("test_total", 30);
     return net;
