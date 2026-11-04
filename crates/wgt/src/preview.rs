@@ -143,7 +143,7 @@ pub fn read(artifact: &Artifact, baseline: Option<&Artifact>) -> Result<Vec<Tens
         let mut values = exact.then(|| Vec::with_capacity(count));
         let mut old_values = (exact && baseline.is_some()).then(|| Vec::with_capacity(count));
         let mut sums = vec![0.; nr * nc];
-        let mut old_sums = vec![0.; nr * nc];
+        let mut old_sums = baseline.map(|_| vec![0.; nr * nc]);
         let mut counts = vec![0usize; nr * nc];
         let (mut min, mut max, mut total) = (f64::INFINITY, f64::NEG_INFINITY, 0.);
         let (mut old_min, mut old_max) = (f64::INFINITY, f64::NEG_INFINITY);
@@ -160,7 +160,7 @@ pub fn read(artifact: &Artifact, baseline: Option<&Artifact>) -> Result<Vec<Tens
             if let Some(values) = &mut values {
                 values.push(value);
             }
-            if let Some(r) = &mut previous {
+            if let (Some(r), Some(old_sums)) = (&mut previous, &mut old_sums) {
                 let old = r.scalar()?;
                 let b = f64::from(old);
                 old_sums[tile] += b;
@@ -177,9 +177,13 @@ pub fn read(artifact: &Artifact, baseline: Option<&Artifact>) -> Result<Vec<Tens
         }
         for i in 0..sums.len() {
             sums[i] /= counts[i] as f64;
-            old_sums[i] /= counts[i] as f64;
+            if let Some(old_sums) = &mut old_sums {
+                old_sums[i] /= counts[i] as f64;
+            }
         }
-        let deltas = sums.iter().zip(&old_sums).map(|(a, b)| a - b).collect();
+        let deltas = old_sums
+            .as_ref()
+            .map(|old| sums.iter().zip(old).map(|(a, b)| a - b).collect());
         let metadata = &artifact.manifest["weights"]["tensors"][name];
         let views: Vec<NamedView> = metadata
             .get("views")
@@ -205,15 +209,15 @@ pub fn read(artifact: &Artifact, baseline: Option<&Artifact>) -> Result<Vec<Tens
                 cols: nc,
                 values: sums,
             },
-            baseline_overview: baseline.map(|_| Overview {
+            baseline_overview: old_sums.map(|values| Overview {
                 rows: nr,
                 cols: nc,
-                values: old_sums,
+                values,
             }),
-            delta_overview: baseline.map(|_| Overview {
+            delta_overview: deltas.map(|values| Overview {
                 rows: nr,
                 cols: nc,
-                values: deltas,
+                values,
             }),
             min,
             max,
@@ -226,4 +230,72 @@ pub fn read(artifact: &Artifact, baseline: Option<&Artifact>) -> Result<Vec<Tens
         });
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn fixture(values: &[f32]) -> (tempfile::TempDir, Artifact) {
+        std::fs::create_dir_all("/tmp/weightlang").unwrap();
+        let directory = tempfile::tempdir_in("/tmp/weightlang").unwrap();
+        let header = serde_json::to_vec(&json!({
+            "w": {"dtype": "F32", "shape": [1, values.len()],
+                  "data_offsets": [0, values.len() * 4]}
+        }))
+        .unwrap();
+        let mut file = File::create(directory.path().join("weights.safetensors")).unwrap();
+        file.write_all(&(header.len() as u64).to_le_bytes())
+            .unwrap();
+        file.write_all(&header).unwrap();
+        for value in values {
+            file.write_all(&value.to_le_bytes()).unwrap();
+        }
+        let artifact = Artifact {
+            root: directory.path().to_path_buf(),
+            manifest: json!({"layers": [], "weights": {"tensors": {
+                "w": {"origin": "test", "views": [{"label": "row", "start": 0, "end": 1}]}
+            }}}),
+            shapes: [("w".into(), vec![1, values.len() as u64])].into(),
+            contracts: Default::default(),
+        };
+        (directory, artifact)
+    }
+
+    #[test]
+    fn previews_preserve_tiled_statistics_with_and_without_baseline() {
+        // 65 columns create 33 tiles, with only one element in the final tile.
+        let values: Vec<_> = (0..65).map(|i| i as f32).collect();
+        let baseline: Vec<_> = values.iter().map(|v| v - 2.).collect();
+        let (_current_dir, current) = fixture(&values);
+        let (_baseline_dir, baseline) = fixture(&baseline);
+        let plain = read(&current, None).unwrap().remove(0);
+        let compared = read(&current, Some(&baseline)).unwrap().remove(0);
+        assert_eq!(plain.values.as_ref().unwrap(), &values);
+        assert_eq!(plain.overview.rows, 1);
+        assert_eq!(plain.overview.cols, 33);
+        assert_eq!(plain.overview.values[0], 0.5);
+        assert_eq!(plain.overview.values[32], 64.);
+        assert_eq!((plain.min, plain.max, plain.mean), (0., 64., 32.));
+        assert_eq!(plain.views[0].label, "row");
+        assert!(plain.baseline_values.is_none());
+        assert!(plain.baseline_overview.is_none());
+        assert!(plain.delta_overview.is_none());
+        assert!(plain.baseline_min.is_none());
+        assert!(plain.baseline_max.is_none());
+        assert!(plain.changed_elements.is_none());
+        assert!(plain.max_abs_delta.is_none());
+        assert_eq!(compared.values, plain.values);
+        assert_eq!(compared.overview.values, plain.overview.values);
+        assert_eq!(compared.baseline_values.unwrap()[64], 62.);
+        let old = compared.baseline_overview.unwrap();
+        assert_eq!((old.rows, old.cols), (1, 33));
+        assert_eq!((old.values[0], old.values[32]), (-1.5, 62.));
+        assert_eq!(compared.delta_overview.unwrap().values, vec![2.; 33]);
+        assert_eq!(compared.baseline_min, Some(-2.));
+        assert_eq!(compared.baseline_max, Some(62.));
+        assert_eq!(compared.changed_elements, Some(65));
+        assert_eq!(compared.max_abs_delta, Some(2.));
+    }
 }
