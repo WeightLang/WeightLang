@@ -10,6 +10,7 @@ mod autodiff;
 pub use autodiff::ForwardPass;
 pub mod transport;
 mod training;
+mod reload;
 pub mod optimization;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

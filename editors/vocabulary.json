@@ -1,5 +1,14 @@
 {
   "keywords": [
+    "save",
+    "load",
+    "reload",
+    "checkpoint",
+    "json",
+    "text",
+    "to",
+    "using",
+    "overwrite",
     "assert",
     "break",
     "collect",

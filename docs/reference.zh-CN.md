@@ -151,6 +151,16 @@ collect/yield/分块不支持 tensor forward/loss，不使记录自动可微；P
 
 普通函数支持原生 `assert CONDITION [, MESSAGE];` 语句，条件严格为 bool 且只求值一次；仅失败才求字符串消息，默认 `assertion failed`。括号条件可写 `assert(condition);`。旧两实参 `assert(condition,message)` 保持急求值与返回 null 的兼容契约。解释/AOT 行为一致，错误含语句行号，详见[原生断言](assertions.md)。
 
+普通函数的原生文件语法为 `save KIND VALUE to PATH [overwrite];` 和读取表达式
+`load KIND from PATH`，KIND 为 `text/json/model/checkpoint`；`load model` 必填 `using OPTIMIZER`，
+checkpoint 使用保存的优化器。值、路径各求值一次；相对路径按脚本目录解析，父目录须存在。
+默认拒绝覆盖，显式 overwrite 只原子替换普通可写文件；每文件最多 64 MiB，按编码字节消耗 operation budget。
+宿主策略模式拒绝直接路径 IO，须用授权 capability。模型与断点不能混用，load 不执行 main 或训练。
+`reload model TARGET from PATH using OPTIMIZER;` / `reload checkpoint TARGET from PATH;` 在同句柄中原子替换同结构模型状态，所有别名可见；model重新初始化优化器，checkpoint恢复保存状态与步数，运行时revision递增并使旧梯度失效。结构不匹配或候选失败保留旧状态。
+`assert CONDITION [, MESSAGE];` 要求严格 bool，只失败才求字符串消息，默认 `assertion failed`；
+旧两实参 `assert(condition,message)` 保持急求值兼容。解释/AOT 相同，错误含语句行号。
+完整签名、格式、安全发布和 JSON 限制见[文件与断言语法](file-io.md)。
+
 控制流为 `if condition { ... } else { ... }`、`while condition { ... }`、
 `for name in list { ... }`、`break;`、`continue;`、`return expr;`。
 当前函数内共享变量环境，if/for 不创建词法局部作用域；重复 let 覆盖绑定。

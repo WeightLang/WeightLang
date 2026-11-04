@@ -69,6 +69,8 @@ fn block(body: &[Statement]) -> String {
             Stmt::Set(n,e) => format!("ensure!(env.contains_key({n:?}), {:?}); let value = {}; env.insert({n:?}.into(),value);", format!("assignment to undeclared variable: {n}"), expr(e)),
             Stmt::Eval(e) => format!("let _ = {};",expr(e)),
             Stmt::Assert(e,message) => format!("if !{}.boolean()? {{ let message = {}; anyhow::bail!(\"{{}}\", message.text()?); }}", expr(e), message.as_ref().map(expr).unwrap_or_else(|| "Value::Text(\"assertion failed\".into())".into())),
+            Stmt::Reload(kind,target,path,optimizer) => format!("let target={}; let path={}; let optimizer={}; rt.reload_file({kind:?},target,path,optimizer)?;",expr(target),expr(path),optimizer.as_ref().map(|e|format!("Some({})",expr(e))).unwrap_or_else(||"None".into())),
+            Stmt::Save(kind,value,path,overwrite) => format!("let value = {}; let path = {}; rt.save_file({kind:?},value,path,{overwrite})?;",expr(value),expr(path)),
             Stmt::Return(e) => format!("return Ok(Flow::Return({}));",expr(e)),
             Stmt::Break => "return Ok(Flow::Break);".into(),
             Stmt::Continue => "return Ok(Flow::Continue);".into(),

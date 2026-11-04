@@ -4,6 +4,8 @@ pub mod compiled;
 mod benchmark;
 mod permissions;
 mod dataset;
+pub(crate) mod file_io;
+mod persistence;
 pub mod record_schema;
 pub mod records;
 mod optimization;
@@ -363,11 +365,22 @@ impl Runtime {
             Stmt::Eval(expr) => {
                 self.eval(expr, env)?;
             }
+            Stmt::Reload(format, target, path, optimizer) => {
+                let target = self.eval(target, env)?;
+                let path = self.eval(path, env)?;
+                let optimizer = optimizer.as_ref().map(|e| self.eval(e, env)).transpose()?;
+                self.reload_file(format, target, path, optimizer)?;
+            }
             Stmt::Assert(condition, message) => {
                 if !self.eval(condition, env)?.boolean()? {
                     let message = match message { Some(e) => self.eval(e, env)?, None => Value::Text("assertion failed".into()) };
                     bail!("{}", message.text()?);
                 }
+            }
+            Stmt::Save(format, value, path, overwrite) => {
+                let value = self.eval(value, env)?;
+                let path = self.eval(path, env)?;
+                self.save_file(format, value, path, *overwrite)?;
             }
             Stmt::Return(expr) => return Ok(Flow::Return(self.eval(expr, env)?)),
             Stmt::Break => return Ok(Flow::Break),
@@ -610,6 +623,7 @@ impl Runtime {
             .with_context(|| format!("{name}()"))
     }
     fn builtin(&mut self, name: &str, a: &[Value]) -> Result<Value> {
+        if let Some(format) = name.strip_prefix("__load_") { return self.load_file(format, a); }
         if name == "__record_field" {
             return self.record_field(a[0].clone(), a[1].text()?);
         }

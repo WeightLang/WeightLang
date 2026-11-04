@@ -66,6 +66,8 @@ pub(super) fn validate(program: &Program) -> Result<()> {
                 Stmt::Collect(_,body) => block(body,program)?,
                 Stmt::Yield(fields) => { for (_,e) in fields { expression(e,program)?; } }
                 Stmt::ForBatches(_,a,b,body) => {expression(a,program)?;expression(b,program)?;block(body,program)?;}
+                Stmt::Save(_,a,b,_) => { expression(a,program)?; expression(b,program)?; }
+                Stmt::Reload(_,a,b,optimizer) => { expression(a,program)?; expression(b,program)?; if let Some(e)=optimizer {expression(e,program)?;} }
                 Stmt::Break | Stmt::Continue => {}
             }
         }

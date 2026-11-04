@@ -4,6 +4,44 @@
   "scope": "Implicit source functions, intrinsics, constants and declaration types. No std modules are imported. Contexts are separate contracts; ordinary functions are shared by interpreter and AOT. Parameters are required unless defaults explicitly say otherwise.",
   "entries": [
     {
+      "name": "save",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "save KIND VALUE to PATH [overwrite];",
+      "purpose": "显式原子保存 model/checkpoint/json/text；默认拒绝覆盖，父目录必须存在，路径按脚本根目录解析。",
+      "documentation": "docs/file-io.md",
+      "defaults": {
+        "overwrite": false
+      },
+      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+    },
+    {
+      "name": "load",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "load KIND from PATH [using OPTIMIZER]",
+      "purpose": "读取 model/checkpoint/json/text；model必填using新优化器，checkpoint恢复已记录优化器，不执行训练或main。",
+      "documentation": "docs/file-io.md",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+    },
+    {
+      "name": "reload",
+      "kind": "syntax",
+      "contexts": [
+        "ordinary_function"
+      ],
+      "signature": "reload model TARGET from PATH using OPTIMIZER; | reload checkpoint TARGET from PATH;",
+      "purpose": "同句柄同结构原子重载，model新优化器，checkpoint恢复状态；revision单调递增，旧梯度失效。",
+      "documentation": "docs/file-io.md",
+      "defaults": {},
+      "implementation": "crates/wgt-runtime/src/script/persistence.rs"
+    },
+    {
       "name": "__record_field",
       "kind": "internal",
       "contexts": [

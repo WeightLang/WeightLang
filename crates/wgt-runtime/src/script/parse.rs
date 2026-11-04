@@ -50,6 +50,8 @@ pub enum Stmt {
     Set(String, Expr),
     Eval(Expr),
     Assert(Expr, Option<Expr>),
+    Save(String, Expr, Expr, bool),
+    Reload(String, Expr, Expr, Option<Expr>),
     If(Expr, Vec<Statement>, Vec<Statement>),
     While(Expr, Vec<Statement>),
     For(String, Expr, Vec<Statement>),
@@ -353,6 +355,24 @@ impl Parser {
             }
             self.expect(";")?;
             Stmt::Yield(fields)
+        } else if self.take("reload") {
+            let format = self.next()?;
+            ensure!(!format.quoted && matches!(format.text.as_str(), "model" | "checkpoint"), "line {line}: reload requires model or checkpoint");
+            let target = self.expr(0)?;
+            self.expect("from")?;
+            let path = self.expr(0)?;
+            let optimizer = if format.text == "model" { self.expect("using")?; Some(self.expr(0)?) } else { None };
+            self.expect(";")?;
+            Stmt::Reload(format.text, target, path, optimizer)
+        } else if self.take("save") {
+            let format = self.next()?;
+            ensure!(!format.quoted && matches!(format.text.as_str(), "model" | "checkpoint" | "json" | "text"), "line {line}: expected save model, checkpoint, json or text");
+            let value = self.expr(0)?;
+            self.expect("to")?;
+            let path = self.expr(0)?;
+            let overwrite = self.take("overwrite");
+            self.expect(";")?;
+            Stmt::Save(format.text, value, path, overwrite)
         } else if self.take("assert") {
             // Preserve the published two-argument function's eager evaluation.
             let start = self.pos;
@@ -467,6 +487,18 @@ impl Parser {
             Expr::Text(t.text)
         } else {
             match t.text.as_str() {
+                "load" => {
+                    let format = self.next()?;
+                    ensure!(!format.quoted && matches!(format.text.as_str(), "model" | "checkpoint" | "json" | "text"), "line {}: expected load model, checkpoint, json or text", t.line);
+                    self.expect("from")?;
+                    let path = self.expr(0)?;
+                    let mut args = vec![path];
+                    if format.text == "model" {
+                        self.expect("using")?;
+                        args.push(self.expr(0)?);
+                    }
+                    Expr::BuiltinCall(format!("__load_{}", format.text), args)
+                }
                 "onehot" => {
                     self.expect("[")?;
                     let size = self.next()?;

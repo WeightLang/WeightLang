@@ -46,6 +46,8 @@
     }
   },
   "prelude": "language/prelude.json",
+  "file_syntax": {"context":"ordinary_function", "save":"save KIND VALUE to PATH [overwrite];", "load":"load KIND from PATH [using OPTIMIZER]", "formats":["model","checkpoint","json","text"], "default_overwrite":false, "parent_creation":false, "max_bytes":67108864, "budget":"one operation per encoded byte", "host_policy":"direct path IO denied; use capabilities", "assert":"assert CONDITION [, MESSAGE]; strict bool; message lazy on failure; two-argument function remains eager"},
+
   "assert_syntax": {
     "syntax": "assert CONDITION [, MESSAGE];",
     "context": "ordinary_function",

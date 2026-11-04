@@ -189,7 +189,7 @@ impl Trainer {
         Ok(loss)
     }
 
-    fn snapshot(&mut self) -> Result<Model> {
+    pub fn snapshot(&mut self) -> Result<Model> {
         let mut names = vec![String::new(); self.session.parameters.len()];
         for (name, &index) in &self.session.names {
             names[index] = name.clone();
@@ -249,8 +249,32 @@ impl Trainer {
         })
     }
 
+    pub(crate) fn reload_candidate(&mut self, mut candidate: Self) -> Result<()> {
+        let structure = |model: Model| -> Result<serde_json::Value> {
+            let mut value = serde_json::to_value(model)?;
+            for parameter in value["parameters"].as_array_mut().context("missing parameters")? {
+                if parameter.get("kind").and_then(|v| v.as_str()) == Some("resident") {
+                    parameter.as_object_mut().context("invalid parameter")?.remove("data");
+                }
+            }
+            Ok(value)
+        };
+        ensure!(structure(self.snapshot()?)? == structure(candidate.snapshot()?)?, "reload requires identical model structure");
+        candidate.session.revision = self.session.revision.checked_add(1).context("revision overflow")?;
+        *self = candidate;
+        Ok(())
+    }
+
     /// Create a new checkpoint; never overwrite an existing file.
     pub fn save(&mut self, path: &Path) -> Result<()> {
+        write_new(path, &self.checkpoint_bytes()?)
+    }
+
+    pub(crate) fn checkpoint_bytes(&mut self) -> Result<Vec<u8>> {
+        self.checkpoint_bytes_bounded(usize::MAX)
+    }
+
+    pub(crate) fn checkpoint_bytes_bounded(&mut self, limit: usize) -> Result<Vec<u8>> {
         let record = Checkpoint {
             format: "weightlang.native-training.v1".into(),
             model: self.snapshot()?,
@@ -259,8 +283,7 @@ impl Trainer {
             first: self.first.clone(),
             second: self.second.clone(),
         };
-        let bytes = serde_json::to_vec(&record)?;
-        write_new(path, &bytes)
+        crate::script::file_io::encode_json(&record, limit)
     }
 
     /// Export native inference IR, without optimizer state or training callbacks.
@@ -270,7 +293,11 @@ impl Trainer {
     }
 
     pub fn restore(path: &Path, budget: usize) -> Result<Self> {
-        let c: Checkpoint = serde_json::from_reader(std::fs::File::open(path)?)?;
+        Self::restore_value(serde_json::from_reader(std::fs::File::open(path)?)?, budget)
+    }
+
+    pub(crate) fn restore_value(value: serde_json::Value, budget: usize) -> Result<Self> {
+        let c: Checkpoint = serde_json::from_value(value)?;
         ensure!(
             c.format == "weightlang.native-training.v1",
             "unsupported checkpoint format"

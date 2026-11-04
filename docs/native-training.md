@@ -238,6 +238,13 @@ p50/p95 为排序后 floor((N-1)*q) 项，无插值；同步范围、训练更�
 
 ## 保存与续训
 
+原生语法优先使用 `save model net to PATH;` / `load model from PATH using "adam"`，
+以及 `save checkpoint net to PATH;` / `load checkpoint from PATH`。
+模型加载显式创建新优化器，断点恢复记录的优化器；不执行原脚本 main 或训练。
+保存语句可显式加 `overwrite` 原子替换普通可写文件，默认拒绝目标存在。
+文本与 JSON、64 MiB 上限、按字节计费和宿主授权边界见[文件与断言语法](file-io.md)。
+以下函数接口继续兼容，其默认不覆盖契约保持不变。
+
 文件父目录须先存在。保存先写同目录临时文件、sync 后以 hard link 原子发布；目标存在即拒绝，
 包括符号链接，不接受隐式覆盖。文件系统须支持硬链接。完整模型、断点和报告应保留在
 `weights/<experiment>/`，见[存储约定](storage.md)。

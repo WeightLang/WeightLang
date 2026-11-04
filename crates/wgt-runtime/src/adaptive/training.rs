@@ -213,13 +213,27 @@ impl AdaptiveSession {
     }
 
     pub fn save_checkpoint(&self, path: &Path) -> Result<()> {
+        crate::training::write_new(path, &self.checkpoint_bytes()?)
+    }
+
+    pub(crate) fn checkpoint_bytes(&self) -> Result<Vec<u8>> {
         let value = if let Some(state) = &self.custom_optimizer {
             super::optimization::validate_state(&state.value)?;
             serde_json::json!({"format":"weightlang.forward-training.v2", "program":self.program, "custom_optimizer":state})
         } else {
             serde_json::json!({"format":"weightlang.forward-training.v1", "program":self.program, "optimizer":self.optimizer})
         };
-        crate::training::write_new(path, &serde_json::to_vec(&value)?)
+        Ok(serde_json::to_vec(&value)?)
+    }
+
+    pub(crate) fn checkpoint_bytes_bounded(&self, limit: usize) -> Result<Vec<u8>> {
+        let value = if let Some(state) = &self.custom_optimizer {
+            super::optimization::validate_state(&state.value)?;
+            serde_json::json!({"format":"weightlang.forward-training.v2", "program":self.program, "custom_optimizer":state})
+        } else {
+            serde_json::json!({"format":"weightlang.forward-training.v1", "program":self.program, "optimizer":self.optimizer})
+        };
+        crate::script::file_io::encode_json(&value, limit)
     }
 
     pub fn restore_checkpoint(value: serde_json::Value, budget: usize) -> Result<Self> {
