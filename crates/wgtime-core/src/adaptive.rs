@@ -980,50 +980,30 @@ impl AdaptiveSession {
                     output=Some(r);
                 },
                 Op::Reshape(r,x) => {
-
-                    self.ready(x)?;
-                    self.scratch[..self.registers[x].len()].copy_from_slice(&self.registers[x]);
+                    self.ready_view(x)?;
                     output = Some(r);
                 },
-                Op::Transpose(r,x,m,n) => {
-                    self.ready(x)?;
-                    for i in 0..m { for j in 0..n { self.scratch[j*m+i] = self.registers[x][i*n+j]; } }
+                Op::Transpose(r,x,_,_) => {
+                    self.ready_view(x)?;
                     output = Some(r);
                 },
-                Op::Permute(r,x,_input_shape,axes,rank) => {
-                    self.ready(x)?;
-                    let input_shape = &self.program.registers[x].shape;
-                    let output_shape = &self.program.registers[r].shape;
-                    for output_index in 0..self.registers[r].len() {
-                        let mut remainder = output_index;
-                        let mut output_coords = [0usize; 8];
-                        let mut input_coords = [0usize; 8];
-                        for axis in (0..rank).rev() {
-                            output_coords[axis] = remainder % output_shape[axis];
-                            remainder /= output_shape[axis];
-                        }
-                        for axis in 0..rank {
-                            input_coords[axes[axis]] = output_coords[axis];
-                        }
-                        let mut input_index = 0usize;
-                        for axis in 0..rank {
-                            input_index = input_index * input_shape[axis] + input_coords[axis];
-                        }
-                        self.scratch[output_index] = self.registers[x][input_index];
-                    }
+                Op::Permute(r,x,_,_,_) => {
+                    self.ready_view(x)?;
                     output = Some(r);
                 },
                 Op::Matmul(r,a,b,m,k,n) => {
-                    self.ready(a)?; self.ready(b)?;
+                    self.ready_view(a)?; self.ready_view(b)?;
                     for i in 0..m { for j in 0..n {
                         let mut sum = 0f64;
-                        for q in 0..k { sum += f64::from(self.registers[a][i*k+q]) * f64::from(self.registers[b][q*n+j]); }
+                        for q in 0..k {
+                            sum += f64::from(self.read_value(a,i*k+q)) * f64::from(self.read_value(b,q*n+j));
+                        }
                         self.scratch[i*n+j] = sum as f32;
                     } }
                     output = Some(r);
                 },
                 Op::BatchMatmul(r,a,b,batch,m,k,n) => {
-                    self.ready(a)?; self.ready(b)?;
+                    self.ready_view(a)?; self.ready_view(b)?;
                     for batch_index in 0..batch {
                         let a_base = batch_index * m * k;
                         let b_base = batch_index * k * n;
@@ -1031,8 +1011,8 @@ impl AdaptiveSession {
                         for i in 0..m { for j in 0..n {
                             let mut sum = 0f64;
                             for q in 0..k {
-                                sum += f64::from(self.registers[a][a_base+i*k+q])
-                                    * f64::from(self.registers[b][b_base+q*n+j]);
+                                sum += f64::from(self.read_value(a,a_base+i*k+q))
+                                    * f64::from(self.read_value(b,b_base+q*n+j));
                             }
                             self.scratch[out_base+i*n+j] = sum as f32;
                         } }
@@ -1214,16 +1194,29 @@ impl AdaptiveSession {
                 }
             }
             if let Some(r) = output {
-                let n = self.registers[r].len();
-                ensure!(
-                    self.scratch[..n].iter().all(|v| v.is_finite()),
-                    "nonfinite activation at instruction {pc}"
-                );
-                if let Some(tape) = tape.as_deref_mut() {
-                    tape.record(op, &self.scratch[..n])?;
+                if matches!(op, Op::Reshape(..) | Op::Transpose(..) | Op::Permute(..)) {
+                    let view = self.make_view(op, r)?;
+                    self.views[r] = Some(view);
+                    self.initialized[r] = true;
+                    if let Some(tape) = tape.as_deref_mut() {
+                        let values = (0..self.registers[r].len())
+                            .map(|index| self.read_value(r, index))
+                            .collect::<Vec<_>>();
+                        tape.record(op, &values)?;
+                    }
+                } else {
+                    let n = self.registers[r].len();
+                    ensure!(
+                        self.scratch[..n].iter().all(|v| v.is_finite()),
+                        "nonfinite activation at instruction {pc}"
+                    );
+                    if let Some(tape) = tape.as_deref_mut() {
+                        tape.record(op, &self.scratch[..n])?;
+                    }
+                    self.registers[r].copy_from_slice(&self.scratch[..n]);
+                    self.views[r] = None;
+                    self.initialized[r] = true;
                 }
-                self.registers[r].copy_from_slice(&self.scratch[..n]);
-                self.initialized[r] = true;
             }
             self.pc += 1;
         }
