@@ -529,7 +529,7 @@ impl<'a> Generator<'a> {
                     let (out_offset,out_len,out_id) = self.reg(o)?;
                     ensure!(self.program.registers[out_id].shape == output_shape,
                         "compiled permute output geometry mismatch");
-                    let mut body_code = format!("for(size_t z=0;z<{out_len};z++){{size_t rem=z,oc[{rank}]={{0}},ic[{rank}]={{0}};");
+                    let mut body_code = format!("if(budget-*used<{out_len})return 2;*used+={out_len};for(size_t z=0;z<{out_len};z++){{size_t rem=z,oc[{rank}]={{0}},ic[{rank}]={{0}};");
                     for axis in (0..rank).rev() {
                         body_code += &format!("oc[{axis}]=rem%{};rem/={};", output_shape[axis], output_shape[axis]);
                     }
