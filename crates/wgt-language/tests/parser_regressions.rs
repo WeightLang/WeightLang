@@ -64,3 +64,43 @@ fn source_split_enforces_source_byte_limit_before_scanning() {
     };
     assert!(error.to_string().contains("WGT source exceeds 4 MiB limit"));
 }
+
+#[test]
+fn matrix_product_uses_native_at_operator() {
+    let expression = returned(
+        "wgt 0.5\\nfn value(q,k) { return q @ k; }"
+    );
+    assert!(matches!(
+        expression,
+        Expr::Binary(ref op, ref left, ref right)
+            if op == "@"
+                && matches!(**left, Expr::Name(ref name) if name == "q")
+                && matches!(**right, Expr::Name(ref name) if name == "k")
+    ));
+}
+
+#[test]
+fn transpose_uses_native_t_postfix() {
+    let expression = returned(
+        "wgt 0.5\\nfn value(k) { return k.T; }"
+    );
+    assert!(matches!(
+        expression,
+        Expr::BuiltinCall(ref op, ref args)
+            if op == "transpose"
+                && matches!(args.as_slice(), [Expr::Name(name)] if name == "k")
+    ));
+}
+
+#[test]
+fn matrix_product_precedes_addition() {
+    let expression = returned(
+        "wgt 0.5\\nfn value(a,b,c) { return a + b @ c; }"
+    );
+    assert!(matches!(
+        expression,
+        Expr::Binary(ref op, _, ref right)
+            if op == "+"
+                && matches!(**right, Expr::Binary(ref inner, _, _) if inner == "@")
+    ));
+}
