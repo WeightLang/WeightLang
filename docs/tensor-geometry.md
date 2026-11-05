@@ -80,3 +80,13 @@ fn loss(prediction,target) { return square(prediction-target).mean; }
 - [语法总览](../language/syntax-tour/model.wgt) 的 T10 注释示例；不改活跃主模型。
 - [wgt-development 技能](../.agents/skills/wgt-development/SKILL.md) 的固定 shape 与多轴规则。
 - [prelude.json](../language/prelude.json) 中张量 intrinsic 的合同元数据。
+
+## AdaptiveSession batch inference API
+
+`AdaptiveSession::evaluate_batch(inputs, batch_size, max_steps)` accepts a contiguous
+row-major `[B,input_len]` buffer and returns `[B,output_len]`. The method validates
+the complete input size and finiteness before execution, uses one shared parameter
+snapshot, preserves sample order, and charges one total instruction budget across
+all samples. Each sample is currently executed independently in sequence; this is
+a host-level batch API, not a fused batched operator or a batch-aware convolution
+kernel. Rank-3 `batch_matmul` remains a separate tensor operation.
