@@ -1232,6 +1232,7 @@ impl AdaptiveSession {
                         tape.record(op, &self.scratch[..n])?;
                     }
                     self.detach_views_of(r);
+                    self.materialize_view(r);
                     self.registers[r].resize(n, 0.);
                     self.registers[r].copy_from_slice(&self.scratch[..n]);
                     self.views[r] = None;
