@@ -719,8 +719,8 @@ impl AdaptiveSession {
                     }
                 };
                 let mut shape = [1usize; 8];
-                shape[..output_shape.len()].copy_from_slice(output_shape);
-                Ok(TensorView { base: view.base, offset: view.offset, shape, strides: contiguous_strides(output_shape), rank: output_shape.len() })
+                shape[..output_shape.len()].copy_from_slice(&output_shape);
+                Ok(TensorView { base: view.base, offset: view.offset, shape, strides: contiguous_strides(&output_shape), rank: output_shape.len() })
             }
             Op::Transpose(_, input, _, _) => {
                 self.ready_view(input)?;
