@@ -1293,6 +1293,26 @@ impl Lower {
                     p.shape.iter().product(),
                 )
             }
+            Expr::Binary(op, a, b) if op == "@" => {
+                let a = self.value(a)?;
+                let b = self.value(b)?;
+                let sa = self.shape(&a)?;
+                let sb = self.shape(&b)?;
+                ensure!(
+                    sa.len() == 2 && sb.len() == 2 && sa[1] == sb[0],
+                    "matrix product requires [M,K] @ [K,N]"
+                );
+                let output_shape = vec![sa[0], sb[1]];
+                let len = output_shape.iter().product();
+                (
+                    I::Matmul {
+                        out: out.into(),
+                        left: a,
+                        right: b,
+                    },
+                    len,
+                )
+            }
             Expr::Binary(op, a, b) if op == "+" || op == "*" || op == "-" => {
                 let a = self.value(a)?;
                 let b = self.value(b)?;
@@ -1617,6 +1637,15 @@ impl Lower {
             | I::Clip { input, .. } => self.shape(input)?,
             I::Add { left, .. } | I::Mul { left, .. } | I::Minimum { left, .. } => {
                 self.shape(left)?
+            }
+            I::Matmul { left, right, .. } => {
+                let left = self.shape(left)?;
+                let right = self.shape(right)?;
+                ensure!(
+                    left.len() == 2 && right.len() == 2 && left[1] == right[0],
+                    "matrix product requires [M,K] @ [K,N]"
+                );
+                vec![left[0], right[1]]
             }
             I::Gate { input, .. } | I::Route { yes: input, .. } => self.shape(input)?,
             I::Softmax { input, .. } | I::LogSoftmax { input, .. } => {
