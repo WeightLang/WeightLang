@@ -12,6 +12,12 @@ WeightLang 不把权重更新算法绑定到模型定义，也不把训练限制
 
 这一边界允许梯度优化、无梯度搜索及混合策略共存。模型定义只声明计算和可学习参数，不声明唯一 optimizer。
 
+### Rust Core 自定义策略入口（新增）
+
+`wgtime_core::training::UpdateStrategy` 与 `Trainer::step_with_strategy` 已提供 CPU 本地 Core API。策略以不可变参数/梯度快照为输入，返回绝对候选参数及下一份策略对象；策略对象要求 Clone，以便候选验证失败时不提交策略状态。Trainer 在提交前检查参数数量、shape、有限值和 frozen 参数不变，然后提交参数、step、revision 与策略状态。
+
+此 API 不依赖固定优化器枚举，适合 Momentum、AdamW、Lion 等单步规则。策略状态仍由调用者持有和持久化；该入口当前 CPU-only，不提供 GPU 自定义策略或服务 IPC 暴露，也不自动把策略状态并入 Trainer checkpoint。多次求导、SAM 和无梯度搜索仍使用下述 WGT 自定义梯度句柄路径或应用级控制。
+
 ## 当前自定义更新能力
 
 CPU forward 路径已有 WGT 自定义更新接口，详见 [原生训练](native-training.md#WGT-自定义更新算法CPU-forward)：
