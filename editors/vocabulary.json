@@ -1,5 +1,9 @@
 {
   "keywords": [
+    "blend",
+    "repeat",
+    "indexed",
+    "carrying",
     "agent",
     "environment",
     "learn",
@@ -169,6 +173,7 @@
   "intrinsics": [
     "add",
     "clip",
+    "conv",
     "depth_gate",
     "detach",
     "exp",

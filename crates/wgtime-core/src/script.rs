@@ -470,7 +470,7 @@ impl Runtime {
     fn eval(&mut self, expr: &Expr, env: &mut Env) -> Result<Value> {
         self.tick()?;
         match expr {
-            Expr::Mix(..) => bail!("mix is only available in tensor forward/loss functions"),
+            Expr::Blend(..) | Expr::Conditional(..) | Expr::Repeat { .. } | Expr::Invoke(..) | Expr::Mix(..) => bail!("model expressions are only available in tensor forward/loss functions"),
             Expr::Sample(p, a, b) => {
                 let p = self.eval(p, env)?;
                 if self.draw_probability(p)? {

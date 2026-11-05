@@ -1,0 +1,30 @@
+# Editor-only candidate syntax; Rust parser/runtime acceptance is verified separately.
+wgt 0.5
+model A {
+    input x: f32[2]
+    output y: f32[2]
+    # Each A instance owns its bias and learn shadow; no training occurs here.
+    parameter bias: f32[2] = [0, 0]
+    learn enabled: bool[2] = [true, false];
+    fn forward(x) { return x + bias; }
+}
+model Root
+input x: f32[2]
+output y: f32[2]
+learn depth: int in 1..=8 = 2;
+learn enabled: bool[8] = true;
+learn scales: float[2] = [0.25, -0.5];
+learn bounded: float[2] in 0..=1 = [0.25, 0.75];
+learn positive: float[2] > 0 = [1, 2];
+learn counts: int[2] in 1..=12 = [1, 12];
+experts: A[8];
+fn forward(x) {
+    # Both branches keep the feature axis [2]; blend weights are scalars.
+    let p = scales[0];
+    let mixed = blend { p => x; (1-p) => experts[0](x); };
+    let selected = if enabled[0] { mixed } else { x; };
+    # Indexed iteration selects independent expert instances; h carries [2].
+    let result = repeat depth indexed i carrying h=selected { experts[i](h) };
+    let shared = repeat 2 carrying h=result { h ** 2; };
+    return shared;
+}

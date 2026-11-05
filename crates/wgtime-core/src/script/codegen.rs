@@ -4,7 +4,7 @@ use anyhow::Result;
 
 fn expr(e: &Expr) -> String {
     let value = match e {
-        Expr::Mix(..) => {
+        Expr::Blend(..) | Expr::Conditional(..) | Expr::Repeat { .. } | Expr::Invoke(..) | Expr::Mix(..) => {
             "anyhow::bail!(\"mix is only available in tensor forward/loss functions\")".into()
         }
         Expr::Sample(p, a, b) => format!(

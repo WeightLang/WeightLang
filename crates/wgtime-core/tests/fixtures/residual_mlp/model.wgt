@@ -1,0 +1,26 @@
+wgt 0.5
+model TwoBlockResidualMlp
+input x: f32[2]
+output y: f32[2]
+# 单样本轴为 [通道=2]；每块 2→3→2，跳连保持同一通道对应关系。
+# 两块复用计算公式，但参数各自独立；这些常量仅是初始化值，尚未训练。
+parameter up0: f32[2,3] = [0.3,-0.2,0.1,0.2,0.4,-0.3]
+parameter hidden0: f32[3] = [0.05,-0.02,0.03]
+parameter down0: f32[3,2] = [0.2,-0.1,0.3,0.2,-0.2,0.4]
+parameter bias0: f32[2] = [0.01,-0.02]
+parameter up1: f32[2,3] = [-0.2,0.3,0.4,0.1,-0.3,0.2]
+parameter hidden1: f32[3] = [-0.03,0.04,0.02]
+parameter down1: f32[3,2] = [0.3,0.2,-0.1,0.4,0.2,-0.3]
+parameter bias1: f32[2] = [-0.02,0.03]
+fn block(v,up,hidden,down,bias) {
+    # 参数裸读为扁平向量，显式恢复矩阵轴；增加长度为 1 的样本轴。
+    # 加偏置前恢复向量，避免广播；reshape 不创建独立参数。
+    let h = tanh(reshape(matmul(reshape(v,[1,2]),reshape(up,[2,3])),[3])+hidden);
+    let correction = reshape(matmul(reshape(h,[1,3]),reshape(down,[3,2])),[2])+bias;
+    return v+correction;
+}
+fn forward(x) {
+    let first = block(x,up0,hidden0,down0,bias0);
+    return block(first,up1,hidden1,down1,bias1);
+}
+fn loss(prediction,target) { return square(prediction-target).mean; }

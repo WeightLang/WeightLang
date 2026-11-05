@@ -18,11 +18,30 @@ function wgtFiles(dir) {
 const files = ['packages', 'std', 'tests'].flatMap(dir => wgtFiles(path.join(root, dir)));
 files.push(path.join(root, 'editors/vscode/media/example.wgt'),
   path.join(root, 'editors/tree-sitter-wgt/test/fixtures/editor_current.wgt'),
-  path.join(root, 'editors/tree-sitter-wgt/test/fixtures/forward.wgt'));
+  path.join(root, 'editors/tree-sitter-wgt/test/fixtures/forward.wgt'),
+  path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_control.wgt'));
 run('tree-sitter', ['parse', '--quiet', ...files], grammar);
 const sample = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/editor_current.wgt');
 const vocabulary = JSON.parse(fs.readFileSync(path.join(root, 'editors/vocabulary.json'), 'utf8'));
 assert(vocabulary.keywords.includes('against'), 'against must be highlighted as a training keyword');
+for (const keyword of ['blend', 'repeat', 'indexed', 'carrying']) {
+  assert(vocabulary.keywords.includes(keyword), `${keyword} must be highlighted as a model expression keyword`);
+}
+const candidate = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_control.wgt');
+const candidateTree = run('tree-sitter', ['parse', candidate], grammar);
+for (const node of ['model_body', 'model_instance_declaration', 'learn_shape', 'blend_expression', 'repeat_expression']) {
+  assert(candidateTree.includes(`(${node}`), `${node}: missing candidate syntax structure`);
+}
+const candidateCaptures = run('tree-sitter', ['query', 'queries/highlights.scm', candidate], grammar);
+for (const keyword of ['blend', 'if', 'else', 'repeat', 'indexed', 'carrying']) {
+  assert(candidateCaptures.split('\n').some(line => line.includes('keyword') && line.includes('`' + keyword + '`')),
+    `${keyword}: missing candidate keyword capture`);
+}
+for (const operator of ['=>', '**']) {
+  assert(candidateCaptures.split('\n').some(line => line.includes('operator') && line.includes('`' + operator + '`')),
+    `${operator}: must be captured as one operator`);
+}
+assert(/type[^\n]*`A`/.test(candidateCaptures), 'instance model type must be highlighted');
 assert(!vocabulary.builtins.includes('fit') && !vocabulary.builtins.includes('predict'), 'removed APIs must not be listed as builtins');
 assert(vocabulary.intrinsics.includes('linear') || vocabulary.layers.includes('linear'), 'linear must be highlighted in its supported context');
 assert(!vocabulary.builtins.some(name => name.startsWith('__')), 'internal implementation names must not be public builtins');

@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy)]
 enum Edge {
+    Conv { x:usize,k:usize,b:usize,g:wgt_language::adaptive::ConvGeometry },
     Matmul { a: usize, b: usize, m: usize, k: usize, n: usize },
     Transpose { x: usize, m: usize, n: usize },
     SoftmaxAxis { x: usize, groups: super::tensor::AxisGroups },
@@ -152,6 +153,7 @@ impl Tape {
 
     pub(super) fn record(&mut self, op: Op, value: &[f32]) -> Result<()> {
         let (out, edge) = match op {
+            Op::Conv(r,x,k,b,g) => (r, Edge::Conv {x:self.reg(x)?,k:self.reg(k)?,b:self.reg(b)?,g}),
             Op::Reshape(r,x) => (r, Edge::Slice { x:self.reg(x)?, start:0 }),
             Op::Transpose(r,x,m,n) => (r, Edge::Transpose { x:self.reg(x)?,m,n }),
             Op::Matmul(r,a,b,m,k,n) => (r, Edge::Matmul { a:self.reg(a)?,b:self.reg(b)?,m,k,n }),
@@ -456,7 +458,18 @@ impl ForwardPass {
                         before[b].gradient[i] += g * db;
                     }
                 }
+                Edge::Conv { x,k,b,g } => {
+                    for (i,&dy) in node.gradient.iter().enumerate() {
+                        before[b].gradient[i/g.output_volume()]+=dy;
+                        g.pairs(i,|xi,ki| {
+                            let xv=before[x].value[xi];let kv=before[k].value[ki];
+                            before[x].gradient[xi]+=dy*kv;
+                            before[k].gradient[ki]+=dy*xv;
+                        });
+                    }
+                },
                 Edge::Matmul { a,b,m,k,n } => {
+
                     for i in 0..m { for j in 0..n { for q in 0..k {
                         let g = node.gradient[i*n+j];
                         before[a].gradient[i*k+q] += g * before[b].value[q*n+j];

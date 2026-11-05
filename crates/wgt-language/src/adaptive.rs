@@ -1,5 +1,7 @@
 use serde::{Serialize, Deserialize};
 mod source;
+mod conv;
+pub use conv::ConvGeometry;
 pub use source::{parse, parse_with_functions};
 pub(crate) use source::validate_definition;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -88,6 +90,7 @@ impl LearnDomain {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Instruction {
+    Conv { out: String, input: String, kernel: String, bias: String, stride: Vec<usize>, padding: Vec<usize>, dilation: Vec<usize>, groups: usize },
     Reshape { out: String, input: String },
     Transpose { out: String, input: String },
     Matmul { out: String, left: String, right: String },

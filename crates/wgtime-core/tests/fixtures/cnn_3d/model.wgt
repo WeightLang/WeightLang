@@ -1,0 +1,15 @@
+wgt 0.5
+model TinyCNN3D
+input x: f32[48]
+output y: f32[16]
+# 通道在前，最后的 3 个轴为空间轴；参数是初始化值，不是训练结果。
+parameter kernel: f32[2,1,2,2,2] = [-0.25,-0.1,0.05,0.2,-0.2,-0.05,0.1,0.25,-0.15,0.0,0.15,-0.25,-0.1,0.05,0.2,-0.2]
+parameter bias: f32[2] = [0.02,0.04]
+fn forward(x) {
+    # 显式恢复输入与 kernel 几何；分组 2，同一 kernel 在各空间位置共享。
+    # stride/padding/dilation 分别为 [1, 2, 1]/[0, 1, 1]/[1, 1, 2]；输出 [2, 1, 2, 4]。
+    let features = conv(reshape(x,[2,2,3,4]),reshape(kernel,[2,1,2,2,2]),bias,[1,2,1],[0,1,1],[1,1,2],2);
+    # 非线性特征提取后展平；宿主只管理输入、训练循环与权重持久化。
+    return reshape(tanh(features),[16]);
+}
+fn loss(prediction,target) { return square(prediction-target).mean; }

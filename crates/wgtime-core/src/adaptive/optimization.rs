@@ -223,7 +223,7 @@ impl AdaptiveSession {
                 "invalid temporary parameter"
             );
             if let Some(domain) = &self.program.parameters.iter().find(|p| &p.name == name).context("unknown temporary parameter")?.learn {
-                domain.validate(value[0])?;
+                for &element in value {domain.validate(element)?;}
             }
             bindings.insert(name.clone(), value.clone());
         }
@@ -286,7 +286,7 @@ impl AdaptiveSession {
                 value.iter().all(|v| v.is_finite()),
                 "nonfinite candidate parameter"
             );
-            if let Some(domain) = &p.learn { domain.validate(value[0])?; }
+            if let Some(domain) = &p.learn { for &element in value {domain.validate(element)?;} }
         }
         let steps = self
             .custom_optimizer

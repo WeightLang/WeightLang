@@ -2,6 +2,10 @@
 
 WGT 声明模型结构与可微计算，Rust 程序负责实例化、数据、训练调度和应用控制。这里的标准库仅包含可嵌入模型的纯张量函数，不提供网络、数据读取、异步任务或工具调度模块。当前为本地 WGT 0.5 实现，尚未发布。
 
+## 语言核心与标准库的边界
+
+语言核心提供组合语法，以及形状检查、原生执行和求导所需的基础张量原语。能够由这些原语组合表达的损失、注意力、网络块和数值算法放在 `std/` 或用户模块中，使用时显式 `import`；不因常用就增加预导入算法函数。标准库函数也不能隐式创建参数实例、读取数据或启动训练。
+
 ## 纯张量模块
 
 ```wgt
@@ -37,6 +41,17 @@ fn loss(prediction, target) {
 | 同上 | `categorical_logits(logits,target)` | `f32[1]`，`-sum(target*log_softmax(logits))` |
 
 类别目标应为非负且总和为 1 的独热或软标签；纯函数不动态验证分布，其他有限目标按同一加权公式计算。输入必须是 logits。稳定 sigmoid 与 log_softmax 沿用原语数值边界；极大有限数的平方、乘法或减法仍可能溢出报错。特征归约不替代样本平均。CPU 梯度来自展开后的原语，不承诺 GPU 或融合性能。
+
+## 注意力与数值迭代模块
+
+新增源码 [`std/attention.wgt`](../std/attention.wgt) 与 [`std/numerics.wgt`](../std/numerics.wgt) 复用现有张量原语。`model_std_algorithms` 五项本地测试已通过，覆盖独立 f64 前向参考、输入与参数有限差分、原生 C 执行、共享增益梯度及显式导入要求；这不代表完整 Transformer 或数值求解器已经验收。调用必须分别显式导入 `import attention from "std/attention"` 或 `import numerics from "std/numerics"`。
+
+| 模块 | 完整签名 | 形状与计算 |
+| --- | --- | --- |
+| `std/attention` | `dot_product_attention(q,k,v)` | `q:[Tq,D]`、`k:[Tk,D]`、`v:[Tk,Dv]`，返回 `[Tq,Dv]`；沿键轴归一化 `q × transpose(k)`，再乘 `v` |
+| `std/numerics` | `relax(estimate,observation,gain)` | 三个输入为同形非空 f32 张量，返回 `estimate + gain * (observation-estimate)`，形状不变 |
+
+所有参数必填。注意力函数不自动除以 `sqrt(D)`；调用方按需预缩放 `q`，例如 `D=4` 时使用 `scale(q,0.5)`。它不提供 mask、batch、多头拆分或缓存。数值更新函数不广播步长，也不限制 `gain` 到 `[0,1]`；标量情况用显式 `[1]` 张量。两者都不创建参数或状态，调用方决定参数共享关系，梯度由展开后的基础原语计算。
 
 ## 自定义计算模块与依赖闭包
 

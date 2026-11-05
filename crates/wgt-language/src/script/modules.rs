@@ -1,6 +1,6 @@
 //! Ordinary script modules, distinct from pure tensor operator libraries.
 use super::parse::{self, Expr, Program, Statement, Stmt};
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use std::{collections::HashMap, path::Path};
 
 pub(super) fn load(path: &str, root: &Path) -> Result<Option<Program>> {
@@ -121,11 +121,13 @@ mod tests {
             "wgt 0.5\nmodule Helpers\nimport cycle from \"./helper.wgt\"\nfn helper(){return 1;}",
         )
         .unwrap();
-        assert!(link(
-            "wgt 0.5\nimport dev from \"./helper.wgt\"\nfn main(){return 0;}",
-            &root
-        )
-        .is_err());
+        assert!(
+            link(
+                "wgt 0.5\nimport dev from \"./helper.wgt\"\nfn main(){return 0;}",
+                &root
+            )
+            .is_err()
+        );
         std::fs::remove_file(path).unwrap();
         std::fs::remove_dir(root).unwrap();
     }
@@ -157,7 +159,29 @@ fn rewrite_expr(expr: &mut Expr, calls: &HashMap<String, String>) {
             }
         }
         Expr::Unary(_, a) | Expr::SampleFrom(_, a) => rewrite_expr(a, calls),
-        Expr::Sample(a, b, c) | Expr::Mix(a, b, c) => {
+        Expr::Blend(arms) => {
+            for (p, x) in arms {
+                rewrite_expr(p, calls);
+                rewrite_expr(x, calls);
+            }
+        }
+        Expr::Repeat {
+            depth,
+            initial,
+            body,
+            ..
+        } => {
+            for e in [depth, initial, body] {
+                rewrite_expr(e, calls);
+            }
+        }
+        Expr::Invoke(target, args) => {
+            rewrite_expr(target, calls);
+            for e in args {
+                rewrite_expr(e, calls);
+            }
+        }
+        Expr::Sample(a, b, c) | Expr::Mix(a, b, c) | Expr::Conditional(a, b, c) => {
             rewrite_expr(a, calls);
             rewrite_expr(b, calls);
             rewrite_expr(c, calls);

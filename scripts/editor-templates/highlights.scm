@@ -22,6 +22,12 @@
 ["wgt" "require" "use" "import" "inherit" "freeze" "unfreeze" "data" "init" "config" "parameter" "share" "adapter" "frozen" "precision" "wtype" "weight"] @keyword
 (clause) @keyword
 (script_keyword) @keyword
+(blend_expression "blend" @keyword)
+(repeat_expression ["repeat" "indexed" "carrying"] @keyword)
+(repeat_expression index: (identifier) @variable)
+(repeat_expression state: (identifier) @variable)
+(model_instance_declaration name: (identifier) @variable)
+(model_instance_declaration model: (identifier) @type)
 (train_expression "train" @keyword)
 (train_expression "on" @keyword)
 (train_expression "against" @keyword)

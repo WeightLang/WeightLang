@@ -375,7 +375,7 @@ impl<'a> Generator<'a> {
         let mut registers = HashMap::new();
         let mut workspace = 0usize;
         let mut max = 0;
-        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Reshape { .. } | I::Transpose { .. } | I::Matmul { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
+        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Conv { .. } | I::Reshape { .. } | I::Transpose { .. } | I::Matmul { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
         for (i, r) in program.registers.iter().enumerate() {
             ensure!(r.shape.len() <= 8 && r.shape.iter().all(|d| *d <= 16384) && crate::elements(&r.shape)? == r.len, "compiled register geometry/storage mismatch");
             ensure!(program.version >= 3 || r.shape == [r.len], "multiaxis registers require compiled IR version 3");
@@ -469,7 +469,21 @@ impl<'a> Generator<'a> {
             let mut reads: Vec<&str> = Vec::new();
             let mut body = String::new();
             match instruction {
+                I::Conv { out:o,input:x,kernel,bias,stride,padding,dilation,groups } => {
+                    let (a,_,xi)=self.reg(x)?;let (k,_,ki)=self.reg(kernel)?;let (b,_,bi)=self.reg(bias)?;
+                    let g=wgt_language::adaptive::ConvGeometry::new(&self.program.registers[xi].shape,&self.program.registers[ki].shape,&self.program.registers[bi].shape,stride,padding,dilation,*groups)?;
+                    ensure!(self.program.registers[self.reg(o)?.2].shape==g.shape(),"compiled conv output shape mismatch");
+                    let work=g.work()?-1;let ov=g.output_volume();let iv=g.input_volume();let kv=g.kernel_volume();let cg=g.channels/g.groups;let og=g.outputs/g.groups;let count=g.outputs*ov;
+                    body+=&format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{count};z++){{size_t oc=z/{ov},pos=z%{ov},coords[3]={{0}};");
+                    for d in (0..g.rank).rev(){body+=&format!("coords[{d}]=pos%{};pos/={};",g.output[d],g.output[d]);}
+                    body+=&format!("double sum=r[{b}+oc];for(size_t c=0;c<{cg};c++)for(size_t q=0;q<{kv};q++){{size_t rem=q,kc[3]={{0}},ix=0;int valid=1;");
+                    for d in (0..g.rank).rev(){body+=&format!("kc[{d}]=rem%{};rem/={};",g.kernel[d],g.kernel[d]);}
+                    for d in 0..g.rank {body+=&format!("{{long p=(long)(coords[{d}]*{}+kc[{d}]*{})-{};if(p<0||p>={})valid=0;else ix=ix*{}+(size_t)p;}}",g.stride[d],g.dilation[d],g.padding[d],g.input[d],g.input[d]);}
+                    body+=&format!("if(valid)sum+=(double)r[{a}+(oc/{og}*{cg}+c)*{iv}+ix]*(double)r[{k}+(oc*{cg}+c)*{kv}+q];}}t[z]=(float)sum;}}");
+                    reads.extend([x.as_str(),kernel.as_str(),bias.as_str()]);out=Some(o);
+                },
                 I::Reshape { out:o,input:x } => {
+
                     let (a,n,_) = self.reg(x)?;
                     ensure!(n == self.reg(o)?.1, "compiled reshape count mismatch");
                     body += &format!("memcpy(t,r+{a},{n}*sizeof(float));");
@@ -523,8 +537,8 @@ impl<'a> Generator<'a> {
                     ensure!(self.reg(o)?.1 == n, "compiled read shape mismatch");
                     body += &format!("memcpy(t,p[{p}],{n}*sizeof(float));");
                     match &self.program.parameters[p].learn {
-                        Some(wgt_language::adaptive::LearnDomain::Int { .. }) => body += "t[0]=roundf(t[0]);",
-                        Some(wgt_language::adaptive::LearnDomain::Bool) => body += "t[0]=t[0]>=0.5f?1.0f:0.0f;",
+                        Some(wgt_language::adaptive::LearnDomain::Int { .. }) => body += &format!("for(size_t j=0;j<{n};j++)t[j]=roundf(t[j]);"),
+                        Some(wgt_language::adaptive::LearnDomain::Bool) => body += &format!("for(size_t j=0;j<{n};j++)t[j]=t[j]>=0.5f?1.0f:0.0f;"),
                         _ => {},
                     }
                     out = Some(o);

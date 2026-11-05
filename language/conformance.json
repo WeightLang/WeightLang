@@ -49,6 +49,12 @@
     {"id":"leading-dot-editor-tolerance","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return .5; }\n"},
     {"id":"double-slash-editor-tolerance","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return 4 // 2; }\n"},
     {"id":"unclosed-body","context":"ordinary_function","rust_accepts":false,"editor_accepts":false,"source":"wgt 0.5\nfn main() { return 1;\n"},
-    {"id":"operator-library-structure","context":"editor","editor_accepts":true,"editor_node":"operators_declaration","source":"wgt 0.5\noperators Local\nfn activate(x) { return relu(x); }\n"}
+    {"id":"operator-library-structure","context":"editor","editor_accepts":true,"editor_node":"operators_declaration","source":"wgt 0.5\noperators Local\nfn activate(x) { return relu(x); }\n"},
+    {"id":"candidate-blend-expression","context":"editor","editor_accepts":true,"editor_node":"blend_expression","source":"wgt 0.5\nfn forward(x){return blend { p => x; (1-p) => x ** 2; };}\n"},
+    {"id":"candidate-if-expression","context":"editor","editor_accepts":true,"source":"wgt 0.5\nfn forward(x){return if enabled[0] {x} else {x ** 2;};}\n"},
+    {"id":"candidate-repeat-indexed","context":"editor","editor_accepts":true,"editor_node":"repeat_expression","source":"wgt 0.5\nfn forward(x){return repeat depth indexed i carrying h=x {experts[i](h)};}\n"},
+    {"id":"candidate-repeat-shared","context":"editor","editor_accepts":true,"editor_node":"repeat_expression","source":"wgt 0.5\nfn forward(x){return repeat 2 carrying h=x {h ** 2;};}\n"},
+    {"id":"candidate-learn-arrays","context":"editor","editor_accepts":true,"editor_node":"learn_shape","source":"wgt 0.5\nlearn enabled: bool[8] = true;\nlearn flags: bool[2] = [true,false];\nlearn scales: float[2] = [0.25,-0.5];\nlearn counts: int[2] in 1..=12 = [1,12];\n"},
+    {"id":"candidate-model-composition","context":"editor","editor_accepts":true,"editor_node":"model_body","source":"wgt 0.5\nmodel A {\ninput x: f32[1]\noutput y: f32[1]\nparameter b: f32[1] = [0]\nlearn enabled: bool[1] = true;\nfn forward(x){return x+b;}\n}\nmodel Root\ninput x: f32[1]\noutput y: f32[1]\nexperts: A[8];\nfn forward(x){return experts[0](x);}\n"}
   ]
 }

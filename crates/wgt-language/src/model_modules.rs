@@ -61,6 +61,26 @@ pub(crate) fn resolve(text: &str, file: Option<&Path>) -> Result<(String, Vec<Pa
     let functions = parse::parse_functions(&unit.functions)?;
     let declarations = strip_imports(&unit.declarations);
     let mut output = declarations;
+    for (name, body) in &unit.models {
+        let child = crate::source::split(body)?;
+        output.push_str(&format!("\nmodel {name} {{\n"));
+        output.push_str(
+            &child
+                .declarations
+                .lines()
+                .skip(2)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        for (name, mut function) in parse::parse_functions(&child.functions)?
+            .into_iter()
+            .collect::<BTreeMap<_, _>>()
+        {
+            rewrite_function(&mut function, &calls);
+            emit_function(&mut output, &name, &function)?;
+        }
+        output.push_str("\n}\n");
+    }
     for (name, mut function) in functions.into_iter().collect::<BTreeMap<_, _>>() {
         ensure!(
             !resolver.functions.contains_key(&name),
@@ -273,6 +293,45 @@ fn expression(expr: &Expr) -> Result<String> {
                 .transpose()?
                 .unwrap_or_default()
         ),
+        Expr::Blend(arms) => format!(
+            "blend {{ {} }}",
+            arms.iter()
+                .map(|(p, x)| Ok(format!("{} => {};", expression(p)?, expression(x)?)))
+                .collect::<Result<Vec<_>>>()?
+                .join(" ")
+        ),
+        Expr::Conditional(c, a, b) => format!(
+            "if {} {{ {} }} else {{ {} }}",
+            expression(c)?,
+            expression(a)?,
+            expression(b)?
+        ),
+        Expr::Repeat {
+            depth,
+            index,
+            carrying,
+            initial,
+            body,
+        } => format!(
+            "repeat {} {}carrying {carrying}={} {{ {} }}",
+            expression(depth)?,
+            index
+                .as_ref()
+                .map(|i| format!("indexed {i} "))
+                .unwrap_or_default(),
+            expression(initial)?,
+            expression(body)?
+        ),
+        Expr::Invoke(target, args) => format!(
+            "{}({})",
+            expression(target)?,
+            args.iter()
+                .map(expression)
+                .collect::<Result<Vec<_>>>()?
+                .join(",")
+        ),
+        Expr::Index(x, i) => format!("({})[{}]", expression(x)?, expression(i)?),
+        Expr::Bool(b) => b.to_string(),
         Expr::Mix(p, a, b) => format!(
             "mix {} {{ then {{ {} }} else {{ {} }} }}",
             expression(p)?,

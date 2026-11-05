@@ -2110,6 +2110,24 @@
       }
     },
     {
+      "name": "conv",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "无 batch、通道优先的 1D/2D/3D 分组互相关；x:[Cin,S...]、kernel:[Cout,Cin/groups,K...]、bias:[Cout]。stride/dilation 为正整数常量列表，padding 为非负对称填充列表，groups 为整除输入输出通道数的正整数常量；无广播。",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/convolution.md",
+      "position": "expression",
+      "signature": "conv(x,kernel,bias,stride,padding,dilation,groups)",
+      "defaults": {},
+      "arity": {
+        "min": 7,
+        "max": 7
+      }
+    },
+    {
       "name": "scale",
       "kind": "intrinsic",
       "contexts": [

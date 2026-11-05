@@ -1,0 +1,231 @@
+==================
+Candidate model blocks and independent instance arrays
+==================
+wgt 0.5
+model A {
+input x: f32[2]
+output y: f32[2]
+parameter b: f32[2] = [0,0]
+learn enabled: bool[2] = [true,false];
+fn forward(x) { return x+b; }
+}
+model Root
+experts: A[8];
+
+---
+
+(source_file
+  (directive
+    (number))
+  (model_declaration
+    (identifier)
+    (model_body
+      (port_declaration
+        (identifier)
+        (qualified_name
+          (identifier))
+        (array
+          (number)))
+      (port_declaration
+        (identifier)
+        (qualified_name
+          (identifier))
+        (array
+          (number)))
+      (directive
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (qualified_name
+          (identifier))
+        (array
+          (number))
+        (operator)
+        (array
+          (number)
+          (punctuation)
+          (number)))
+      (learn_declaration
+        (identifier)
+        (learn_shape
+          (number))
+        (array
+          (literal)
+          (punctuation)
+          (literal)))
+      (function_declaration
+        (identifier)
+        (arguments
+          (qualified_name
+            (identifier)))
+        (body
+          (script_keyword)
+          (qualified_name
+            (identifier))
+          (operator)
+          (qualified_name
+            (identifier))))))
+  (model_declaration
+    (identifier))
+  (model_instance_declaration
+    (identifier)
+    (identifier)
+    (learn_shape
+      (number))))
+
+==================
+Candidate blend conditional repeat and square expressions
+==================
+fn forward(x) {
+let a=blend { p => x; (1-p) => experts[0](x); };
+let b=if enabled[0] { a } else { x; };
+let c=repeat depth indexed i carrying h=b { experts[i](h) };
+return repeat 2 carrying h=c { h ** 2; };
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier)))
+    (body
+      (script_keyword)
+      (parameter
+        (identifier))
+      (blend_expression
+        (body
+          (qualified_name
+            (identifier))
+          (operator)
+          (qualified_name
+            (identifier))
+          (arguments
+            (number)
+            (operator)
+            (qualified_name
+              (identifier)))
+          (operator)
+          (qualified_name
+            (identifier))
+          (array
+            (number))
+          (arguments
+            (qualified_name
+              (identifier)))))
+      (script_keyword)
+      (parameter
+        (identifier))
+      (script_keyword)
+      (qualified_name
+        (identifier))
+      (array
+        (number))
+      (body
+        (qualified_name
+          (identifier)))
+      (script_keyword)
+      (body
+        (qualified_name
+          (identifier)))
+      (script_keyword)
+      (parameter
+        (identifier))
+      (repeat_expression
+        (qualified_name
+          (identifier))
+        (identifier)
+        (identifier)
+        (qualified_name
+          (identifier))
+        (body
+          (qualified_name
+            (identifier))
+          (array
+            (qualified_name
+              (identifier)))
+          (arguments
+            (qualified_name
+              (identifier)))))
+      (script_keyword)
+      (repeat_expression
+        (number)
+        (identifier)
+        (qualified_name
+          (identifier))
+        (body
+          (qualified_name
+            (identifier))
+          (operator)
+          (number))))))
+
+==================
+Candidate learn arrays retain inclusive range token boundaries
+==================
+learn enabled: bool[8] = true;
+learn flags: bool[2] = [true,false];
+learn scales: float[2] = [0.25,-0.5];
+learn bounded: float[2] in 0..=1 = [0.25,0.75];
+learn positive: float[2] > 0 = [1,2];
+learn counts: int[2] in 1..=12 = [1,12];
+const trailing_decimal = 1.
+
+---
+
+(source_file
+  (learn_declaration
+    (identifier)
+    (learn_shape
+      (number))
+    (literal))
+  (learn_declaration
+    (identifier)
+    (learn_shape
+      (number))
+    (array
+      (literal)
+      (punctuation)
+      (literal)))
+  (learn_declaration
+    (identifier)
+    (learn_shape
+      (number))
+    (array
+      (number)
+      (punctuation)
+      (operator)
+      (number)))
+  (learn_declaration
+    (identifier)
+    (learn_shape
+      (number))
+    (learn_bound)
+    (learn_bound)
+    (array
+      (number)
+      (punctuation)
+      (number)))
+  (learn_declaration
+    (identifier)
+    (learn_shape
+      (number))
+    (signed_number)
+    (array
+      (number)
+      (punctuation)
+      (number)))
+  (learn_declaration
+    (identifier)
+    (learn_shape
+      (number))
+    (learn_bound)
+    (learn_bound)
+    (array
+      (number)
+      (punctuation)
+      (number)))
+  (constant_declaration
+    (identifier)
+    (number)))

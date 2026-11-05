@@ -1,10 +1,11 @@
 //! WGT 0.5 compilation units: model declarations and ordinary functions coexist.
 //! Splitting preserves physical line numbers; comments and strings cannot close a function.
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 
 pub struct Unit {
     pub declarations: String,
     pub functions: String,
+    pub models: Vec<(String, String)>,
 }
 
 pub fn split(source: &str) -> Result<Unit> {
@@ -14,8 +15,71 @@ pub fn split(source: &str) -> Result<Unit> {
     let mut in_function = false;
     let mut opened = false;
     let mut depth = 0usize;
+    let mut models = Vec::new();
+    let mut model_block: Option<(String, String, usize)> = None;
     for (i, line) in source.lines().enumerate() {
         let trimmed = line.trim();
+        if let Some((name, body, level)) = &mut model_block {
+            let mut quote = false;
+            let mut escape = false;
+            for c in line.chars() {
+                if quote {
+                    if escape {
+                        escape = false;
+                    } else if c == '\\' {
+                        escape = true;
+                    } else if c == '"' {
+                        quote = false;
+                    }
+                } else {
+                    match c {
+                        '#' => break,
+                        '"' => quote = true,
+                        '{' => *level += 1,
+                        '}' => {
+                            *level = level
+                                .checked_sub(1)
+                                .context("unexpected model closing brace")?
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if *level == 0 {
+                ensure!(
+                    trimmed == "}",
+                    "model closing brace must occupy its own line"
+                );
+                models.push((name.clone(), body.clone()));
+                model_block = None;
+            } else {
+                body.push_str(line);
+                body.push('\n');
+            }
+            declarations.push("");
+            functions.push("");
+            continue;
+        }
+        if header && !in_function && trimmed.starts_with("model ") && trimmed.ends_with('{') {
+            let name = trimmed
+                .strip_prefix("model ")
+                .unwrap()
+                .strip_suffix('{')
+                .unwrap()
+                .trim();
+            ensure!(
+                crate::script::operators::identifier(name),
+                "invalid submodel name"
+            );
+            ensure!(
+                !models.iter().any(|(n, _)| n == name),
+                "duplicate submodel definition"
+            );
+            model_block = Some((name.to_owned(), format!("wgt 0.5\nmodel {name}\n"), 1));
+            declarations.push("");
+            functions.push("");
+            continue;
+        }
         if !header && !trimmed.is_empty() && !trimmed.starts_with('#') {
             ensure!(
                 trimmed == "wgt 0.5",
@@ -32,7 +96,12 @@ pub fn split(source: &str) -> Result<Unit> {
             "line {}: duplicate version header",
             i + 1
         );
-        if !in_function && (trimmed.starts_with("fn ") || trimmed.starts_with("async fn ") || trimmed.starts_with("agent ") || trimmed.starts_with("environment ")) {
+        if !in_function
+            && (trimmed.starts_with("fn ")
+                || trimmed.starts_with("async fn ")
+                || trimmed.starts_with("agent ")
+                || trimmed.starts_with("environment "))
+        {
             in_function = true;
             opened = false;
         }
@@ -79,7 +148,9 @@ pub fn split(source: &str) -> Result<Unit> {
     }
     ensure!(header, "missing 'wgt 0.5' header");
     ensure!(!in_function, "unterminated function");
+    ensure!(model_block.is_none(), "unterminated submodel definition");
     Ok(Unit {
+        models,
         declarations: declarations.join("\n"),
         functions: functions.join("\n"),
     })
@@ -88,7 +159,10 @@ pub fn split(source: &str) -> Result<Unit> {
 /// Static sequential graph plan. Weights are created only by an explicit constructor call.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Graph {
-    #[serde(default, skip_serializing_if = "crate::categorical::VectorType::is_plain")]
+    #[serde(
+        default,
+        skip_serializing_if = "crate::categorical::VectorType::is_plain"
+    )]
     pub output_type: crate::categorical::VectorType,
     pub input: usize,
     pub seed: u64,
@@ -105,21 +179,31 @@ pub struct GraphLayer {
 
 pub fn vector_port(body: &str) -> Result<(String, usize)> {
     let (name, n, kind) = typed_vector_port(body)?;
-    ensure!(kind == crate::categorical::VectorType::F32, "this port requires f32[N]; categorical types are output contracts");
+    ensure!(
+        kind == crate::categorical::VectorType::F32,
+        "this port requires f32[N]; categorical types are output contracts"
+    );
     Ok((name, n))
 }
 
 pub fn typed_vector_port(body: &str) -> Result<(String, usize, crate::categorical::VectorType)> {
     use crate::categorical::VectorType;
-    let (name, dtype) = body.split_once(':').context("port requires name: type[N]")?;
-    let (kind, shape) = dtype.trim().split_once('[').context("native vector execution requires type[N]")?;
+    let (name, dtype) = body
+        .split_once(':')
+        .context("port requires name: type[N]")?;
+    let (kind, shape) = dtype
+        .trim()
+        .split_once('[')
+        .context("native vector execution requires type[N]")?;
     let kind = match kind {
         "f32" => VectorType::F32,
         "logits" => VectorType::Logits,
         "probabilities" => VectorType::Probabilities,
         _ => anyhow::bail!("native vector type must be f32, logits or probabilities"),
     };
-    let shape = shape.strip_suffix(']').context("native vector execution requires type[N]")?;
+    let shape = shape
+        .strip_suffix(']')
+        .context("native vector execution requires type[N]")?;
     let n: usize = shape
         .trim()
         .parse()
@@ -202,7 +286,11 @@ pub fn graph(source: &str) -> Result<(String, Graph)> {
                     ensure!(declared_in == width, "linear input width mismatch");
                     ("linear", out.context("linear requires out")?, bias)
                 } else {
-                    ensure!(matches!(spec, "relu" | "tanh" | "sigmoid" | "identity"), "line {}: operator is not yet supported by native vector construction: {spec}", i+1);
+                    ensure!(
+                        matches!(spec, "relu" | "tanh" | "sigmoid" | "identity"),
+                        "line {}: operator is not yet supported by native vector construction: {spec}",
+                        i + 1
+                    );
                     (spec, width, false)
                 };
                 ensure!(out > 0 && out <= 16384, "invalid output width");

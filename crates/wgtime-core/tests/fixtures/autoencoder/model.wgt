@@ -1,0 +1,18 @@
+wgt 0.5
+model BottleneckAutoencoder
+input x: f32[3]
+output reconstruction: f32[3]
+# 单样本 3 个特征压缩到 2 个潜变量，再重建 3 个特征；没有批次轴契约。
+# 编码器和解码器参数独立（非 tied weights）；给定值仅初始化，不隐式训练。
+parameter encoder: f32[3,2] = [0.4,-0.2,0.1,0.3,-0.3,0.2]
+parameter encoder_bias: f32[2] = [0.02,-0.01]
+parameter decoder: f32[2,3] = [0.3,0.1,-0.2,-0.1,0.4,0.2]
+parameter decoder_bias: f32[3] = [0.01,-0.02,0.03]
+fn forward(x) {
+    # 参数裸读为扁平向量，显式恢复编码/解码矩阵轴。
+    # matmul 内部 [1,3]→[1,2]；恢复向量后加同形偏置，无广播。
+    let latent = tanh(reshape(matmul(reshape(x,[1,3]),reshape(encoder,[3,2])),[2])+encoder_bias);
+    # 线性解码器允许正负重建值；训练目标由 Rust 显式传入原始输入。
+    return reshape(matmul(reshape(latent,[1,2]),reshape(decoder,[2,3])),[3])+decoder_bias;
+}
+fn loss(prediction,target) { return square(prediction-target).mean; }

@@ -1,6 +1,6 @@
 //! Validate syntax-bound training strategies after collecting all user declarations.
 use super::parse::{Expr, Program, Statement, Stmt};
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 
 pub(super) fn validate(program: &Program) -> Result<()> {
     fn expression(expr: &Expr, program: &Program) -> Result<()> {
@@ -41,7 +41,29 @@ pub(super) fn validate(program: &Program) -> Result<()> {
                 }
             }
             Expr::Unary(_, x) | Expr::SampleFrom(_, x) => expression(x, program)?,
-            Expr::Sample(p, a, b) | Expr::Mix(p, a, b) => {
+            Expr::Blend(arms) => {
+                for (p, x) in arms {
+                    expression(p, program)?;
+                    expression(x, program)?;
+                }
+            }
+            Expr::Repeat {
+                depth,
+                initial,
+                body,
+                ..
+            } => {
+                for e in [depth, initial, body] {
+                    expression(e, program)?;
+                }
+            }
+            Expr::Invoke(target, args) => {
+                expression(target, program)?;
+                for e in args {
+                    expression(e, program)?;
+                }
+            }
+            Expr::Sample(p, a, b) | Expr::Mix(p, a, b) | Expr::Conditional(p, a, b) => {
                 for e in [p, a, b] {
                     expression(e, program)?;
                 }
@@ -71,8 +93,13 @@ pub(super) fn validate(program: &Program) -> Result<()> {
                 Stmt::Learn(_, target, learner, body) => {
                     expression(target, program)?;
                     if !learner.is_empty() {
-                        let function=program.get(learner).with_context(||format!("unknown learner function: {learner}"))?;
-                        ensure!(!function.is_async && function.args.len()==2, "learner must be a synchronous user function with two parameters");
+                        let function = program
+                            .get(learner)
+                            .with_context(|| format!("unknown learner function: {learner}"))?;
+                        ensure!(
+                            !function.is_async && function.args.len() == 2,
+                            "learner must be a synchronous user function with two parameters"
+                        );
                     }
                     block(body, program)?;
                 }

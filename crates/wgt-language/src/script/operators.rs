@@ -1,6 +1,6 @@
 //! Pure tensor functions and explicit, non-executing source imports.
 use super::parse::{Expr, Function, Program, Statement, Stmt};
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
@@ -8,7 +8,11 @@ use std::{
 };
 
 const OPS: &[&str] = &[
-    "reshape", "transpose", "matmul", "scale",
+    "reshape",
+    "transpose",
+    "matmul",
+    "scale",
+    "conv",
     "add",
     "mul",
     "relu",
@@ -118,7 +122,10 @@ fn validate_inner(
     let f = functions
         .get(name)
         .with_context(|| format!("unknown tensor operator: {name}"))?;
-    ensure!(!f.is_async, "async function cannot be a tensor operator: {name}");
+    ensure!(
+        !f.is_async,
+        "async function cannot be a tensor operator: {name}"
+    );
     ensure!(
         f.args.iter().all(|n| identifier(n)),
         "invalid operator parameter"
@@ -162,7 +169,7 @@ fn check_expr(
             names.contains(n),
             "operator cannot capture tensor or parameter: {n}"
         ),
-        Expr::Number(_) => {}
+        Expr::Number(_) | Expr::Bool(_) => {}
         Expr::Slice(x, start, end) => {
             check_expr(x, names, functions, stack, checked)?;
             for endpoint in start.iter().chain(end.iter()) {
@@ -176,6 +183,55 @@ fn check_expr(
         }
         Expr::Unary(op, x) if op == "-" => check_expr(x, names, functions, stack, checked)?,
         Expr::Binary(op, a, b) if ["+", "-", "*"].contains(&op.as_str()) => {
+            check_expr(a, names, functions, stack, checked)?;
+            check_expr(b, names, functions, stack, checked)?;
+        }
+        Expr::Index(x, i) => {
+            check_expr(x, names, functions, stack, checked)?;
+            check_expr(i, names, functions, stack, checked)?;
+        }
+        Expr::Blend(arms) => {
+            for (p, x) in arms {
+                check_expr(p, names, functions, stack, checked)?;
+                check_expr(x, names, functions, stack, checked)?;
+            }
+        }
+        Expr::Repeat {
+            depth,
+            index,
+            carrying,
+            initial,
+            body,
+        } => {
+            check_expr(depth, names, functions, stack, checked)?;
+            check_expr(initial, names, functions, stack, checked)?;
+            let mut scoped = names.clone();
+            scoped.insert(carrying.clone());
+            if let Some(i) = index {
+                scoped.insert(i.clone());
+            }
+            check_expr(body, &scoped, functions, stack, checked)?;
+        }
+        Expr::Binary(op, a, b) if op == "**" && matches!(**b, Expr::Number(2.)) => {
+            check_expr(a, names, functions, stack, checked)?
+        }
+        Expr::Conditional(condition, a, b) => {
+            match &**condition {
+                Expr::Bool(_) => {}
+                Expr::Binary(op, x, y)
+                    if [">", ">=", "<", "<=", "==", "!="].contains(&op.as_str()) =>
+                {
+                    check_expr(x, names, functions, stack, checked)?;
+                    check_expr(y, names, functions, stack, checked)?;
+                }
+                Expr::Call(op, args) if op == "positive" && args.len() == 1 => {
+                    check_expr(&args[0], names, functions, stack, checked)?
+                }
+                Expr::Name(_) | Expr::Index(..) => {
+                    check_expr(condition, names, functions, stack, checked)?
+                }
+                _ => bail!("pure tensor if requires a scalar comparison or boolean condition"),
+            }
             check_expr(a, names, functions, stack, checked)?;
             check_expr(b, names, functions, stack, checked)?;
         }
@@ -197,6 +253,7 @@ fn check_expr(
                 );
             } else {
                 let arity = match n.as_str() {
+                    "conv" => 7,
                     "add" | "mul" | "gate" | "minimum" | "reshape" | "matmul" | "scale" => 2,
                     "route" | "slice" | "clip" => 3,
                     "softmax" if args.len() == 2 => 2,
@@ -235,10 +292,45 @@ pub(crate) fn rewrite(
             a.iter().map(|e| rewrite(e, names, calls)).collect(),
         ),
         Expr::List(a) => Expr::List(a.iter().map(|e| rewrite(e, names, calls)).collect()),
-        Expr::Slice(x, start, end) => Expr::Slice(r(x), start.as_ref().map(|e| r(e)), end.as_ref().map(|e| r(e))),
+        Expr::Slice(x, start, end) => Expr::Slice(
+            r(x),
+            start.as_ref().map(|e| r(e)),
+            end.as_ref().map(|e| r(e)),
+        ),
         Expr::Unary(o, a) => Expr::Unary(o.clone(), r(a)),
         Expr::Binary(o, a, b) => Expr::Binary(o.clone(), r(a), r(b)),
         Expr::Mix(p, a, b) => Expr::Mix(r(p), r(a), r(b)),
+        Expr::Conditional(p, a, b) => Expr::Conditional(r(p), r(a), r(b)),
+        Expr::Blend(arms) => Expr::Blend(
+            arms.iter()
+                .map(|(p, x)| (rewrite(p, names, calls), rewrite(x, names, calls)))
+                .collect(),
+        ),
+        Expr::Index(x, i) => Expr::Index(r(x), r(i)),
+        Expr::Invoke(x, args) => Expr::Invoke(
+            r(x),
+            args.iter().map(|x| rewrite(x, names, calls)).collect(),
+        ),
+        Expr::Repeat {
+            depth,
+            index,
+            carrying,
+            initial,
+            body,
+        } => {
+            let mut scoped = names.clone();
+            scoped.remove(carrying);
+            if let Some(i) = index {
+                scoped.remove(i);
+            }
+            Expr::Repeat {
+                depth: r(depth),
+                index: index.clone(),
+                carrying: carrying.clone(),
+                initial: r(initial),
+                body: Box::new(rewrite(body, &scoped, calls)),
+            }
+        }
         _ => e.clone(),
     }
 }
@@ -274,6 +366,8 @@ pub fn standard_source(path: &str) -> Option<&'static str> {
     match path {
         "std/activation" => Some(include_str!("../../../../std/activation.wgt")),
         "std/loss" => Some(include_str!("../../../../std/loss.wgt")),
+        "std/attention" => Some(include_str!("../../../../std/attention.wgt")),
+        "std/numerics" => Some(include_str!("../../../../std/numerics.wgt")),
         _ => None,
     }
 }
@@ -288,59 +382,84 @@ pub(crate) fn link(
     for (alias, path) in imports {
         let standard = path.starts_with("std/");
         let source = if standard {
-            ensure!(!matches!(path.as_str(), "std/activation/operators" | "std/loss/operators"), "internal /operators import was removed; use std/activation or std/loss");
+            ensure!(
+                !matches!(
+                    path.as_str(),
+                    "std/activation/operators" | "std/loss/operators"
+                ),
+                "internal /operators import was removed; use std/activation or std/loss"
+            );
             standard_source(&path)
                 .with_context(|| format!("unsupported native standard operator module: {path}; legacy block modules require graph migration"))?
                 .to_owned()
         } else {
-        let file = if path.starts_with("./") {
-            let relative = Path::new(&path[2..]);
-            ensure!(
-                relative
-                    .components()
-                    .all(|c| matches!(c, std::path::Component::Normal(_))),
-                "operator path must stay under the source directory"
-            );
-            let root = root.canonicalize()?;
-            let file = root.join(relative).canonicalize()?;
-            ensure!(
-                file.starts_with(root),
-                "operator path escapes source directory"
-            );
-            file
-        } else {
-            let (module, name) = path
-                .rsplit_once('/')
-                .context("package import requires MODULE/LIBRARY")?;
-            ensure!(identifier(name), "invalid operator library name");
-            let base = dependencies
-                .get(module)
-                .with_context(|| format!("unresolved operator dependency: {module}"))?;
-            let base = Path::new(base);
-            if base.join("wgt.index.json").is_file() {
-                let index: serde_json::Value = serde_json::from_slice(&fs::read(base.join("wgt.index.json"))?)?;
-                ensure!(index["format_version"] == 2, "unsupported source package index");
-                let mut found = None;
-                for relative in index["sources"].as_object().context("package sources")?.keys().filter(|p| p.ends_with(".wgt")) {
-                    ensure!(Path::new(relative).components().all(|c| matches!(c, std::path::Component::Normal(_))), "unsafe package source path");
-                    let file = base.join(relative);
-                    ensure!(fs::metadata(&file)?.len() <= 1024 * 1024, "operator library exceeds 1 MiB");
-                    let text = fs::read_to_string(&file)?;
-                    if library(&text).is_ok_and(|library| library == name) {
-                        ensure!(found.is_none(), "duplicate operator library: {name}");
-                        found = Some(file);
-                    }
-                }
-                found.with_context(|| format!("operator library missing from source package: {name}"))?
+            let file = if path.starts_with("./") {
+                let relative = Path::new(&path[2..]);
+                ensure!(
+                    relative
+                        .components()
+                        .all(|c| matches!(c, std::path::Component::Normal(_))),
+                    "operator path must stay under the source directory"
+                );
+                let root = root.canonicalize()?;
+                let file = root.join(relative).canonicalize()?;
+                ensure!(
+                    file.starts_with(root),
+                    "operator path escapes source directory"
+                );
+                file
             } else {
-                base.join(name).join("source.wgt")
-            }
-        };
-        ensure!(
-            fs::metadata(&file)?.len() <= 1024 * 1024,
-            "operator library exceeds 1 MiB"
-        );
-        fs::read_to_string(&file).with_context(|| file.display().to_string())?
+                let (module, name) = path
+                    .rsplit_once('/')
+                    .context("package import requires MODULE/LIBRARY")?;
+                ensure!(identifier(name), "invalid operator library name");
+                let base = dependencies
+                    .get(module)
+                    .with_context(|| format!("unresolved operator dependency: {module}"))?;
+                let base = Path::new(base);
+                if base.join("wgt.index.json").is_file() {
+                    let index: serde_json::Value =
+                        serde_json::from_slice(&fs::read(base.join("wgt.index.json"))?)?;
+                    ensure!(
+                        index["format_version"] == 2,
+                        "unsupported source package index"
+                    );
+                    let mut found = None;
+                    for relative in index["sources"]
+                        .as_object()
+                        .context("package sources")?
+                        .keys()
+                        .filter(|p| p.ends_with(".wgt"))
+                    {
+                        ensure!(
+                            Path::new(relative)
+                                .components()
+                                .all(|c| matches!(c, std::path::Component::Normal(_))),
+                            "unsafe package source path"
+                        );
+                        let file = base.join(relative);
+                        ensure!(
+                            fs::metadata(&file)?.len() <= 1024 * 1024,
+                            "operator library exceeds 1 MiB"
+                        );
+                        let text = fs::read_to_string(&file)?;
+                        if library(&text).is_ok_and(|library| library == name) {
+                            ensure!(found.is_none(), "duplicate operator library: {name}");
+                            found = Some(file);
+                        }
+                    }
+                    found.with_context(|| {
+                        format!("operator library missing from source package: {name}")
+                    })?
+                } else {
+                    base.join(name).join("source.wgt")
+                }
+            };
+            ensure!(
+                fs::metadata(&file)?.len() <= 1024 * 1024,
+                "operator library exceeds 1 MiB"
+            );
+            fs::read_to_string(&file).with_context(|| file.display().to_string())?
         };
         library(&source)?;
         let (library_name, functions) = library_functions(&source)?;
@@ -367,7 +486,14 @@ pub(crate) fn link(
                     },
                 })
                 .collect();
-            linked.insert(calls[&n].clone(), Function { is_async: f.is_async, args: f.args, body });
+            linked.insert(
+                calls[&n].clone(),
+                Function {
+                    is_async: f.is_async,
+                    args: f.args,
+                    body,
+                },
+            );
         }
     }
     // Only remove declaration lines; a string or comment inside a function is untouched.

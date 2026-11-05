@@ -17,6 +17,7 @@ pub use workspace::ExecutionProgress;
 pub use wgt_language::adaptive::{Program, Register, Parameter, Instruction};
 #[derive(Debug, Clone, Copy)]
 enum Op {
+    Conv(usize, usize, usize, usize, wgt_language::adaptive::ConvGeometry),
     Reshape(usize, usize),
     Transpose(usize, usize, usize, usize),
     Matmul(usize, usize, usize, usize, usize, usize),
@@ -98,7 +99,7 @@ impl AdaptiveSession {
             && !program.instructions.iter().any(|i| matches!(i, Instruction::ValidateProbabilities { .. }))),
             "categorical output metadata and validation require adaptive IR version 2");
         ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,
-            Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Matmul { .. }
+            Instruction::Conv { .. } | Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Matmul { .. }
             | Instruction::SoftmaxAxis { .. } | Instruction::Scale { .. })), "tensor operations require adaptive IR version 3");
         ensure!(!program.instructions.is_empty(), "empty adaptive program");
         if let Some(loss) = &program.loss {
@@ -146,9 +147,9 @@ impl AdaptiveSession {
         let mut floats = 0usize;
         for p in &program.parameters {
             if let Some(domain) = &p.learn {
-                ensure!(p.shape == [1] && !p.probability && !p.frozen, "learn parameter must be a trainable scalar");
-                ensure!(p.data.len() == 1, "learn parameter requires one shadow value");
-                domain.validate(p.data[0]).with_context(|| format!("learn {}", p.name))?;
+                ensure!(p.shape.len()==1 && !p.probability && !p.frozen, "learn parameter must be a trainable vector");
+                ensure!(p.data.len() == p.shape[0], "learn shadow shape mismatch");
+                for &value in &p.data {domain.validate(value).with_context(|| format!("learn {}", p.name))?;}
             }
             if p.probability {
                 ensure!(p.shape == [1], "prob parameter must be scalar");
@@ -201,7 +202,14 @@ impl AdaptiveSession {
         for (pc, instruction) in program.instructions.iter().enumerate() {
             let op = (|| -> Result<Op> {
                 Ok(match instruction {
+                    Instruction::Conv { out,input,kernel,bias,stride,padding,dilation,groups } => {
+                        let (r,x,k,b)=(dest(out)?,reg(input)?,reg(kernel)?,reg(bias)?);
+                        let g=wgt_language::adaptive::ConvGeometry::new(&program.registers[x].shape,&program.registers[k].shape,&program.registers[b].shape,stride,padding,dilation,*groups)?;
+                        ensure!(program.registers[r].shape==g.shape(),"conv output shape mismatch");
+                        Op::Conv(r,x,k,b,g)
+                    },
                     Instruction::Reshape { out, input } => {
+
                         let (r,x) = (dest(out)?,reg(input)?);
                         ensure!(len(r) == len(x), "reshape element count mismatch");
                         Op::Reshape(r,x)
@@ -578,7 +586,7 @@ impl AdaptiveSession {
         ensure!(!p.frozen, "frozen parameter");
         ensure!(values.len() == p.data.len(), "parameter length mismatch");
         ensure!(values.iter().all(|v| v.is_finite()), "nonfinite parameter");
-        if let Some(domain) = &p.learn { domain.validate(values[0])?; }
+        if let Some(domain) = &p.learn { for &value in values {domain.validate(value)?;} }
         let revision = self.revision.checked_add(1).context("revision overflow")?;
         p.data.copy_from_slice(values);
         self.revision = revision;
@@ -714,6 +722,7 @@ impl AdaptiveSession {
                 .get(pc)
                 .context("adaptive program fell through without return")?;
             let cost = match op {
+                Op::Conv(_,_,_,_,g) => g.work()? as u64,
                 Op::Matmul(_,_,_,m,k,n) => m.checked_mul(k).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("matmul work overflow")? as u64,
                 _ => self.workspace.cost(op)?,
             };
@@ -770,7 +779,7 @@ impl AdaptiveSession {
                     let data = &parameter.data;
                     self.scratch[..data.len()].copy_from_slice(data);
                     if let Some(domain) = &parameter.learn {
-                        self.scratch[0] = domain.read(data[0]);
+                        for (target,value) in self.scratch.iter_mut().zip(data) {*target=domain.read(*value);}
                     }
                     output = Some(r);
                 }
@@ -784,7 +793,17 @@ impl AdaptiveSession {
                         .copy_from_slice(&self.registers[r]);
                     self.wrote = true;
                 }
+                Op::Conv(r,x,k,b,g) => {
+                    self.ready(x)?;self.ready(k)?;self.ready(b)?;
+                    for i in 0..self.registers[r].len() {
+                        let mut sum=f64::from(self.registers[b][i/g.output_volume()]);
+                        g.pairs(i,|xi,ki|sum+=f64::from(self.registers[x][xi])*f64::from(self.registers[k][ki]));
+                        self.scratch[i]=sum as f32;
+                    }
+                    output=Some(r);
+                },
                 Op::Reshape(r,x) => {
+
                     self.ready(x)?;
                     self.scratch[..self.registers[x].len()].copy_from_slice(&self.registers[x]);
                     output = Some(r);

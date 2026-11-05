@@ -1,0 +1,24 @@
+wgt 0.5
+model TwoStepTanhCell
+input x: f32[6]
+output final_hidden: f32[2]
+# 单个扁平输入依次携带 [t0 的2通道,t1 的2通道,initial_hidden 的2通道]。
+# 只展开固定两步；初始状态由调用者提供，不保存跨调用 state/cache。
+# 两步显式传入相同的 input_weight/recurrent_weight/bias，梯度应累加到同一参数。
+# 以下是初始化值，不是已训练权重；时间轴不创建额外参数。
+parameter input_weight: f32[2,2] = [0.4,-0.2,0.1,0.3]
+parameter recurrent_weight: f32[2,2] = [0.2,0.1,-0.3,0.4]
+parameter bias: f32[2] = [0.02,-0.03]
+fn cell(observation,previous,iw,rw,b) {
+    # 行向量 [1,输入通道]×[输入通道,隐藏通道]，隐藏轴长度始终为 2。
+    # 参数裸读为扁平向量，显式 reshape 恢复矩阵轴，不复制共享参数。
+    let observed = reshape(matmul(reshape(observation,[1,2]),reshape(iw,[2,2])),[2]);
+    let recurrent = reshape(matmul(reshape(previous,[1,2]),reshape(rw,[2,2])),[2]);
+    return tanh(observed+recurrent+b);
+}
+fn forward(x) {
+    let initial = x[4:6];
+    let first = cell(x[0:2],initial,input_weight,recurrent_weight,bias);
+    return cell(x[2:4],first,input_weight,recurrent_weight,bias);
+}
+fn loss(prediction,target) { return square(prediction-target).mean; }

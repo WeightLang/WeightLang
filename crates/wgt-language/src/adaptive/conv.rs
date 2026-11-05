@@ -1,0 +1,140 @@
+//! Checked channel-first, unbatched spatial cross-correlation geometry.
+use anyhow::{Context, Result, ensure};
+#[derive(Clone, Copy, Debug)]
+pub struct ConvGeometry {
+    pub rank: usize,
+    pub input: [usize; 3],
+    pub kernel: [usize; 3],
+    pub output: [usize; 3],
+    pub stride: [usize; 3],
+    pub padding: [usize; 3],
+    pub dilation: [usize; 3],
+    pub channels: usize,
+    pub outputs: usize,
+    pub groups: usize,
+}
+impl ConvGeometry {
+    pub fn new(
+        x: &[usize],
+        k: &[usize],
+        bias: &[usize],
+        stride: &[usize],
+        padding: &[usize],
+        dilation: &[usize],
+        groups: usize,
+    ) -> Result<Self> {
+        ensure!(
+            (2..=4).contains(&x.len()) && k.len() == x.len() + 1,
+            "conv requires 1..3 spatial axes and channel-first kernel"
+        );
+        crate::model::validate_shape(x)?;
+        crate::model::validate_shape(k)?;
+        let rank = x.len() - 1;
+        ensure!(
+            stride.len() == rank && padding.len() == rank && dilation.len() == rank,
+            "conv options must match spatial rank"
+        );
+        ensure!(
+            groups > 0 && x[0] % groups == 0 && k[0] % groups == 0 && k[1] == x[0] / groups,
+            "conv groups/channel mismatch"
+        );
+        ensure!(bias == [k[0]], "conv bias must have shape [Cout]");
+        let mut g = Self {
+            rank,
+            input: [1; 3],
+            kernel: [1; 3],
+            output: [1; 3],
+            stride: [1; 3],
+            padding: [0; 3],
+            dilation: [1; 3],
+            channels: x[0],
+            outputs: k[0],
+            groups,
+        };
+        for a in 0..rank {
+            ensure!(
+                (1..=16384).contains(&stride[a])
+                    && (1..=16384).contains(&dilation[a])
+                    && padding[a] <= 16384,
+                "conv stride/dilation must be 1..16384 and padding 0..16384"
+            );
+            let effective = dilation[a]
+                .checked_mul(k[a + 2] - 1)
+                .and_then(|n| n.checked_add(1))
+                .context("conv extent overflow")?;
+            let padded = x[a + 1]
+                .checked_add(padding[a] * 2)
+                .context("conv padding overflow")?;
+            ensure!(padded >= effective, "conv kernel exceeds padded input");
+            g.input[a] = x[a + 1];
+            g.kernel[a] = k[a + 2];
+            g.output[a] = (padded - effective) / stride[a] + 1;
+            g.stride[a] = stride[a];
+            g.padding[a] = padding[a];
+            g.dilation[a] = dilation[a];
+        }
+        crate::model::validate_shape(&g.shape())?;
+        g.work()?;
+        Ok(g)
+    }
+    pub fn shape(self) -> Vec<usize> {
+        let mut s = vec![self.outputs];
+        s.extend_from_slice(&self.output[..self.rank]);
+        s
+    }
+    pub fn input_volume(self) -> usize {
+        self.input.iter().product()
+    }
+    pub fn kernel_volume(self) -> usize {
+        self.kernel.iter().product()
+    }
+    pub fn output_volume(self) -> usize {
+        self.output.iter().product()
+    }
+    pub fn work(self) -> Result<usize> {
+        self.outputs
+            .checked_mul(self.output_volume())
+            .and_then(|n| n.checked_mul(self.channels / self.groups))
+            .and_then(|n| n.checked_mul(self.kernel_volume()))
+            .and_then(|n| n.checked_add(1))
+            .context("conv work overflow")
+    }
+    /// Visit valid input/kernel pairs for one flattened output. No im2col buffer.
+    pub fn pairs(self, out: usize, mut visit: impl FnMut(usize, usize)) {
+        let oc = out / self.output_volume();
+        let mut pos = out % self.output_volume();
+        let mut coords = [0; 3];
+        for a in (0..self.rank).rev() {
+            coords[a] = pos % self.output[a];
+            pos /= self.output[a];
+        }
+        for c in 0..self.channels / self.groups {
+            for q in 0..self.kernel_volume() {
+                let mut rem = q;
+                let mut kc = [0; 3];
+                for a in (0..self.rank).rev() {
+                    kc[a] = rem % self.kernel[a];
+                    rem /= self.kernel[a];
+                }
+                let mut index = 0;
+                let mut valid = true;
+                for a in 0..self.rank {
+                    let p = (coords[a] * self.stride[a] + kc[a] * self.dilation[a]) as isize
+                        - self.padding[a] as isize;
+                    if p < 0 || p >= self.input[a] as isize {
+                        valid = false;
+                        break;
+                    }
+                    index = index * self.input[a] + p as usize;
+                }
+                if valid {
+                    let ic = oc / (self.outputs / self.groups) * (self.channels / self.groups) + c;
+                    visit(
+                        ic * self.input_volume() + index,
+                        (oc * (self.channels / self.groups) + c) * self.kernel_volume() + q,
+                    );
+                }
+            }
+        }
+    }
+}

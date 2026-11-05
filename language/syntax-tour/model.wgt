@@ -1,21 +1,22 @@
 wgt 0.5
 # WGT 当前模型语法总览：可直接读取的主模型 + 中文注释中的独立示例。
 # 本文件不是多个模型的拼接。只有未加 # 的 T01 是活跃模型。
-# T02..T11、R01、P01 均为注释资料；不要整体去掉 # 后当成一个编译单元。
+# T02..T12、R01、P01 均为注释资料；不要整体去掉 # 后当成一个编译单元。
 # 每个独立模型落盘时各用一个目录的 model.wgt；本次不创建 examples。
 # 语法依据：crates/wgt-language/src/source.rs、adaptive/source.rs、
 # script/parse.rs、script/operators.rs、model.rs、model_modules.rs。
 # 专题依据：docs/reference.zh-CN.md、native-backend.md、
 # learnable-architecture-parameters.md、custom-operators.md。
 # 这是当前本地实现导览，不代表已经发布，也不承诺覆盖所有神经网络架构。
-# 本地验证：T01 定义解析和原生编译前向通过，[2,4] -> [9]、[0,0] -> [0]；T10 attention 最终 IR 安全校验后 core 7 suites/30 tests 通过。
+# 本地已有验证：旧写法 T01 曾以 [2,4] -> [9]、[0,0] -> [0] 通过定义解析和原生编译前向；T10 attention 最终 IR 安全校验后 core 7 suites/30 tests 通过。
 # T02/T03/T04/T05/T09 已单独抽取通过定义解析，T06 配套本地导入也已通过。
+# T01 的 blend/if 与直接数学式 loss 已通过定义解析及 learn_architecture 原生前向回归；T12 已单独抽取通过定义解析，尚未独立训练验收。
 # 解析不等于所有数值行为已验证。
 # 查阅目录：
 # 01 版本/名称/注释；T01 活跃模型；02 接口/参数/初始化/shape；
 # 03 全部张量表达式（T02）；04 分类输出/后缀（T03/T04）；
-# 05 helper/std/本地导入（T05/T06）；06 门控/硬分支/循环/状态（T07）；
-# 07 工作内存/资源（T08）；08 五类 learn/depth_gate；09 loss/训练；
+# 05 helper/std/本地导入（T05/T06）；06 blend/if/repeat、门控/循环/状态（T07/T12）；
+# 07 工作内存/资源（T08）；08 learn 参数与数组；09 loss/训练；
 # 10 顺序 layer/init（T09）；11 Rust 三入口/显式生命周期（R01）；
 # 12 遗留宿主索引；13 提案（P01）；14 提取与验证清单（T10 attention、T11 Richardson 松弛）。
 
@@ -34,14 +35,13 @@ wgt 0.5
 # 没有 batch 轴：输入 [2,4] 表示一个样本，不表示两个样本。
 # 初始化、未训练时的数学预期为 [9]；输入 [0,0] 的数学预期为 [0]。
 # [2,4] -> identity linear [2,4] -> mean [3] -> gain 路 [15]，旁路 [3]
-# -> p=0.5 混合 [9] -> depth>=2、enabled=true、两个初值为 1 的增益 -> [9]。
-# 浮点实现应按容差比较；训练后预期值会改变。
+# -> 互补 blend 权重 0.5 得 [9] -> if depth>=2、if enabled、两个初值为 1 的增益 -> [9]。
+# T01 新语法行为待重新验收；保留旧验证的数学预期，浮点实现按容差比较，训练后预期值会改变。
 model SyntaxTour
 input x: f32[2]
 output y: f32[1]
 target target: f32[1]
 import activation from "std/activation"
-import loss_ops from "std/loss"
 
 # w 的轴是 [输出特征, 输入特征]；扁平列表按 C 行优先排列。
 # frozen 仍参与计算和梯度传播，但不被优化器更新，也不能 write。
@@ -73,16 +73,14 @@ fn forward(x) {
     # read 与直接参数引用均读当前值；复制 local 不会创建新的可训练参数。
     let projected = linear(x, w, bias), baseline = mean(projected);
     let transformed = scaled_average(projected, read(gain));
-    # 两条路均为 [1]。mix 等价 route(p,transformed,baseline)。
-    # 每支只能有一个表达式，可选尾随分号；不能在支内 let/return。
-    let mixed = mix p {
-        then { transformed }
-        else { baseline; }
+    # 两条路均为 [1]；blend 的权重显式相加为 1，因此是互补加权平均。
+    let mixed = blend {
+        p => transformed;
+        [1] - p => baseline;
     };
-    # depth_gate 只认顶层 learn int 名和字面量索引。它不自动重复模型。
-    # 这里显式启用第二段；每次引用共享同一组参数，不会产生独立层权重。
-    let selected = route(depth_gate(depth, 2), mixed, baseline);
-    let active = gate(enabled, selected);
+    # 这里以可读的 if 展示离散前向选择；learn int/bool 的代理梯度语义需验收。
+    let selected = if depth >= 2 { mixed } else { baseline };
+    let active = if enabled { selected } else { baseline };
     # 一般逐元素乘法不广播；这里所有因子都是 [1]。
     return gate(pass, active * bounded_gain * positive_gain);
 }
@@ -90,7 +88,7 @@ fn forward(x) {
 fn loss(prediction, target) {
     # [1] 预测、[1] 目标 -> [1] 半平方损失；沿特征轴平均，不隐含 batch。
     # 自定义 loss 不捕获模型参数；Rust 必须显式选择 Loss::Custom 才使用它。
-    return loss_ops.half_squared_error(prediction, target);
+    return 0.5 * ((prediction - target) ** 2).mean;
 }
 # T01 END
 
@@ -435,14 +433,49 @@ fn loss(prediction, target) {
 # docs/standard-library.md：普通标量/列表函数与模型纯 std 的不同上下文。
 # 新应用把对应的数据准备、I/O、调度、训练循环放在 Rust 中。
 
-# 13 P01：提案/待实现区，不是当前可执行 WGT，以下故意不提供伪造语法
-# 子模型 A 的实例数组：需要定义实例身份、初始化与权重/状态所有权，当前无已验收语法。
-# shared 专家：当前可重复引用同参数实现共享计算，但没有已验收的专家 shared 声明。
-# top-k 路由：当前 gate/route/mix 只做固定张量计算/混合，不提供 top-k 专家调度。
-# 多专家数量/比例学习：标量 learn 不改变参数个数、shape 或实例数组长度。
-# automatic repeat：depth_gate 配显式展开，不自动重复模块，也不让动态循环次数可微。
+# 13 T12：数组参数、子模型实例数组与 repeat 综合示例（完整独立模型，注释中；新语法待行为验收）
+# 该例展示固定长度数组，不表示动态索引、任意幂运算或张量广播已实现。
+# 专家 A 每个实例各有自己的 gain 参数；同一 experts[i] 的多次调用共享该实例参数。
+# repeat 的 carrying 是逐轮状态；indexed i 是编译展开时的固定索引，不是运行时任意索引。
+# 普通 repeat(3) 每轮复用同一个共享 gain；learn depth repeat 展开至声明上界并以硬门选择有效轮数。
+# 参数初值只是定义初值；是否更新由显式训练过程决定，本例没有运行或训练记录。
+# wgt 0.5
+# model ArrayArchitecture
+# input x: f32[1]
+# output y: f32[1]
+# learn scales: float[3] = 1.0;
+# learn offsets: float[3] = [0.0, 0.1, 0.2];
+# learn enabled: bool[3] = [true, false, true];
+# learn depths: int[2] in 0..=3 = [2, 3];
+# model Expert {
+#     input value: f32[1]
+#     output result: f32[1]
+#     learn gain: float > 0 = 1.0;
+#     fn forward(value) { return value * gain; }
+# }
+# experts: Expert[3];
+# fn forward(x) {
+#     # 各专家输入/输出保持 [1]；三个不同实例有独立 gain 初值和训练状态。
+#     let expert_result = repeat 3 indexed i carrying state = x {
+#         if enabled[i] { experts[i](state) + offsets[i] } else { state }
+#     };
+#     # 固定三轮共享同一个 scales 参数向量，每轮取对应标量；不是三份独立权重。
+#     let repeated = repeat 3 indexed step carrying value = expert_result {
+#         value * scales[step]
+#     };
+#     # depth 是 learn int 数组中的固定元素；最多展开三步，候选状态以门控选取。
+#     let adaptive = repeat depths[0] indexed step carrying value = repeated {
+#         value + [1]
+#     };
+#     return adaptive;
+# }
+# T12 END
+# P01：真正未实现的提案，不是当前可执行 WGT。以下能力仍待设计或验收。
+# shared 专家池与动态调度：子模型实例数组已有声明形式，但没有已验收的专家池选择协议。
+# top-k 路由：blend/gate/route 只做固定张量计算/混合，不提供 top-k 专家调度。
+# 动态专家数量/比例学习：learn 数组长度固定，不能改变实例数组长度或参数个数。
 # choice/categorical 架构参数：当前 learn 不接受 choice，不以 prob 或 logits 输出冒充实现。
-# decode policy(input) {method:sample;}：目标语法，parser/runtime 接线与返回/RNG 契约待验收。
+# decode policy(input) {method:sample;}：parser/runtime 接线与返回/RNG 契约待验收。
 # 更广泛的架构类别见 docs/architecture-coverage.md；设计矩阵不是当前支持承诺。
 
 # T10 BEGIN：独立完整固定 shape 多轴 attention 模型，合同冻结且指定范围已本地验证。
@@ -519,10 +552,11 @@ fn loss(prediction, target) {
 # 已提供的本地证据：crates/wgtime-core/tests/differentiable_program.rs 两项通过，覆盖参考解释器与 native-cpu 编译执行及训练/权重/checkpoint行为；不代表已发布。
 
 # 14 示例提取与验证清单
-# T01：本文件唯一活跃、完整模型；已通过定义解析和原生编译前向，[2,4] -> [9]、[0,0] -> [0]。
+# T01：本文件唯一活跃、完整模型；本次 blend/if/direct-loss 改写尚待重新解析和原生编译前向验收；数学预期仍为 [2,4] -> [9]、[0,0] -> [0]。
 # T02/T03/T04/T05/T09/T10/T11：注释中的独立完整模型；T10/T11 已抽取并通过 wgt check，T02/T03/T04/T05/T09 保留原验证记录。
 # T06a：完整 operators 库，不是 ModelDefinition；T06b：完整消费者，必须提供配套 ops.wgt。
 # T07/T08：完整低层模型语法资料；包含当前服务 compiled 路径拒绝的状态能力，不作 facade 验收。
 # R01：完整 Rust 函数资料，内部宏字符串也是独立 Scale 模型；不是 WGT 提取块。
+# T12：独立完整模型展示数组参数、子模型数组及 repeat；新组合尚待行为验收。
 # P01：有意非运行设计说明，没有现行模型语法保证。
 # 不要将各编号连成一个文件，也不要把注释中的旧宿主索引当成可执行模型。

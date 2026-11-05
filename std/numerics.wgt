@@ -1,0 +1,13 @@
+wgt 0.5
+operators Numerics
+
+# relax(estimate,observation,gain) -> estimate + gain * (observation-estimate)。
+# 三个参数必须为同形非空 f32 张量，返回相同形状；标量情况显式使用 f32[1]。
+# 每个轴保持原有位置对应关系，逐元素更新；不将 f32[1] 广播到向量或矩阵。
+# gain 是逐元素步长，可小于 0 或大于 1，不是被限制在 [0,1] 的 gate 概率。
+# 重复调用共享更新公式；调用方显式传入状态、观测和步长并决定参数是否共享。
+# 本纯函数不初始化、训练或提交状态；返回值须由模型或 Rust 调用方显式接续使用。
+fn relax(estimate,observation,gain) {
+    let residual = observation-estimate;
+    return estimate+gain*residual;
+}

@@ -13,7 +13,7 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 
 `wgt-model` facade 的 Rust 库名为 `wgt`，当前提供 `model!`、`include_model!` 字符串宏以及 `ModelDefinition::parse`、`ModelDefinition::from_file`。内嵌源码、编译期文件和运行期文件入口共享模型定义解析语义。上述能力已在本地实现并通过定点验证，尚未发布。不要把 Rust 宏形式加入 WGT 语法说明，也不要用解析成功推断 forward 已执行；宏和定义解析只构造/检查定义，不连接服务、不执行模型。
 
-当前模型入口支持单个 f32 向量；字符串入口可导入 `std/activation`、`std/loss`，文件入口还可解析相对路径纯计算模块及嵌套导入。不得宣称多输入、batch forward、cache 或任意 dtype 支持。模型定义与服务中初始化/加载的实例、训练权重和优化器检查点是不同对象；加载定义不得隐式执行训练或创建运行状态。准确接口及实现状态以 [docs/native-backend.md](../../../docs/native-backend.md) 为权威。
+当前模型入口支持单个 f32 向量；源码中实现了标准纯计算模块导入及文件入口相对路径、嵌套导入，但模块导入与编译 forward 尚待完整行为验收。不得宣称多输入、batch forward、cache 或任意 dtype 支持。模型定义与服务中初始化/加载的实例、训练权重和优化器检查点是不同对象；加载定义不得隐式执行训练或创建运行状态。准确接口及实现状态以 [docs/native-backend.md](../../../docs/native-backend.md) 为权威。
 
 ### 固定 shape 多轴张量几何（行为待验证）
 
@@ -21,9 +21,13 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 
 ### 可学习架构参数
 
-顶层模型定义支持标量 `learn`，当前本地定点验证覆盖解释执行、真实 C 编译，以及 Rust facade 真实 daemon 的三入口训练/推理与权重保存、载入续训。核心组合测试覆盖 adaptive、compiled forward 和 learn 共 17 项，daemon 集成 1 项；这是局部验证，不等于全仓验收或已发布。语法和边界见 [docs/learnable-architecture-parameters.md](../../../docs/learnable-architecture-parameters.md)。
+顶层模型定义支持标量及固定长度数组 `learn`。core 定点五组共 33/33 通过（adaptive、compiled_forward、control 10、std 5、learn 6），另有 architecture 6/6 和 conv 3/3 通过；真实 service 的 conv 3 项和 architecture 1 项通过，覆盖训练、权重恢复续训和释放；真实 control facade 1/1 已覆盖 native-cpu 子模型、三种 learn 数组、indexed repeat、if、blend 与半平方 loss 的训练、权重回载、续训一致和释放归零；矩阵分支正反例及 5→5.5 已通过。此前 daemon 的标量路径验证不自动扩展到新语法；这是局部验证，不等于全仓验收或已发布。语法和边界见 [docs/learnable-architecture-parameters.md](../../../docs/learnable-architecture-parameters.md)。
 
-`learn` 每项独占一行且以分号结束：float 无界、float 闭区间、float 严格下界、bool 字面量及有界 int。float 在 SGD/Adam 更新后投影；int/bool 使用连续 shadow，硬读取并以 identity STE 反传。`depth_gate` 仅用于 tensor forward，配合显式 `route` 展开有限计算段并共享参数；它不提供自动 repeat 或可微动态循环。learn 参数读取为 f32[1]，可参与 gate/mix，不能直接作为 linear 原始 bias 或被 write。`choice` 不支持。
+`learn` 每项独占一行且以分号结束：float 无界、float 闭区间、float 严格下界、bool 字面量及有界 int；类型名后紧跟 `[N]`（1..16384），例如 `int[2] in 0..=3`；不能写在范围末尾，此语法及错误形式的拒绝均已实现并通过测试，syntax-tour T12 已解析通过。标量初值填充或等长列表逐项初始化。float 在 SGD/Adam 更新后投影；int/bool 使用连续 shadow，硬读取并以 identity STE 反传。读取形状为 f32[1] 或 f32[N]，索引须编译期确定；不能直接作为 linear 原始参数或被 write，`choice` 不支持。
+
+`repeat depth [indexed i] carrying h=initial { body }` 以常量或范围落在 0..=256 的 learn int 作深度，逐轮传递同形状态；indexed i 为零基编译期索引，必须与 carrying 状态名不同。学习深度训练时全部候选计算并以 STE 传梯度，推理跳过未启用的内联候选；一般动态循环不因此可微。`model A { ... }` 定义子模型，根模型仍写 `model Root`；`blocks: A[2];` 中不同索引参数独立、同一索引共享，实例索引只接受编译期常量或 repeat 索引。子模型调用的输入和结果须符合其声明的输入、输出合同；子模型 forward 仅不可变 let 和最终 return，不能嵌套子模型定义或自带 loss。
+
+`blend { p => a; (1-p) => b; }` 权重各在 [0,1]，逐项求和不归一化；gate/route 的门为 [1] 或与值完全同 shape，route 两支也须完全同 shape，仅等长不足。表达式 if 的 learn bool 或 `learn_int >= 整数字面量` 条件使用 STE，其余支持的比较及语句 if 为硬分支。有限字面量乘张量是缩放，`**` 仅支持指数 2；不提供一般张量广播。完整签名及局部验证范围见主参考。
 
 权重互通：`save weights net to "weights.safetensors";` 与 `reload weights net from "weights.safetensors" using "sgd";`；绑定显式构造的源模型，标准safetensors仅有限F32精确name/shape/C-row-major，不猜图/改名/转置/下载。成功保留句柄别名、重置优化器/步数/自定义状态，失败原子保留。view/add只存独立参数；weights不含图或checkpoint训练状态，不宣称torch.load完整兼容。learn 参数权重保存其 shadow，重新加载必须绑定声明相同 learn 元数据的模型定义。示例与限制见docs/file-io.md。
 只接受 wgt 0.5，模型、forward、loss 和 main 可在同文件。顶层 `learn` 是模型架构参数声明，不是 `main` 中的宿主训练控制流；训练循环与应用控制由 Rust 主程序负责。执行不得依赖 Python。
@@ -62,7 +66,7 @@ examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原�
 普通脚本模块与纯张量算子是两种独立导入机制。普通脚本可导入固定逻辑名 `std/openresponses/harness`，或本地开发路径 `./module.wgt`；模块声明 `module NAME`，导出普通及 async 函数，只能在普通脚本调用，不能用于 forward/loss。harness 提供 async `next(session,profile)`、`submit(session,results)`（null）、`finished(step)`（bool，status不等于tools）协议辅助，全部参数必填，finished不表示响应成功；工具映射与循环由 WGT 显式编写。解释执行、默认编译及显式轻客户端 AOT 的双 worker 闭环测试通过；AOT 测试移除模型源码并清空工具链 PATH。性能与吞吐尚未验收，完整模型执行迁移仍按 docs/openresponses.md 的范围说明。候选循环示例 examples/openresponses/addition/model.wgt。
 
 纯张量自定义算子：forward/loss 可调用只含不可重复 let 和最终 return 的 fn；参数全部必填且显式传入，
-不可捕获模型参数/局部变量，不允许递归、状态写入、I/O 或宿主回调。`operators NAME` 声明独立库，
+不可捕获模型参数/局部变量，不允许递归、状态写入、I/O 或宿主回调；纯 helper 条件允许比较、`positive` 和布尔字面量。`operators NAME` 声明独立库，
 `import alias from "./ops.wgt"` 或 `"MODULE/LibraryName"` 导入，仅供张量调用 `alias.fn(...)`；这不是普通脚本 module loader。
 算子展开为原生 IR，继承梯度与保存/AOT；release-assets 自动打包库，fetch/锁文件校验源。
 完整签名、原语集合、版本和限制见 docs/custom-operators.md；真实例子 examples/native_training/custom_operators/model.wgt。
@@ -78,7 +82,7 @@ examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原�
   完整例子 examples/native_training/categorical/model.wgt；契约 docs/reference.zh-CN.md、docs/native-training.md。
 - 记录批次：`let batch=collect {for i in range(0,35){yield {observation:[i],target:[i*2]};}};`，声明形式非任意表达式；字段左到右一次求值、同字段/种类/固定同质shape，整条追加。`batch.observation`投影，`batch[i]`取记录，保留.mean/.probabilities后缀，同名字段用`batch[i]["mean"]`。`for part in batch size 16`顺序对齐切分，保留尾批/空批零次/size正整数；yield归同函数最近collect，return穿透并清理。100k行/256字段/64层/1m节点及1m文本字节；不接受句柄，不自动可微。完整运行例子examples/native_training/ppo/model.wgt与docs/reference.zh-CN.md记录批次节。
 - 普通函数文件IO用 `save KIND VALUE to PATH [overwrite];`、`load KIND from PATH`，KIND为text/json/model/checkpoint；load model必填using优化器，checkpoint恢复记录状态。父目录须存在，默认拒绝覆盖，显式overwrite只原子替换普通可写文件；64MiB/文件、按编码字节消耗operation budget，host policy下拒绝直接IO。JSON拒绝句柄/非有限数，UTF-8文本，JSONL继续流式batch/close。断言用 `assert CONDITION;` 或 `assert CONDITION, MESSAGE;`，严格bool且仅失败求消息。详见docs/file-io.md。
-- 普通 f32 权重不默认限制到 [0,1]；当前没有 0/1 布尔参数或自定义权重范围声明。区间含零不能防止除零，普通脚本的除零和非有限结果报错。
+- 普通 f32 权重不默认限制到 [0,1]；`learn bool` 和有界 `learn float` 是独立架构参数声明。区间含零不能防止除零，普通脚本的除零和非有限结果报错。
 - mix p { then { a } else { b } } 用于 forward/loss 张量混合，每支一个表达式。
   与 route 相同，推理在精确端点短路内联分支；训练/VJP 保留完整梯度。提前 let 的计算不会省略。
 - fn loss(prediction,target) 是无模型参数的张量损失，返回 f32[1]；配置 `loss: loss` 的声明式 train 才执行该自定义训练。
@@ -101,7 +105,7 @@ examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原�
 公共语言变更同步主参考、专题文档和此技能；运行 git diff --check。
 模型构造/加载与训练分离；保留模型放 weights/，不覆盖已有产物。遵循 docs/storage.md。
 
-标准库完整契约见 docs/standard-library.md。`std/` 的旧用户原生声明与宿主模块已移除；当前模型纯张量库仅有 `std/activation` 和 `std/loss`，不要恢复旧声明或宿主模块来证明模型执行支持。纯张量逻辑模块 std/activation 导出 swish(x)、swiglu(gate,value)、squared_relu(x)，非空同形 f32[N] 到 f32[N]；std/loss 导出 squared_error(prediction,target)、half_squared_error(prediction,target)、categorical_logits(logits,target)，同形 f32[N] 到 f32[1]，前两项特征均值、最后一项类别加权负对数似然之和。全部参数必填，无默认值/广播/隐含batch；不创建权重或状态，target分布由调用方保证，CPU梯度继承展开原语。使用逻辑名导入，不暴露内部 /operators 路径。普通列表原生函数无需import，不能据此用于forward/loss。
+标准库完整契约见 docs/standard-library.md。`std/` 的旧用户原生声明与宿主模块已移除；当前模型纯张量库还包括 `std/attention` 和 `std/numerics`，算法均须显式导入，模块导入及编译 forward 尚待完整验收；不要恢复旧声明或宿主模块来证明模型执行支持。纯张量逻辑模块 std/activation 导出 swish(x)、swiglu(gate,value)、squared_relu(x)，非空同形 f32[N] 到 f32[N]；std/loss 导出 squared_error(prediction,target)、half_squared_error(prediction,target)、categorical_logits(logits,target)，同形 f32[N] 到 f32[1]，前两项特征均值、最后一项类别加权负对数似然之和。全部参数必填，无默认值/广播/隐含batch；不创建权重或状态，target分布由调用方保证，CPU梯度继承展开原语。使用逻辑名导入，不暴露内部 /operators 路径。普通列表原生函数无需import，不能据此用于forward/loss。
 数据接口：zeros(count)、ones(count)、full(count,value)、linspace(start,end,count)、
 one_hot(index,classes)、concat(x,y)、vector_slice(x,start,end)、gather(x,indices)、
 compress(x,mask)、reverse(x)。参数全部必填；有限 f64 一维列表，允许空列表；
