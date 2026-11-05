@@ -117,12 +117,18 @@ struct Token {
 }
 
 pub fn parse_functions(source: &str) -> Result<Program> {
+    const MAX_SCRIPT_BYTES: usize = 4 * 1024 * 1024;
+    const MAX_TOKENS: usize = 100_000;
+    ensure!(
+        source.len() <= MAX_SCRIPT_BYTES,
+        "script source exceeds 4 MiB limit"
+    );
     let mut lines = source.lines().enumerate();
     let (header_line, header) = lines
         .find(|(_, line)| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
         .context("missing script version header")?;
     ensure!(
-        header == "wgt 0.5",
+        header.trim() == "wgt 0.5",
         "expected 'wgt 0.5' as first non-comment line"
     );
     let text = lines.map(|(_, line)| line).collect::<Vec<_>>().join("\n");
@@ -221,6 +227,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
             );
             (token, false)
         };
+        ensure!(tokens.len() < MAX_TOKENS, "script token limit exceeded");
         tokens.push(Token {
             text: token,
             line: token_line,
@@ -234,7 +241,6 @@ pub fn parse_functions(source: &str) -> Result<Program> {
             quoted,
         });
     }
-    ensure!(tokens.len() <= 100_000, "script token limit exceeded");
     let mut parser = Parser {
         tokens,
         pos: 0,
@@ -1125,7 +1131,10 @@ impl Parser {
                 break;
             }
             let op = self.next()?.text;
-            let right = self.expr(power + 1)?;
+            // Exponentiation is right-associative: a ** b ** c == a ** (b ** c).
+            // All other binary operators remain left-associative.
+            let right_min = if op == "**" { power } else { power + 1 };
+            let right = self.expr(right_min)?;
             left = Expr::Binary(op, Box::new(left), Box::new(right));
         }
         self.depth -= 1;
