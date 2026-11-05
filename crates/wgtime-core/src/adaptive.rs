@@ -1211,6 +1211,8 @@ impl AdaptiveSession {
             }
             if let Some(r) = output {
                 if matches!(op, Op::Reshape(..) | Op::Transpose(..) | Op::Permute(..)) {
+                    self.detach_views_of(r);
+                    self.materialize_view(r);
                     let view = self.make_view(op, r)?;
                     self.views[r] = Some(view);
                     self.initialized[r] = true;
