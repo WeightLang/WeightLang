@@ -988,7 +988,7 @@ impl AdaptiveSession {
                 }
                 Op::Conv(r,x,k,b,g) => {
                     self.ready(x)?;self.ready(k)?;self.ready(b)?;
-                    for i in 0..self.registers[r].len() {
+                    for i in 0..self.program.registers[r].len {
                         let mut sum=f64::from(self.registers[b][i/g.output_volume()]);
                         g.pairs(i,|xi,ki|sum+=f64::from(self.registers[x][xi])*f64::from(self.registers[k][ki]));
                         self.scratch[i]=sum as f32;
@@ -1037,7 +1037,7 @@ impl AdaptiveSession {
                 },
                 Op::SoftmaxAxis(r,x,groups) => {
                     self.ready(x)?;
-                    groups.softmax(&self.registers[x], &mut self.scratch[..self.registers[r].len()])?;
+                    groups.softmax(&self.registers[x], &mut self.scratch[..self.program.registers[r].len])?;
                     output = Some(r);
                 },
                 Op::Scale(r,x,factor) => {
@@ -1048,7 +1048,7 @@ impl AdaptiveSession {
                 Op::Linear(r, x, w, b) => {
                     self.ready(x)?;
                     let x = &self.registers[x];
-                    for row in 0..self.registers[r].len() {
+                    for row in 0..self.program.registers[r].len {
                         let mut v = b.map_or(0., |b| self.program.parameters[b].data[row]);
                         for (col, value) in x.iter().enumerate() {
                             v += value * self.program.parameters[w].data[row * x.len() + col];
@@ -1060,7 +1060,7 @@ impl AdaptiveSession {
                 Op::Binary(r, a, b, mul) => {
                     self.ready(a)?;
                     self.ready(b)?;
-                    for i in 0..self.registers[r].len() {
+                    for i in 0..self.program.registers[r].len {
                         self.scratch[i] = if mul {
                             self.registers[a][i] * self.registers[b][i]
                         } else {
@@ -1079,7 +1079,7 @@ impl AdaptiveSession {
                 Op::Minimum(r, a, b) => {
                     self.ready(a)?;
                     self.ready(b)?;
-                    for i in 0..self.registers[r].len() {
+                    for i in 0..self.program.registers[r].len {
                         self.scratch[i] = self.registers[a][i].min(self.registers[b][i]);
                     }
                     output = Some(r);
@@ -1151,7 +1151,7 @@ impl AdaptiveSession {
                     let all_one = tape.is_none() && self.registers[p].iter().all(|v| *v == 1.);
                     if all_zero || all_one {
                         let selected = if all_one { Some(a) } else { b };
-                        let n = self.registers[r].len();
+                        let n = self.program.registers[r].len;
                         if let Some(selected) = selected {
                             self.ready(selected)?;
                             self.scratch[..n].copy_from_slice(&self.registers[selected]);
@@ -1163,7 +1163,7 @@ impl AdaptiveSession {
                         if let Some(b) = b {
                             self.ready(b)?;
                         }
-                        for i in 0..self.registers[r].len() {
+                        for i in 0..self.program.registers[r].len {
                             let p =
                                 self.registers[p][if self.registers[p].len() == 1 { 0 } else { i }];
                             self.scratch[i] = p * self.registers[a][i]
@@ -1186,7 +1186,7 @@ impl AdaptiveSession {
                 }
                 Op::Slice(r, x, start) => {
                     self.ready(x)?;
-                    let n = self.registers[r].len();
+                    let n = self.program.registers[r].len;
                     self.scratch[..n].copy_from_slice(&self.registers[x][start..start + n]);
                     output = Some(r);
                 }
