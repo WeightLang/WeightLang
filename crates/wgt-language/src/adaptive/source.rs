@@ -393,6 +393,7 @@ fn parse_definition(
         program,
         sizes,
         types: HashMap::new(),
+        axes: HashMap::new(),
         memories: HashMap::new(),
         next: 0,
         loops: Vec::new(),
@@ -448,6 +449,7 @@ fn parse_definition(
             program,
             sizes: HashMap::from([(input.clone(), n + m)]),
             types: HashMap::from([(loss.args[0].clone(), lower.program.output_type)]),
+            axes: HashMap::new(),
             memories: HashMap::new(),
             next: 0,
             loops: vec![],
@@ -532,6 +534,8 @@ struct Lower {
     program: Program,
     sizes: HashMap<String, usize>,
     types: HashMap<String, crate::categorical::VectorType>,
+    /// Compile-time axis labels; empty labels are anonymous dimensions.
+    axes: HashMap<String, Vec<Option<String>>>,
     memories: HashMap<String, (usize, usize)>,
     next: usize,
     loops: Vec<(String, String)>,
@@ -600,6 +604,7 @@ impl Lower {
                 len,
                 shape: vec![len],
             });
+            self.axes.insert(name.into(), vec![None]);
         }
         Ok(())
     }
@@ -623,9 +628,11 @@ impl Lower {
                 self.shape(name)? == shape,
                 "register geometry changes: {name}"
             );
+            self.axes.entry(name.into()).or_insert_with(|| vec![None; shape.len()]);
         } else {
             self.register(name, len)?;
-            self.program.registers.last_mut().unwrap().shape = shape;
+            self.program.registers.last_mut().unwrap().shape = shape.clone();
+            self.axes.insert(name.into(), vec![None; shape.len()]);
         }
         Ok(())
     }
@@ -664,6 +671,31 @@ impl Lower {
     fn assign(&mut self, out: &str, expr: &Expr) -> Result<()> {
         use crate::categorical::VectorType;
         if let Expr::BuiltinCall(name, args) = expr {
+            if name == "__tensor_annot" {
+                let [Expr::List(dimensions), value] = args.as_slice() else {
+                    bail!("invalid internal tensor annotation");
+                };
+                self.assign(out, value)?;
+                let shape = self.shape(out)?;
+                ensure!(dimensions.len() == shape.len(),
+                    "tensor annotation rank mismatch: expected {}, got {}", shape.len(), dimensions.len());
+                let mut axes = Vec::with_capacity(dimensions.len());
+                let mut seen = std::collections::HashSet::new();
+                for (index, dimension) in dimensions.iter().enumerate() {
+                    let Expr::List(pair) = dimension else { bail!("invalid tensor dimension annotation"); };
+                    let [Expr::Text(axis), dimension] = pair.as_slice() else { bail!("invalid tensor dimension annotation"); };
+                    let expected = scalar_literal(dimension)?;
+                    ensure!(expected >= 1. && expected.fract() == 0. && expected as usize == shape[index],
+                        "tensor dimension mismatch at axis {index}: expected {expected}, got {}", shape[index]);
+                    let axis = if axis.is_empty() { None } else {
+                        ensure!(seen.insert(axis.clone()), "duplicate tensor axis: {axis}");
+                        Some(axis.clone())
+                    };
+                    axes.push(axis);
+                }
+                self.axes.insert(out.into(), axes);
+                return Ok(());
+            }
             if name == "__probabilities" {
                 let [value] = args.as_slice() else {
                     bail!(".probabilities expects one value")
