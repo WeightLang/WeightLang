@@ -54,3 +54,11 @@ fn lexer_enforces_source_byte_limit() {
     let error = parse_functions(&source).expect_err("source byte limit must reject oversized input");
     assert!(error.to_string().contains("script source exceeds 4 MiB limit"));
 }
+
+#[test]
+fn source_split_enforces_source_byte_limit_before_scanning() {
+    let source = format!("wgt 0.5\\n#{}", "x".repeat(4 * 1024 * 1024));
+    let error = wgt_language::source::split(&source)
+        .expect_err("source splitting must reject oversized input");
+    assert!(error.to_string().contains("WGT source exceeds 4 MiB limit"));
+}
