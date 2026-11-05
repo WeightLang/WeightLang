@@ -754,7 +754,11 @@ impl AdaptiveSession {
                 .context("adaptive program fell through without return")?;
             let cost = match op {
                 Op::Conv(_,_,_,_,g) => g.work()? as u64,
+                Op::Reshape(r,_) => (self.registers[r].len() as u64).saturating_add(1),
+                Op::Transpose(_,_,m,n) => m.checked_mul(n).and_then(|v|v.checked_add(1)).context("transpose work overflow")? as u64,
+                Op::Permute(r,_,_,_) => (self.registers[r].len() as u64).saturating_add(1),
                 Op::Matmul(_,_,_,m,k,n) => m.checked_mul(k).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("matmul work overflow")? as u64,
+                Op::BatchMatmul(_,_,_,batch,m,k,n) => batch.checked_mul(m).and_then(|v|v.checked_mul(k)).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("batch_matmul work overflow")? as u64,
                 _ => self.workspace.cost(op)?,
             };
 
