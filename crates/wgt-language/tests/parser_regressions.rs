@@ -104,3 +104,22 @@ fn matrix_product_precedes_addition() {
                 && matches!(**right, Expr::Binary(ref inner, _, _) if inner == "@")
     ));
 }
+
+#[test]
+fn matrix_syntax_lowers_to_native_tensor_ir() {
+    let source = r#"wgt 0.5
+model MatrixSyntax
+input x: f32[6]
+output y: f32[1]
+parameter projection: f32[3,2] = [1,0,0,1,1,1]
+fn forward(x) {
+    let tokens = reshape(x,[2,3]);
+    let q = tokens @ projection;
+    let k = q.T;
+    let scores = q @ k;
+    return scores.mean;
+}
+"#;
+    wgt_language::adaptive::parse(source)
+        .expect("native @ and .T syntax should lower to matrix IR");
+}
