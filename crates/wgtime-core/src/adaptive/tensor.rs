@@ -187,4 +187,48 @@ mod tests {
         assert!(groups.rms(&[1.; 6], 0., &mut [0.; 6]).is_err());
         assert!(groups.rms(&[1.; 3], 1e-6, &mut [0.; 3]).is_err());
     }
+    #[test]
+    fn layer_norm_vjp_matches_finite_differences() {
+        let groups = AxisGroups::new(&[2, 3, 2], 1).unwrap();
+        let input = [0.2, -0.1, 0.7, 0.4, -0.3, 0.9, 0.1, 0.5, -0.8, 0.6, 0.3, -0.2];
+        let gamma = [0.8, 1.1, -0.4];
+        let beta = [0.1, -0.2, 0.3];
+        let gradient = [0.2, -0.3, 0.5, 0.8, -0.2, 0.1, 0.7, -0.4, 0.9, 0.3, 0.2, -0.8];
+        let epsilon = 1e-4;
+        let mut output = [0.; 12];
+        groups.layer_norm(&input, &gamma, &beta, epsilon, &mut output).unwrap();
+        let mut dx = [0.; 12];
+        let mut dgamma = [0.; 3];
+        let mut dbeta = [0.; 3];
+        groups.layer_norm_vjp(&input, &gamma, &gradient, epsilon, &mut dx, &mut dgamma, &mut dbeta).unwrap();
+        let loss = |x: &[f32; 12], g: &[f32; 3], b: &[f32; 3]| {
+            let mut y = [0.; 12];
+            groups.layer_norm(x, g, b, epsilon, &mut y).unwrap();
+            y.iter().zip(gradient).map(|(y, dy)| y * dy).sum::<f32>()
+        };
+        let step = 0.001;
+        for i in 0..12 {
+            let mut plus = input;
+            let mut minus = input;
+            plus[i] += step;
+            minus[i] -= step;
+            let numerical = (loss(&plus, &gamma, &beta) - loss(&minus, &gamma, &beta)) / (2. * step);
+            assert!((numerical - dx[i]).abs() < 2e-3, "input {i}: {numerical} vs {}", dx[i]);
+        }
+        for i in 0..3 {
+            let mut plus = gamma;
+            let mut minus = gamma;
+            plus[i] += step;
+            minus[i] -= step;
+            let numerical = (loss(&input, &plus, &beta) - loss(&input, &minus, &beta)) / (2. * step);
+            assert!((numerical - dgamma[i]).abs() < 2e-3, "gamma {i}: {numerical} vs {}", dgamma[i]);
+            let mut plus = beta;
+            let mut minus = beta;
+            plus[i] += step;
+            minus[i] -= step;
+            let numerical = (loss(&input, &gamma, &plus) - loss(&input, &gamma, &minus)) / (2. * step);
+            assert!((numerical - dbeta[i]).abs() < 2e-3, "beta {i}: {numerical} vs {}", dbeta[i]);
+        }
+    }
+
 }
