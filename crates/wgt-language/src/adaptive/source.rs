@@ -1210,10 +1210,16 @@ impl Lower {
                 ("softmax", [x, axis]) => {
                     let x = self.value(x)?;
                     let shape = self.shape(&x)?;
-                    let axis = scalar_literal(axis)?;
+                    let axis = if let Expr::Text(name) = axis {
+                        self.axes.get(&x)
+                            .and_then(|axes| axes.iter().position(|axis| axis.as_deref() == Some(name.as_str())))
+                            .with_context(|| format!("unknown named softmax axis: {name}"))? as f32
+                    } else {
+                        scalar_literal(axis)?
+                    };
                     ensure!(
                         axis >= 0. && axis.fract() == 0. && axis < shape.len() as f32,
-                        "softmax axis must be a nonnegative in-range integer"
+                        "softmax axis must be a nonnegative in-range integer or declared axis name"
                     );
                     Some((
                         I::SoftmaxAxis {
@@ -1240,7 +1246,20 @@ impl Lower {
                 _ => None,
             };
             if let Some((instruction, shape)) = tensor {
+                let output_axes = match &instruction {
+                    I::Transpose { input, .. } => self.axes.get(input).map(|axes| vec![axes[1].clone(), axes[0].clone()]),
+                    I::Matmul { left, right, .. } => {
+                        let a = self.axes.get(left).cloned().unwrap_or_else(|| vec![None; 2]);
+                        let b = self.axes.get(right).cloned().unwrap_or_else(|| vec![None; 2]);
+                        Some(vec![a[0].clone(), b[1].clone()])
+                    }
+                    I::SoftmaxAxis { input, .. } | I::Scale { input, .. } => self.axes.get(input).cloned(),
+                    _ => None,
+                };
                 self.register_shape(out, shape)?;
+                if let Some(axes) = output_axes {
+                    self.axes.insert(out.into(), axes);
+                }
                 self.program.version = 3;
                 self.types.insert(out.into(), VectorType::F32);
                 self.program.instructions.push(instruction);
@@ -1334,6 +1353,13 @@ impl Lower {
                     sa.len() == 2 && sb.len() == 2 && sa[1] == sb[0],
                     "matrix product requires [M,K] @ [K,N]"
                 );
+                let left_axes = self.axes.get(&a).cloned().unwrap_or_else(|| vec![None; 2]);
+                let right_axes = self.axes.get(&b).cloned().unwrap_or_else(|| vec![None; 2]);
+                if let (Some(left), Some(right)) = (&left_axes[1], &right_axes[0]) {
+                    ensure!(left == right,
+                        "matrix product axis mismatch: left contracts {left}, right contracts {right}");
+                }
+                self.axes.insert(out.into(), vec![left_axes[0].clone(), right_axes[1].clone()]);
                 self.program.version = 3;
                 let output_shape = vec![sa[0], sb[1]];
                 let len = output_shape.iter().product();
