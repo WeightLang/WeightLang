@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 enum Edge {
     Conv { x:usize,k:usize,b:usize,g:wgt_language::adaptive::ConvGeometry },
     Matmul { a: usize, b: usize, m: usize, k: usize, n: usize },
+    BatchMatmul { a: usize, b: usize, batch: usize, m: usize, k: usize, n: usize },
     Transpose { x: usize, m: usize, n: usize },
     Permute { x: usize, input_shape: [usize; 8], axes: [usize; 8], rank: usize },
     SoftmaxAxis { x: usize, groups: super::tensor::AxisGroups },
@@ -159,6 +160,7 @@ impl Tape {
             Op::Transpose(r,x,m,n) => (r, Edge::Transpose { x:self.reg(x)?,m,n }),
             Op::Permute(r,x,input_shape,axes,rank) => (r, Edge::Permute { x:self.reg(x)?,input_shape,axes,rank }),
             Op::Matmul(r,a,b,m,k,n) => (r, Edge::Matmul { a:self.reg(a)?,b:self.reg(b)?,m,k,n }),
+            Op::BatchMatmul(r,a,b,batch,m,k,n) => (r, Edge::BatchMatmul { a:self.reg(a)?,b:self.reg(b)?,batch,m,k,n }),
             Op::SoftmaxAxis(r,x,groups) => (r, Edge::SoftmaxAxis { x:self.reg(x)?,groups }),
             Op::Scale(r,x,factor) => (r, Edge::Scale { x:self.reg(x)?,factor }),
             Op::Constant(r, _) | Op::Unary(r, _, 5) => (r, Edge::Leaf),
@@ -471,12 +473,23 @@ impl ForwardPass {
                     }
                 },
                 Edge::Matmul { a,b,m,k,n } => {
-
                     for i in 0..m { for j in 0..n { for q in 0..k {
                         let g = node.gradient[i*n+j];
                         before[a].gradient[i*k+q] += g * before[b].value[q*n+j];
                         before[b].gradient[q*n+j] += g * before[a].value[i*k+q];
                     } } }
+                },
+                Edge::BatchMatmul { a,b,batch,m,k,n } => {
+                    for batch_index in 0..batch {
+                        let a_base = batch_index * m * k;
+                        let b_base = batch_index * k * n;
+                        let out_base = batch_index * m * n;
+                        for i in 0..m { for j in 0..n { for q in 0..k {
+                            let g = node.gradient[out_base+i*n+j];
+                            before[a].gradient[a_base+i*k+q] += g * before[b].value[b_base+q*n+j];
+                            before[b].gradient[b_base+q*n+j] += g * before[a].value[a_base+i*k+q];
+                        } } }
+                    }
                 },
                 Edge::Transpose { x,m,n } => {
                     for i in 0..m { for j in 0..n { before[x].gradient[i*n+j] += node.gradient[j*m+i]; } }
