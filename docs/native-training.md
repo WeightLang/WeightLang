@@ -1,5 +1,8 @@
 # 原生 WGT 训练脚本（本地实验实现）
 
+> 训练策略不限定为 SGD/Adam。WeightLang 已提供 CPU forward 的 WGT 自定义更新路径，允许用户读取梯度快照、编写任意候选更新并原子提交；算法范围、STE 机制、checkpoint 合同及后续生命周期设计见[训练策略与模型生命周期](training-strategies-and-lifecycle.md)。
+
+
 模型/训练程序的源码入口统一为 `model.wgt`，执行函数仍为 `fn main()`。
 独立示例按 `<示例名>/model.wgt` 组织，见[示例目录](../examples/native_training/README.md)。
 相对数据与保存路径按入口所在目录解析；移动入口时须一并调整这些路径。
