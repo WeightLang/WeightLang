@@ -1388,7 +1388,6 @@ impl Lower {
                     ensure!(left == right,
                         "matrix product axis mismatch: left contracts {left}, right contracts {right}");
                 }
-                self.axes.insert(out.into(), vec![left_axes[0].clone(), right_axes[1].clone()]);
                 self.program.version = 3;
                 let output_shape = vec![sa[0], sb[1]];
                 let len = output_shape.iter().product();
