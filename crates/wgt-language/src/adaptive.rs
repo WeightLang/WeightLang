@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 mod source;
 mod conv;
-pub use conv::ConvGeometry;
+pub use conv::{ConvGeometry, Pool2dGeometry};
 pub use source::{parse, parse_with_functions};
 pub(crate) use source::{validate_definition, lower_operation};
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -91,6 +91,8 @@ impl LearnDomain {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Instruction {
     Conv { out: String, input: String, kernel: String, bias: String, stride: Vec<usize>, padding: Vec<usize>, dilation: Vec<usize>, groups: usize },
+    MaxPool2d { out: String, input: String, kernel: Vec<usize>, stride: Vec<usize> },
+    AvgPool2d { out: String, input: String, kernel: Vec<usize>, stride: Vec<usize> },
     Reshape { out: String, input: String },
     Transpose { out: String, input: String },
     /// General axis permutation. axes[out_axis] = input_axis.
