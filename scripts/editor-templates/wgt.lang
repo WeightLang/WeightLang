@@ -10,6 +10,6 @@
 <context id="builtins" style-ref="builtins">@@builtins_TAGS@@@@intrinsics_TAGS@@@@layers_TAGS@@</context>
 <context id="types" style-ref="types">@@types_TAGS@@</context>
 <context id="constants" style-ref="def:boolean">@@constants_TAGS@@</context>
-<context id="operator" style-ref="def:operator"><match>&lt;-|-&gt;|[!&lt;&gt;=+*/%&amp;|\-]</match></context>
+<context id="operator" style-ref="def:operator"><match>&lt;-|-&gt;|[!&lt;&gt;=+*/%&amp;|@\-]</match></context>
 <context id="number" style-ref="def:decimal"><match>(?&lt;![\w.])-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?(?![\w.])</match></context>
 </include></context></definitions></language>
