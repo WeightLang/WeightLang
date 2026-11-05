@@ -57,7 +57,7 @@ fn lexer_enforces_source_byte_limit() {
 
 #[test]
 fn source_split_enforces_source_byte_limit_before_scanning() {
-    let source = format!("wgt 0.5\\n#{}", "x".repeat(4 * 1024 * 1024));
+    let source = format!("wgt 0.5\n#{}", "x".repeat(4 * 1024 * 1024));
     let error = match wgt_language::source::split(&source) {
         Ok(_) => panic!("source splitting must reject oversized input"),
         Err(error) => error,
