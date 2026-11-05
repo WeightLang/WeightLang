@@ -686,7 +686,8 @@ impl AdaptiveSession {
                 remainder /= view.shape[axis];
                 offset += coordinate * view.strides[axis];
             }
-            self.registers[register][index] = self.registers[view.base][offset];
+            let value = self.registers[view.base][offset];
+            self.registers[register][index] = value;
         }
         self.views[register] = None;
     }
