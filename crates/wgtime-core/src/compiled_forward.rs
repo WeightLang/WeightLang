@@ -379,7 +379,7 @@ impl<'a> Generator<'a> {
         let mut registers = HashMap::new();
         let mut workspace = 0usize;
         let mut max = 0;
-        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Conv { .. } | I::Reshape { .. } | I::Transpose { .. } | I::Matmul { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
+        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Conv { .. } | I::Reshape { .. } | I::Transpose { .. } | I::Permute { .. } | I::Matmul { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
         for (i, r) in program.registers.iter().enumerate() {
             ensure!(r.shape.len() <= 8 && r.shape.iter().all(|d| *d <= 16384) && crate::elements(&r.shape)? == r.len, "compiled register geometry/storage mismatch");
             ensure!(program.version >= 3 || r.shape == [r.len], "multiaxis registers require compiled IR version 3");
@@ -512,6 +512,36 @@ impl<'a> Generator<'a> {
                     let (m,n) = (shape[0],shape[1]);
                     ensure!(self.program.registers[self.reg(o)?.2].shape == [n,m], "compiled transpose output geometry mismatch");
                     body += &format!("for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++)t[j*{m}+i]=r[{a}+i*{n}+j];");
+                    reads.push(x); out=Some(o);
+                },
+                I::Permute { out:o,input:x,axes } => {
+                    let (a,n,xi) = self.reg(x)?;
+                    let input_shape = &self.program.registers[xi].shape;
+                    let rank = input_shape.len();
+                    ensure!((1..=8).contains(&rank) && axes.len() == rank,
+                        "compiled permute rank mismatch");
+                    let mut seen = vec![false; rank];
+                    let output_shape = axes.iter().map(|&axis| {
+                        ensure!(axis < rank && !seen[axis], "compiled permute axes must form a bijection");
+                        seen[axis] = true;
+                        Ok(input_shape[axis])
+                    }).collect::<Result<Vec<_>>>()?;
+                    let (out_offset,out_len,out_id) = self.reg(o)?;
+                    ensure!(self.program.registers[out_id].shape == output_shape,
+                        "compiled permute output geometry mismatch");
+                    let mut body_code = format!("for(size_t z=0;z<{out_len};z++){{size_t rem=z,oc[{rank}]={{0}},ic[{rank}]={{0}};");
+                    for axis in (0..rank).rev() {
+                        body_code += &format!("oc[{axis}]=rem%{};rem/={};", output_shape[axis], output_shape[axis]);
+                    }
+                    for axis in 0..rank {
+                        body_code += &format!("ic[{}]=oc[{axis}];", axes[axis]);
+                    }
+                    body_code += "size_t src=0;";
+                    for axis in 0..rank {
+                        body_code += &format!("src=src*{}+ic[{axis}];", input_shape[axis]);
+                    }
+                    body_code += &format!("t[z]=r[{a}+src];}}");
+                    body += &body_code;
                     reads.push(x); out=Some(o);
                 },
                 I::Matmul { out:o,left,right } => {
