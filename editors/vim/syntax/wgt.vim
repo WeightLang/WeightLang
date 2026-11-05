@@ -7,7 +7,7 @@ syntax keyword wgtConstants false null true
 syntax keyword wgtTypes f32 logits prob probabilities
 syntax match wgtNumber /\v<\d+(\.\d*)?([eE][+-]?\d+)?/
 syntax match wgtNumber /\v\.\d+([eE][+-]?\d+)?/
-syntax match wgtOperator /<-\|->\|[!<>=+*\/%&|\-]/
+syntax match wgtOperator /<-\|->\|[!<>=+*\/%&|@\-]/
 syntax match wgtParameter /\<[A-Za-z_][A-Za-z0-9_]*\ze\s*=\%([^=]\|$\)/
 syntax region wgtString start=/"/ skip=/\\./ end=/"/ oneline
 syntax match wgtComment /#.*/
