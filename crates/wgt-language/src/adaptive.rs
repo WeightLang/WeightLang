@@ -93,6 +93,8 @@ pub enum Instruction {
     Conv { out: String, input: String, kernel: String, bias: String, stride: Vec<usize>, padding: Vec<usize>, dilation: Vec<usize>, groups: usize },
     Reshape { out: String, input: String },
     Transpose { out: String, input: String },
+    /// General axis permutation. axes[out_axis] = input_axis.
+    Permute { out: String, input: String, axes: Vec<usize> },
     Matmul { out: String, left: String, right: String },
     SoftmaxAxis { out: String, input: String, axis: usize },
     Scale { out: String, input: String, factor: f32 },
