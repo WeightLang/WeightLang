@@ -50,12 +50,32 @@ enum Op {
     Return(usize),
 }
 
+#[derive(Clone, Copy)]
+struct TensorView {
+    base: usize,
+    offset: usize,
+    shape: [usize; 8],
+    strides: [usize; 8],
+    rank: usize,
+}
+fn contiguous_strides(shape: &[usize]) -> [usize; 8] {
+    let mut strides = [1usize; 8];
+    let mut stride = 1usize;
+    for axis in (0..shape.len()).rev() {
+        strides[axis] = stride;
+        stride *= shape[axis];
+    }
+    strides
+}
+
 /// CPU-only experimental runtime; owns persistent weights and per-call registers.
 /// Budget covers f32 storage (including rollback and scratch), not program metadata.
 pub struct AdaptiveSession {
     program: Program,
     ops: Vec<Op>,
     registers: Vec<Vec<f32>>,
+    /// Non-owning strided views over a canonical register; materialized lazily.
+    views: Vec<Option<TensorView>>,
     initialized: Vec<bool>,
     backup: Vec<Vec<f32>>,
     scratch: Vec<f32>,
@@ -530,6 +550,7 @@ impl AdaptiveSession {
             compiled_forward_calls: 0,
             compiled_tape_calls: 0,
             initialized: vec![false; program.registers.len()],
+            views: vec![None; program.registers.len()],
             program,
             ops,
             registers,
@@ -624,13 +645,133 @@ impl AdaptiveSession {
         Ok(())
     }
 
-    fn ready(&self, index: usize) -> Result<()> {
+    fn ready_view(&self, index: usize) -> Result<()> {
         ensure!(
             self.initialized[index],
             "read of uninitialized register: {}",
             self.program.registers[index].name
         );
         Ok(())
+    }
+    fn read_value(&self, register: usize, logical_index: usize) -> f32 {
+        if let Some(view) = self.views[register] {
+            let mut remainder = logical_index;
+            let mut offset = view.offset;
+            for axis in (0..view.rank).rev() {
+                let coordinate = remainder % view.shape[axis];
+                remainder /= view.shape[axis];
+                offset += coordinate * view.strides[axis];
+            }
+            self.registers[view.base][offset]
+        } else {
+            self.registers[register][logical_index]
+        }
+    }
+    fn materialize_view(&mut self, register: usize) {
+        let Some(view) = self.views[register] else { return; };
+        let len = self.registers[register].len();
+        for index in 0..len {
+            let mut remainder = index;
+            let mut offset = view.offset;
+            for axis in (0..view.rank).rev() {
+                let coordinate = remainder % view.shape[axis];
+                remainder /= view.shape[axis];
+                offset += coordinate * view.strides[axis];
+            }
+            self.registers[register][index] = self.registers[view.base][offset];
+        }
+        self.views[register] = None;
+    }
+    fn ready(&mut self, index: usize) -> Result<()> {
+        self.ready_view(index)?;
+        self.materialize_view(index);
+        Ok(())
+    }
+    fn make_view(&mut self, op: Op, output: usize) -> Result<TensorView> {
+        let output_shape = &self.program.registers[output].shape;
+        match op {
+            Op::Reshape(_, input) => {
+                self.ready_view(input)?;
+                let input_shape = &self.program.registers[input].shape;
+                let view = if let Some(existing) = self.views[input] {
+                    let contiguous = contiguous_strides(&existing.shape[..existing.rank]);
+                    if existing.strides[..existing.rank] == contiguous[..existing.rank] {
+                        existing
+                    } else {
+                        self.materialize_view(input);
+                        let strides = contiguous_strides(output_shape);
+                        let mut shape = [1usize; 8];
+                        shape[..output_shape.len()].copy_from_slice(output_shape);
+                        return Ok(TensorView { base: input, offset: 0, shape, strides, rank: output_shape.len() });
+                    }
+                } else {
+                    let strides = contiguous_strides(input_shape);
+                    TensorView {
+                        base: input,
+                        offset: 0,
+                        shape: {
+                            let mut shape = [1usize; 8];
+                            shape[..input_shape.len()].copy_from_slice(input_shape);
+                            shape
+                        },
+                        strides,
+                        rank: input_shape.len(),
+                    }
+                };
+                let mut shape = [1usize; 8];
+                shape[..output_shape.len()].copy_from_slice(output_shape);
+                Ok(TensorView { base: view.base, offset: view.offset, shape, strides: contiguous_strides(output_shape), rank: output_shape.len() })
+            }
+            Op::Transpose(_, input, _, _) => {
+                self.ready_view(input)?;
+                let input_shape = &self.program.registers[input].shape;
+                let mut view = if let Some(existing) = self.views[input] {
+                    existing
+                } else {
+                    TensorView {
+                        base: input,
+                        offset: 0,
+                        shape: {
+                            let mut shape = [1usize; 8];
+                            shape[..input_shape.len()].copy_from_slice(input_shape);
+                            shape
+                        },
+                        strides: contiguous_strides(input_shape),
+                        rank: input_shape.len(),
+                    }
+                };
+                view.shape.swap(0, 1);
+                view.strides.swap(0, 1);
+                Ok(view)
+            }
+            Op::Permute(_, input, axes, rank) => {
+                self.ready_view(input)?;
+                let input_shape = &self.program.registers[input].shape;
+                let mut view = if let Some(existing) = self.views[input] {
+                    existing
+                } else {
+                    TensorView {
+                        base: input,
+                        offset: 0,
+                        shape: {
+                            let mut shape = [1usize; 8];
+                            shape[..input_shape.len()].copy_from_slice(input_shape);
+                            shape
+                        },
+                        strides: contiguous_strides(input_shape),
+                        rank,
+                    }
+                };
+                let old_shape = view.shape;
+                let old_strides = view.strides;
+                for axis in 0..rank {
+                    view.shape[axis] = old_shape[axes[axis]];
+                    view.strides[axis] = old_strides[axes[axis]];
+                }
+                Ok(view)
+            }
+            _ => bail!("instruction is not a tensor view"),
+        }
     }
 
     /// One forward transaction; state persists between successful calls. Invalid
@@ -683,6 +824,7 @@ impl AdaptiveSession {
         );
         ensure!(max_steps > 0, "max_steps must be positive");
         self.initialized.fill(false);
+        self.views.fill(None);
         self.initialized[self.input] = true;
         self.registers[self.input].copy_from_slice(input);
         for (p, b) in self.program.parameters.iter().zip(&mut self.backup) {
