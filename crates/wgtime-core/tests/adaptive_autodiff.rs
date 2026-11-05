@@ -251,3 +251,35 @@ fn forward(x) {
     pass.backward(&[1., 1., 1.], &BTreeMap::new()).unwrap();
     close(pass.input_gradient().unwrap(), &[0., 0., 1.]);
 }
+
+#[test]
+fn general_permute_forward_and_vjp_match_finite_differences() {
+    let source = r#"wgt 0.5
+model PermuteGradient
+input x: f32[24]
+output y: f32[1]
+fn forward(x) {
+    let tensor: f32[sequence=2, heads=3, dim=4] = reshape(x,[2,3,4]);
+    let reordered = permute(tensor,[dim,sequence,heads]);
+    let weights = reshape([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24],[4,2,3]);
+    return (reordered * weights).mean;
+}
+"#;
+    let mut session = model(source);
+    let input = (0..24).map(|n| n as f32 * 0.1).collect::<Vec<_>>();
+    let mut pass = session.forward(&input, 1000, 32_768).unwrap();
+    let output = pass.output()[0];
+    pass.backward(&[1.], &BTreeMap::new()).unwrap();
+    let gradient = pass.input_gradient().unwrap().to_vec();
+    let epsilon = 0.001;
+    for index in 0..24 {
+        let mut plus = input.clone();
+        plus[index] += epsilon;
+        let yp = session.forward(&plus, 1000, 32_768).unwrap().output()[0];
+        let mut minus = input.clone();
+        minus[index] -= epsilon;
+        let ym = session.forward(&minus, 1000, 32_768).unwrap().output()[0];
+        close(&[gradient[index]], &[(yp - ym) / (2. * epsilon)]);
+    }
+    assert!(output.is_finite());
+}
