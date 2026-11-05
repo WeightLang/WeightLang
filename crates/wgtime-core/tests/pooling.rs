@@ -43,3 +43,17 @@ fn pool2d_rejects_invalid_geometry() {
     let source = "wgt 0.5\nmodel InvalidPool\ninput x: f32[16]\noutput y: f32[1]\nfn forward(x) { return reshape(max_pool2d(reshape(x,[1,4,4]), [5,2], [1,1]), [1]); }\n";
     assert!(parse(source).is_err());
 }
+
+#[test]
+fn adaptive_batch_inference_matches_independent_samples() {
+    let first: Vec<f32> = (1..=16).map(|n| n as f32).collect();
+    let second: Vec<f32> = (1..=16).map(|n| (17 - n) as f32).collect();
+    let mut inputs = first.clone();
+    inputs.extend_from_slice(&second);
+    let mut batched = session(MAX_POOL, true);
+    let actual = batched.evaluate_batch(&inputs, 2, 2000).unwrap();
+    let mut single = session(MAX_POOL, true);
+    let mut expected = single.evaluate(&first, 1000).unwrap();
+    expected.extend(single.evaluate(&second, 1000).unwrap());
+    assert_eq!(actual, expected);
+}
