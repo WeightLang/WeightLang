@@ -124,7 +124,7 @@ impl AdaptiveSession {
             && !program.instructions.iter().any(|i| matches!(i, Instruction::ValidateProbabilities { .. }))),
             "categorical output metadata and validation require adaptive IR version 2");
         ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,
-            Instruction::Conv { .. } | Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Permute { .. } | Instruction::Matmul { .. } | Instruction::BatchMatmul { .. } | Instruction::LayerNorm { .. }
+            Instruction::Conv { .. } | Instruction::MaxPool2d { .. } | Instruction::AvgPool2d { .. } | Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Permute { .. } | Instruction::Matmul { .. } | Instruction::BatchMatmul { .. } | Instruction::LayerNorm { .. }
             | Instruction::SoftmaxAxis { .. } | Instruction::Scale { .. })), "tensor operations require adaptive IR version 3");
         ensure!(!program.instructions.is_empty(), "empty adaptive program");
         if let Some(loss) = &program.loss {
