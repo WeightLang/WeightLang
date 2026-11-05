@@ -315,3 +315,36 @@ fn forward(x) {
     }
     assert!(output.is_finite());
 }
+
+#[test]
+fn permuted_batch_view_feeds_batched_matmul_without_materialization() {
+    let source = r#"wgt 0.5
+model PermutedBatchMatmul
+input x: f32[20]
+output y: f32[1]
+fn forward(x) {
+    let left: f32[batch=2, rows=2, inner=3] = x[0:12];
+    let transposed = permute(left,[batch,inner,rows]);
+    let right: f32[batch=2, inner=2, cols=2] = x[12:20];
+    let product = batch_matmul(transposed,right);
+    return product.mean;
+}
+"#;
+    let mut session = model(source);
+    let input = (0..20).map(|n| (n as f32 + 1.) * 0.025).collect::<Vec<_>>();
+    let mut pass = session.forward(&input, 1000, 32_768).unwrap();
+    let output = pass.output()[0];
+    pass.backward(&[1.], &BTreeMap::new()).unwrap();
+    let gradient = pass.input_gradient().unwrap().to_vec();
+    let epsilon = 0.001;
+    for index in 0..20 {
+        let mut plus = input.clone();
+        plus[index] += epsilon;
+        let yp = session.forward(&plus, 1000, 32_768).unwrap().output()[0];
+        let mut minus = input.clone();
+        minus[index] -= epsilon;
+        let ym = session.forward(&minus, 1000, 32_768).unwrap().output()[0];
+        close(&[gradient[index]], &[(yp - ym) / (2. * epsilon)]);
+    }
+    assert!(output.is_finite());
+}
