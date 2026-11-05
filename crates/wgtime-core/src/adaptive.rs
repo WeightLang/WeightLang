@@ -236,7 +236,9 @@ impl AdaptiveSession {
                         }
                         let output_shape = axes.iter().map(|&axis| shape[axis]).collect::<Vec<_>>();
                         ensure!(program.registers[r].shape == output_shape, "permute output shape mismatch");
-                        Op::Permute(r,x,shape.iter().copied().chain(std::iter::repeat(1)).take(8).collect::<Vec<_>>().try_into().unwrap(),order,axes.len())
+                        let mut input_shape = [1usize; 8];
+                        input_shape[..shape.len()].copy_from_slice(shape);
+                        Op::Permute(r,x,input_shape,order,axes.len())
                     },
                     Instruction::Matmul { out, left, right } => {
                         let (r,a,b) = (dest(out)?,reg(left)?,reg(right)?);
