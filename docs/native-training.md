@@ -215,6 +215,63 @@ train net on inputs against targets using momentum;
 此语法也不扩展底层自定义优化器的CPU forward能力范围。
 完整可运行例子为 [train_strategy/model.wgt](../examples/native_training/train_strategy/model.wgt)。
 
+## Rust 自定义更新策略（CPU Trainer）
+
+`wgtime_core::training::UpdateStrategy` 为 Rust 使用者提供算法无关的单步更新入口。策略实现 `Clone`，并通过 `propose(&self, parameters, step)` 返回**候选参数和下一份策略状态**；Trainer 先验证所有候选的数量、shape、有限值及冻结参数不变，再一次性提交模型参数、revision、step 和策略状态。若求导、策略计算或候选校验失败，模型和调用者持有的策略状态都不改变。
+
+```rust,ignore
+use wgtime_core::training::{
+    mlp, Objective, ParameterGradient, Trainer, UpdateStrategy,
+};
+use std::path::Path;
+
+#[derive(Clone, Default)]
+struct Momentum { velocity: Vec<Vec<f32>>, steps: u64 }
+
+impl UpdateStrategy for Momentum {
+    fn propose(
+        &self,
+        parameters: &[ParameterGradient],
+        step: u64,
+    ) -> anyhow::Result<(Vec<Vec<f32>>, Self)> {
+        let mut next = self.clone();
+        if next.velocity.is_empty() {
+            next.velocity = parameters.iter()
+                .map(|p| vec![0.0; p.values.len()])
+                .collect();
+        }
+        let mut candidates = Vec::new();
+        for (index, p) in parameters.iter().enumerate() {
+            let mut values = p.values.clone();
+            if !p.frozen {
+                for (i, value) in values.iter_mut().enumerate() {
+                    next.velocity[index][i] =
+                        0.9 * next.velocity[index][i] + p.gradients[i];
+                    *value -= 0.01 * next.velocity[index][i];
+                }
+            }
+            candidates.push(values);
+        }
+        next.steps = step;
+        Ok((candidates, next))
+    }
+}
+
+let mut trainer = Trainer::inference(
+    mlp(&[2, 8, 1], "tanh", 42)?,
+    Path::new("."),
+    64 * 1024 * 1024,
+)?;
+let mut strategy = Momentum::default();
+let loss = trainer.step_with_strategy(
+    &inputs,
+    Objective::Mse(&targets),
+    &mut strategy,
+)?;
+```
+
+该入口目前只接受 CPU backend，并要求以 inference/no-built-in-optimizer Trainer 初始化；它不会暗中选择 SGD/Adam。策略对象由调用者持有，因此策略状态的持久化也由调用者负责；若要崩溃恢复，应将模型 checkpoint 与策略状态一起写入同一个应用级原子制品。GPU、自定义策略跨 IPC 和统一的策略 checkpoint schema 尚未实现。WGT 侧既有 `differentiate/commit_gradients` 机制仍可用于更灵活的多次求导、SAM 或无梯度候选搜索。
+
 ## WGT 自定义更新算法（CPU forward）
 
 `differentiate(model,inputs,targets)` 要求 CPU `forward` 模型以 `"none"` 构造，且定义受限可微 `fn loss`。
