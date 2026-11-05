@@ -1105,6 +1105,7 @@ impl Lower {
             let tensor = match (op.as_str(), args.as_slice()) {
                 ("reshape", [x, Expr::List(dims)]) => {
                     let x = self.value(x)?;
+                    ensure!(x != out, "in-place reshape is unsupported; bind the view to a new name");
                     let shape = dims
                         .iter()
                         .map(|e| {
@@ -1189,6 +1190,7 @@ impl Lower {
                 }
                 ("transpose", [x]) => {
                     let x = self.value(x)?;
+                    ensure!(x != out, "in-place transpose is unsupported; bind the view to a new name");
                     let shape = self.shape(&x)?;
                     ensure!(shape.len() == 2, "transpose requires rank 2");
                     Some((
@@ -1201,6 +1203,7 @@ impl Lower {
                 }
                 ("permute", [x, Expr::List(order)]) => {
                     let x = self.value(x)?;
+                    ensure!(x != out, "in-place permute is unsupported; bind the view to a new name");
                     let shape = self.shape(&x)?;
                     let input_axes = self.axes.get(&x).cloned().unwrap_or_else(|| vec![None; shape.len()]);
                     ensure!(order.len() == shape.len(), "permute requires one axis per tensor dimension");
