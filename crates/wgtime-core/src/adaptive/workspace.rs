@@ -61,7 +61,7 @@ pub(super) fn validate(
             I::Conv { out,input,kernel,bias,.. } => vec![out,input,kernel,bias],
             I::Read { out, .. } | I::ResourceState { out } => vec![out],
             I::Write { value, .. } | I::Return { value } => vec![value],
-            I::Reshape { out, input } | I::Transpose { out, input } | I::SoftmaxAxis { out, input, .. } | I::Scale { out, input, .. } | I::Linear { out, input, .. }
+            I::Reshape { out, input } | I::Transpose { out, input } | I::Permute { out, input, .. } | I::SoftmaxAxis { out, input, .. } | I::Scale { out, input, .. } | I::Linear { out, input, .. }
             | I::Tanh { out, input }
             | I::Sigmoid { out, input }
             | I::Relu { out, input }
