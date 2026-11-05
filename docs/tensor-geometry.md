@@ -11,7 +11,9 @@
 当前 kernel 使用朴素 f64 累加而非 BLAS，并复用 `AxisGroups`。将 `let k = q` 已验证输出和梯度相同且 work 更少；目前没有全局 CSE 或活跃区间复用，compiled workspace 各 register 常驻，session 仍保留 reference buffers，因此不宣称内存最优。
 
 
-固定 shape 几何算子用于模型内部张量计算。WGT 提供原生矩阵乘法运算符 `@` 与 rank-2 转置后缀 `.T`，它们直接 lowering 到既有 Matmul/Transpose IR，不需要调用 `matmul(...)` 或 `transpose(...)`。例如：
+固定 shape 几何算子用于模型内部张量计算。WGT 支持局部张量类型注解和命名轴，例如 `let q: f32[sequence=8, hidden=32] = ...;`。注解在编译期检查 rank、各轴长度和重复轴名；命名轴用于矩阵收缩、Softmax 归约与轴置换的一致性检查，不增加运行时数值数据。未命名维度可写为 `f32[8,32]`。
+
+WGT 提供原生矩阵乘法运算符 `@` 与 rank-2 转置后缀 `.T`，它们直接 lowering 到既有 Matmul/Transpose IR，不需要调用 `matmul(...)` 或 `transpose(...)`。例如：
 
 ```wgt
 let q = x @ wq;
@@ -19,15 +21,19 @@ let k = x @ wk;
 let scores = scale(q @ k.T, 0.5);
 ```
 
-`@` 的两侧必须是 rank-2 张量，且 `A:[M,K]`、`B:[K,N]`；输出 shape 为 `[M,N]`。不支持 batch broadcasting 或隐式维度扩展。`.T` 仅接受 rank-2 张量并交换最后两个（也是仅有的两个）轴。矩阵乘法优先级与 `* / %` 相同，左结合；后缀 `.T` 优先于二元运算。旧的 `matmul(a,b)` 和 `transpose(x)` 调用继续兼容。
+`@` 的两侧必须是 rank-2 张量，且 `A:[M,K]`、`B:[K,N]`；输出 shape 为 `[M,N]`。当两侧收缩轴都命名时，名称必须一致。不支持 batch broadcasting 或隐式维度扩展。`softmax(x,"keys")` 可用已声明的轴名选择归约轴。
+通用轴置换写为 `permute(x,[heads,sequence,dim])`，列表表示输出轴依次来自输入的哪个轴；也可使用零基整数轴索引。轴必须构成完整排列。
+`batch_matmul(a,b)` 支持 rank-3 `[B,M,K]` 与 `[B,K,N]`，输出 `[B,M,N]`；当前要求两个 batch 维相等，不支持 batch 广播。`.T` 仅接受 rank-2 张量并交换最后两个（也是仅有的两个）轴。矩阵乘法优先级与 `* / %` 相同，左结合；后缀 `.T` 优先于二元运算。旧的 `matmul(a,b)` 和 `transpose(x)` 调用继续兼容。
 
-模型服务入口仍只接受一个 `f32` 向量；需要矩阵输入时，当前仍须在 forward 内显式 `reshape`。返回值仍须为向量，因此矩阵输出应显式 reshape 回一维。当前版本尚未实现局部 `f32[sequence, hidden]` 类型注解、命名轴、通用 `permute`、多轴索引或批次矩阵乘法；这些不能仅凭 `@` 和 `.T` 推断为已支持。
+模型服务入口仍只接受一个 `f32` 向量；需要矩阵输入时，当前仍须在 forward 内显式 `reshape`。返回值仍须为向量，因此矩阵输出应显式 reshape 回一维。当前版本尚未实现多轴索引、动态 Shape、通用广播和完整的零拷贝 TensorView。当前 `permute` 在 CPU 和编译执行路径中会物化排列后的数据；它不是零拷贝视图。
 
 | 表达式 | 合同 | 限制 |
 | --- | --- | --- |
 | `reshape(x,[d1,...,dn])` | 按行优先元素顺序重解释 shape | 目标为 1..8 个正整数常量轴，每轴 1..16384，元素总数不超过 16777216；元素数须与输入相同 |
 | `x.T` / `transpose(x)` | rank-2 张量交换两个轴 | 不接受其他 rank；两种写法等价 |
+| `permute(x,[...])` | 按输出轴顺序置换任意 rank 1..8 的张量轴 | 轴索引必须构成完整排列；当前物化数据 |
 | `a @ b` / `matmul(a,b)` | `[M,K] @ [K,N] -> [M,N]` | 两边必须是 rank-2 且内维相等；无广播；两种写法等价 |
+| `batch_matmul(a,b)` | `[B,M,K] @ [B,K,N] -> [B,M,N]` | rank-3，batch 维相等，无 batch 广播 |
 | `softmax(x,axis)` | 沿指定整轴独立归一化；稳定计算，沿轴使用 f64 累加 | axis 为非负整数字面常量且必须在 rank 范围内；`softmax(x)` 与 `log_softmax(x)` 仍只接受 rank-1 向量 |
 | `scale(x,literal)` | 以有限有符号数值字面量缩放张量 | 不广播，shape 保持不变 |
 
