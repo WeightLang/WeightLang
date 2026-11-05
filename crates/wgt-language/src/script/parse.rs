@@ -228,7 +228,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
                 }
             }
             ensure!(
-                "(){}[];,:.+-*/%<>=!&|".contains(ch),
+                "(){}[];,:.+-*/%@<>=!&|".contains(ch),
                 "line {line}: unexpected character {ch}"
             );
             (token, false)
@@ -1078,7 +1078,9 @@ impl Parser {
                     "line {}: expected field name or postfix operation",
                     operation.line
                 );
-                if matches!(operation.text.as_str(), "mean" | "probabilities") {
+                if operation.text == "T" {
+                    left = Expr::BuiltinCall("transpose".into(), vec![left]);
+                } else if matches!(operation.text.as_str(), "mean" | "probabilities") {
                     let name = if operation.text == "probabilities" {
                         "__probabilities"
                     } else {
@@ -1127,7 +1129,7 @@ impl Parser {
                 "==" | "!=" => 3,
                 "<" | "<=" | ">" | ">=" => 4,
                 "+" | "-" => 5,
-                "*" | "/" | "%" => 6,
+                "*" | "/" | "%" | "@" => 6,
                 "**" => 8,
                 _ => break,
             };
