@@ -214,3 +214,32 @@ fn forward(x) {
     assert_eq!(output.len(), 1);
     assert!(output[0].is_finite());
 }
+
+#[test]
+fn compiled_entry_supports_named_axis_layer_norm() {
+    let source = r#"wgt 0.5
+model LayerNorm
+input x: f32[6]
+output y: f32[6]
+parameter gamma: f32[3] = [1,1,1]
+parameter beta: f32[3] = [0,0,0]
+fn forward(x) {
+    let tokens: f32[sequence=2, hidden=3] = x;
+    let normalized = layer_norm(tokens,gamma,beta,"hidden",0.0001);
+    let flat: f32[6] = normalized;
+    return flat;
+}
+"#;
+    let ModelPlan::Forward(program) = ModelDefinition::parse(source)
+        .unwrap()
+        .instantiate_plan()
+        .unwrap()
+    else {
+        panic!("forward");
+    };
+    let mut compiled = CompiledForward::compile(&program, 1024 * 1024).unwrap();
+    let input = [0.2, -0.1, 0.7, 0.4, -0.3, 0.9];
+    let output = compiled.run(&input, &[&[1.,1.,1.], &[0.,0.,0.]]).unwrap();
+    assert_eq!(output.len(), 6);
+    assert!(output.iter().all(|value| value.is_finite()));
+}
