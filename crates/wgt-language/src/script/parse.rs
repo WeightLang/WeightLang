@@ -576,7 +576,40 @@ impl Parser {
                 Stmt::LetSample(bindings, model, *input)
             } else {
                 let name = self.name()?;
+                let annotation = if self.take(":") {
+                    self.expect("f32")?;
+                    self.expect("[")?;
+                    let mut dimensions = Vec::new();
+                    let mut axis_names = std::collections::HashSet::new();
+                    if !self.is("]") {
+                        loop {
+                            let axis = if self.tokens.get(self.pos).is_some_and(|t| !t.quoted)
+                                && self.tokens.get(self.pos + 1).is_some_and(|t| !t.quoted && t.text == "=")
+                            {
+                                let axis = self.name()?;
+                                self.expect("=")?;
+                                ensure!(axis_names.insert(axis.clone()), "duplicate tensor axis: {axis}");
+                                axis
+                            } else {
+                                String::new()
+                            };
+                            let dimension = self.expr(0)?;
+                            dimensions.push(Expr::List(vec![Expr::Text(axis), dimension]));
+                            if !self.take(",") {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect("]")?;
+                    Some(Expr::List(dimensions))
+                } else {
+                    None
+                };
                 self.expect("=")?;
+                if annotation.is_some() {
+                    ensure!(!self.is("collect") && !self.is("learn"),
+                        "tensor type annotations apply only to tensor value bindings");
+                }
                 if self.take("collect") {
                     Stmt::Collect(name, self.block()?)
                 } else if self.take("learn") {
@@ -588,7 +621,13 @@ impl Parser {
                     };
                     Stmt::Learn(Some(name), model, learner, self.block()?)
                 } else {
-                    Stmt::Let(name, self.expr(0)?)
+                    let value = self.expr(0)?;
+                    let value = if let Some(annotation) = annotation {
+                        Expr::BuiltinCall("__tensor_annot".into(), vec![annotation, value])
+                    } else {
+                        value
+                    };
+                    Stmt::Let(name, value)
                 }
             };
             let ordinary = matches!(kind, Stmt::Let(_, _));
