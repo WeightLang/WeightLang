@@ -259,7 +259,7 @@ model PermuteGradient
 input x: f32[24]
 output y: f32[1]
 fn forward(x) {
-    let tensor: f32[sequence=2, heads=3, dim=4] = reshape(x,[2,3,4]);
+    let tensor: f32[sequence=2, heads=3, dim=4] = x;
     let reordered = permute(tensor,[dim,sequence,heads]);
     let weights = reshape([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24],[4,2,3]);
     return (reordered * weights).mean;
