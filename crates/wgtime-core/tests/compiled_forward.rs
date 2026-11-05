@@ -133,3 +133,29 @@ fn sequential_graph_uses_native_layer_trace() {
         &(0..model.layers.len()).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn compiled_entry_supports_general_tensor_permutation() {
+    let source = r#"wgt 0.5
+model Permute
+input x: f32[24]
+output y: f32[1]
+fn forward(x) {
+    let tensor: f32[sequence=2, heads=3, dim=4] = reshape(x,[2,3,4]);
+    let reordered = permute(tensor,[dim,sequence,heads]);
+    return reordered.mean;
+}
+"#;
+    let ModelPlan::Forward(program) = ModelDefinition::parse(source)
+        .unwrap()
+        .instantiate_plan()
+        .unwrap()
+    else {
+        panic!("forward");
+    };
+    let mut compiled = CompiledForward::compile(&program, 1024 * 1024).unwrap();
+    let input = (0..24).map(|n| n as f32).collect::<Vec<_>>();
+    let output = compiled.run(&input, &[]).unwrap();
+    let expected = input.iter().sum::<f32>() / 24.;
+    assert!((output[0] - expected).abs() < 1e-6);
+}
