@@ -32,12 +32,14 @@ pub struct ParameterGradient {
 /// Algorithm-independent CPU update hook. The strategy owns its state (momentum,
 /// moments, population, schedules, etc.) and returns absolute candidate values.
 /// The trainer validates every candidate before committing any parameter.
-pub trait UpdateStrategy {
-    fn update(
-        &mut self,
+pub trait UpdateStrategy: Clone {
+    /// Return candidates and a staged next strategy state. The trainer only
+    /// installs that state after all parameter candidates pass validation.
+    fn propose(
+        &self,
         parameters: &[ParameterGradient],
         step: u64,
-    ) -> Result<Vec<Vec<f32>>>;
+    ) -> Result<(Vec<Vec<f32>>, Self)>;
 }
 
 pub enum Objective<'a> {
@@ -173,7 +175,7 @@ impl Trainer {
         strategy: &mut S,
     ) -> Result<f32> {
         ensure!(
-            matches!(self.backend, TrainingBackend::Cpu),
+            matches!(&self.backend, TrainingBackend::Cpu),
             "user-defined update strategies currently require the CPU backend"
         );
         ensure!(
@@ -197,7 +199,7 @@ impl Trainer {
                 frozen: p.frozen,
             }
         }).collect::<Vec<_>>();
-        let candidates = strategy.update(&parameters, next_step)?;
+        let (candidates, next_strategy) = strategy.propose(&parameters, next_step)?;
         ensure!(candidates.len() == parameters.len(), "strategy candidate count mismatch");
         for (parameter, candidate) in parameters.iter().zip(&candidates) {
             ensure!(
@@ -226,6 +228,7 @@ impl Trainer {
         }
         self.steps = next_step;
         self.session.revision = next_revision;
+        *strategy = next_strategy;
         Ok(loss)
     }
 
