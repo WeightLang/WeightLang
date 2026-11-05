@@ -68,7 +68,7 @@ fn source_split_enforces_source_byte_limit_before_scanning() {
 #[test]
 fn matrix_product_uses_native_at_operator() {
     let expression = returned(
-        "wgt 0.5\\nfn value(q,k) { return q @ k; }"
+        "wgt 0.5\nfn value(q,k) { return q @ k; }"
     );
     assert!(matches!(
         expression,
@@ -82,7 +82,7 @@ fn matrix_product_uses_native_at_operator() {
 #[test]
 fn transpose_uses_native_t_postfix() {
     let expression = returned(
-        "wgt 0.5\\nfn value(k) { return k.T; }"
+        "wgt 0.5\nfn value(k) { return k.T; }"
     );
     assert!(matches!(
         expression,
@@ -95,7 +95,7 @@ fn transpose_uses_native_t_postfix() {
 #[test]
 fn matrix_product_precedes_addition() {
     let expression = returned(
-        "wgt 0.5\\nfn value(a,b,c) { return a + b @ c; }"
+        "wgt 0.5\nfn value(a,b,c) { return a + b @ c; }"
     );
     assert!(matches!(
         expression,
