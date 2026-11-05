@@ -114,7 +114,8 @@ output y: f32[1]
 parameter projection: f32[3,2] = [1,0,0,1,1,1]
 fn forward(x) {
     let tokens = reshape(x,[2,3]);
-    let q = tokens @ projection;
+    let projection_matrix = reshape(projection,[3,2]);
+    let q = tokens @ projection_matrix;
     let k = q.T;
     let scores = q @ k;
     return scores.mean;
@@ -136,7 +137,8 @@ fn project(a,b) {
 }
 fn forward(x) {
     let tokens = reshape(x,[2,3]);
-    let q = project(tokens,projection);
+    let projection_matrix = reshape(projection,[3,2]);
+    let q = project(tokens,projection_matrix);
     return (q @ q.T).mean;
 }
 "#;
@@ -176,7 +178,7 @@ fn forward(x) {
 "#;
     let error = wgt_language::adaptive::parse(source)
         .expect_err("different named contracting axes must be rejected");
-    assert!(error.to_string().contains("matrix product axis mismatch"));
+    assert!(format!("{error:#}").contains("matrix product axis mismatch"));
 }
 
 #[test]
@@ -229,7 +231,7 @@ fn forward(x) {
 "#;
     let error = wgt_language::adaptive::parse(source)
         .expect_err("permutation axes must be unique");
-    assert!(error.to_string().contains("permute axes must form a bijection"));
+    assert!(format!("{error:#}").contains("permute axes must form a bijection"));
 }
 
 #[test]
@@ -266,5 +268,5 @@ fn forward(x) {
 "#;
     let error = wgt_language::adaptive::parse(source)
         .expect_err("different named batch axes must be rejected");
-    assert!(error.to_string().contains("batch_matmul batch axis mismatch"));
+    assert!(format!("{error:#}").contains("batch_matmul batch axis mismatch"));
 }
