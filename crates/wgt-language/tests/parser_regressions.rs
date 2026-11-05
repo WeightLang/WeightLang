@@ -239,8 +239,8 @@ model BatchMatmul
 input x: f32[24]
 output y: f32[1]
 fn forward(x) {
-    let left: f32[batch=2, rows=2, inner=3] = reshape(x[0:12],[2,2,3]);
-    let right: f32[batch=2, inner=3, cols=2] = reshape(x[12:24],[2,3,2]);
+    let left: f32[batch=2, rows=2, inner=3] = x[0:12];
+    let right: f32[batch=2, inner=3, cols=2] = x[12:24];
     let product = batch_matmul(left,right);
     return product.mean;
 }
@@ -258,8 +258,8 @@ model BadBatchMatmul
 input x: f32[24]
 output y: f32[1]
 fn forward(x) {
-    let left: f32[batch=2, rows=2, inner=3] = reshape(x[0:12],[2,2,3]);
-    let right: f32[other_batch=2, inner=3, cols=2] = reshape(x[12:24],[2,3,2]);
+    let left: f32[batch=2, rows=2, inner=3] = x[0:12];
+    let right: f32[other_batch=2, inner=3, cols=2] = x[12:24];
     let product = batch_matmul(left,right);
     return product.mean;
 }
