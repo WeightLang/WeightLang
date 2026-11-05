@@ -46,7 +46,7 @@
 ";" @punctuation.delimiter
 (function_declaration name: (identifier) @function)
 (call function: (qualified_name) @function)
-((qualified_name) @function.builtin (#any-of? @function.builtin "add" "batch_matmul" "clip" "conv" "depth_gate" "detach" "exp" "gate" "linear" "log" "log_softmax" "matmul" "mean" "memory_alloc" "memory_free" "memory_read" "memory_write" "minimum" "mul" "permute" "positive" "read" "relu" "reshape" "resource_state" "route" "scale" "sigmoid" "slice" "softmax" "square" "sum" "tanh" "transpose" "write"))
+((qualified_name) @function.builtin (#any-of? @function.builtin "add" "batch_matmul" "clip" "conv" "depth_gate" "detach" "exp" "gate" "layer_norm" "linear" "log" "log_softmax" "matmul" "mean" "memory_alloc" "memory_free" "memory_read" "memory_write" "minimum" "mul" "permute" "positive" "read" "relu" "reshape" "resource_state" "route" "scale" "sigmoid" "slice" "softmax" "square" "sum" "tanh" "transpose" "write"))
 ((identifier) @function.builtin (#any-of? @function.builtin "identity" "linear" "relu" "sigmoid" "tanh"))
 (parameter name: (identifier) @variable.parameter)
 (model_declaration name: (identifier) @type)
