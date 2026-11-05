@@ -159,3 +159,30 @@ fn forward(x) {
     let expected = input.iter().sum::<f32>() / 24.;
     assert!((output[0] - expected).abs() < 1e-6);
 }
+
+#[test]
+fn compiled_entry_supports_batched_matrix_products() {
+    let source = r#"wgt 0.5
+model BatchMatmul
+input x: f32[24]
+output y: f32[1]
+fn forward(x) {
+    let left: f32[batch=2, rows=2, inner=3] = reshape(x[0:12],[2,2,3]);
+    let right: f32[batch=2, inner=3, cols=2] = reshape(x[12:24],[2,3,2]);
+    let product = batch_matmul(left,right);
+    return product.mean;
+}
+"#;
+    let ModelPlan::Forward(program) = ModelDefinition::parse(source)
+        .unwrap()
+        .instantiate_plan()
+        .unwrap()
+    else {
+        panic!("forward");
+    };
+    let mut compiled = CompiledForward::compile(&program, 1024 * 1024).unwrap();
+    let input = (0..24).map(|n| n as f32 * 0.1).collect::<Vec<_>>();
+    let output = compiled.run(&input, &[]).unwrap();
+    assert_eq!(output.len(), 1);
+    assert!(output[0].is_finite());
+}
