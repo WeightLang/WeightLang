@@ -18,6 +18,8 @@ pub use wgt_language::adaptive::{Program, Register, Parameter, Instruction};
 #[derive(Debug, Clone, Copy)]
 enum Op {
     Conv(usize, usize, usize, usize, wgt_language::adaptive::ConvGeometry),
+    MaxPool2d(usize, usize, wgt_language::adaptive::Pool2dGeometry),
+    AvgPool2d(usize, usize, wgt_language::adaptive::Pool2dGeometry),
     Reshape(usize, usize),
     Transpose(usize, usize, usize, usize),
     Permute(usize, usize, [usize; 8], [usize; 8], usize),
@@ -230,6 +232,18 @@ impl AdaptiveSession {
                         let g=wgt_language::adaptive::ConvGeometry::new(&program.registers[x].shape,&program.registers[k].shape,&program.registers[b].shape,stride,padding,dilation,*groups)?;
                         ensure!(program.registers[r].shape==g.shape(),"conv output shape mismatch");
                         Op::Conv(r,x,k,b,g)
+                    },
+                    Instruction::MaxPool2d { out, input, kernel, stride } => {
+                        let (r, x) = (dest(out)?, reg(input)?);
+                        let g = wgt_language::adaptive::Pool2dGeometry::new(&program.registers[x].shape, kernel, stride)?;
+                        ensure!(program.registers[r].shape == g.shape(), "max_pool2d output shape mismatch");
+                        Op::MaxPool2d(r, x, g)
+                    },
+                    Instruction::AvgPool2d { out, input, kernel, stride } => {
+                        let (r, x) = (dest(out)?, reg(input)?);
+                        let g = wgt_language::adaptive::Pool2dGeometry::new(&program.registers[x].shape, kernel, stride)?;
+                        ensure!(program.registers[r].shape == g.shape(), "avg_pool2d output shape mismatch");
+                        Op::AvgPool2d(r, x, g)
                     },
                     Instruction::Reshape { out, input } => {
 
@@ -925,6 +939,7 @@ impl AdaptiveSession {
                 .context("adaptive program fell through without return")?;
             let cost = match op {
                 Op::Conv(_,_,_,_,g) => g.work()? as u64,
+                Op::MaxPool2d(_,_,g) | Op::AvgPool2d(_,_,g) => g.work()? as u64,
                 Op::Reshape(r,_) | Op::Permute(r,_,_,_) => (self.program.registers[r].len as u64).saturating_add(1),
                 Op::Transpose(_,_,m,n) => m.checked_mul(n).and_then(|v|v.checked_add(1)).context("transpose work overflow")? as u64,
                 Op::Matmul(_,_,_,m,k,n) => m.checked_mul(k).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("matmul work overflow")? as u64,
@@ -1008,6 +1023,26 @@ impl AdaptiveSession {
                     }
                     output=Some(r);
                 },
+                Op::MaxPool2d(r, x, g) => {
+                    self.ready(x)?;
+                    for i in 0..g.output_len() {
+                        let mut maximum = f32::NEG_INFINITY;
+                        g.visit(i, |index| maximum = maximum.max(self.registers[x][index]));
+                        self.scratch[i] = maximum;
+                    }
+                    output = Some(r);
+                },
+                Op::AvgPool2d(r, x, g) => {
+                    self.ready(x)?;
+                    let divisor = g.window_len() as f64;
+                    for i in 0..g.output_len() {
+                        let mut sum = 0f64;
+                        g.visit(i, |index| sum += f64::from(self.registers[x][index]));
+                        self.scratch[i] = (sum / divisor) as f32;
+                    }
+                    output = Some(r);
+                },
+
                 Op::Reshape(r,x) => {
                     self.ready_view(x)?;
                     output = Some(r);
