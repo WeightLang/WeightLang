@@ -10,6 +10,7 @@ use std::{
 const OPS: &[&str] = &[
     "reshape",
     "transpose",
+    "permute",
     "matmul",
     "scale",
     "conv",
