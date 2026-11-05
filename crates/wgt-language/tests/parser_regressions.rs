@@ -194,3 +194,40 @@ fn forward(x) {
     wgt_language::adaptive::parse(source)
         .expect("softmax should accept an annotated named axis");
 }
+
+#[test]
+fn named_axis_permute_lowers_to_geometry_ir() {
+    let source = r#"wgt 0.5
+model NamedPermute
+input x: f32[24]
+output y: f32[1]
+fn forward(x) {
+    let tensor: f32[sequence=2, heads=3, dim=4] = reshape(x,[2,3,4]);
+    let reordered = permute(tensor,[dim,sequence,heads]);
+    return reordered.mean;
+}
+"#;
+    let program = wgt_language::adaptive::parse(source)
+        .expect("named-axis permutation should lower");
+    assert!(program.version >= 3);
+    assert!(program.instructions.iter().any(|instruction|
+        matches!(instruction, wgt_language::adaptive::Instruction::Permute { axes, .. }
+            if axes == &[2,0,1])));
+}
+
+#[test]
+fn permute_rejects_duplicate_axes() {
+    let source = r#"wgt 0.5
+model DuplicatePermute
+input x: f32[24]
+output y: f32[1]
+fn forward(x) {
+    let tensor: f32[a=2, b=3, c=4] = reshape(x,[2,3,4]);
+    let invalid = permute(tensor,[a,a,c]);
+    return invalid.mean;
+}
+"#;
+    let error = wgt_language::adaptive::parse(source)
+        .expect_err("permutation axes must be unique");
+    assert!(error.to_string().contains("permute axes must form a bijection"));
+}
