@@ -688,30 +688,30 @@ impl AdaptiveSession {
         Ok(())
     }
     fn make_view(&mut self, op: Op, output: usize) -> Result<TensorView> {
-        let output_shape = &self.program.registers[output].shape;
+        let output_shape = self.program.registers[output].shape.clone();
         match op {
             Op::Reshape(_, input) => {
                 self.ready_view(input)?;
-                let input_shape = &self.program.registers[input].shape;
+                let input_shape = self.program.registers[input].shape.clone();
                 let view = if let Some(existing) = self.views[input] {
                     let contiguous = contiguous_strides(&existing.shape[..existing.rank]);
                     if existing.strides[..existing.rank] == contiguous[..existing.rank] {
                         existing
                     } else {
                         self.materialize_view(input);
-                        let strides = contiguous_strides(output_shape);
+                        let strides = contiguous_strides(&output_shape);
                         let mut shape = [1usize; 8];
-                        shape[..output_shape.len()].copy_from_slice(output_shape);
+                        shape[..output_shape.len()].copy_from_slice(&output_shape);
                         return Ok(TensorView { base: input, offset: 0, shape, strides, rank: output_shape.len() });
                     }
                 } else {
-                    let strides = contiguous_strides(input_shape);
+                    let strides = contiguous_strides(&input_shape);
                     TensorView {
                         base: input,
                         offset: 0,
                         shape: {
                             let mut shape = [1usize; 8];
-                            shape[..input_shape.len()].copy_from_slice(input_shape);
+                            shape[..input_shape.len()].copy_from_slice(&input_shape);
                             shape
                         },
                         strides,
