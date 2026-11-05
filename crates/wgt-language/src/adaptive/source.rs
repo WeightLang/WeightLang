@@ -1302,6 +1302,7 @@ impl Lower {
                     sa.len() == 2 && sb.len() == 2 && sa[1] == sb[0],
                     "matrix product requires [M,K] @ [K,N]"
                 );
+                self.program.version = 3;
                 let output_shape = vec![sa[0], sb[1]];
                 let len = output_shape.iter().product();
                 (
