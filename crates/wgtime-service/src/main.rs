@@ -11,6 +11,7 @@ use std::time::Duration;
 use wgtime_core::training::{mlp, Objective, Optimizer, Trainer};
 use wgtime::{receive, send, Reply, Request, PROTOCOL};
 
+mod admission;
 mod metrics;
 #[cfg(feature="allocation-metrics")]
 #[global_allocator]
@@ -21,6 +22,14 @@ const MAX_CONNECTION_BYTES: usize = 512 * 1024 * 1024;
 struct Shared {
     next: AtomicU64,
     connections: AtomicUsize,
+}
+// The accept loop owns admission; this guard owns exactly one admitted slot.
+// It also runs when a worker unwinds, after its connection-local state is dropped.
+struct ConnectionSlot<'a>(&'a AtomicUsize);
+impl Drop for ConnectionSlot<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 struct Guard {
     directory: PathBuf,
@@ -139,9 +148,8 @@ impl Connection {
                     "adam" => Optimizer::Adam,
                     _ => bail!("unsupported optimizer"),
                 };
-                let trainer = Trainer::new(
+                let trainer = Trainer::new_self_contained(
                     mlp(&widths, &activation, seed)?,
-                    Path::new("."),
                     memory,
                     optimizer,
                 )?;
@@ -160,17 +168,16 @@ impl Connection {
                 let definition = wgt_language::model::ModelDefinition::parse(&source)?;
                 // Reject an impossible parameter budget before materializing any values.
                 // Core preparation still checks activations, workspace and optimizer state.
-                let parameter_bytes = definition.parameters().iter().try_fold(0usize, |total, parameter| {
-                    let count = parameter.shape.iter().try_fold(1usize, |n, axis| n.checked_mul(*axis)).context("parameter shape overflow")?;
-                    total.checked_add(count.checked_mul(4).context("parameter byte overflow")?).context("parameter byte overflow")
-                })?;
-                let storage_bytes = definition.states().iter().try_fold(parameter_bytes, |total,state| total.checked_add(state.shape.iter().product::<usize>()*4).context("state byte overflow"))?;
-                let required = if definition.operations().is_empty() { storage_bytes } else { storage_bytes.checked_mul(4).context("storage byte overflow")? };
+                let required = admission::storage_bytes(
+                    definition.parameters().iter().map(|p| p.shape.as_slice())
+                        .chain(definition.states().iter().map(|state| state.shape.as_slice())),
+                    if definition.operations().is_empty() { 1 } else { 4 },
+                )?;
                 ensure!(required <= memory, "definition storage memory budget exceeded");
                 let handle = shared.next.fetch_add(1, Ordering::Relaxed);
                 let program = match definition.instantiate_plan()? {
                     wgt_language::model::ModelPlan::Graph(graph) => {
-                        let model = wgtime_core::source::Graph(graph).instantiate()?;
+                        let model = wgtime_core::source::Graph(graph).instantiate_bounded(memory)?;
                         wgtime_core::compiled_forward::CompiledForward::model_program(&model)?
                     }
                     wgt_language::model::ModelPlan::Forward(program) => program,
@@ -313,7 +320,7 @@ impl Connection {
                     _ => bail!("unsupported optimizer"),
                 };
                 let trainer =
-                    Trainer::new(graph.instantiate()?, Path::new("."), memory, optimizer)?;
+                    Trainer::new_self_contained(graph.instantiate_bounded(memory)?, memory, optimizer)?;
                 let handle = shared.next.fetch_add(1, Ordering::Relaxed);
                 self.sessions.insert(handle, (trainer, memory));
                 self.reserved += memory;
@@ -379,7 +386,7 @@ impl Connection {
                     .checkpoints
                     .get(&checkpoint)
                     .context("unknown checkpoint or foreign owner")?;
-                let trainer = Trainer::restore_value(serde_json::from_slice(bytes)?, memory)?;
+                let trainer = Trainer::restore_self_contained_value(serde_json::from_slice(bytes)?, memory)?;
                 let handle = shared.next.fetch_add(1, Ordering::Relaxed);
                 self.sessions.insert(handle, (trainer, memory));
                 self.reserved += memory;
@@ -425,6 +432,7 @@ impl Connection {
     }
 }
 fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
+    let _slot = ConnectionSlot(&shared.connections);
     let result = (|| -> Result<()> {
         ensure!(
             wgtime::peer_uid(&stream)? == unsafe { libc::geteuid() },
@@ -527,9 +535,9 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                             ensure!(bytes.len() <= 64 * 1024 * 1024, "artifact byte limit exceeded");
                             let value: serde_json::Value = serde_json::from_slice(&bytes)?;
                             let trainer = if checkpoint {
-                                Trainer::restore_value(value, memory)?
+                                Trainer::restore_self_contained_value(value, memory)?
                             } else {
-                                Trainer::new(serde_json::from_value(value)?, Path::new("."), memory, Optimizer::Sgd)?
+                                Trainer::new_self_contained(serde_json::from_value(value)?, memory, Optimizer::Sgd)?
                             };
                             let report = trainer.session.report();
                             Ok(serde_json::json!({"input":report.input,"output":report.output,"steps":trainer.steps()}))
@@ -600,16 +608,15 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                                 state.adaptive.insert(handle, (session, memory));
                             } else {
                                 let trainer = if checkpoint {
-                                    Trainer::restore_value(value, memory)?
+                                    Trainer::restore_self_contained_value(value, memory)?
                                 } else {
                                     let optimizer = match optimizer.as_str() {
                                         "adam" => Optimizer::Adam,
                                         "sgd" => Optimizer::Sgd,
                                         _ => bail!("unsupported optimizer"),
                                     };
-                                    Trainer::new(
+                                    Trainer::new_self_contained(
                                         serde_json::from_value(value)?,
-                                        Path::new("."),
                                         memory,
                                         optimizer,
                                     )?
@@ -697,10 +704,7 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                         }
                     },
                     Err(error) => {
-                        let error = format!("{error:#}");
-                        stream.write_all(&1u32.to_le_bytes())?;
-                        stream.write_all(&(error.len() as u32).to_le_bytes())?;
-                        stream.write_all(error.as_bytes())?;
+                        wgtime::send_binary_error(&mut stream, &error)?;
                     }
                 }
                 continue;
@@ -754,11 +758,11 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
     if let Err(error) = result {
         eprintln!("wgtime connection: {error:#}");
     }
-    shared.connections.fetch_sub(1, Ordering::Relaxed);
 }
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+    mod hardening;
 
     #[test]
     fn listener_guard_removes_socket_before_unlocking_and_allows_restart() -> Result<()> {

@@ -74,6 +74,30 @@ impl Trainer {
         })
     }
 
+    /// Prepare an untrusted, self-contained model without opening parameter paths.
+    /// File descriptors may carry an artifact, but its contents are not authority
+    /// to open additional files in the service process.
+    pub fn new_self_contained(model: Model, budget: usize, optimizer: Optimizer) -> Result<Self> {
+        Self::ensure_self_contained(&model)?;
+        Self::new(model, Path::new("."), budget, optimizer)
+    }
+
+    fn ensure_self_contained(model: &Model) -> Result<()> {
+        for parameter in &model.parameters {
+            // An allow-list makes future storage variants require an explicit
+            // review before they are accepted at the service boundary.
+            ensure!(
+                matches!(
+                    &parameter.value,
+                    Value::Resident { .. } | Value::Packed { .. }
+                        | Value::View { .. } | Value::Add { .. }
+                ),
+                "self-contained model required: external parameter files are forbidden"
+            );
+        }
+        Ok(())
+    }
+
     /// Prepare inference without creating optimizer moments or permitting updates.
     pub fn inference(model: Model, root: &Path, budget: usize) -> Result<Self> {
         Ok(Self { backend: TrainingBackend::Cpu, session: Session::prepare(model,root,budget)?, optimizer: None, steps: 0, first: Vec::new(), second: Vec::new() })
@@ -352,8 +376,25 @@ impl Trainer {
         Self::restore_value(serde_json::from_reader(std::fs::File::open(path)?)?, budget)
     }
 
+    /// Restore a trusted local checkpoint; parameter paths retain their legacy semantics.
     pub fn restore_value(value: serde_json::Value, budget: usize) -> Result<Self> {
+        Self::restore_value_with_policy(value, budget, false)
+    }
+
+    /// Restore an untrusted checkpoint without opening embedded parameter paths.
+    pub fn restore_self_contained_value(value: serde_json::Value, budget: usize) -> Result<Self> {
+        Self::restore_value_with_policy(value, budget, true)
+    }
+
+    fn restore_value_with_policy(
+        value: serde_json::Value,
+        budget: usize,
+        self_contained: bool,
+    ) -> Result<Self> {
         let c: Checkpoint = serde_json::from_value(value)?;
+        if self_contained {
+            Self::ensure_self_contained(&c.model)?;
+        }
         ensure!(
             c.format == "weightlang.native-training.v1",
             "unsupported checkpoint format"
@@ -484,3 +525,6 @@ pub fn mlp(widths: &[usize], activation: &str, seed: u64) -> Result<Model> {
         layers,
     })
 }
+
+#[cfg(test)]
+mod security_tests;
