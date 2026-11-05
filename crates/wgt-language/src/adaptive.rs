@@ -98,6 +98,7 @@ pub enum Instruction {
     Matmul { out: String, left: String, right: String },
     /// Batched rank-3 matrix product with equal batch extents.
     BatchMatmul { out: String, left: String, right: String },
+    LayerNorm { out: String, input: String, gamma: String, beta: String, axis: usize, epsilon: f32 },
     SoftmaxAxis { out: String, input: String, axis: usize },
     Scale { out: String, input: String, factor: f32 },
     Constant {
