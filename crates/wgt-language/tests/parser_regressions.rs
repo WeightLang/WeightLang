@@ -270,3 +270,24 @@ fn forward(x) {
         .expect_err("different named batch axes must be rejected");
     assert!(format!("{error:#}").contains("batch_matmul batch axis mismatch"));
 }
+
+#[test]
+fn layer_norm_accepts_named_axis_and_preserves_shape() {
+    let source = r#"wgt 0.5
+model NamedLayerNorm
+input x: f32[6]
+output y: f32[6]
+parameter gamma: f32[3] = [1,1,1]
+parameter beta: f32[3] = [0,0,0]
+fn forward(x) {
+    let tokens: f32[sequence=2, hidden=3] = x;
+    let normalized = layer_norm(tokens,gamma,beta,"hidden",0.0001);
+    let flat: f32[6] = normalized;
+    return flat;
+}
+"#;
+    let program = wgt_language::adaptive::parse(source)
+        .expect("LayerNorm should lower with named axis");
+    assert!(program.instructions.iter().any(|instruction|
+        matches!(instruction, wgt_language::adaptive::Instruction::LayerNorm { axis: 1, .. })));
+}
