@@ -17,10 +17,10 @@ fn forward(x) {
     let k = matmul(tokens,projection);
     let v = matmul(tokens,values);
     # [2,2] scores reduce over keys (axis 1), independently for each query.
-    let scores = scale(matmul(q,transpose(k)),0.7071067811865476);
+    let scores = scale(q @ k.T,0.7071067811865476);
     let attention = softmax(scores,1);
-    let context = matmul(attention,v);
+    let context = attention @ v;
     # Output projection preserves tokens; the host contract stays one vector.
-    return reshape(matmul(context,outputs),[6]);
+    return reshape(context @ outputs,[6]);
 }
 fn loss(prediction,target) { return square(prediction-target).mean; }
