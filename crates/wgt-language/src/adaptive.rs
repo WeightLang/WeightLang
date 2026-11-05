@@ -96,6 +96,8 @@ pub enum Instruction {
     /// General axis permutation. axes[out_axis] = input_axis.
     Permute { out: String, input: String, axes: Vec<usize> },
     Matmul { out: String, left: String, right: String },
+    /// Batched rank-3 matrix product with equal batch extents.
+    BatchMatmul { out: String, left: String, right: String },
     SoftmaxAxis { out: String, input: String, axis: usize },
     Scale { out: String, input: String, factor: f32 },
     Constant {
