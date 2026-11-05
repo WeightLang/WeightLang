@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tensor-language:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check WGT parser and language tests
+        run: cargo test --locked -p wgt-language
+      - name: Check tensor runtime autodiff
+        run: cargo test --locked --no-default-features -p wgtime-core --test adaptive_autodiff
+      - name: Check compiled tensor backend
+        run: cargo test --locked --no-default-features -p wgtime-core --test compiled_forward
+      - name: Check generated editor support
+        run: node scripts/generate_editor_support.cjs --check
+      - name: Check prelude catalog
+        run: node scripts/check_prelude.cjs
