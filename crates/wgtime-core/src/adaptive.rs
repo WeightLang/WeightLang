@@ -23,6 +23,7 @@ enum Op {
     Permute(usize, usize, [usize; 8], [usize; 8], usize),
     Matmul(usize, usize, usize, usize, usize, usize),
     BatchMatmul(usize, usize, usize, usize, usize, usize, usize),
+    LayerNorm(usize, usize, usize, usize, tensor::AxisGroups, f32),
     SoftmaxAxis(usize, usize, tensor::AxisGroups),
     Scale(usize, usize, f32),
 
@@ -121,7 +122,7 @@ impl AdaptiveSession {
             && !program.instructions.iter().any(|i| matches!(i, Instruction::ValidateProbabilities { .. }))),
             "categorical output metadata and validation require adaptive IR version 2");
         ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,
-            Instruction::Conv { .. } | Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Permute { .. } | Instruction::Matmul { .. } | Instruction::BatchMatmul { .. }
+            Instruction::Conv { .. } | Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Permute { .. } | Instruction::Matmul { .. } | Instruction::BatchMatmul { .. } | Instruction::LayerNorm { .. }
             | Instruction::SoftmaxAxis { .. } | Instruction::Scale { .. })), "tensor operations require adaptive IR version 3");
         ensure!(!program.instructions.is_empty(), "empty adaptive program");
         if let Some(loss) = &program.loss {
@@ -276,6 +277,16 @@ impl AdaptiveSession {
                             && program.registers[r].shape == [sa[0],sa[1],sb[2]],
                             "batch_matmul shape mismatch");
                         Op::BatchMatmul(r,a,b,sa[0],sa[1],sa[2],sb[2])
+                    },
+                    Instruction::LayerNorm { out, input, gamma, beta, axis, epsilon } => {
+                        let (r,x,g,b) = (dest(out)?,reg(input)?,reg(gamma)?,reg(beta)?);
+                        let groups = tensor::AxisGroups::new(&program.registers[x].shape, *axis)?;
+                        ensure!(program.registers[g].shape == [groups.width]
+                            && program.registers[b].shape == [groups.width]
+                            && program.registers[r].shape == program.registers[x].shape,
+                            "LayerNorm tensor geometry mismatch");
+                        ensure!(epsilon.is_finite() && *epsilon > 0., "LayerNorm epsilon must be positive and finite");
+                        Op::LayerNorm(r,x,g,b,groups,*epsilon)
                     },
                     Instruction::SoftmaxAxis { out, input, axis } => {
                         let (r,x) = (dest(out)?,reg(input)?);
@@ -918,6 +929,7 @@ impl AdaptiveSession {
                 Op::Transpose(_,_,m,n) => m.checked_mul(n).and_then(|v|v.checked_add(1)).context("transpose work overflow")? as u64,
                 Op::Matmul(_,_,_,m,k,n) => m.checked_mul(k).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("matmul work overflow")? as u64,
                 Op::BatchMatmul(_,_,_,batch,m,k,n) => batch.checked_mul(m).and_then(|v|v.checked_mul(k)).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("batch_matmul work overflow")? as u64,
+                Op::LayerNorm(_,_,_,_,groups,_) => groups.len().checked_mul(3).and_then(|v|v.checked_add(1)).context("LayerNorm work overflow")? as u64,
                 _ => self.workspace.cost(op)?,
             };
 
@@ -1034,6 +1046,13 @@ impl AdaptiveSession {
                             self.scratch[out_base+i*n+j] = sum as f32;
                         } }
                     }
+                    output = Some(r);
+                },
+                Op::LayerNorm(r,x,gamma,beta,groups,epsilon) => {
+                    self.ready(x)?; self.ready(gamma)?; self.ready(beta)?;
+                    let len = self.program.registers[r].len;
+                    groups.layer_norm(&self.registers[x], &self.registers[gamma], &self.registers[beta],
+                        epsilon, &mut self.scratch[..len])?;
                     output = Some(r);
                 },
                 Op::SoftmaxAxis(r,x,groups) => {
