@@ -13,6 +13,7 @@ const OPS: &[&str] = &[
     "permute",
     "matmul",
     "batch_matmul",
+    "layer_norm",
     "scale",
     "conv",
     "add",
