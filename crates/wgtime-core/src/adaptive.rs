@@ -529,10 +529,17 @@ impl AdaptiveSession {
             ops.push(op);
         }
         let output_len = output_len.context("program requires a return")?;
+        let view_registers = ops.iter().filter_map(|op| match op {
+            Op::Reshape(register, _) | Op::Transpose(register, _, _, _) | Op::Permute(register, _, _, _) => Some(*register),
+            _ => None,
+        }).collect::<std::collections::HashSet<_>>();
         let registers = program
             .registers
             .iter()
-            .map(|register| crate::zero_buffer(register.len))
+            .enumerate()
+            .map(|(index, register)| {
+                if view_registers.contains(&index) { Ok(Vec::new()) } else { crate::zero_buffer(register.len) }
+            })
             .collect::<Result<_>>()?;
         let backup = program
             .parameters
@@ -873,6 +880,7 @@ impl AdaptiveSession {
             self.steps = compiled.last_steps();
             let output = result?;
             let register = returned.context("compiled forward did not return")?;
+            self.registers[register].resize(output.len(), 0.);
             self.registers[register].copy_from_slice(&output);
             self.compiled_forward_calls = self.compiled_forward_calls.saturating_add(1);
             if traced { self.compiled_tape_calls = self.compiled_tape_calls.saturating_add(1); }
@@ -938,7 +946,7 @@ impl AdaptiveSession {
                     self.workspace.read(
                         m,
                         &self.registers[a],
-                        &mut self.scratch[..self.registers[r].len()],
+                        &mut self.scratch[..self.program.registers[r].len],
                     )?;
                     output = Some(r);
                 }
