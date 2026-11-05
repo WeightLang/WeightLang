@@ -94,6 +94,27 @@ fn loss(prediction,target) { return square(prediction-target).mean; }
 - 当前 core 的 `tests/convolution.rs` 覆盖 1D、2D、3D 的 reference 与 compiled forward 对照、输入/kernel/bias 梯度对照、有限差分梯度、训练预算和 shape 边界错误。该测试调用的是 `AdaptiveSession`；它不等同于真实 wgtime service 集成验证。
 - `wgt-model/tests/convolution.rs` 的三项真实 wgtime service 测试已通过，分别覆盖 1D、2D、3D native-cpu 训练、safetensors 权重保存和恢复、续训及资源释放。该证据限于固定形状卷积 fixture，不包含池化、归一化或完整 CNN 分类器。示例中的参数仍是定义初值，不是这些测试训练后的权重。
 
+## 2D pooling
+
+WGT Adaptive IR supports channel-first 2D pooling on `[C,H,W]` tensors:
+
+```wgt
+let pooled_max = max_pool2d(features, [2,2], [2,2]);
+let pooled_avg = avg_pool2d(features, [2,2], [2,2]);
+```
+
+The arguments are input, `[kernel_h,kernel_w]`, and `[stride_h,stride_w]`.
+The current implementation uses valid windows (no padding or ceil mode), requires
+positive compile-time integer dimensions, and returns `[C,OH,OW]`.
+
+- MaxPool2D routes the gradient to the first maximum in each window when values tie.
+- AvgPool2D divides by the full window area and distributes gradients equally.
+- Both operations have reference-interpreter and generated native-CPU forward paths.
+- Both are differentiable through the AdaptiveSession reverse-mode tape.
+
+Batch dimensions, configurable padding, ceil mode, and GPU pooling kernels are not
+part of this initial implementation.
+
 ## Compact CNN classifier
 
 The repository also includes a complete two-layer convolutional classifier at
