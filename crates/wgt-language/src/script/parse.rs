@@ -135,24 +135,30 @@ pub fn parse_functions(source: &str) -> Result<Program> {
     let mut chars = text.char_indices().peekable();
     let mut tokens = Vec::new();
     let mut line = header_line + 2;
+    let mut column = 1usize;
     while let Some((start, ch)) = chars.next() {
         if ch == '\n' {
             line += 1;
+            column = 1;
             continue;
         }
         if ch.is_whitespace() {
+            column += 1;
             continue;
         }
         if ch == '#' {
             for (_, c) in chars.by_ref() {
                 if c == '\n' {
                     line += 1;
+                    column = 1;
                     break;
                 }
+                column += 1;
             }
             continue;
         }
         let token_line = line;
+        let token_column = column;
         let (token, quoted) = if ch == '"' {
             let mut escaped = false;
             let mut end = None;
@@ -228,16 +234,14 @@ pub fn parse_functions(source: &str) -> Result<Program> {
             (token, false)
         };
         ensure!(tokens.len() < MAX_TOKENS, "script token limit exceeded");
+        // The iterator points at the first byte after this token. Count only
+        // the token's source characters so column tracking stays linear-time.
+        let token_end = chars.peek().map_or(text.len(), |(index, _)| *index);
+        column += text[start..token_end].chars().count();
         tokens.push(Token {
             text: token,
             line: token_line,
-            column: text[..start]
-                .rsplit('\n')
-                .next()
-                .unwrap_or("")
-                .chars()
-                .count()
-                + 1,
+            column: token_column,
             quoted,
         });
     }
