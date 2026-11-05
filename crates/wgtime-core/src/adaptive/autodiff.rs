@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 #[derive(Clone, Copy)]
 enum Edge {
     Conv { x:usize,k:usize,b:usize,g:wgt_language::adaptive::ConvGeometry },
+    MaxPool2d { x: usize, g: wgt_language::adaptive::Pool2dGeometry },
+    AvgPool2d { x: usize, g: wgt_language::adaptive::Pool2dGeometry },
     Matmul { a: usize, b: usize, m: usize, k: usize, n: usize },
     BatchMatmul { a: usize, b: usize, batch: usize, m: usize, k: usize, n: usize },
     LayerNorm { x: usize, gamma: usize, beta: usize, groups: super::tensor::AxisGroups, epsilon: f32 },
@@ -157,6 +159,8 @@ impl Tape {
     pub(super) fn record(&mut self, op: Op, value: &[f32]) -> Result<()> {
         let (out, edge) = match op {
             Op::Conv(r,x,k,b,g) => (r, Edge::Conv {x:self.reg(x)?,k:self.reg(k)?,b:self.reg(b)?,g}),
+            Op::MaxPool2d(r,x,g) => (r, Edge::MaxPool2d { x:self.reg(x)?, g }),
+            Op::AvgPool2d(r,x,g) => (r, Edge::AvgPool2d { x:self.reg(x)?, g }),
             Op::Reshape(r,x) => (r, Edge::Slice { x:self.reg(x)?, start:0 }),
             Op::Transpose(r,x,m,n) => (r, Edge::Transpose { x:self.reg(x)?,m,n }),
             Op::Permute(r,x,input_shape,axes,rank) => (r, Edge::Permute { x:self.reg(x)?,input_shape,axes,rank }),
@@ -474,6 +478,28 @@ impl ForwardPass {
                             before[x].gradient[xi]+=dy*kv;
                             before[k].gradient[ki]+=dy*xv;
                         });
+                    }
+                },
+                Edge::MaxPool2d { x, g } => {
+                    for (i, &dy) in node.gradient.iter().enumerate() {
+                        let mut maximum = f32::NEG_INFINITY;
+                        let mut selected = None;
+                        g.visit(i, |index| {
+                            let value = before[x].value[index];
+                            if value > maximum {
+                                maximum = value;
+                                selected = Some(index);
+                            }
+                        });
+                        if let Some(index) = selected {
+                            before[x].gradient[index] += dy;
+                        }
+                    }
+                },
+                Edge::AvgPool2d { x, g } => {
+                    let share = 1.0 / g.window_len() as f32;
+                    for (i, &dy) in node.gradient.iter().enumerate() {
+                        g.visit(i, |index| before[x].gradient[index] += dy * share);
                     }
                 },
                 Edge::Matmul { a,b,m,k,n } => {
