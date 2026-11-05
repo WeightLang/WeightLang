@@ -7,7 +7,7 @@ fn source(kind: &str, main: &str) -> String {
 
 #[test]
 fn typed_probability_conversion_charges_linear_work() {
-    for kind in ["logits","probabilities"] {
+    for kind in ["f32","logits","probabilities"] {
         let input=if kind=="logits" {"[0,0,0]"} else {"[0.25,0.25,0.5]"};
         let baseline=source(kind,&format!("fn main(){{let net=Policy(\"adam\");let value=net({input});return value;}}"));
         let converted=source(kind,&format!("fn main(){{let net=Policy(\"adam\");let value=net({input});return value.probabilities;}}"));
@@ -28,8 +28,8 @@ fn main() {
  let net=Policy("adam"); let scores=identity(net([1000,1000,-1000]));
  let __unused=0; let softmax=4;
  let p=scores.probabilities; let q=identity(p).probabilities;
- assert(p==q,"probabilities conversion must be idempotent");
- assert(p[0]==0.5 && p[1]==0.5 && p[2]==0,"stable conversion");
+ assert p==q,"probabilities conversion must be idempotent";
+ assert p[0]==0.5 && p[1]==0.5 && p[2]==0,"stable conversion";
  return q;
 }"#);
     assert_eq!(script::run(&text, Path::new("."), 10000).unwrap().result, serde_json::json!([0.5,0.5,0.]));
@@ -45,7 +45,7 @@ fn probabilities_are_validated_without_normalization() {
         assert!(script::run(&text,Path::new("."),10000).is_err(), "{values}");
     }
     let plain=source("f32", "fn main(){ let net=Policy(\"adam\"); return net([0,0,0]).probabilities; }");
-    assert!(format!("{:#}",script::run(&plain,Path::new("."),10000).unwrap_err()).contains("requires logits"));
+    assert_eq!(script::run(&plain,Path::new("."),10000).unwrap().result, serde_json::json!([1./3.,1./3.,1./3.]));
 }
 
 #[test]
@@ -66,9 +66,9 @@ fn model_serialization_retains_output_contract_and_legacy_defaults() {
         {"op":"validate_probabilities","out":"checked","input":"x"},
         {"op":"return","value":"checked"}
     ]);
-    invalid_op["registers"]=serde_json::json!([{"name":"x","len":3},{"name":"checked","len":3}]);
+    invalid_op["registers"]=serde_json::json!([{"name":"x","len":3,"shape":[3]},{"name":"checked","len":3,"shape":[3]}]);
     assert!(adaptive::AdaptiveSession::prepare(serde_json::from_value(invalid_op).unwrap(),1_000_000).is_err());
-    let mut future=encoded.clone(); future["version"]=3.into();
+    let mut future=encoded.clone(); future["version"]=4.into();
     assert!(adaptive::AdaptiveSession::prepare(serde_json::from_value(future).unwrap(),1_000_000).is_err());
     let mut legacy=encoded;
     legacy.as_object_mut().unwrap().remove("output_type");
@@ -83,10 +83,10 @@ fn declared_probability_sampling_uses_mass_and_preserves_rng() {
     let text=source("probabilities", r#"fn draw(net,x){return sample from net(x);}
 fn main(){
  let net=Policy("adam"); seed(11); let count=0;
- for i in range(0,2000){let action=draw(net,[0,0.250001,0.75]); assert(action>0,"zero mass"); if action==1 {count=count+1;}}
- assert(count>400 && count<600,"categorical distribution");
+ for i in range(0,2000){let action=draw(net,[0,0.250001,0.75]); assert action>0,"zero mass"; if action==1 {count=count+1;}}
+ assert count>400 && count<600,"categorical distribution";
  seed(19); let a=draw(net,[0,0.25,0.75]); let tail=random();
- seed(19); let b=draw(net,[0,0.25,0.75]); assert(a==b && tail==random(),"reproducible RNG");
+ seed(19); let b=draw(net,[0,0.25,0.75]); assert a==b && tail==random(),"reproducible RNG";
  return true;
 }"#);
     assert_eq!(script::run(&text,Path::new("."),200000).unwrap().result,true);

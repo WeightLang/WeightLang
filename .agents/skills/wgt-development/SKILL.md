@@ -75,11 +75,11 @@ examples/native_training/custom_sam/model.wgt 用两次一阶求导、一次原�
 - parameter p: prob = 0.7 使用可训练 logit，初值必须在 (0,1)；frozen p: prob = 1 支持精确端点。
   读取为 f32[1] 概率，底层参数/梯度暴露 logit；不得 write(prob) 或直接作为 linear 的参数。
 - 互斥类别输出可声明 `output scores: logits[N]` 或 `output choices: probabilities[N]`（N=1..16384）；只按真实 forward 语义声明，raw linear 输出使用 logits。模型返回、局部变量/函数参数、制品/训练断点和 AOT 保留类型。
-  `scores.probabilities` 对 logits 做减最大值稳定 softmax，对 probabilities 验证并保持原值；每项有限且严格 [0,1]，f64 累加总和绝对容差 1e-5，不静默归一化。
-  普通 f32 后缀拒绝，显式 `softmax(x)` 保留；独立二分类 logit 未实现，标量 prob 不变。loss 的 log_softmax/CE 仍直接消费 logits；CPU 梯度已实现，GPU 新类型路径未验证。
+  `scores.probabilities` 对 rank-1 普通 f32 分数及 logits 做减最大值稳定 softmax，可写 `linear(x,w,b).probabilities`；对 probabilities 验证并保持原值，每项有限且严格 [0,1]，f64 累加总和绝对容差 1e-5，不静默归一化。
+  f32 即使数值为 [0.2,0.8] 仍按分数转换；结果在局部变量、纯 helper 和连续后缀中保留概率类型，不二次 softmax。拒绝非向量/空向量/非有限值；输出声明本身不转换。显式 `softmax(x)` 保留；独立二分类 logit 未实现，标量 prob 不变。f32/logits 复用 softmax 梯度，概率验证用恒等梯度；loss 的 log_softmax/CE 仍直接消费 logits，GPU 新类型路径未验证。
   模型类别采样新语法以 `decode policy(x) {method:sample;}` 为目标；等待 parser/runtime 实现后核实返回类型、RNG 与不提交 forward 写入的完整契约。
   `sample_record/model.wgt` 描述旧实现的同次动作/概率绑定；新 decode 构造语法尚未完成接线，勿复制旧形式。
-  完整例子 examples/native_training/categorical/model.wgt；契约 docs/reference.zh-CN.md、docs/native-training.md。
+  完整例子 crates/wgtime-core/tests/fixtures/cnn_probabilities/model.wgt；契约 docs/reference.zh-CN.md、docs/native-training.md。
 - 记录批次：`let batch=collect {for i in range(0,35){yield {observation:[i],target:[i*2]};}};`，声明形式非任意表达式；字段左到右一次求值、同字段/种类/固定同质shape，整条追加。`batch.observation`投影，`batch[i]`取记录，保留.mean/.probabilities后缀，同名字段用`batch[i]["mean"]`。`for part in batch size 16`顺序对齐切分，保留尾批/空批零次/size正整数；yield归同函数最近collect，return穿透并清理。100k行/256字段/64层/1m节点及1m文本字节；不接受句柄，不自动可微。完整运行例子examples/native_training/ppo/model.wgt与docs/reference.zh-CN.md记录批次节。
 - 普通函数文件IO用 `save KIND VALUE to PATH [overwrite];`、`load KIND from PATH`，KIND为text/json/model/checkpoint；load model必填using优化器，checkpoint恢复记录状态。父目录须存在，默认拒绝覆盖，显式overwrite只原子替换普通可写文件；64MiB/文件、按编码字节消耗operation budget，host policy下拒绝直接IO。JSON拒绝句柄/非有限数，UTF-8文本，JSONL继续流式batch/close。断言用 `assert CONDITION;` 或 `assert CONDITION, MESSAGE;`，严格bool且仅失败求消息。详见docs/file-io.md。
 - 普通 f32 权重不默认限制到 [0,1]；`learn bool` 和有界 `learn float` 是独立架构参数声明。区间含零不能防止除零，普通脚本的除零和非有限结果报错。

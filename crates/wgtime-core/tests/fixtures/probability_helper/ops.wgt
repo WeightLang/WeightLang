@@ -1,0 +1,4 @@
+wgt 0.5
+operators ProbabilityOps
+# 沿唯一类别轴转换普通分数；不捕获模型参数，也不隐式执行训练。
+fn convert(x) { return x.probabilities; }

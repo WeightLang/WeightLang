@@ -156,8 +156,9 @@ fn loss(prediction, target) {
 # logits[N] 表示互斥类别原始分数；probabilities[N] 表示已算好的类别概率。
 # 声明本身不做 softmax 或归一化。不要把 linear 原始分数声明为 probabilities。
 # probabilities 检查每项有限且属于 [0,1]，f64 累加总和距 1 的绝对误差 <=1e-5。
-# .probabilities 对 logits 做稳定 softmax，对 probabilities 验证后保持原值。
-# 普通 f32 向量不能用此后缀；显式 softmax(x) 仍可用。
+# .probabilities 对 rank-1 f32 分数/logits 做稳定 softmax，对 probabilities 验证后保持原值。
+# f32 [0.2,0.8] 仍是分数；后缀结果保留概率类型，重复后缀不二次 softmax。
+# 非向量、空向量、非有限值拒绝；显式 softmax(x) 仍可用。
 # 分类类型只用于 output，不能写 input logits 或 parameter probabilities。
 # loss 的 prediction 保留输出类别类型；CE/log_softmax 直接消费 logits。
 # Rust facade forward 返回 Vec<f32>，不要在 Rust Vec 上套用 WGT 后缀。
@@ -180,7 +181,10 @@ fn loss(prediction, target) {
 # model Probabilities
 # input x: f32[3]
 # output choices: probabilities[3]
-# fn forward(x) { return softmax(x); }
+# parameter w: f32[3,3] = [1,0,0,0,1,0,0,0,1]
+# parameter b: f32[3] = [0,0,0]
+# # linear 输出普通分数，后缀才执行归一化；声明本身不转换。
+# fn forward(x) { return linear(x,w,b).probabilities; }
 # T04 END
 # 不支持独立二分类 logit[N]；标量 prob 与互斥类别向量不是同一类型。
 # decode policy(x) {method:sample;} 尚未完成 parser/runtime 接线，列入末尾提案。

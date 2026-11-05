@@ -668,13 +668,13 @@ impl Lower {
                 let input = self.value(value)?;
                 let kind = self.types.get(&input).copied().unwrap_or_default();
                 ensure!(
-                    kind != VectorType::F32,
-                    ".probabilities requires a logits[N] or probabilities[N] tensor"
+                    self.shape(&input)?.len() == 1,
+                    ".probabilities requires a rank-1 f32, logits or probabilities tensor"
                 );
                 self.register(out, self.size(&input)?)?;
                 self.program
                     .instructions
-                    .push(if kind == VectorType::Logits {
+                    .push(if kind != VectorType::Probabilities {
                         I::Softmax {
                             out: out.into(),
                             input,

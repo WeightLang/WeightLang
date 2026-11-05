@@ -241,7 +241,8 @@ fn check_expr(
             }
         }
         Expr::Call(n, args) | Expr::BuiltinCall(n, args) => {
-            if !OPS.contains(&n.as_str()) {
+            let probability_suffix = matches!(e, Expr::BuiltinCall(_, _)) && n == "__probabilities";
+            if !OPS.contains(&n.as_str()) && !probability_suffix {
                 ensure!(
                     !intrinsic(n),
                     "state/parameter primitive is not a pure operator: {n}"

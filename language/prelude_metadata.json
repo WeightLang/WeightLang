@@ -218,7 +218,7 @@
         "ordinary_function"
       ],
       "signature": "__probabilities(value)",
-      "purpose": "Compiler-only target for typed value.probabilities; source calls with __ prefix are rejected. Stable softmax for logits, strict validation and identity for probabilities, ordinary f32 rejected.",
+      "purpose": "Compiler-only target for value.probabilities; source calls with __ prefix are rejected. Stable softmax for rank-1 f32 scores or logits, strict validation and identity for probabilities. Preserves the probability tag; never guesses from values or flattens matrices.",
       "arity": {
         "min": 1,
         "max": 1

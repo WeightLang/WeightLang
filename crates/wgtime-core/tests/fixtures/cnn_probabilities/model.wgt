@@ -1,0 +1,17 @@
+wgt 0.5
+model CNNProbabilities
+input x: f32[9]
+output y: probabilities[2]
+# 单通道 3×3 图像；2 个共享的 2×2 卷积核产生 [2,2,2] 特征。
+# 所有参数是确定性初始化值，训练由 Rust 调用方显式执行。
+parameter kernel: f32[2,1,2,2] = [0.2,-0.1,0.3,0.1,-0.2,0.4,0.1,-0.3]
+parameter bias: f32[2] = [0.1,-0.1]
+parameter weight: f32[2,8] = [0.2,-0.1,0.3,0.1,-0.2,0.4,0.1,-0.3,-0.1,0.2,-0.2,0.3,0.1,-0.1,0.2,0.4]
+parameter offset: f32[2] = [0.2,-0.1]
+fn forward(x) {
+    let features = conv(reshape(x,[1,3,3]),reshape(kernel,[2,1,2,2]),bias,[1,1],[0,0],[1,1],1);
+    # 展平保留通道优先次序；linear 的两个普通 f32 分数沿唯一类别轴归一化。
+    let flat = reshape(tanh(features),[8]);
+    return linear(flat,weight,offset).probabilities.probabilities;
+}
+fn loss(prediction,target) { return square(prediction-target).mean; }

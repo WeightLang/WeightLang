@@ -47,8 +47,7 @@ pub fn softmax(values: &[f64]) -> Result<Vec<f64>> {
 /// Explicit conversion never guesses whether an ordinary vector is categorical.
 pub fn probabilities(kind: VectorType, values: &[f64]) -> Result<Vec<f64>> {
     match kind {
-        VectorType::F32 => anyhow::bail!(".probabilities requires logits[N] or probabilities[N]; use softmax(x) for an ordinary f32 vector"),
-        VectorType::Logits => softmax(values),
+        VectorType::F32 | VectorType::Logits => softmax(values),
         VectorType::Probabilities => {
             validate_probabilities(values)?;
             Ok(values.to_vec())
@@ -93,7 +92,12 @@ mod tests {
         for p in [vec![], vec![f64::NAN], vec![f64::INFINITY], vec![-0.1, 1.1], vec![0.2, 0.2], vec![1.000001]] {
             assert!(validate_probabilities(&p).is_err(), "{p:?}");
         }
-        assert!(probabilities(VectorType::F32, &[0., 1.]).is_err());
+        assert_eq!(probabilities(VectorType::F32, &[0.2, 0.8]).unwrap(), softmax(&[0.2, 0.8]).unwrap());
+        for kind in [VectorType::F32, VectorType::Logits, VectorType::Probabilities] {
+            for values in [vec![], vec![f64::NAN], vec![f64::INFINITY], vec![f64::NEG_INFINITY]] {
+                assert!(probabilities(kind, &values).is_err());
+            }
+        }
         assert!(softmax(&[]).is_err());
         assert!(softmax(&[f64::NEG_INFINITY]).is_err());
     }

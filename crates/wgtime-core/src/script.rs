@@ -748,14 +748,16 @@ impl Runtime {
             return self.load_file(format, a);
         }
         if name == "__probabilities" {
-            let [Value::CategoricalVector(kind, values)] = a else {
-                bail!(".probabilities requires logits[N] or probabilities[N]; use softmax(x) for an ordinary f32 vector")
+            let (kind, values) = match a {
+                [Value::CategoricalVector(kind, values)] => (*kind, values),
+                [Value::List(values)] => (crate::categorical::VectorType::F32, values),
+                _ => bail!(".probabilities requires a nonempty numeric vector"),
             };
             let work = values.len() as u64;
             ensure!(self.remaining >= work, "operation budget exhausted");
             self.remaining -= work;
             let input = values.iter().map(Value::number).collect::<Result<Vec<_>>>()?;
-            let output = crate::categorical::probabilities(*kind, &input)?;
+            let output = crate::categorical::probabilities(kind, &input)?;
             return Ok(Value::CategoricalVector(crate::categorical::VectorType::Probabilities,
                 output.into_iter().map(Value::Number).collect()));
         }

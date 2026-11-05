@@ -54,13 +54,15 @@ cargo build -p weightlang-wgt
 
 互斥类别输出可声明 `output scores: logits[N]` 或 `output choices: probabilities[N]`（N=1..16384）。
 `net(x)` 的返回值跨局部变量、函数参数和返回值保留类型，模型/训练断点保存加载与 AOT 也保留声明。
-`scores.probabilities` 对 logits 做减最大值的稳定 softmax；已是 probabilities 时验证并保持原值。
+`scores.probabilities` 对 rank-1 f32 分数或 logits 做减最大值的稳定 softmax，可直接写 `linear(x,w,b).probabilities`；已是 probabilities 时验证并保持原值。
+不按数值猜概率：普通 f32 `[0.2,0.8]` 仍做 softmax；转换结果保留概率类型，重复后缀仅验证。输出声明本身不执行 softmax。
+矩阵、空向量、非有限值明确拒绝；f32/logits 复用 softmax 梯度，已是概率使用恒等梯度。
 概率每项须有限且在 [0,1]，f64 累加的总和与 1 绝对误差不超过 1e-5，不静默归一化。
 模型类别采样目标形式为 `decode policy(x) {method:sample;}`；其 logits/probabilities 行为、RNG 与事务契约待 parser/runtime 实现后补齐。
 普通 f32 的显式 `softmax(x)` 保留；独立二分类 logit 类型未实现。
 后缀转换支持 CPU 张量 loss 和梯度，`log_softmax(prediction)` 与交叉熵仍直接消费 logits，原有损失契约不变。
 GPU 新类型路径尚未验证。详见[分类向量参考](reference.zh-CN.md#互斥分类向量与-expressionprobabilities)，
-完整例子为 [categorical/model.wgt](../examples/native_training/categorical/model.wgt)。
+完整例子为 [cnn_probabilities/model.wgt](../crates/wgtime-core/tests/fixtures/cnn_probabilities/model.wgt)。
 
 ## 语法与值
 

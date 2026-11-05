@@ -1,0 +1,7 @@
+wgt 0.5
+model ImportedProbabilities
+input x:f32[2]
+output y:probabilities[2]
+import ops from "./ops.wgt"
+# 输入是两个类别分数；helper 返回的概率标签使第二次后缀只验证而不重复归一化。
+fn forward(x) { return ops.convert(x).probabilities; }

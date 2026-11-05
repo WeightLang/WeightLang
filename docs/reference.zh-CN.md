@@ -515,16 +515,19 @@ v1 夹带分类元数据或概率验证指令、未知未来版本和任意未�
 `net(x)` 当前提交显式 `write`；规划中的 `decode` 将无梯度 tape 且丢弃 forward 写入，待实现验证。
 索引返回普通数值，切片返回普通列表；改变向量的算术/列表操作不自动推断类别类型。
 
-`scores.probabilities` 对 logits 沿唯一类别轴执行减最大值的稳定 softmax，返回有类型的 probabilities；
+`scores.probabilities` 对 rank-1 普通 f32 分数或 logits 沿唯一类别轴执行减最大值的稳定 softmax，返回有类型的 probabilities；
+例如 `linear(x,w,b).probabilities`。f32 即使数值恰为 `[0.2,0.8]` 也作为分数转换，不按数值猜测类型。
 已是 probabilities 时逐项验证后保持原值，不重复 softmax、不静默归一化。每项必须有限且严格在 [0,1]，
 总和使用 f64 累加，与 1 的绝对误差不得超过 **1e-5**；此容差覆盖最大支持宽度的 f32 softmax 舍入。
-空向量、非有限值、错误形状和非法概率都明确报错。普通 f32 向量不能使用该后缀，显式数学函数 `softmax(x)` 保留。
+空向量、非有限值、错误形状和非法概率都明确报错；不对矩阵隐式选轴或展平，显式数学函数 `softmax(x)` 保留。
+转换结果经局部变量、纯张量 helper 和链式 `.probabilities.probabilities` 保持概率类型，后续后缀只验证。
+现有普通函数的非空有限一维数字列表采用同样的分数转换与类型保持规则（数值存储为 f64）。
 后缀与索引从左向右结合，接在完整调用或括号之后，输入只求值一次，不受同名局部变量遮蔽。
 
-forward/loss 的预测参数保留输出类型，后缀转换可微：logits 使用 softmax Jacobian，probabilities 验证为恒等梯度。
+forward/loss 的预测参数保留输出类型，后缀转换可微：f32 分数和 logits 使用 softmax Jacobian，probabilities 验证为恒等梯度。
 `log_softmax(prediction)` 仍直接消费 logits，交叉熵原有输入契约不变，不强制先 softmax 再 log。
 显式概率采样按实际总质量缩放一次 RNG 阈值，跳过零质量类别；这不修改存储向量。
-CPU 路径已实现，GPU 新类型路径未验证。完整示例见 [categorical/model.wgt](../examples/native_training/categorical/model.wgt)。
+CPU 路径已实现，GPU 新类型路径未验证。完整 CNN 示例见 [cnn_probabilities/model.wgt](../crates/wgtime-core/tests/fixtures/cnn_probabilities/model.wgt)。
 
 ```wgt
 wgt 0.5
