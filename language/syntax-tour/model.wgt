@@ -544,9 +544,10 @@ fn loss(prediction, target) {
 # T10 END
 # T10 合同：WGT 0.5；实际使用新几何 op 或多轴 softmax 时用 adaptive IR v3。
 # 旧 IR v1/v2 不因 AST 出现新 intrinsic 而全定义升级；read/裸参数引用始终 flat vector。
-# 参数矩阵必须局部显式 reshape(parameter,[...])，如本例 projection/values/outputs。
-# reshape 目标为 1..8 轴正整数常量，每轴 1..16384、总元素<=16777216，元素数相同。
-# transpose 仅 rank2；matmul [M,K]@[K,N]->[M,N]，无广播。
+# 局部 let 可写 f32[sequence=2,hidden=3]，按相同元素数直接绑定 Shape 并声明编译期轴名。
+# reshape 仍兼容；reshape 目标为 1..8 轴正整数常量，每轴 1..16384、总元素<=16777216，元素数相同。
+# @ / matmul [M,K]@[K,N]->[M,N]；.T / transpose 仅 rank2；permute 接受完整轴排列。
+# batch_matmul 支持 [B,M,K]@[B,K,N]->[B,M,N] 且 batch 相等；不广播。permute 当前物化数据。
 # softmax(x,axis) 的 axis 是非负整常量，沿轴独立稳定归一化并用 f64 累加；softmax(x)/log_softmax(x) 仍为 rank1。
 # scale(x,literal) 接受有限有符号数值字面量，不广播并保持 shape。
 # 最终 IR 安全校验后的验证：core 7 suites/30 tests、真实 service 1 项、macro fixture 编译 1 项通过；本文件 T01 与抽取 T10/T11 均通过 wgt check。
