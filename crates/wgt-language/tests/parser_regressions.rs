@@ -143,3 +143,54 @@ fn forward(x) {
     wgt_language::model::ModelDefinition::parse(source)
         .expect("pure tensor helpers should accept native matrix products");
 }
+
+#[test]
+fn local_tensor_annotations_validate_shape_and_named_axes() {
+    let source = r#"wgt 0.5
+model NamedAxes
+input x: f32[6]
+output y: f32[1]
+fn forward(x) {
+    let tokens: f32[sequence=2, hidden=3] = reshape(x,[2,3]);
+    let projection: f32[hidden=3, channel=2] = reshape(x,[3,2]);
+    let q = tokens @ projection;
+    return q.mean;
+}
+"#;
+    wgt_language::adaptive::parse(source)
+        .expect("annotated shape and named matrix axes should type-check");
+}
+
+#[test]
+fn matrix_products_reject_mismatched_named_contracting_axes() {
+    let source = r#"wgt 0.5
+model BadNamedAxes
+input x: f32[6]
+output y: f32[1]
+fn forward(x) {
+    let left: f32[sequence=2, hidden=3] = reshape(x,[2,3]);
+    let right: f32[context=3, features=2] = reshape(x,[3,2]);
+    let invalid = left @ right;
+    return invalid.mean;
+}
+"#;
+    let error = wgt_language::adaptive::parse(source)
+        .expect_err("different named contracting axes must be rejected");
+    assert!(error.to_string().contains("matrix product axis mismatch"));
+}
+
+#[test]
+fn named_softmax_axis_resolves_from_tensor_annotation() {
+    let source = r#"wgt 0.5
+model NamedSoftmaxAxis
+input x: f32[6]
+output y: f32[1]
+fn forward(x) {
+    let scores: f32[queries=2, keys=3] = reshape(x,[2,3]);
+    let probabilities = softmax(scores,"keys");
+    return probabilities.mean;
+}
+"#;
+    wgt_language::adaptive::parse(source)
+        .expect("softmax should accept an annotated named axis");
+}
