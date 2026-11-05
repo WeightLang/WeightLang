@@ -43,7 +43,7 @@ const grammar = {
     {name: 'variable.parameter.wgt', match: '\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*=(?!=))'},
     {name: 'constant.numeric.wgt', match: '(?<![\\w.])-?(?:\\d+\\.\\d*|\\.\\d+|\\d+)(?:[eE][-+]?\\d+)?(?![\\w.])'},
     {name: 'entity.name.function.wgt', match: '\\b[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*(?=\\s*\\()'},
-    {name: 'keyword.operator.wgt', match: '<-|->|=>|\\*\\*|==|!=|<=|>=|&&|\\|\\||[<>=!+*/%\\-]'},
+    {name: 'keyword.operator.wgt', match: '<-|->|=>|\\*\\*|==|!=|<=|>=|&&|\\|\\||[<>=!+*/%@\\-]'},
     {name: 'punctuation.wgt', match: '[\\[\\](){},.:;]'},
   ],
 };
