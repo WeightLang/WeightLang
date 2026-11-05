@@ -529,17 +529,10 @@ impl AdaptiveSession {
             ops.push(op);
         }
         let output_len = output_len.context("program requires a return")?;
-        let view_registers = ops.iter().filter_map(|op| match op {
-            Op::Reshape(register, _) | Op::Transpose(register, _, _, _) | Op::Permute(register, _, _, _) => Some(*register),
-            _ => None,
-        }).collect::<std::collections::HashSet<_>>();
         let registers = program
             .registers
             .iter()
-            .enumerate()
-            .map(|(index, register)| {
-                if view_registers.contains(&index) { Ok(Vec::new()) } else { crate::zero_buffer(register.len) }
-            })
+            .map(|register| crate::zero_buffer(register.len))
             .collect::<Result<_>>()?;
         let backup = program
             .parameters
