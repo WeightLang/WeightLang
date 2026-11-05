@@ -93,3 +93,28 @@ fn loss(prediction,target) { return square(prediction-target).mean; }
 - 这是卷积计算原子，不内置激活、池化、归一化或 CNN block。
 - 当前 core 的 `tests/convolution.rs` 覆盖 1D、2D、3D 的 reference 与 compiled forward 对照、输入/kernel/bias 梯度对照、有限差分梯度、训练预算和 shape 边界错误。该测试调用的是 `AdaptiveSession`；它不等同于真实 wgtime service 集成验证。
 - `wgt-model/tests/convolution.rs` 的三项真实 wgtime service 测试已通过，分别覆盖 1D、2D、3D native-cpu 训练、safetensors 权重保存和恢复、续训及资源释放。该证据限于固定形状卷积 fixture，不包含池化、归一化或完整 CNN 分类器。示例中的参数仍是定义初值，不是这些测试训练后的权重。
+
+## Compact CNN classifier
+
+The repository also includes a complete two-layer convolutional classifier fixture at
+`crates/wgtime-core/tests/fixtures/cnn_classifier/model.wgt`. It is deliberately small
+enough for deterministic CPU tests:
+
+- Input: one channel-first `[1, 8, 8]` image (the model service boundary is still a flat `f32[64]` vector).
+- Conv2D: `[1,8,8] -> [4,4,4]`, stride `[2,2]`, padding `[1,1]`.
+- ReLU.
+- Conv2D: `[4,4,4] -> [4,2,2]`, stride `[2,2]`, padding `[1,1]`.
+- ReLU and flatten to 16 features.
+- Linear classifier: `[16] -> [3]`.
+
+The forward function uses the existing convolution IR, compiled native-CPU forward path,
+and differentiable convolution tape. It does not require a special CNN runtime or
+materialized im2col buffer.
+
+The fixture intentionally uses strided convolutions for spatial downsampling rather
+than claiming MaxPool2D support. MaxPool2D, AvgPool2D, BatchNorm, batched convolution,
+and a general multi-axis tensor input ABI remain separate work.
+
+Regression coverage is in `crates/wgtime-core/tests/cnn_classifier.rs`:
+interpreter/compiled-forward parity, nonzero finite gradients for both convolution
+kernels and the classifier weights, and an SGD loss-reduction smoke test.
