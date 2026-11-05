@@ -854,6 +854,36 @@ impl AdaptiveSession {
         result
     }
 
+    /// Evaluate a contiguous row-major batch shaped [batch_size, input_len].
+    /// Samples share the same parameter snapshot and are executed independently in
+    /// input order. max_steps is a total budget across the whole batch.
+    pub fn evaluate_batch(
+        &mut self,
+        inputs: &[f32],
+        batch_size: usize,
+        max_steps: u64,
+    ) -> Result<Vec<f32>> {
+        ensure!(batch_size > 0, "batch_size must be positive");
+        let input_width = self.input_len();
+        let expected = batch_size.checked_mul(input_width)
+            .context("batch input size overflow")?;
+        ensure!(inputs.len() == expected && inputs.iter().all(|v| v.is_finite()),
+            "invalid batch input: expected [batch_size, input_len]");
+        ensure!(max_steps > 0, "max_steps must be positive");
+        let output_capacity = batch_size.checked_mul(self.output_len())
+            .context("batch output size overflow")?;
+        let mut outputs = Vec::with_capacity(output_capacity);
+        let mut remaining = max_steps;
+        for sample in inputs.chunks_exact(input_width) {
+            let output = self.evaluate(sample, remaining)?;
+            let used = self.steps;
+            ensure!(used <= remaining, "batch execution budget accounting error");
+            remaining -= used;
+            outputs.extend_from_slice(&output);
+        }
+        Ok(outputs)
+    }
+
     fn begin(&mut self, input: &[f32], max_steps: u64) -> Result<()> {
         self.ensure_idle()?;
         self.steps = 0;
