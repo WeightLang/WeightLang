@@ -182,7 +182,7 @@ fn check_expr(
             }
         }
         Expr::Unary(op, x) if op == "-" => check_expr(x, names, functions, stack, checked)?,
-        Expr::Binary(op, a, b) if ["+", "-", "*"].contains(&op.as_str()) => {
+        Expr::Binary(op, a, b) if ["+", "-", "*", "@"].contains(&op.as_str()) => {
             check_expr(a, names, functions, stack, checked)?;
             check_expr(b, names, functions, stack, checked)?;
         }
