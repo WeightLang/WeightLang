@@ -1,0 +1,42 @@
+name: Tensor operator tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/wgt-language/src/adaptive/**'
+      - 'crates/wgt-language/src/adaptive.rs'
+      - 'crates/wgtime-core/src/adaptive.rs'
+      - 'crates/wgtime-core/src/adaptive/**'
+      - 'crates/wgtime-core/src/compiled_forward.rs'
+      - 'crates/wgtime-core/tests/pooling.rs'
+      - 'Cargo.lock'
+      - '.github/workflows/tensor-operators.yml'
+  pull_request:
+    paths:
+      - 'crates/wgt-language/src/adaptive/**'
+      - 'crates/wgt-language/src/adaptive.rs'
+      - 'crates/wgtime-core/src/adaptive.rs'
+      - 'crates/wgtime-core/src/adaptive/**'
+      - 'crates/wgtime-core/src/compiled_forward.rs'
+      - 'crates/wgtime-core/tests/pooling.rs'
+      - 'Cargo.lock'
+      - '.github/workflows/tensor-operators.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tensor-operators-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pooling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test pooling and batch inference
+        run: cargo test --locked -p wgtime-core --test pooling
