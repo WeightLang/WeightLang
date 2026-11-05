@@ -498,6 +498,28 @@ impl<'a> Generator<'a> {
                     body+=&format!("if(valid)sum+=(double)r[{a}+(oc/{og}*{cg}+c)*{iv}+ix]*(double)r[{k}+(oc*{cg}+c)*{kv}+q];}}t[z]=(float)sum;}}");
                     reads.extend([x.as_str(),kernel.as_str(),bias.as_str()]);out=Some(o);
                 },
+                I::MaxPool2d { out:o,input:x,kernel,stride }
+                | I::AvgPool2d { out:o,input:x,kernel,stride } => {
+                    let (a,_,xi) = self.reg(x)?;
+                    let g = wgt_language::adaptive::Pool2dGeometry::new(
+                        &self.program.registers[xi].shape, kernel, stride
+                    )?;
+                    let (_,out_len,out_id) = self.reg(o)?;
+                    ensure!(self.program.registers[out_id].shape == g.shape(),
+                        "compiled pool2d output geometry mismatch");
+                    let work = g.work()?;
+                    let spatial = g.output_h * g.output_w;
+                    let window = g.window_len();
+                    let is_max = matches!(instruction, I::MaxPool2d { .. });
+                    if is_max {
+                        body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{out_len};z++){{size_t c=z/{spatial},p=z%{spatial},oy=p/{},ox=p%{};float v=-INFINITY;for(size_t ky=0;ky<{};ky++)for(size_t kx=0;kx<{};kx++){{size_t ix=(c*{}+oy*{}+ky)*{}+ox*{}+kx;v=fmaxf(v,r[{a}+ix]);}}t[z]=v;}}",
+                            g.output_w,g.output_w,g.kernel_h,g.kernel_w,g.input_h,g.stride_h,g.input_w,g.stride_w);
+                    } else {
+                        body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{out_len};z++){{size_t c=z/{spatial},p=z%{spatial},oy=p/{},ox=p%{};double v=0.;for(size_t ky=0;ky<{};ky++)for(size_t kx=0;kx<{};kx++){{size_t ix=(c*{}+oy*{}+ky)*{}+ox*{}+kx;v+=(double)r[{a}+ix];}}t[z]=(float)(v/{window}.0);}}",
+                            g.output_w,g.output_w,g.kernel_h,g.kernel_w,g.input_h,g.stride_h,g.input_w,g.stride_w);
+                    }
+                    reads.push(x); out=Some(o);
+                },
                 I::Reshape { out:o,input:x } => {
 
                     let (a,n,_) = self.reg(x)?;
