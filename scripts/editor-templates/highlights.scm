@@ -57,5 +57,4 @@
 ((qualified_name) @function.builtin (#any-of? @function.builtin @@builtins_QUOTED@@))
 ((qualified_name) @function.builtin (#any-of? @function.builtin @@intrinsics_QUOTED@@))
 ((identifier) @function.builtin (#any-of? @function.builtin @@layers_QUOTED@@))
-((qualified_name) @function.builtin (#any-of? @function.builtin "permute" "batch_matmul"))
 ((identifier) @keyword (#any-of? @keyword "mix" "then" "sample" "onehot"))
