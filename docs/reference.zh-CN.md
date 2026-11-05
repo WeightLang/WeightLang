@@ -331,6 +331,8 @@ workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 | `reshape(x,[d1,...,dn])` | 固定 shape 重解释，1..8 个正整数常量轴，每轴 1..16384、总元素数不超过 16777216；元素数须相同，行为待验证 |
 | `x.T` / `transpose(x)` | rank-2 张量交换两个轴，两种写法等价 |
 | `a @ b` / `matmul(a,b)` | rank-2 `[M,K] @ [K,N] -> [M,N]`，内轴须相等，无广播，两种写法等价 |
+| `permute(x,[...])` | rank 1..8 的完整轴排列；interpreter 为零拷贝 strided view，其他算子按需物化 |
+| `batch_matmul(a,b)` | rank-3 `[B,M,K] @ [B,K,N] -> [B,M,N]`，batch 维相等，不广播 |
 | `scale(x,literal)` | 乘以有限有符号数值字面量，不广播且保持 shape，行为待验证 |
 | `conv(x,kernel,bias,stride,padding,dilation,groups)` | 完整七参数签名，无默认值；无批次、通道优先的 f32 卷积。输入 `x` 为 `[Cin,S1,...,Sd]`，kernel 为 `[Cout,Cin/groups,K1,...,Kd]`，bias 必须为 `[Cout]`；空间 rank `d` 为 1..3，输出为 `[Cout,O1,...,Od]`，`Oa=floor((Sa+2*padding[a]-(dilation[a]*(Ka-1)+1))/stride[a])+1`。stride/dilation 各为长度 d 的正整数常量列表，元素 1..16384；padding 为长度 d 的非负整数常量列表，元素 0..16384，对称零填充；groups 为 1..16384 的整数常量，必须整除 Cin、Cout，kernel 输入通道轴须等于 Cin/groups。输入/权重参数以行优先扁平 f32 存储，必须显式 `reshape` 出所需几何；单向量模型入口不提供 batch 轴。完整语义见[卷积专题](convolution.md)。core 卷积 3/3 和真实 wgtime service 3 项已通过，覆盖训练、权重恢复续训和释放；这是局部验证 |
 | `gate(p,x)` | 返回 p*x；p 的 shape 为 [1] 或与 x 完全相同，每项须在 [0,1]；[1] 门按元素应用；推理时 p 全为 0 跳过 x 表达式 |
