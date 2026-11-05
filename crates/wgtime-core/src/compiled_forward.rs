@@ -379,7 +379,7 @@ impl<'a> Generator<'a> {
         let mut registers = HashMap::new();
         let mut workspace = 0usize;
         let mut max = 0;
-        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Conv { .. } | I::Reshape { .. } | I::Transpose { .. } | I::Permute { .. } | I::Matmul { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
+        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Conv { .. } | I::Reshape { .. } | I::Transpose { .. } | I::Permute { .. } | I::Matmul { .. } | I::BatchMatmul { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
         for (i, r) in program.registers.iter().enumerate() {
             ensure!(r.shape.len() <= 8 && r.shape.iter().all(|d| *d <= 16384) && crate::elements(&r.shape)? == r.len, "compiled register geometry/storage mismatch");
             ensure!(program.version >= 3 || r.shape == [r.len], "multiaxis registers require compiled IR version 3");
@@ -552,6 +552,22 @@ impl<'a> Generator<'a> {
                     ensure!(self.program.registers[self.reg(o)?.2].shape == [m,n], "compiled matmul output geometry mismatch");
                     let work=m.checked_mul(k).and_then(|v|v.checked_mul(n)).context("matmul work overflow")?;
                     body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+i*{k}+q]*(double)r[{b}+q*{n}+j];t[i*{n}+j]=(float)sum;}}");
+                    reads.extend([left.as_str(),right.as_str()]); out=Some(o);
+                },
+                I::BatchMatmul { out:o,left,right } => {
+                    let (a,_,ai) = self.reg(left)?;
+                    let (b,_,bi) = self.reg(right)?;
+                    let sa = &self.program.registers[ai].shape;
+                    let sb = &self.program.registers[bi].shape;
+                    ensure!(sa.len()==3 && sb.len()==3 && sa[0]==sb[0] && sa[2]==sb[1],
+                        "compiled batch_matmul geometry mismatch");
+                    let (batch,m,k,n)=(sa[0],sa[1],sa[2],sb[2]);
+                    let (_,out_len,out_id)=self.reg(o)?;
+                    ensure!(self.program.registers[out_id].shape == [batch,m,n],
+                        "compiled batch_matmul output geometry mismatch");
+                    let work=batch.checked_mul(m).and_then(|v|v.checked_mul(k))
+                        .and_then(|v|v.checked_mul(n)).context("batch_matmul work overflow")?;
+                    body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{batch};z++)for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+z*{m}*{k}+i*{k}+q]*(double)r[{b}+z*{k}*{n}+q*{n}+j];t[z*{m}*{n}+i*{n}+j]=(float)sum;}}");
                     reads.extend([left.as_str(),right.as_str()]); out=Some(o);
                 },
                 I::Scale { out:o,input:x,factor } => {
