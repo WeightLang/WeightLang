@@ -49,6 +49,8 @@
     {"id":"leading-dot-editor-tolerance","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return .5; }\n"},
     {"id":"double-slash-editor-tolerance","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main() { return 4 // 2; }\n"},
     {"id":"unclosed-body","context":"ordinary_function","rust_accepts":false,"editor_accepts":false,"source":"wgt 0.5\nfn main() { return 1;\n"},
+    {"id":"model-operations-editor-structure","context":"editor","editor_accepts":true,"editor_node":"state_declaration","source":"wgt 0.5\nmodel Memory\nstate activity: f32[4] = [0,0,0,0];\nfn observe(input: f32[4], delta: f32[4]) -> f32[4] {let next=input+delta;activity <- next;return next;}\nfn reset(){activity <- [0,0,0,0];}\n"},
+    {"id":"state-without-semicolon-editor-structure","context":"editor","editor_accepts":true,"editor_node":"state_declaration","source":"wgt 0.5\nmodel Memory\nstate activity: f32[1] = [0]\nfn reset(){activity <- [0];}\n"},
     {"id":"operator-library-structure","context":"editor","editor_accepts":true,"editor_node":"operators_declaration","source":"wgt 0.5\noperators Local\nfn activate(x) { return relu(x); }\n"},
     {"id":"candidate-blend-expression","context":"editor","editor_accepts":true,"editor_node":"blend_expression","source":"wgt 0.5\nfn forward(x){return blend { p => x; (1-p) => x ** 2; };}\n"},
     {"id":"candidate-if-expression","context":"editor","editor_accepts":true,"source":"wgt 0.5\nfn forward(x){return if enabled[0] {x} else {x ** 2;};}\n"},

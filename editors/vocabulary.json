@@ -6,6 +6,7 @@
     "carrying",
     "agent",
     "environment",
+    "state",
     "learn",
     "assert",
     "async",

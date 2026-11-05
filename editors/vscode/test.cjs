@@ -29,7 +29,18 @@ const onig = require('vscode-oniguruma');
   check('# linear f32 "quoted"', 'linear', 'comment.line.number-sign.wgt');
   for (const n of ['-1.2e-3', '.5', '42', '1.']) check(`const N = ${n}`, n, 'constant.numeric.wgt');
   check('layer y: custom.block(width=4)', 'custom.block', 'entity.name.function.wgt');
-  check('let y = net([1]);', 'predict', 'support.function.wgt');
+  check('let y = len([1]);', 'len', 'support.function.wgt');
+  check('state activity: f32[4] = [0,0,0,0];', 'state', 'keyword.control.wgt');
+  for (const type of ['f32', 'logits', 'probabilities']) {
+    check(`fn observe(input) -> ${type}[4] {`, type, 'storage.type.wgt');
+  }
+  for (const operator of ['<-', '->']) {
+    const line = operator === '<-' ? 'activity <- [0,0,0,0];' : 'fn observe(x: f32[4]) -> f32[4] {';
+    const {tokens} = grammar.tokenizeLine(line, tm.INITIAL);
+    const start = line.indexOf(operator);
+    assert(tokens.some(token => token.startIndex === start && token.endIndex === start + operator.length
+      && token.scopes.includes('keyword.operator.wgt')), `${operator}: expected one complete operator token`);
+  }
   const vocabulary = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../vocabulary.json')));
   for (const word of vocabulary.keywords) check(word, word, 'keyword.control.wgt');
   for (const word of vocabulary.builtins) check(word + '(x);', word, 'support.function.wgt');

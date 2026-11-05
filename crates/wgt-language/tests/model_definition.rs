@@ -10,8 +10,8 @@ fn forward(x) { return x * gain; }
 fn definition_is_static_and_initialization_is_explicit() {
     let definition=ModelDefinition::parse(MODEL).unwrap();
     assert_eq!(definition.name(),"Scale");
-    assert_eq!(definition.interface().input,1);
-    assert_eq!(definition.interface().output,1);
+    assert_eq!(definition.interface().unwrap().input,1);
+    assert_eq!(definition.interface().unwrap().output,1);
     assert_eq!(definition.parameters()[0].name,"gain");
     let encoded=serde_json::to_string(&definition).unwrap();
     let restored:ModelDefinition=serde_json::from_str(&encoded).unwrap();

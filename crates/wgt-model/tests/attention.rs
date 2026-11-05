@@ -7,15 +7,15 @@ fn attention_macro_and_file_share_geometry() {
     let embedded=wgt::include_model!("tests/fixtures/attention/model.wgt");
     let parsed=ModelDefinition::parse(SOURCE).unwrap();
     assert_eq!(embedded.parameters()[0].shape,[3,2]);
-    assert_eq!(parsed.interface().input,6);
-    assert_eq!(parsed.interface().output,6);
+    assert_eq!(parsed.interface().unwrap().input,6);
+    assert_eq!(parsed.interface().unwrap().output,6);
     let root=std::env::var_os("CLAUDE_JOB_DIR").map(std::path::PathBuf::from).map(|p|p.join("tmp")).unwrap_or_else(||"/tmp/weightlang".into());fs::create_dir_all(&root).unwrap();
     let temp=tempfile::tempdir_in(&root).unwrap();
     fs::write(temp.path().join("ops.wgt"),"wgt 0.5\noperators Geometry\nfn matrix(x){return reshape(x,[2,3]);}\n").unwrap();
     let imported=SOURCE.replace("model TinyAttention","import geometry from \"./ops.wgt\"\nmodel TinyAttention").replace("reshape(x,[2,3])","geometry.matrix(x)");
     fs::write(temp.path().join("model.wgt"),imported).unwrap();
     let imported=ModelDefinition::from_file(temp.path().join("model.wgt")).unwrap();
-    assert_eq!(imported.interface().output,6);
+    assert_eq!(imported.interface().unwrap().output,6);
 
 }
 #[test]

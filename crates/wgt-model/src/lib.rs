@@ -6,6 +6,11 @@ use std::{cell::RefCell, fs::{self, OpenOptions}, path::Path, rc::Rc};
 use wgtime::Request;
 pub use wgt_language::model::{ModelDefinition, ModelInterface, ParameterSchema};
 pub use wgt_model_macros::{model, include_model};
+pub use wgt_language::operations::{ArgumentSchema, Effects, OperationSchema, StateSchema};
+/// ContinuousOnly conservatively rejects every model containing bool/int parameters.
+#[derive(Clone, Copy, Debug)]
+pub enum DifferentiationPolicy { ContinuousOnly, StraightThrough }
+pub type ParameterCandidate = (String, Vec<usize>, Vec<f32>);
 
 #[derive(Clone, Copy, Debug)]
 pub enum Optimizer { Sgd, Adam }
@@ -32,40 +37,65 @@ impl Client {
     /// Initialize parameters explicitly; parsing a definition never calls this method.
     pub fn initialize(&self, definition: &ModelDefinition, options: InstanceOptions) -> Result<Model> {
         let reply=self.connection.borrow_mut().call(Request::InitializeDefinition {source:definition.source().into(),memory:options.memory_bytes,optimizer:options.optimizer.map(|o|o.name().into())})?;
-        Ok(Model { connection:self.connection.clone(), handle:Some(reply["handle"].as_u64().context("missing model handle")?), interface:definition.interface().clone(), backend:reply["backend"].as_str().context("missing execution backend")?.into() })
+        Ok(Model { connection:self.connection.clone(), handle:Some(reply["handle"].as_u64().context("missing model handle")?), interface:definition.interface().cloned(), operations:definition.operations().to_vec(), backend:reply["backend"].as_str().context("missing execution backend")?.into() })
     }
     pub fn stats(&self) -> Result<serde_json::Value> { self.connection.borrow_mut().call(Request::Stats) }
 }
 
-pub struct Model { connection: Rc<RefCell<wgtime::Client>>, handle: Option<u64>, interface: ModelInterface, backend: String }
+pub struct Model { connection: Rc<RefCell<wgtime::Client>>, handle: Option<u64>, interface: Option<ModelInterface>, operations: Vec<OperationSchema>, backend: String }
 impl Model {
     fn handle(&self)->Result<u64> { self.handle.context("model is closed") }
-    pub fn interface(&self)->&ModelInterface { &self.interface }
+    pub fn interface(&self)->Option<&ModelInterface> { self.interface.as_ref() }
+    pub fn operations(&self)->&[OperationSchema] { &self.operations }
+    pub fn call(&self,name:&str,inputs:&[Vec<f32>])->Result<Option<Vec<f32>>> {
+        let schema=self.operations.iter().find(|s|s.name==name).context("unknown operation")?;
+        ensure!(inputs.len()==schema.inputs.len() && inputs.iter().zip(&schema.inputs).all(|(v,s)|v.len()==s.width && v.iter().all(|x|x.is_finite())),"operation arguments do not match schema");
+        let reply=self.connection.borrow_mut().call(Request::CallOperation{handle:self.handle()?,name:name.into(),inputs:inputs.into()})?;
+        let output:Option<Vec<f32>>=serde_json::from_value(reply.get("output").context("missing operation output")?.clone())?;
+        ensure!(match (&output,schema.output) {(None,None)=>true,(Some(v),Some(n))=>v.len()==n && v.iter().all(|x|x.is_finite()),_=>false},"invalid service operation output");
+        Ok(output)
+    }
+    pub fn parameters(&self)->Result<Vec<ParameterCandidate>> { Ok(serde_json::from_value(self.connection.borrow_mut().call(Request::ParameterValues{handle:self.handle()?})?)?) }
+    pub fn state(&self)->Result<Vec<ParameterCandidate>> { Ok(serde_json::from_value(self.connection.borrow_mut().call(Request::StateValues{handle:self.handle()?})?)?) }
+    /// Atomically replace a validated candidate batch; clears legacy optimizer state.
+    pub fn update_parameters(&self,candidates:&[ParameterCandidate])->Result<()> {
+        self.connection.borrow_mut().call(Request::UpdateParameters{handle:self.handle()?,candidates:candidates.into()})?; Ok(())
+    }
+    pub fn train_with_policy(&self,inputs:&[Vec<f32>],targets:Targets<'_>,options:TrainOptions,policy:DifferentiationPolicy)->Result<f32> {
+        self.train_internal(inputs,targets,options,Some(policy))
+    }
     /// Execution backend reported by the initialized service instance.
     pub fn backend(&self)->&str { &self.backend }
     /// One finite f32 input vector; multi-input models are not supported in this slice.
     pub fn forward(&self, input:&[f32])->Result<Vec<f32>> {
-        ensure!(input.len()==self.interface.input && input.iter().all(|n|n.is_finite()), "input must be a finite vector of width {}",self.interface.input);
+        let interface=self.interface.as_ref().context("typed model requires an explicit named operation call")?;
+        ensure!(input.len()==interface.input && input.iter().all(|n|n.is_finite()), "input must be a finite vector of width {}",interface.input);
         let reply=self.connection.borrow_mut().call(Request::Predict {handle:self.handle()?,input:input.into()})?;
         let output:Vec<f32>=serde_json::from_value(reply.get("output").context("missing output")?.clone())?;
-        ensure!(output.len()==self.interface.output && output.iter().all(|n|n.is_finite()),"invalid service output");
+        ensure!(output.len()==interface.output && output.iter().all(|n|n.is_finite()),"invalid service output");
         Ok(output)
     }
     /// CPU SGD/Adam only, selected explicitly at initialization or weight binding.
     pub fn train(&self, inputs:&[Vec<f32>], targets:Targets<'_>, options:TrainOptions)->Result<f32> {
-        ensure!(!inputs.is_empty() && inputs.iter().all(|row| row.len()==self.interface.input && row.iter().all(|n|n.is_finite())), "training inputs must be a nonempty finite matrix of model input width");
+        self.train_internal(inputs,targets,options,None)
+    }
+    fn train_internal(&self, inputs:&[Vec<f32>], targets:Targets<'_>, options:TrainOptions, policy:Option<DifferentiationPolicy>)->Result<f32> {
+        let interface=self.interface.as_ref().context("typed operations do not support differentiation or gradients across state")?;
+        ensure!(!inputs.is_empty() && inputs.iter().all(|row| row.len()==interface.input && row.iter().all(|n|n.is_finite())), "training inputs must be a nonempty finite matrix of model input width");
         ensure!(options.rate.is_finite() && options.rate>0., "learning rate must be positive and finite");
         ensure!(options.clip.is_none_or(|n|n.is_finite() && n>0.), "gradient clip norm must be positive and finite");
         match &targets {
             Targets::Values(rows) => ensure!(rows.len()==inputs.len() && rows.iter().all(|row|row.iter().all(|n|n.is_finite())), "targets must be finite and match batch size"),
-            Targets::Classes(rows) => ensure!(rows.len()==inputs.len() && rows.iter().all(|n|*n<self.interface.output), "class targets must match batch size and output range"),
+            Targets::Classes(rows) => ensure!(rows.len()==inputs.len() && rows.iter().all(|n|*n<interface.output), "class targets must match batch size and output range"),
         }
         let targets=match (options.loss,targets) {
             (Loss::CrossEntropy,Targets::Classes(values))=>serde_json::to_value(values)?,
             (Loss::Mse|Loss::Custom,Targets::Values(values))=>serde_json::to_value(values)?,
             _=>anyhow::bail!("loss and target kind do not match"),
         };
-        let reply=self.connection.borrow_mut().call(Request::TrainStep {handle:self.handle()?,inputs:inputs.into(),targets,rate:options.rate,loss:match options.loss {Loss::Mse=>"mse",Loss::CrossEntropy=>"cross_entropy",Loss::Custom=>"loss"}.into(),clip:options.clip})?;
+        let loss=match options.loss {Loss::Mse=>"mse",Loss::CrossEntropy=>"cross_entropy",Loss::Custom=>"loss"}.into();
+        let request=if let Some(policy)=policy {Request::TrainStepWithPolicy{handle:self.handle()?,inputs:inputs.into(),targets,rate:options.rate,loss,clip:options.clip,straight_through:matches!(policy,DifferentiationPolicy::StraightThrough)}} else {Request::TrainStep{handle:self.handle()?,inputs:inputs.into(),targets,rate:options.rate,loss,clip:options.clip}};
+        let reply=self.connection.borrow_mut().call(request)?;
         let loss=reply["loss"].as_f64().context("missing loss")? as f32;
         ensure!(loss.is_finite(),"nonfinite service loss");Ok(loss)
     }

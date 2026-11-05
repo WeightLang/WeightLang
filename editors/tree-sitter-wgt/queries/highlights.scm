@@ -6,6 +6,10 @@
 (punctuation) @punctuation.delimiter
 ["(" ")" "[" "]" "{" "}"] @punctuation.bracket
 ["fn" "model" "operators" "block" "layer" "input" "output" "target" "const" "dim" "native" "intrinsic" "async"] @keyword
+(state_declaration "state" @keyword)
+(state_declaration name: (identifier) @variable)
+(tensor_type dtype: _ @type.builtin)
+(function_declaration "->" @operator)
 (learn_declaration "learn" @keyword)
 (learn_declaration name: (identifier) @variable)
 (learn_declaration "float" @type.builtin)

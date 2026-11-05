@@ -28,8 +28,10 @@ pub struct ParameterSchema {
 pub struct ModelDefinition {
     source: String,
     name: String,
-    interface: ModelInterface,
+    interface: Option<ModelInterface>,
     parameters: Vec<ParameterSchema>,
+    operations: Vec<crate::operations::OperationSchema>,
+    states: Vec<crate::operations::StateSchema>,
 }
 impl TryFrom<String> for ModelDefinition {
     type Error = anyhow::Error;
@@ -42,6 +44,7 @@ impl From<ModelDefinition> for String {
 pub enum ModelPlan {
     Graph(source::Graph),
     Forward(adaptive::Program),
+    Operations(crate::operations::OperationsPlan),
 }
 impl ModelDefinition {
     pub fn parse(text: &str) -> Result<Self> {
@@ -52,6 +55,12 @@ impl ModelDefinition {
         ensure!(text.len() <= MAX_SOURCE_BYTES, "model definition exceeds 1 MiB source limit");
         let unit = source::split(text)?;
         let functions = script::parse::parse_functions(&unit.functions)?;
+        if functions.values().any(|f| f.signature.is_some()) || unit.declarations.lines().any(|l| l.trim().starts_with("state ")) || (!functions.contains_key("forward") && functions.values().any(|f| f.args.is_empty())) {
+            let names: Vec<_> = unit.declarations.lines().filter_map(|line| line.split('#').next().unwrap_or("").trim().strip_prefix("model ")).collect();
+            ensure!(names.len() == 1 && script::operators::identifier(names[0].trim()), "model definition requires one valid model name");
+            let plan = crate::operations::lower(text, false)?;
+            return Ok(Self { source: text.into(), name: names[0].trim().into(), interface: None, parameters: plan.parameter_schemas(), states: plan.state_schemas(), operations: plan.entries.into_iter().map(|(schema,_)|schema).collect() });
+        }
         for (name, function) in &functions {
             ensure!(name != "main" && !name.starts_with("__"), "model definitions cannot contain application entrypoints or agent/environment declarations: {name}");
             ensure!(!function.is_async, "model definitions cannot contain async functions");
@@ -99,7 +108,7 @@ impl ModelDefinition {
             let output=graph.layers.last().context("model requires layers")?.output;
             (ModelInterface{input:graph.input,output,output_type:graph.output_type,target:None},parameters)
         };
-        Ok(Self {source:text.into(),name,interface,parameters})
+        Ok(Self {source:text.into(),name,interface:Some(interface),parameters,operations:Vec::new(),states:Vec::new()})
     }
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         Self::from_file_with_dependencies(path).map(|(definition, _)| definition)
@@ -114,14 +123,20 @@ impl ModelDefinition {
         Ok((definition, dependencies))
     }
     pub fn name(&self) -> &str { &self.name }
-    pub fn interface(&self) -> &ModelInterface { &self.interface }
+    /// Legacy single-forward interface. For typed models use operations().
+    pub fn interface(&self) -> Option<&ModelInterface> { self.interface.as_ref() }
+    pub fn legacy_interface(&self) -> Option<&ModelInterface> { self.interface.as_ref() }
+    pub fn operations(&self) -> &[crate::operations::OperationSchema] { &self.operations }
+    pub fn states(&self) -> &[crate::operations::StateSchema] { &self.states }
     pub fn parameters(&self) -> &[ParameterSchema] { &self.parameters }
     pub fn source(&self) -> &str { &self.source }
     /// Explicit service-side initialization boundary; callers must enforce their memory budget.
     pub fn instantiate_plan(&self) -> Result<ModelPlan> {
         let unit = source::split(&self.source)?;
         let functions = script::parse::parse_functions(&unit.functions)?;
-        if functions.contains_key("forward") {
+        if !self.operations.is_empty() {
+            Ok(ModelPlan::Operations(crate::operations::lower(&self.source, true)?))
+        } else if functions.contains_key("forward") {
             Ok(ModelPlan::Forward(adaptive::parse(&self.source)?))
         } else {
             Ok(ModelPlan::Graph(source::graph(&self.source)?.1))

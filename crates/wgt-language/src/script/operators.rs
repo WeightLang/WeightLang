@@ -491,6 +491,7 @@ pub(crate) fn link(
                 calls[&n].clone(),
                 Function {
                     is_async: f.is_async,
+                    signature: f.signature,
                     args: f.args,
                     body,
                 },

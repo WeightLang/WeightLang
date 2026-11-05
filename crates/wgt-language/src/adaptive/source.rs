@@ -15,6 +15,9 @@ pub fn parse_with_functions(
 ) -> Result<Program> {
     parse_definition(source, functions, true)
 }
+pub(crate) fn lower_operation(source: &str, functions: &crate::script::parse::Program, materialize: bool) -> Result<Program> {
+    parse_definition(source, functions, materialize)
+}
 pub(crate) fn validate_definition(
     source: &str,
     functions: &crate::script::parse::Program,
@@ -1799,6 +1802,11 @@ impl Lower {
                             );
                         }
                         self.assign(n, e)?;
+                    }
+                    Stmt::Eval(Expr::BuiltinCall(op, args)) if op == "__transaction_write" && args.len() == 2 => {
+                        let parameter = self.parameter(&args[0])?.name.clone();
+                        let value = self.value(&args[1])?;
+                        self.program.instructions.push(I::Write { parameter, value });
                     }
                     Stmt::Eval(Expr::Call(op, args)) if op == "write" && args.len() == 2 => {
                         let parameter = self.parameter(&args[0])?.name.clone();

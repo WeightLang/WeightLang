@@ -10,7 +10,7 @@ module.exports = grammar({
     comment: _ => /#[^\n]*/,
     _statement: $ => choice($.module_declaration, $.prelude_declaration, $.learn_declaration, $.model_declaration, $.operators_declaration, $.block_declaration, $.layer_declaration,
       $.port_declaration, $.constant_declaration, $.dimension_declaration, $.directive, $.native_declaration, $.data_row,
-      $.function_declaration, $.instance_declaration, $.model_instance_declaration),
+      $.function_declaration, $.instance_declaration, $.model_instance_declaration, $.state_declaration),
     learn_declaration: $ => choice(
       seq('learn', field('name', $.identifier), ':', 'float', optional($.learn_shape), '=', field('initializer', choice($.signed_number, $.array)), ';'),
       seq('learn', field('name', $.identifier), ':', 'float', optional($.learn_shape), '>', field('lower_bound', $.signed_number), '=', field('initializer', choice($.signed_number, $.array)), ';'),
@@ -21,7 +21,10 @@ module.exports = grammar({
     module_declaration: $ => seq('module', field('name', $.identifier)),
     prelude_declaration: $ => seq('prelude', 'native', field('version', $.number), ';'),
     instance_declaration: $ => seq(choice('agent', 'environment'), field('name', $.identifier), repeat($._newline), $.body),
-    function_declaration: $ => seq(optional('async'), 'fn', field('name', $.identifier), $.arguments, repeat($._newline), $.body),
+    function_declaration: $ => seq(optional('async'), 'fn', field('name', $.identifier), $.arguments, optional(seq('->', field('return_type', $.tensor_type))), repeat($._newline), $.body),
+    // Typed categorical returns remain editor tolerance, not runtime support.
+    tensor_type: $ => seq(field('dtype', choice('f32', 'logits', 'probabilities')), $.learn_shape),
+    state_declaration: $ => seq('state', field('name', $.identifier), ':', field('type', $.tensor_type), '=', field('initializer', $.array), optional(';')),
     body: $ => seq('{', repeat(choice($._item, $._newline, $.body, $.script_keyword, ';')), '}'),
     // Keywords with dedicated syntax productions live only in those productions,
     // avoiding competing token ownership in tolerant bodies and expressions.
@@ -64,7 +67,7 @@ module.exports = grammar({
     signed_number: _ => token(seq(optional(choice('+', '-')), /(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?/)),
     number: _ => /(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?/,
     string: _ => /"([^"\\\n]|\\[^\n])*"/,
-    operator: _ => choice('->', '=>', '**', '==', '!=', '<=', '>=', '//', '&&', '||', '!', '=', '+', '-', '*', '/', '%', '<', '>'),
+    operator: _ => choice('<-', '->', '=>', '**', '==', '!=', '<=', '>=', '//', '&&', '||', '!', '=', '+', '-', '*', '/', '%', '<', '>'),
     punctuation: _ => choice(',', ':', '.'),
   },
 });

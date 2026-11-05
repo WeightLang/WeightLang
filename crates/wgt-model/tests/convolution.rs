@@ -19,8 +19,8 @@ impl Drop for Daemon {
 fn check_service(definition: ModelDefinition, source: &str, input_len: usize, output_len: usize) {
     use std::os::unix::fs::PermissionsExt;
 
-    assert_eq!(definition.interface().input, input_len);
-    assert_eq!(definition.interface().output, output_len);
+    assert_eq!(definition.interface().unwrap().input, input_len);
+    assert_eq!(definition.interface().unwrap().output, output_len);
     let root = std::env::var_os("CLAUDE_JOB_DIR")
         .map(std::path::PathBuf::from)
         .map(|p| p.join("tmp"))
@@ -52,8 +52,8 @@ fn check_service(definition: ModelDefinition, source: &str, input_len: usize, ou
     fs::write(&source_path, source).unwrap();
     let runtime = ModelDefinition::from_file(&source_path).unwrap();
     fs::remove_file(source_path).unwrap();
-    assert_eq!(runtime.interface().input, input_len);
-    assert_eq!(runtime.interface().output, output_len);
+    assert_eq!(runtime.interface().unwrap().input, input_len);
+    assert_eq!(runtime.interface().unwrap().output, output_len);
 
     let options = || InstanceOptions {
         optimizer: Some(Optimizer::Sgd),

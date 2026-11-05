@@ -20,7 +20,19 @@ files.push(path.join(root, 'editors/vscode/media/example.wgt'),
   path.join(root, 'editors/tree-sitter-wgt/test/fixtures/editor_current.wgt'),
   path.join(root, 'editors/tree-sitter-wgt/test/fixtures/forward.wgt'),
   path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_control.wgt'));
+const operations = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_operations.wgt');
+files.push(operations);
 run('tree-sitter', ['parse', '--quiet', ...files], grammar);
+const operationsTree = run('tree-sitter', ['parse', operations], grammar);
+for (const node of ['state_declaration', 'tensor_type', 'function_declaration']) {
+  assert(operationsTree.includes(`(${node}`), `${node}: missing model operation structure`);
+}
+assert(operationsTree.includes('return_type: (tensor_type'), 'typed operation return must retain its type field');
+const operationsCaptures = run('tree-sitter', ['query', 'queries/highlights.scm', operations], grammar);
+for (const [capture, text] of [['keyword', 'state'], ['variable', 'activity'], ['type.builtin', 'f32'], ['function', 'observe'], ['function', 'reset'], ['operator', '<-'], ['operator', '->']]) {
+  assert(operationsCaptures.split('\n').some(line => line.includes(capture) && line.includes('`' + text + '`')),
+    `${text}: missing ${capture} capture`);
+}
 const sample = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/editor_current.wgt');
 const vocabulary = JSON.parse(fs.readFileSync(path.join(root, 'editors/vocabulary.json'), 'utf8'));
 assert(vocabulary.keywords.includes('against'), 'against must be highlighted as a training keyword');

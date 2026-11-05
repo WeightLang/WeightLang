@@ -54,7 +54,7 @@
     },
     {
       "name": "keyword.control.wgt",
-      "match": "\\b(?:blend|repeat|indexed|carrying|agent|environment|learn|assert|async|await|spawn|tasks|sleep|break|checkpoint|collect|continue|else|fn|for|from|frozen|if|import|in|init|input|json|layer|let|load|mix|model|onehot|operators|output|overwrite|parameter|reload|return|sample|save|size|text|then|to|train|on|against|rate|clip|target|using|wgt|while|yield|native|intrinsic)\\b"
+      "match": "\\b(?:blend|repeat|indexed|carrying|agent|environment|state|learn|assert|async|await|spawn|tasks|sleep|break|checkpoint|collect|continue|else|fn|for|from|frozen|if|import|in|init|input|json|layer|let|load|mix|model|onehot|operators|output|overwrite|parameter|reload|return|sample|save|size|text|then|to|train|on|against|rate|clip|target|using|wgt|while|yield|native|intrinsic)\\b"
     },
     {
       "name": "invalid.deprecated.wgt",
@@ -82,7 +82,7 @@
     },
     {
       "name": "keyword.operator.wgt",
-      "match": "=>|\\*\\*|==|!=|<=|>=|&&|\\|\\||[<>=!+*/%\\-]"
+      "match": "<-|->|=>|\\*\\*|==|!=|<=|>=|&&|\\|\\||[<>=!+*/%\\-]"
     },
     {
       "name": "punctuation.wgt",

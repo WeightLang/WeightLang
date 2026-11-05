@@ -7,7 +7,7 @@
 
 ## Rust 主程序与 WGT 模型目标
 
-目标工作流由 Rust 主程序负责数据准备、I/O、调度与训练循环，WGT 定义模型结构、模型内部计算及可选的可微 loss。Rust 库包名为 `wgt-model`，crate 名为 `wgt`。`ModelDefinition::parse`、`ModelDefinition::from_file`、`model!` 与 `include_model!` 共用模型解析与定义；两个宏仅接受 Rust 字符串字面量，编译时复用同一 parser 检查并嵌入源码，运行时仍解析定义。模型模块导入在本地实现中包含 `std/activation`、`std/loss`、`std/attention` 和 `std/numerics`；文件入口还实现了相对路径纯计算模块及嵌套导入。模块导入和编译 forward 尚待完整行为验收，不能视为已支持或已发布能力。当前模型只支持单个 `f32` 向量输入。
+目标工作流由 Rust 主程序负责数据准备、I/O、调度与训练循环，WGT 定义模型结构、模型内部计算及可选的可微 loss。Rust 库包名为 `wgt-model`，crate 名为 `wgt`。`ModelDefinition::parse`、`ModelDefinition::from_file`、`model!` 与 `include_model!` 共用模型解析与定义；两个宏仅接受 Rust 字符串字面量，编译时复用同一 parser 检查并嵌入源码，运行时仍解析定义。模型模块导入在本地实现中包含 `std/activation`、`std/loss`、`std/attention` 和 `std/numerics`；文件入口还实现了相对路径纯计算模块及嵌套导入。模块导入和编译 forward 尚待完整行为验收，不能视为已支持或已发布能力。既有 forward 模型入口只接受单个 `f32` 向量；多输入 typed 操作已通过本地指定范围验收，尚未发布，见[模型操作](model-operations.md)。
 
 模型执行、参数和优化器状态由唯一的机器级 `wgtime` 服务持有。定义解析、编译期检查和源码嵌入不连接服务或初始化模型；Rust 程序须先显式调用 `Client::connect()`，再请求初始化、训练或权重保存。当前 facade 提供 `Model::save_weights`，没有公共训练 checkpoint API。Rust facade 通过 IPC 使用服务端原生编译 forward；这不意味着旧脚本执行路径已全部删除。API 已在本地实现并通过定点验证，尚未发布；不代表更广泛的能力支持。完整签名与契约见 [Rust 后端契约](native-backend.md)。
 
@@ -95,6 +95,16 @@ weightc compile examples/native_training/supervised/model.wgt -o .cache/weightla
 `wgt script` 是 `wgt run` 的命令别名，不是另一套语言。
 解释和编译模式使用同一前端；编译模式生成 Rust 控制流和静态模型计划，运行时不解析 WGT。
 `weightc check` 检查语法及受支持的模型声明，不证明所有函数调用、路径初始化或循环终止。
+
+## 多入口模型操作
+
+WGT 0.5 的 typed 操作已通过本地指定范围验收，尚未发布。core 7 个 suite 共 31 项、typed import roundtrip 1/1，最终 daemon 重建后真实 IPC 5/5（operations 1、既有 service 1、CNN 3）；language 与 model 常规测试 16 项通过、8 项 ignored，相关服务测试单独执行。workspace all-targets 检查、typed `model!` 宏编译和完整示例解析通过；解析不证明执行，完整覆盖范围见[模型操作验收状态](model-operations.md#验收状态)。每个入口的每个参数必须标注 `f32[N]`，N 为 1..16384，各参数宽度之和不超过 16384；可有多个参数。返回类型为 `-> f32[N]`，省略表示无返回值；无参无返回的 `fn reset() {}` 合法。typed 模式使用函数签名声明端口，不使用根级 `input`、`output` 或 `target`，不支持 `loss`、子模型或操作互调；纯张量辅助函数仍受各自限制。
+
+模型定义中出现 typed 函数签名或 `state` 声明，或者没有 `forward` 但存在无参函数时，会进入操作模式。该模式中无参且无返回类型标注的函数按 void 入口处理，不是纯 helper；例如 `fn constant() { return [1]; }` 会被拒绝。有返回值的无参入口须写成 `fn observe() -> f32[1] { ... }`。纯 helper 必须至少有一个未标注类型的参数，仍须遵守纯张量 helper 限制。
+
+`state name: f32[N] = [有限数值, ...]` 声明固定向量状态，初值长度须匹配，末尾分号可选。`name <- expression;` 显式更新裸状态或参数名，分号必需；冻结目标及形状不符的更新拒绝。状态名与参数名不能冲突，入口参数也不能遮蔽存储名。typed `forward` 不允许写状态或参数。表达式遵守当前张量 lowering 限制，不支持任意宿主计算。
+
+同一服务实例的入口共享参数与状态；调用内写后读看到候选值，成功并通过校验才原子提交，失败保持原值。状态与权重分离，普通权重不保存操作状态；不提供状态快照、状态 checkpoint 或重启恢复保证。操作由服务侧原生代码执行而非 VM，typed 操作不支持自动微分或跨状态求导。旧 forward 路径的 `train_with_policy` 提供 `ContinuousOnly`，遇到模型中任意 `learn bool` 或 `learn int` 即拒绝；`StraightThrough` 允许离散参数使用 STE，旧 `train` 保持 STE 兼容行为。策略检查与训练由单个 `TrainStepWithPolicy` 请求原子处理，不持久设置策略。参数候选拒绝 frozen/probability 参数，bool/int 候选必须严格离散；没有 CAS，revision 仅在服务响应中返回，不承诺拒绝过期候选。`update_parameters` 成功清空旧 forward 优化器，失败保持原状态，重新训练须通过 `load_weights` 显式选回。typed 操作无优化器，加载权重保留 state。当前 Rust facade 签名见[Rust 后端契约](native-backend.md#多入口操作)。详见[模型操作](model-operations.md)。
 
 ## 声明式模型
 
@@ -334,7 +344,7 @@ workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 
 完整可执行示例：[self_modifying/model.wgt](../examples/self_modifying/model.wgt)。
 
-固定 shape 多轴几何与 attention 算子合同（行为待验证）见[固定 shape 张量几何](tensor-geometry.md)。实际使用新几何算子或多轴 softmax 时使用 adaptive IR v3；旧 IR v1/v2 不因 AST 中出现新 intrinsic 而全定义升级。参数读取始终为 flat vector，矩阵参数须显式 reshape。模型入口仍为单个 f32 向量，矩阵输出须 reshape 回向量。完整模型示例在 [T10 语法总览注释](../language/syntax-tour/model.wgt) 与后端测试 fixture `crates/wgtime-core/tests/fixtures/attention/model.wgt`；本地验证为 core 7 suites / 30 tests、真实 service 集成 1 项和 macro fixture 编译 1 项通过；native-cpu attention 100 步 SGD 的 MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训和资源释放。核心补充 IR 安全校验后须回归。未验证完整 Transformer、多头 attention、动态 batch 或 GPU 路径。
+固定 shape 多轴几何与 attention 算子合同（行为待验证）见[固定 shape 张量几何](tensor-geometry.md)。实际使用新几何算子或多轴 softmax 时使用 adaptive IR v3；旧 IR v1/v2 不因 AST 中出现新 intrinsic 而全定义升级。参数读取始终为 flat vector，矩阵参数须显式 reshape。既有 forward 入口为单个 f32 向量，矩阵输出须 reshape 回向量；typed 操作多输入的本地验收范围见[模型操作](model-operations.md)。完整模型示例在 [T10 语法总览注释](../language/syntax-tour/model.wgt) 与后端测试 fixture `crates/wgtime-core/tests/fixtures/attention/model.wgt`；本地验证为 core 7 suites / 30 tests、真实 service 集成 1 项和 macro fixture 编译 1 项通过；native-cpu attention 100 步 SGD 的 MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训和资源释放。核心补充 IR 安全校验后须回归。未验证完整 Transformer、多头 attention、动态 batch 或 GPU 路径。
 可微路由训练示例：[soft_routing/model.wgt](../examples/native_training/soft_routing/model.wgt)，
 完整训练、状态与保存约束见[可微程序](differentiable-programs.md)。上述三种算子的张量梯度仅用于 forward，
 全部参数必填，无温度等隐式选项。`p=1` 表示完整通过或完全采用 a 的输出。

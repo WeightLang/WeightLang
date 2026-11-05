@@ -98,7 +98,14 @@ pub enum Stmt {
 pub struct Function {
     pub is_async: bool,
     pub args: Vec<String>,
+    /// Present on explicitly typed model operations; absent on legacy helpers.
+    pub signature: Option<OperationSignature>,
     pub body: Vec<Statement>,
+}
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct OperationSignature {
+    pub inputs: Vec<usize>,
+    pub output: Option<usize>,
 }
 pub type Program = HashMap<String, Function>;
 #[derive(Clone, Debug)]
@@ -198,6 +205,8 @@ pub fn parse_functions(source: &str) -> Result<Program> {
                         | ('*', '*')
                         | ('!', '=')
                         | ('<', '=')
+                        | ('<', '-')
+                        | ('-', '>')
                         | ('>', '=')
                         | ('&', '&')
                         | ('|', '|')
@@ -258,17 +267,25 @@ pub fn parse_functions(source: &str) -> Result<Program> {
         );
         parser.expect("(")?;
         let mut args = Vec::new();
+        let mut input_types = Vec::new();
         if !parser.is(")") {
             loop {
                 let arg = parser.name()?;
                 ensure!(!args.contains(&arg), "duplicate argument: {arg}");
                 args.push(arg);
+                input_types.push(if parser.take(":") { Some(parser.tensor_width()?) } else { None });
                 if !parser.take(",") {
                     break;
                 }
             }
         }
         parser.expect(")")?;
+        let has_return = parser.take("->");
+        let output = if has_return { Some(parser.tensor_width()?) } else { None };
+        let signature = if has_return || input_types.iter().any(Option::is_some) {
+            ensure!(input_types.iter().all(Option::is_some), "operation arguments must all declare f32[N] types");
+            Some(OperationSignature { inputs: input_types.into_iter().flatten().collect(), output })
+        } else { None };
         ensure!(
             !is_async || !matches!(name.as_str(), "main" | "forward" | "loss"),
             "async {name} is unavailable; entry and tensor functions must be synchronous"
@@ -281,6 +298,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
                     Function {
                         is_async,
                         args,
+                        signature,
                         body
                     }
                 )
@@ -298,6 +316,14 @@ struct Parser {
     depth: usize,
 }
 impl Parser {
+    fn tensor_width(&mut self) -> Result<usize> {
+        self.expect("f32")?;
+        self.expect("[")?;
+        let width = self.next()?.text.parse::<usize>().context("tensor width must be a fixed integer")?;
+        ensure!((1..=16384).contains(&width), "tensor width must be 1..16384");
+        self.expect("]")?;
+        Ok(width)
+    }
     fn instance_declaration(&mut self) -> Result<(String, Function)> {
         let line = self.line();
         let agent = self.take("agent");
@@ -387,6 +413,7 @@ impl Parser {
             Function {
                 is_async: false,
                 args,
+                signature: None,
                 body: vec![Statement {
                     line,
                     kind: Stmt::Return(Expr::BuiltinCall(builtin.into(), values)),
@@ -709,7 +736,12 @@ impl Parser {
             }
         } else {
             let expr = self.expr(0)?;
-            if self.take("=") {
+            if self.take("<-") {
+                let Expr::Name(name) = expr else { bail!("line {line}: transactional update requires a bare state or parameter name"); };
+                let value = self.expr(0)?;
+                self.expect(";")?;
+                Stmt::Eval(Expr::BuiltinCall("__transaction_write".into(), vec![Expr::Name(name), value]))
+            } else if self.take("=") {
                 let Expr::Name(name) = expr else {
                     bail!("line {line}: assignment target must be a variable");
                 };

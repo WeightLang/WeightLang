@@ -11,8 +11,8 @@ output y:f32[1]
 fn forward(x){return x+x;}
 "#);
     let file=wgt::include_model!("tests/fixtures/model.wgt");
-    assert_eq!(inline.interface().input,1);
-    assert_eq!(file.interface().output,1);
+    assert_eq!(inline.interface().unwrap().input,1);
+    assert_eq!(file.interface().unwrap().output,1);
     assert!(ModelDefinition::parse(SOURCE).is_ok());
 }
 

@@ -227,28 +227,42 @@ fn strip_imports(source: &str) -> String {
         + "\n"
 }
 fn rewrite_function(function: &mut Function, calls: &HashMap<String, String>) {
-    for statement in &mut function.body {
-        match &mut statement.kind {
-            Stmt::Let(_, expr) | Stmt::Return(expr) => {
-                *expr = operators::rewrite(expr, &HashMap::new(), calls)
+    fn rewrite(body: &mut [parse::Statement], calls: &HashMap<String,String>) {
+        for statement in body {
+            match &mut statement.kind {
+                Stmt::Let(_, expr) | Stmt::Set(_, expr) | Stmt::Return(expr) | Stmt::Eval(expr) => *expr=operators::rewrite(expr,&HashMap::new(),calls),
+                Stmt::If(expr,yes,no) => { *expr=operators::rewrite(expr,&HashMap::new(),calls); rewrite(yes,calls); rewrite(no,calls); },
+                Stmt::While(expr,body) => {*expr=operators::rewrite(expr,&HashMap::new(),calls);rewrite(body,calls);},
+                _=>{},
             }
-            _ => {} // Shared validation rejects non-tensor statements below.
         }
     }
+    rewrite(&mut function.body,calls);
 }
 fn emit_function(out: &mut String, name: &str, function: &Function) -> Result<()> {
     ensure!(
         !function.is_async,
         "model modules cannot contain async functions"
     );
-    out.push_str(&format!("\nfn {name}({}) {{\n", function.args.join(",")));
-    for statement in &function.body {
-        match &statement.kind {
-            Stmt::Let(name, e) => out.push_str(&format!("let {name} = {};\n", expression(e)?)),
-            Stmt::Return(e) => out.push_str(&format!("return {};\n", expression(e)?)),
-            _ => bail!("model computation supports only immutable let and return"),
-        }
+    let args=if let Some(signature)=&function.signature {function.args.iter().zip(&signature.inputs).map(|(n,w)|format!("{n}: f32[{w}]")).collect::<Vec<_>>().join(",")}else{function.args.join(",")};
+    let output=function.signature.as_ref().and_then(|s|s.output).map(|n|format!(" -> f32[{n}]")).unwrap_or_default();
+    out.push_str(&format!("\nfn {name}({args}){output} {{\n"));
+    fn emit_body(out:&mut String,body:&[parse::Statement])->Result<()> {
+        for statement in body {match &statement.kind {
+            Stmt::Let(name,e)=>out.push_str(&format!("let {name} = {};\n",expression(e)?)),
+            Stmt::Set(name,e)=>out.push_str(&format!("{name} = {};\n",expression(e)?)),
+            Stmt::Return(Expr::Null)=>out.push_str("return;\n"),
+            Stmt::Return(e)=>out.push_str(&format!("return {};\n",expression(e)?)),
+            Stmt::Eval(Expr::BuiltinCall(op,args)) if op=="__transaction_write" && args.len()==2=>out.push_str(&format!("{} <- {};\n",expression(&args[0])?,expression(&args[1])?)),
+            Stmt::Eval(e)=>out.push_str(&format!("{};\n",expression(e)?)),
+            Stmt::If(e,yes,no)=>{out.push_str(&format!("if {} {{\n",expression(e)?));emit_body(out,yes)?;out.push_str("} else {\n");emit_body(out,no)?;out.push_str("}\n");},
+            Stmt::While(e,body)=>{out.push_str(&format!("while {} {{\n",expression(e)?));emit_body(out,body)?;out.push_str("}\n");},
+            Stmt::Break=>out.push_str("break;\n"),
+            Stmt::Continue=>out.push_str("continue;\n"),
+            _=>bail!("unsupported model computation statement"),
+        }} Ok(())
     }
+    emit_body(out,&function.body)?;
     out.push_str("}\n");
     Ok(())
 }

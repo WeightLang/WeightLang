@@ -26,6 +26,12 @@ pub enum Request {
         memory: usize,
     },
     InitializeDefinition { source: String, memory: usize, optimizer: Option<String> },
+    CallOperation { handle: u64, name: String, inputs: Vec<Vec<f32>> },
+    OperationSchemas { handle: u64 },
+    ParameterValues { handle: u64 },
+    StateValues { handle: u64 },
+    UpdateParameters { handle: u64, candidates: Vec<(String, Vec<usize>, Vec<f32>)> },
+    TrainStepWithPolicy { handle: u64, inputs: Vec<Vec<f32>>, targets: serde_json::Value, rate: f32, loss: String, clip: Option<f32>, straight_through: bool },
     Predict {
         handle: u64,
         input: Vec<f32>,

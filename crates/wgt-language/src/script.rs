@@ -73,6 +73,7 @@ fn parse_linked(source: &str, imported: Program) -> Result<Program> {
             name.into(),
             parse::Function {
                 is_async: false,
+                signature: None,
                 args: vec!["optimizer".into()],
                 body: vec![Statement {
                     line: 1,

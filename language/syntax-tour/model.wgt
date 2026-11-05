@@ -18,7 +18,7 @@ wgt 0.5
 # 05 helper/std/本地导入（T05/T06）；06 blend/if/repeat、门控/循环/状态（T07/T12）；
 # 07 工作内存/资源（T08）；08 learn 参数与数组；09 loss/训练；
 # 10 顺序 layer/init（T09）；11 Rust 三入口/显式生命周期（R01）；
-# 12 遗留宿主索引；13 提案（P01）；14 提取与验证清单（T10 attention、T11 Richardson 松弛）。
+# 12 遗留宿主索引；13 数组/repeat（T12）；14 typed operations（T13，本地指定范围已验收）；15 提案（P01）；16 提取与验证清单（T10 attention、T11 Richardson 松弛）。
 
 # 01 版本、名称、注释和边界
 # 首个非空、非注释行必须为 wgt 0.5；版本头只出现一次。
@@ -417,8 +417,9 @@ fn loss(prediction, target) {
 # 当前 service forward 是固定 shape IR -> C -> 本机共享库；初始化需要可用 C 编译器。
 # 参数与机器码分离，训练/绑定权重后 forward 读当前权重；反向仍为 tape，不是 compiled backward。
 # 源码解析成功不等于已执行 forward；本地实现/定点验证不等于发布或全架构验收。
-# facade 目前只有单 f32 向量 forward、CPU 训练和权重保存/绑定；没有公共 checkpoint API。
-# 不承诺多输入、batch forward、跨请求 cache、任意 dtype、GPU 新分类类型或通用模块实例。
+# 旧 forward facade 目前只有单 f32 向量入口、CPU 训练和权重保存/绑定；没有公共 checkpoint API。
+# typed operations 是另一类定义，操作签名可有多个 f32[N] 输入，本地服务验收范围见 docs/model-operations.md。
+# 不承诺 batch forward、跨请求 cache、任意 dtype、GPU 新分类类型或通用模块实例。
 
 # 12 历史宿主脚本仅作索引，不作为新模型主程序写法
 # 共用 parser 中仍保留普通值、函数、控制流、I/O、训练、agent、environment、异步等语法。
@@ -474,7 +475,36 @@ fn loss(prediction, target) {
 #     return adaptive;
 # }
 # T12 END
-# P01：真正未实现的提案，不是当前可执行 WGT。以下能力仍待设计或验收。
+# 14 T13 BEGIN：typed operations 多入口模型展示，本地指定范围已验收；独立于活跃 T01。
+# 本例不声明 forward/loss；入口参数和返回值是固定宽度 f32 向量，state 是实例运行状态。
+# advance 读写同一实例的 value；一次调用整体成功并通过校验后才提交事务候选。
+# 操作提交后再读取看到已提交值；失败调用不留下部分更新，相关回滚已有定向测试覆盖。
+# 分别初始化的 Counter 实例拥有隔离的 value 与 gain，不共享可变状态。
+# gain 是参数，可显式接收外部候选；普通 weights 制品不包含 value 状态。
+# 此 typed operations 模型无 loss、无 AD、无 optimizer；Rust 应用负责外部调度。
+# 本完整示例已抽取并通过定义解析；运行时覆盖范围见 docs/model-operations.md，不代表已发布。
+# wgt 0.5
+# model Counter
+# parameter gain: f32[1] = [1]
+# state value: f32[1] = [0]
+# fn advance(input: f32[1]) -> f32[1] {
+#     value <- value + input * gain;
+#     return value;
+# }
+# fn observe() -> f32[1] {
+#     return value;
+# }
+# fn reset() {
+#     value <- [0];
+# }
+# fn adapt(next: f32[1]) {
+#     gain <- next;
+# }
+# # 多输入操作：两个独立输入向量，本例仅返回左侧；Rust 按签名分别传入。
+# fn combine(left: f32[1], right: f32[2]) -> f32[1] { return left; }
+# T13 END
+
+# 15 P01：真正未实现的提案，不是当前可执行 WGT。以下能力仍待设计或验收。
 # shared 专家池与动态调度：子模型实例数组已有声明形式，但没有已验收的专家池选择协议。
 # top-k 路由：blend/gate/route 只做固定张量计算/混合，不提供 top-k 专家调度。
 # 动态专家数量/比例学习：learn 数组长度固定，不能改变实例数组长度或参数个数。
@@ -556,7 +586,7 @@ fn loss(prediction, target) {
 # 已提供的本地证据：crates/wgtime-core/tests/differentiable_program.rs 两项通过，覆盖参考解释器与 native-cpu 编译执行及训练/权重/checkpoint行为；不代表已发布。
 
 # 14 示例提取与验证清单
-# T01：本文件唯一活跃、完整模型；本次 blend/if/direct-loss 改写尚待重新解析和原生编译前向验收；数学预期仍为 [2,4] -> [9]、[0,0] -> [0]。
+# T01：本文件唯一活跃、完整模型；本次 blend/if/direct-loss 改写已通过定义解析，原生编译前向仍待验收；数学预期仍为 [2,4] -> [9]、[0,0] -> [0]。
 # T02/T03/T04/T05/T09/T10/T11：注释中的独立完整模型；T10/T11 已抽取并通过 wgt check，T02/T03/T04/T05/T09 保留原验证记录。
 # T06a：完整 operators 库，不是 ModelDefinition；T06b：完整消费者，必须提供配套 ops.wgt。
 # T07/T08：完整低层模型语法资料；包含当前服务 compiled 路径拒绝的状态能力，不作 facade 验收。

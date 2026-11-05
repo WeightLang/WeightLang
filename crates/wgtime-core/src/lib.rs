@@ -2,6 +2,7 @@
 //! `Session::run` allocates no heap memory. Preparation and transport may allocate.
 pub mod accelerator;
 pub mod compiled_forward;
+pub mod operations;
 pub mod adaptive;
 pub mod categorical;
 pub mod collection;

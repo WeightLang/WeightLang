@@ -3,7 +3,7 @@ mod source;
 mod conv;
 pub use conv::ConvGeometry;
 pub use source::{parse, parse_with_functions};
-pub(crate) use source::validate_definition;
+pub(crate) use source::{validate_definition, lower_operation};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Program {

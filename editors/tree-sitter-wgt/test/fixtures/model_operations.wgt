@@ -1,0 +1,14 @@
+wgt 0.5
+model Memory
+# 四维轴代表跨操作保留的活动值；声明初始化不代表实例已经训练。
+state activity: f32[4] = [0,0,0,0];
+# 两个输入使用同一特征轴；显式写回后返回更新结果。
+fn observe(input: f32[4], delta: f32[4]) -> f32[4] {
+    let next = input + delta;
+    activity <- next;
+    return next;
+}
+# 无返回、零参数操作将每个活动值恢复为初始零值。
+fn reset() {
+    activity <- [0,0,0,0];
+}

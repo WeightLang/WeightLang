@@ -13,11 +13,19 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 
 `wgt-model` facade 的 Rust 库名为 `wgt`，当前提供 `model!`、`include_model!` 字符串宏以及 `ModelDefinition::parse`、`ModelDefinition::from_file`。内嵌源码、编译期文件和运行期文件入口共享模型定义解析语义。上述能力已在本地实现并通过定点验证，尚未发布。不要把 Rust 宏形式加入 WGT 语法说明，也不要用解析成功推断 forward 已执行；宏和定义解析只构造/检查定义，不连接服务、不执行模型。
 
-当前模型入口支持单个 f32 向量；源码中实现了标准纯计算模块导入及文件入口相对路径、嵌套导入，但模块导入与编译 forward 尚待完整行为验收。不得宣称多输入、batch forward、cache 或任意 dtype 支持。模型定义与服务中初始化/加载的实例、训练权重和优化器检查点是不同对象；加载定义不得隐式执行训练或创建运行状态。准确接口及实现状态以 [docs/native-backend.md](../../../docs/native-backend.md) 为权威。
+既有 forward 模型入口支持单个 f32 向量；typed 操作多输入已通过下述本地指定范围验收，尚未发布。源码中实现了标准纯计算模块导入及文件入口相对路径、嵌套导入，但模块导入与编译 forward 尚待完整行为验收。不得据此宣称 batch forward、cache 或任意 dtype 支持。模型定义与服务中初始化/加载的实例、训练权重和优化器检查点是不同对象；加载定义不得隐式执行训练或创建运行状态。准确接口及实现状态以 [docs/native-backend.md](../../../docs/native-backend.md) 为权威。
+
+### 多入口操作
+
+本地指定范围已验收：core 7 suite 共 31 项、typed import roundtrip 1/1；覆盖状态演化与隔离、reset、预算写后回滚、两次状态写后读及参数混合更新、零存储及仅 void 操作、混合参数与局部变量 `<-` 拒绝、外部搜索、权重与状态分离、策略及优化器处理。最终 daemon 重建后真实 IPC 5/5（operations 1、既有 service 1、CNN 3）；language 与 model 常规测试 16 项通过、8 项 ignored，相关服务测试单独执行。workspace all-targets、typed `model!` 宏编译和完整示例解析均通过；解析不证明执行，不能说全仓验收或已发布。合同见 [docs/model-operations.md](../../../docs/model-operations.md)。每个 typed 参数为 `f32[N]`，N=1..16384，各参数宽度总和不超过 16384；返回 `f32[N]` 或省略表示 void，`fn reset() {}` 合法。状态声明 `state name: f32[N] = [有限数值, ...]` 可省末尾分号；`name <- expression;` 必须以裸状态或参数名为目标且分号必填。typed 模式不用根级 input/output/target，不支持 loss、子模型或操作互调；typed forward 禁止写入。
+
+模型定义出现 typed 签名或 `state`，或没有 `forward` 但有无参函数时进入操作模式。无参且无返回类型的函数是 void 入口，不是 helper，不能返回张量；无参返回值入口须显式标注如 `fn observe() -> f32[1] { ... }`。纯 helper 须至少有一个无类型标注参数。
+
+同实例各入口共享参数及独立状态，调用内写后读看到候选，成功原子提交、失败保持原值；普通权重不保存状态。服务侧原生执行、无 VM，typed 操作无 AD、无跨状态求导。旧 forward 的 `train_with_policy` 中 ContinuousOnly 遇到模型任意 learn bool/int 即拒绝，StraightThrough 使用 STE，旧 train 保留 STE。`ModelDefinition::interface()` 现为 Option，旧调用须显式处理缺失值；`call`、`operations`、`parameters`、`state`、`update_parameters`、`train_with_policy` 签名见 [Rust 后端](../../../docs/native-backend.md#多入口操作)；策略检查与训练由单个 `TrainStepWithPolicy` 请求原子处理，不持久设置策略。参数候选拒绝 frozen/probability 参数，bool/int 候选必须严格离散。候选更新无 CAS、无状态 snapshot/checkpoint，revision 仅在服务响应中返回，不承诺拒绝过期候选或断线 exactly-once；`update_parameters` 成功清空旧 forward optimizer，失败保持原状态，重新训练需通过 `load_weights` 显式选回。typed 操作无 optimizer，权重加载保留 state。
 
 ### 固定 shape 多轴张量几何（行为待验证）
 
-核心合同为 WGT 0.5，相关 adaptive IR 为 v3；旧 IR v1/v2 仅在显式提供一维 `shape=[len]` 时接受，shape 缺失拒绝。`reshape(x,[d1,...,dn])` 的维度必须是 1..8 个正整数常量，每轴 1..16384，元素总数不超过 16777216，且总元素数须保持不变。`transpose(x)` 只接受 rank-2 并交换两轴；`matmul(a,b)` 为 rank-2 `[M,K] @ [K,N] -> [M,N]`，不广播。`softmax(x,axis)` 的 axis 是非负整数字面量，沿整轴独立稳定归一化并使用 f64 累加；原 `softmax(x)` 与 `log_softmax(x)` 仍为 rank-1 形式。`scale(x,literal)` 接受有限有符号数值字面量，不广播并保 shape。服务模型入口仍为单个 f32 向量，矩阵结果需 reshape 为向量。指定范围已本地验证：core 7 suites / 30 tests、真实 service 集成 1 项和 macro fixture 编译 1 项。native-cpu attention 100 步 SGD 的 MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训及资源释放。核心补充 IR 安全校验后须回归；不能据此声称完整 Transformer、多头 attention、动态 batch 或 GPU 路径已验证。完整 attention 模型见 [docs/tensor-geometry.md](../../../docs/tensor-geometry.md) 和 `language/syntax-tour/model.wgt` 的注释 T10。
+核心合同为 WGT 0.5，相关 adaptive IR 为 v3；旧 IR v1/v2 仅在显式提供一维 `shape=[len]` 时接受，shape 缺失拒绝。`reshape(x,[d1,...,dn])` 的维度必须是 1..8 个正整数常量，每轴 1..16384，元素总数不超过 16777216，且总元素数须保持不变。`transpose(x)` 只接受 rank-2 并交换两轴；`matmul(a,b)` 为 rank-2 `[M,K] @ [K,N] -> [M,N]`，不广播。`softmax(x,axis)` 的 axis 是非负整数字面量，沿整轴独立稳定归一化并使用 f64 累加；原 `softmax(x)` 与 `log_softmax(x)` 仍为 rank-1 形式。`scale(x,literal)` 接受有限有符号数值字面量，不广播并保 shape。既有 forward 服务入口为单个 f32 向量，矩阵结果需 reshape 为向量；typed 操作多输入验收范围见上节。指定范围已本地验证：core 7 suites / 30 tests、真实 service 集成 1 项和 macro fixture 编译 1 项。native-cpu attention 100 步 SGD 的 MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训及资源释放。核心补充 IR 安全校验后须回归；不能据此声称完整 Transformer、多头 attention、动态 batch 或 GPU 路径已验证。完整 attention 模型见 [docs/tensor-geometry.md](../../../docs/tensor-geometry.md) 和 `language/syntax-tour/model.wgt` 的注释 T10。
 
 ### 可学习架构参数
 

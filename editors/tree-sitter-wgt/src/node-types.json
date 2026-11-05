@@ -662,6 +662,16 @@
             "named": true
           }
         ]
+      },
+      "return_type": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "tensor_type",
+            "named": true
+          }
+        ]
       }
     },
     "children": {
@@ -954,6 +964,10 @@
         },
         {
           "type": "prelude_declaration",
+          "named": true
+        },
+        {
+          "type": "state_declaration",
           "named": true
         }
       ]
@@ -1499,6 +1513,80 @@
         {
           "type": "prelude_declaration",
           "named": true
+        },
+        {
+          "type": "state_declaration",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "state_declaration",
+    "named": true,
+    "fields": {
+      "initializer": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "array",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "tensor_type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "tensor_type",
+    "named": true,
+    "fields": {
+      "dtype": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "f32",
+            "named": false
+          },
+          {
+            "type": "logits",
+            "named": false
+          },
+          {
+            "type": "probabilities",
+            "named": false
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "learn_shape",
+          "named": true
         }
       ]
     }
@@ -1992,6 +2080,10 @@
     "named": false
   },
   {
+    "type": "<-",
+    "named": false
+  },
+  {
     "type": "<=",
     "named": false
   },
@@ -2121,6 +2213,10 @@
     "named": false
   },
   {
+    "type": "f32",
+    "named": false
+  },
+  {
     "type": "false",
     "named": false
   },
@@ -2213,6 +2309,10 @@
     "named": false
   },
   {
+    "type": "logits",
+    "named": false
+  },
+  {
     "type": "loss",
     "named": false
   },
@@ -2265,6 +2365,10 @@
     "named": false
   },
   {
+    "type": "probabilities",
+    "named": false
+  },
+  {
     "type": "rate",
     "named": false
   },
@@ -2306,6 +2410,10 @@
   },
   {
     "type": "spawn",
+    "named": false
+  },
+  {
+    "type": "state",
     "named": false
   },
   {

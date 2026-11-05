@@ -10,7 +10,17 @@
 
 目标职责分工是：Rust 主程序负责数据准备、训练循环和业务控制，WGT `ModelDefinition` 负责模型内部计算，所有模型计算由唯一 `wgtime` service 执行。模型定义、运行时实例、权重和 checkpoint 分离；解析定义不创建实例，不初始化权重或训练状态，不训练、不写文件。
 
-首期定义 API 提供纯 `ModelDefinition` 的 `parse` / `from_file`，以及接受 Rust 字符串字面量的 `model!` / `include_model!` 宏。三种入口共用 parser 并统一拒绝 `import`。宏在编译期验证后嵌入源码；运行时构造定义仍是纯解析，不是预编译 IR。此 facade 已通过本地定点验证（语言 4 项、宏 7 项、facade 2 项，含真实三入口推理/训练/weights/drop 及删除源码后无工具链运行），但尚未发布；这不代表全仓、全 GPU 或性能验收通过。本文其余现有 WGT 训练语法描述当前脚本接口，不代表新 facade 具备相同 API。
+首期定义 API 提供纯 `ModelDefinition` 的 `parse` / `from_file`，以及接受 Rust 字符串字面量的 `model!` / `include_model!` 宏。三种入口共用 parser；纯计算模块导入已在源码接入，行为尚待完整验收。宏在编译期验证后嵌入源码；运行时构造定义仍是纯解析，不是预编译 IR。此 facade 已通过本地定点验证（语言 4 项、宏 7 项、facade 2 项，含真实三入口推理/训练/weights/drop 及删除源码后无工具链运行），但尚未发布；这不代表全仓、全 GPU 或性能验收通过。本文其余现有 WGT 训练语法描述当前脚本接口，不代表新 facade 具备相同 API。
+## 多入口操作与训练策略
+
+本地指定范围已验收，尚未发布：core 7 个 suite 共 31 项、typed import roundtrip 1/1；最终 daemon 重建后真实 IPC 5/5（operations 1、既有 service 1、CNN 3）。language 与 model 常规测试 16 项通过、8 项 ignored，相关服务测试单独执行。workspace all-targets 检查、typed `model!` 宏编译和完整示例解析均通过；解析不证明执行。覆盖范围及完整记录见[模型操作验收状态](model-operations.md#验收状态)，不代表全仓验收。
+
+多入口 typed 模型可不声明 loss 或优化器；每个输入为固定 `f32[N]`（N=1..16384），总输入宽度不超过 16384，返回固定 `f32[N]` 或 void。它以原生代码执行，不使用 VM，也不支持 AD 或跨状态求导。同实例入口共享参数及独立状态，写后读应看到候选值，全部成功才原子提交，失败保持原值；普通权重不含状态。
+
+模型定义出现 typed 签名或 `state`，或没有 `forward` 但有无参函数时进入操作模式。无参且无返回类型的函数是 void 入口而非纯 helper，不能返回张量；无参且有返回值须显式标注，如 `fn observe() -> f32[1] { ... }`。纯 helper 须至少有一个无类型标注参数。
+
+旧 forward 训练路径的 `train_with_policy` 提供 `ContinuousOnly` 和 `StraightThrough`：前者在整个模型存在任意 `learn bool` 或 `learn int` 时拒绝，即使当前路径未读取；后者采用直通估计（STE）。旧 `train` 保留 STE 兼容行为。当前 facade 包含 `call`、`operations`、`parameters`、`state`、`update_parameters` 和 `train_with_policy`，签名见[Rust 后端契约](native-backend.md#多入口操作)；策略检查与训练由单个 `TrainStepWithPolicy` 服务请求原子处理，不持久设置策略。参数候选拒绝 frozen/probability 参数，bool/int 候选必须严格离散；没有 CAS 或状态 snapshot，revision 仅在服务响应中返回，不承诺拒绝过期候选。`update_parameters` 成功会清空旧 forward 优化器，失败保持原状态，重新训练需通过 `load_weights` 显式选回优化器。typed 操作无优化器和 AD，加载权重保留 state。语法及限制见[模型操作](model-operations.md)。
+
 ## 统一训练入口契约（本轮实现中）
 
 监督训练使用同一个表达式入口，作为语句时忽略返回值：
@@ -453,7 +463,7 @@ weightc --offline --locked compile model.wgt -o demo
 
 编译模式会把已解析目录映射写入程序；数据/包文件不嵌入可执行文件，移动缓存后需重新编译。
 独立可执行程序不自动联网解析或重新校验包，--root 仅影响脚本相对路径，不改变依赖缓存路径。
-`wgt-model` Rust facade 与 `wgtime` 服务不负责 WGT 包解析；包依赖解析属于 `wgt` CLI 脚本入口。当前 Rust 模型定义入口拒绝 `import`，不能用包依赖功能绕过此限制。
+`wgt-model` Rust facade 与 `wgtime` 服务不负责 WGT 包解析；包依赖解析属于 `wgt` CLI 脚本入口。Rust 模型定义入口的纯计算模块导入仍待行为验收；CLI 包依赖解析不等同于该入口的模块导入。
 
 ## 计算能力调用策略
 

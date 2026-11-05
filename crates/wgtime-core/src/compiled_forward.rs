@@ -41,6 +41,10 @@ pub struct CompiledForward {
 }
 impl CompiledForward {
     pub fn compile(program: &Program, memory: usize) -> Result<Self> {
+        ensure!(!program.instructions.iter().any(|i| matches!(i, I::Write { .. })), "ordinary forward does not support state writes; use transaction compilation");
+        Self::compile_transaction(program, memory)
+    }
+    pub fn compile_transaction(program: &Program, memory: usize) -> Result<Self> {
         let generated = Generator::new(program)?.generate()?;
         let bytes = generated
             .workspace
@@ -462,6 +466,18 @@ impl<'a> Generator<'a> {
             input,
             input_id
         );
+        let mut transaction_bytes = 0usize;
+        if self.program.instructions.iter().any(|i| matches!(i, I::Write { .. })) {
+            // Candidate storage is native workspace, never the caller's immutable parameter slices.
+            let offset = self.workspace + self.max;
+            code += &format!("const float *original[{}];float *candidate[{}];", self.parameters.len().max(1), self.parameters.len().max(1));
+            for (index, parameter) in self.program.parameters.iter().enumerate() {
+                let len = parameter.data.len();
+                code += &format!("original[{index}]=p[{index}];candidate[{index}]=r+{};memcpy(candidate[{index}],original[{index}],{len}*sizeof(float));", offset + transaction_bytes);
+                transaction_bytes = transaction_bytes.checked_add(len).context("transaction workspace overflow")?;
+            }
+            code += "p=(const float *const *)candidate;";
+        }
         let mut output_width = None;
         for (index, instruction) in self.program.instructions.iter().enumerate() {
             code += &format!("L{index}:;if(*used>=budget)return 2;++*used;{{\n");
@@ -775,8 +791,14 @@ impl<'a> Generator<'a> {
                     );
                 }
 
-                I::Write { .. }
-                | I::MemoryAlloc { .. }
+                I::Write { parameter, value } => {
+                    let (p, n) = self.par(parameter)?;
+                    let (a, m, _) = self.reg(value)?;
+                    ensure!(n == m && !self.program.parameters[p].frozen, "invalid transactional write");
+                    reads.push(value);
+                    body += &format!("for(size_t i=0;i<{n};i++)if(!isfinite(r[{a}+i]))return 1;memcpy(candidate[{p}],r+{a},{n}*sizeof(float));if(trace&&trace(context,{index},r+{a},{n}))return 5;");
+                }
+                I::MemoryAlloc { .. }
                 | I::MemoryFree { .. }
                 | I::MemoryRead { .. }
                 | I::MemoryWrite { .. }
@@ -809,6 +831,7 @@ impl<'a> Generator<'a> {
             workspace: self
                 .workspace
                 .checked_add(self.max)
+                .and_then(|n| n.checked_add(transaction_bytes))
                 .context("workspace overflow")?,
         })
     }

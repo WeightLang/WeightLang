@@ -119,6 +119,10 @@
         {
           "type": "SYMBOL",
           "name": "model_instance_declaration"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "state_declaration"
         }
       ]
     },
@@ -629,6 +633,31 @@
           "name": "arguments"
         },
         {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "->"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "return_type",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "tensor_type"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
           "type": "REPEAT",
           "content": {
             "type": "SYMBOL",
@@ -638,6 +667,89 @@
         {
           "type": "SYMBOL",
           "name": "body"
+        }
+      ]
+    },
+    "tensor_type": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "dtype",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "f32"
+              },
+              {
+                "type": "STRING",
+                "value": "logits"
+              },
+              {
+                "type": "STRING",
+                "value": "probabilities"
+              }
+            ]
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "learn_shape"
+        }
+      ]
+    },
+    "state_declaration": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "state"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ":"
+        },
+        {
+          "type": "FIELD",
+          "name": "type",
+          "content": {
+            "type": "SYMBOL",
+            "name": "tensor_type"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "FIELD",
+          "name": "initializer",
+          "content": {
+            "type": "SYMBOL",
+            "name": "array"
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": ";"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         }
       ]
     },
@@ -1795,6 +1907,10 @@
     "operator": {
       "type": "CHOICE",
       "members": [
+        {
+          "type": "STRING",
+          "value": "<-"
+        },
         {
           "type": "STRING",
           "value": "->"

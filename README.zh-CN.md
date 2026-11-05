@@ -4,16 +4,18 @@
 
 > **优雅地描述神经网络的内部架构。**
 
-WGT 描述模型的内部架构与计算，让张量流、参数共享、模块组合和状态转移清晰可见。Rust 控制数据准备、I/O、调度与训练循环。模型执行以同一份 WGT 定义和 `wgtime` 服务为目标。
+WGT 描述模型内部的参数、状态，以及计算和更新它们的操作。Rust 负责数据准备、I/O、调度以及训练或搜索循环；唯一的 `wgtime` 服务拥有可变模型实例。可复用算法通过标准库显式导入。
 
-**可学习架构参数（Learnable Architecture Parameters）**让模型在明确约束下学习数值与结构开关。以下声明已在本地实现：整数和布尔参数在前向使用离散值，训练时通过 STE（直通估计器）传递代理梯度。
+前向计算、loss 与 backprop 是一种可选的模型路径。模型也可以使用有状态操作，或接收外部生成的参数更新。操作文档所列的 core 状态回滚、无梯度搜索、真实 service 操作和 CNN 回归范围已通过本地验收。typed 操作不支持自动微分（AD）；既有 forward 路径保留显式训练策略。这些能力已在本地实现，但尚未发布；边界与验收范围见[多范式模型操作](docs/model-operations.md)。
+
+**可学习架构参数（Learnable Architecture Parameters）**让模型在明确约束下声明数值与结构开关。以下声明已在本地实现。旧 `train` 路径对整数和布尔读取使用 STE（直通估计器）；既有 forward 路径保留显式训练策略，`learn` 本身不绑定到某种策略：
 
 ```wgt
 learn depth: int in 1..=12 = 6;
 learn use_skip: bool = true;
 ```
 
-通过 `depth_gate` 与显式有界计算组合，可以训练有效深度；布尔参数可以控制残差连接的门控。自动 `repeat`、改变张量形状和 `choice` 仍属于设计方向。完整浮点约束、离散训练规则及权重保存方式见[可学习架构参数与已测示例](docs/learnable-architecture-parameters.md)。
+可通过 `depth_gate` 或有界 `repeat` 表达受约束的计算，也可用布尔参数控制残差连接。`repeat` 已在文档所述边界内本地实现并验证；`choice` 和动态形状变化仍属于设计方向。完整浮点约束、离散训练规则及权重保存方式见[可学习架构参数与已测示例](docs/learnable-architecture-parameters.md)。
 
 参见[设计理念](docs/design-philosophy.md)了解动机，参见[架构覆盖矩阵](docs/architecture-coverage.md)了解验证边界。
 

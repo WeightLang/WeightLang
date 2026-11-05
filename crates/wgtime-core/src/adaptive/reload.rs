@@ -6,6 +6,23 @@ impl AdaptiveSession {
         crate::weight_artifact::encode(&self.program.parameters.iter().map(|p| (p.name.clone(), p.shape.clone(), p.data.clone())).collect::<Vec<_>>(), limit)
     }
 
+    /// Atomic external search update; optimizer moments are intentionally discarded.
+    pub fn update_candidates(&mut self, values: &[(String, Vec<usize>, Vec<f32>)]) -> Result<()> {
+        self.ensure_mutable()?; self.ensure_idle()?;
+        ensure!(!values.is_empty(), "empty parameter candidate batch");
+        let mut seen = std::collections::BTreeSet::new();
+        let mut program = self.program.clone();
+        for (name,shape,data) in values {
+            ensure!(seen.insert(name), "duplicate candidate parameter");
+            let p=program.parameters.iter_mut().find(|p|&p.name==name).context("unknown candidate parameter")?;
+            ensure!(!p.frozen && !p.probability, "candidate cannot update frozen or probability parameter");
+            ensure!(&p.shape==shape && data.len()==p.data.len() && data.iter().all(|v|v.is_finite()), "candidate parameter shape/finite mismatch");
+            if let Some(domain)=&p.learn {for v in data {domain.validate(*v)?;match domain {wgt_language::adaptive::LearnDomain::Int{..}=>ensure!(v.fract()==0.,"integer candidate must be integral"),wgt_language::adaptive::LearnDomain::Bool=>ensure!(*v==0. || *v==1.,"bool candidate must be 0 or 1"),_=>{}}}}
+            p.data.clone_from(data);
+        }
+        let candidate=Self::prepare(program,self.memory_limit)?;
+        self.reload_candidate(candidate)
+    }
     pub fn bind_weights(&mut self, bytes: &[u8], optimizer: &str) -> Result<()> {
         self.ensure_mutable()?;
         self.ensure_idle()?;

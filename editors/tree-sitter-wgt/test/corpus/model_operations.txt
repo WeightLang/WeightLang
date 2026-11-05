@@ -1,0 +1,119 @@
+==================
+Typed operations and explicit state updates
+==================
+wgt 0.5
+model Memory
+state activity: f32[1] = [0];
+fn observe(input: f32[1]) -> f32[1] {activity <- input; return activity;}
+fn reset() {activity <- [0];}
+
+---
+
+(source_file
+  (directive
+    (number))
+  (model_declaration
+    (identifier))
+  (state_declaration
+    (identifier)
+    (tensor_type
+      (learn_shape
+        (number)))
+    (array
+      (number)))
+  (function_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (qualified_name
+        (identifier))
+      (array
+        (number)))
+    (tensor_type
+      (learn_shape
+        (number)))
+    (body
+      (qualified_name
+        (identifier))
+      (operator)
+      (qualified_name
+        (identifier))
+      (script_keyword)
+      (qualified_name
+        (identifier))))
+  (function_declaration
+    (identifier)
+    (arguments)
+    (body
+      (qualified_name
+        (identifier))
+      (operator)
+      (array
+        (number)))))
+
+==================
+State line declaration without semicolon
+==================
+state activity: f32[1] = [0]
+fn reset() {}
+
+---
+
+(source_file
+  (state_declaration
+    (identifier)
+    (tensor_type
+      (learn_shape
+        (number)))
+    (array
+      (number)))
+  (function_declaration
+    (identifier)
+    (arguments)
+    (body)))
+
+==================
+Categorical typed returns are editor tolerance only
+==================
+fn scores(x: f32[2]) -> logits[2] {return x;}
+fn choices(x: f32[2]) -> probabilities[2] {return x;}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (qualified_name
+        (identifier))
+      (array
+        (number)))
+    (tensor_type
+      (learn_shape
+        (number)))
+    (body
+      (script_keyword)
+      (qualified_name
+        (identifier))))
+  (function_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (qualified_name
+        (identifier))
+      (array
+        (number)))
+    (tensor_type
+      (learn_shape
+        (number)))
+    (body
+      (script_keyword)
+      (qualified_name
+        (identifier)))))

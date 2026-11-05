@@ -4,24 +4,35 @@
 
 > **Express neural architectures clearly and elegantly.**
 
-WGT describes a model's internal architecture and computation, making tensor
-flow, shared parameters, module composition and state transitions visible. Rust
-controls data preparation, I/O, orchestration and training loops. Model execution
-is designed around one WGT definition and the `wgtime` service.
+WGT describes a model's internal architecture: parameters, state, and the
+operations that compute or update them. Rust controls data preparation, I/O,
+orchestration and training or search loops. The unique `wgtime` service owns
+mutable model instances. Reusable algorithms are brought in through explicit
+standard-library imports.
 
-**Learnable Architecture Parameters** let a model train numeric values and
+Forward computation with loss and backpropagation is one optional model path;
+models can also use stateful operations or externally generated parameter
+updates. The documented core state rollback, gradient-free search, service
+operations and CNN regression scope have passed local verification. Typed
+operations do not support automatic differentiation (AD); the existing forward
+path retains its explicit training policies. These operations are implemented
+locally but not yet released; see the [model operations contract and verification boundaries](docs/model-operations.md).
+
+**Learnable Architecture Parameters** let a model declare numeric values and
 structural gates with explicit constraints. The following declarations are locally
-implemented; integer and boolean reads use hard values with straight-through
-surrogate gradients during training:
+implemented. The legacy `train` path uses straight-through surrogate gradients
+(STE) for integer and boolean reads. Explicit training policies are available to
+the existing forward path; `learn` itself is not tied to a particular policy:
 
 ```wgt
 learn depth: int in 1..=12 = 6;
 learn use_skip: bool = true;
 ```
 
-Use `depth_gate` with explicitly bounded computation to train depth, or use a
-boolean parameter to gate a skip connection. Automatic `repeat`, shape changes
-and `choice` remain design work. See the [language contract and tested examples](docs/learnable-architecture-parameters.md)
+Use `depth_gate` or bounded `repeat` to express constrained computation, or use a
+boolean parameter to gate a skip connection. `repeat` has been locally implemented
+and verified within the documented bounds; `choice` and dynamic shape changes
+remain design work. See the [language contract and tested examples](docs/learnable-architecture-parameters.md)
 for floating-point constraints, discrete training rules and weight persistence.
 
 See the [design philosophy](docs/design-philosophy.md) and
