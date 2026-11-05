@@ -1212,7 +1212,7 @@ impl AdaptiveSession {
                         tape.record(op, &values)?;
                     }
                 } else {
-                    let n = self.registers[r].len();
+                    let n = self.program.registers[r].len;
                     ensure!(
                         self.scratch[..n].iter().all(|v| v.is_finite()),
                         "nonfinite activation at instruction {pc}"
