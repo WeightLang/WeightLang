@@ -379,7 +379,7 @@ impl<'a> Generator<'a> {
         let mut registers = HashMap::new();
         let mut workspace = 0usize;
         let mut max = 0;
-        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Conv { .. } | I::Reshape { .. } | I::Transpose { .. } | I::Permute { .. } | I::Matmul { .. } | I::BatchMatmul { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
+        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Conv { .. } | I::Reshape { .. } | I::Transpose { .. } | I::Permute { .. } | I::Matmul { .. } | I::BatchMatmul { .. } | I::LayerNorm { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
         for (i, r) in program.registers.iter().enumerate() {
             ensure!(r.shape.len() <= 8 && r.shape.iter().all(|d| *d <= 16384) && crate::elements(&r.shape)? == r.len, "compiled register geometry/storage mismatch");
             ensure!(program.version >= 3 || r.shape == [r.len], "multiaxis registers require compiled IR version 3");
@@ -569,6 +569,27 @@ impl<'a> Generator<'a> {
                         .and_then(|v|v.checked_mul(n)).context("batch_matmul work overflow")?;
                     body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{batch};z++)for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+z*{m}*{k}+i*{k}+q]*(double)r[{b}+z*{k}*{n}+q*{n}+j];t[z*{m}*{n}+i*{n}+j]=(float)sum;}}");
                     reads.extend([left.as_str(),right.as_str()]); out=Some(o);
+                },
+                I::LayerNorm { out:o,input:x,gamma,beta,axis,epsilon } => {
+                    let (a,_,ai) = self.reg(x)?;
+                    let (g,_,gi) = self.reg(gamma)?;
+                    let (b,_,bi) = self.reg(beta)?;
+                    let shape = &self.program.registers[ai].shape;
+                    ensure!(*axis < shape.len(), "compiled LayerNorm axis out of range");
+                    let (outer,width,inner) = (
+                        shape[..*axis].iter().product::<usize>(),
+                        shape[*axis],
+                        shape[axis+1..].iter().product::<usize>(),
+                    );
+                    ensure!(self.program.registers[gi].shape == [width]
+                        && self.program.registers[bi].shape == [width],
+                        "compiled LayerNorm scale/bias geometry mismatch");
+                    let (_,out_len,out_id)=self.reg(o)?;
+                    ensure!(self.program.registers[out_id].shape == *shape && epsilon.is_finite() && *epsilon > 0.,
+                        "compiled LayerNorm output geometry or epsilon mismatch");
+                    let work=out_len.checked_mul(3).and_then(|v|v.checked_add(1)).context("LayerNorm work overflow")?;
+                    body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t o=0;o<{outer};o++)for(size_t i=0;i<{inner};i++){{double mean=0.;for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;mean+=(double)r[{a}+idx];}}mean/={width};double variance=0.;for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;double delta=(double)r[{a}+idx]-mean;variance+=delta*delta;}}variance/={width};double inv=1.0/sqrt(variance+{epsilon:.17});for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;t[idx]=(float)(((double)r[{a}+idx]-mean)*inv*(double)r[{g}+a]+(double)r[{b}+a]);}}}}");
+                    reads.extend([x.as_str(),gamma.as_str(),beta.as_str()]); out=Some(o);
                 },
                 I::Scale { out:o,input:x,factor } => {
                     let (a,n,id) = self.reg(x)?;
