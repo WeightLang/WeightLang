@@ -17,7 +17,7 @@ learn use_skip: bool = true;
 
 可通过 `depth_gate` 或有界 `repeat` 表达受约束的计算，也可用布尔参数控制残差连接。`repeat` 已在文档所述边界内本地实现并验证；`choice` 和动态形状变化仍属于设计方向。完整浮点约束、离散训练规则及权重保存方式见[可学习架构参数与已测示例](docs/learnable-architecture-parameters.md)。
 
-参见[设计理念](docs/design-philosophy.md)了解动机，参见[架构覆盖矩阵](docs/architecture-coverage.md)了解验证边界。
+参见[设计理念](docs/design-philosophy.md)了解动机，参见[架构覆盖矩阵](docs/architecture-coverage.md)了解验证边界；[训练策略与模型生命周期](docs/training-strategies-and-lifecycle.md)说明自定义权重更新、STE、Checkpoint 和工程化路线。
 
 ## 构建并启动服务
 
