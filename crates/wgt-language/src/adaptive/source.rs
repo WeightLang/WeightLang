@@ -1189,6 +1189,34 @@ impl Lower {
                         vec![shape[1], shape[0]],
                     ))
                 }
+                ("permute", [x, Expr::List(order)]) => {
+                    let x = self.value(x)?;
+                    let shape = self.shape(&x)?;
+                    let input_axes = self.axes.get(&x).cloned().unwrap_or_else(|| vec![None; shape.len()]);
+                    ensure!(order.len() == shape.len(), "permute requires one axis per tensor dimension");
+                    let mut axes = Vec::with_capacity(order.len());
+                    let mut seen = std::collections::HashSet::new();
+                    for axis in order {
+                        let index = match axis {
+                            Expr::Number(_) | Expr::Unary(_, _) => {
+                                let value = scalar_literal(axis)?;
+                                ensure!(value >= 0. && value.fract() == 0. && value < shape.len() as f32,
+                                    "permute axis index is out of range");
+                                value as usize
+                            }
+                            Expr::Name(name) => input_axes.iter().position(|axis| axis.as_deref() == Some(name.as_str()))
+                                .with_context(|| format!("unknown named permute axis: {name}"))?,
+                            _ => bail!("permute axes must be integer indices or declared axis names"),
+                        };
+                        ensure!(seen.insert(index), "permute axes must form a bijection");
+                        axes.push(index);
+                    }
+                    let output_shape = axes.iter().map(|&axis| shape[axis]).collect::<Vec<_>>();
+                    Some((
+                        I::Permute { out: out.into(), input: x, axes: axes.clone() },
+                        output_shape,
+                    ))
+                }
                 ("matmul", [a, b]) => {
                     let a = self.value(a)?;
                     let b = self.value(b)?;
@@ -1248,6 +1276,7 @@ impl Lower {
             if let Some((instruction, shape)) = tensor {
                 let output_axes = match &instruction {
                     I::Transpose { input, .. } => self.axes.get(input).map(|axes| vec![axes[1].clone(), axes[0].clone()]),
+                    I::Permute { input, axes, .. } => self.axes.get(input).map(|labels| axes.iter().map(|&axis| labels[axis].clone()).collect()),
                     I::Matmul { left, right, .. } => {
                         let a = self.axes.get(left).cloned().unwrap_or_else(|| vec![None; 2]);
                         let b = self.axes.get(right).cloned().unwrap_or_else(|| vec![None; 2]);
