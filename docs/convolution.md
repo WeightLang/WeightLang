@@ -96,8 +96,10 @@ fn loss(prediction,target) { return square(prediction-target).mean; }
 
 ## Compact CNN classifier
 
-The repository also includes a complete two-layer convolutional classifier fixture at
-`crates/wgtime-core/tests/fixtures/cnn_classifier/model.wgt`. It is deliberately small
+The repository also includes a complete two-layer convolutional classifier at
+[`examples/cnn/tiny_image_classifier.wgt`](../examples/cnn/tiny_image_classifier.wgt),
+with a matching regression fixture at `crates/wgtime-core/tests/fixtures/cnn_classifier/model.wgt`.
+It is deliberately small
 enough for deterministic CPU tests:
 
 - Input: one channel-first `[1, 8, 8]` image (the model service boundary is still a flat `f32[64]` vector).
