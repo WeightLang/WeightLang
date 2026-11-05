@@ -1273,6 +1273,31 @@ impl Lower {
                         vec![sa[0], sb[1]],
                     ))
                 }
+                ("layer_norm", [x, gamma, beta, axis, epsilon]) => {
+                    let x = self.value(x)?;
+                    let gamma = self.value(gamma)?;
+                    let beta = self.value(beta)?;
+                    let shape = self.shape(&x)?;
+                    let axis = if let Expr::Text(name) = axis {
+                        self.axes.get(&x)
+                            .and_then(|axes| axes.iter().position(|axis| axis.as_deref() == Some(name.as_str())))
+                            .with_context(|| format!("unknown named LayerNorm axis: {name}"))?
+                    } else {
+                        let value = scalar_literal(axis)?;
+                        ensure!(value >= 0. && value.fract() == 0. && value < shape.len() as f32,
+                            "LayerNorm axis must be a nonnegative in-range integer");
+                        value as usize
+                    };
+                    let width = shape[axis];
+                    ensure!(self.shape(&gamma)? == vec![width] && self.shape(&beta)? == vec![width],
+                        "LayerNorm gamma/beta must match the normalized axis width");
+                    let epsilon = scalar_literal(epsilon)?;
+                    ensure!(epsilon > 0., "LayerNorm epsilon must be positive");
+                    Some((
+                        I::LayerNorm { out: out.into(), input: x, gamma, beta, axis, epsilon },
+                        shape,
+                    ))
+                }
                 ("softmax", [x, axis]) => {
                     let x = self.value(x)?;
                     let shape = self.shape(&x)?;
@@ -1325,7 +1350,7 @@ impl Lower {
                         let b = self.axes.get(right).cloned().unwrap_or_else(|| vec![None; 3]);
                         Some(vec![a[0].clone(), a[1].clone(), b[2].clone()])
                     }
-                    I::SoftmaxAxis { input, .. } | I::Scale { input, .. } => self.axes.get(input).cloned(),
+                    I::SoftmaxAxis { input, .. } | I::Scale { input, .. } | I::LayerNorm { input, .. } => self.axes.get(input).cloned(),
                     _ => None,
                 };
                 self.register_shape(out, shape)?;
