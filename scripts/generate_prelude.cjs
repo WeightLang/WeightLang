@@ -7,7 +7,23 @@ const root = path.resolve(__dirname, '..');
 function catalog() {
   const metadata = JSON.parse(fs.readFileSync(path.join(root, 'language/prelude_metadata.json'), 'utf8'));
   assert(metadata.entries.every(e => !['function','intrinsic'].includes(e.kind)), 'public callables belong in std/prelude.wgt');
-  return {...metadata, entries: [...parseDeclarations(fs.readFileSync(path.join(root, 'std/prelude.wgt'), 'utf8')), ...metadata.entries]};
+  const tensorIntrinsics = [
+    {
+      name: 'permute', kind: 'intrinsic', contexts: ['tensor_forward', 'tensor_loss'],
+      purpose: 'Permute tensor axes by a complete output-to-input axis order; accepts integer indices or declared axis names. Current CPU/compiler paths materialize the reordered tensor.',
+      implementation: 'crates/wgt-language/src/adaptive/source.rs',
+      documentation: 'docs/tensor-geometry.md', position: 'expression',
+      signature: 'permute(x,[axes])', defaults: {},
+    },
+    {
+      name: 'batch_matmul', kind: 'intrinsic', contexts: ['tensor_forward', 'tensor_loss'],
+      purpose: 'Rank-3 [B,M,K] @ [B,K,N] -> [B,M,N]; batch dimensions must match exactly and are not broadcast.',
+      implementation: 'crates/wgt-language/src/adaptive/source.rs',
+      documentation: 'docs/tensor-geometry.md', position: 'expression',
+      signature: 'batch_matmul(a,b)', defaults: {},
+    },
+  ];
+  return {...metadata, entries: [...parseDeclarations(fs.readFileSync(path.join(root, 'std/prelude.wgt'), 'utf8')), ...tensorIntrinsics, ...metadata.entries]};
 }
 if (require.main === module) {
   const text = JSON.stringify(catalog(), null, 2) + '\n';
