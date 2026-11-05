@@ -123,3 +123,23 @@ fn forward(x) {
     wgt_language::adaptive::parse(source)
         .expect("native @ and .T syntax should lower to matrix IR");
 }
+
+#[test]
+fn matrix_operator_is_allowed_in_pure_tensor_helpers() {
+    let source = r#"wgt 0.5
+model MatrixHelper
+input x: f32[6]
+output y: f32[1]
+parameter projection: f32[3,2] = [1,0,0,1,1,1]
+fn project(a,b) {
+    return a @ b;
+}
+fn forward(x) {
+    let tokens = reshape(x,[2,3]);
+    let q = project(tokens,projection);
+    return (q @ q.T).mean;
+}
+"#;
+    wgt_language::model::ModelDefinition::parse(source)
+        .expect("pure tensor helpers should accept native matrix products");
+}
