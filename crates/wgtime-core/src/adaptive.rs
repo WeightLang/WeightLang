@@ -20,7 +20,7 @@ enum Op {
     Conv(usize, usize, usize, usize, wgt_language::adaptive::ConvGeometry),
     Reshape(usize, usize),
     Transpose(usize, usize, usize, usize),
-    Permute(usize, usize, [usize; 8], usize),
+    Permute(usize, usize, [usize; 8], [usize; 8], usize),
     Matmul(usize, usize, usize, usize, usize, usize),
     SoftmaxAxis(usize, usize, tensor::AxisGroups),
     Scale(usize, usize, f32),
@@ -236,7 +236,7 @@ impl AdaptiveSession {
                         }
                         let output_shape = axes.iter().map(|&axis| shape[axis]).collect::<Vec<_>>();
                         ensure!(program.registers[r].shape == output_shape, "permute output shape mismatch");
-                        Op::Permute(r,x,order,axes.len())
+                        Op::Permute(r,x,shape.iter().copied().chain(std::iter::repeat(1)).take(8).collect::<Vec<_>>().try_into().unwrap(),order,axes.len())
                     },
                     Instruction::Matmul { out, left, right } => {
                         let (r,a,b) = (dest(out)?,reg(left)?,reg(right)?);
@@ -831,7 +831,7 @@ impl AdaptiveSession {
                     for i in 0..m { for j in 0..n { self.scratch[j*m+i] = self.registers[x][i*n+j]; } }
                     output = Some(r);
                 },
-                Op::Permute(r,x,axes,rank) => {
+                Op::Permute(r,x,_input_shape,axes,rank) => {
                     self.ready(x)?;
                     let input_shape = &self.program.registers[x].shape;
                     let output_shape = &self.program.registers[r].shape;
