@@ -9,7 +9,7 @@ operators Attention
 # 不提供 mask、batch、多头拆分、广播或缓存。模型负责各次调用是否共享投影参数。
 # 本纯函数不创建参数、初始化权重、训练或保存状态；梯度沿原语传回 q/k/v。
 fn dot_product_attention(q,k,v) {
-    let scores = matmul(q,transpose(k));
+    let scores = q @ k.T;
     let probabilities = softmax(scores,1);
-    return matmul(probabilities,v);
+    return probabilities @ v;
 }
