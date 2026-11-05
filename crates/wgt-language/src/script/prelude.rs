@@ -58,5 +58,5 @@ pub fn migration(name: &str) -> Option<&'static str> {
 }
 
 pub fn is_builtin(name: &str) -> bool {
-    builtin(name).is_some()
+    builtin(name).is_some() || matches!(name, "permute" | "batch_matmul")
 }
