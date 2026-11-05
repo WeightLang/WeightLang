@@ -1217,6 +1217,30 @@ impl Lower {
                         output_shape,
                     ))
                 }
+                ("batch_matmul", [a, b]) => {
+                    let a = self.value(a)?;
+                    let b = self.value(b)?;
+                    let sa = self.shape(&a)?;
+                    let sb = self.shape(&b)?;
+                    ensure!(sa.len() == 3 && sb.len() == 3
+                        && sa[0] == sb[0] && sa[2] == sb[1],
+                        "batch_matmul requires [B,M,K] and [B,K,N] with equal B");
+                    let left_axes = self.axes.get(&a).cloned().unwrap_or_else(|| vec![None; 3]);
+                    let right_axes = self.axes.get(&b).cloned().unwrap_or_else(|| vec![None; 3]);
+                    for (left, right, message) in [
+                        (&left_axes[0], &right_axes[0], "batch"),
+                        (&left_axes[2], &right_axes[1], "contracting"),
+                    ] {
+                        if let (Some(left), Some(right)) = (left, right) {
+                            ensure!(left == right, "batch_matmul {message} axis mismatch: {left} vs {right}");
+                        }
+                    }
+                    let output_shape = vec![sa[0], sa[1], sb[2]];
+                    Some((
+                        I::BatchMatmul { out: out.into(), left: a, right: b },
+                        output_shape,
+                    ))
+                }
                 ("matmul", [a, b]) => {
                     let a = self.value(a)?;
                     let b = self.value(b)?;
@@ -1281,6 +1305,11 @@ impl Lower {
                         let a = self.axes.get(left).cloned().unwrap_or_else(|| vec![None; 2]);
                         let b = self.axes.get(right).cloned().unwrap_or_else(|| vec![None; 2]);
                         Some(vec![a[0].clone(), b[1].clone()])
+                    }
+                    I::BatchMatmul { left, right, .. } => {
+                        let a = self.axes.get(left).cloned().unwrap_or_else(|| vec![None; 3]);
+                        let b = self.axes.get(right).cloned().unwrap_or_else(|| vec![None; 3]);
+                        Some(vec![a[0].clone(), a[1].clone(), b[2].clone()])
                     }
                     I::SoftmaxAxis { input, .. } | I::Scale { input, .. } => self.axes.get(input).cloned(),
                     _ => None,
