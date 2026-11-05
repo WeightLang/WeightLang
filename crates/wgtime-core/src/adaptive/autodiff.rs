@@ -9,6 +9,7 @@ enum Edge {
     Conv { x:usize,k:usize,b:usize,g:wgt_language::adaptive::ConvGeometry },
     Matmul { a: usize, b: usize, m: usize, k: usize, n: usize },
     BatchMatmul { a: usize, b: usize, batch: usize, m: usize, k: usize, n: usize },
+    LayerNorm { x: usize, gamma: usize, beta: usize, groups: super::tensor::AxisGroups, epsilon: f32 },
     Transpose { x: usize, m: usize, n: usize },
     Permute { x: usize, input_shape: [usize; 8], axes: [usize; 8], rank: usize },
     SoftmaxAxis { x: usize, groups: super::tensor::AxisGroups },
@@ -161,6 +162,9 @@ impl Tape {
             Op::Permute(r,x,input_shape,axes,rank) => (r, Edge::Permute { x:self.reg(x)?,input_shape,axes,rank }),
             Op::Matmul(r,a,b,m,k,n) => (r, Edge::Matmul { a:self.reg(a)?,b:self.reg(b)?,m,k,n }),
             Op::BatchMatmul(r,a,b,batch,m,k,n) => (r, Edge::BatchMatmul { a:self.reg(a)?,b:self.reg(b)?,batch,m,k,n }),
+            Op::LayerNorm(r,x,gamma,beta,groups,epsilon) => (r, Edge::LayerNorm {
+                x:self.reg(x)?, gamma:self.reg(gamma)?, beta:self.reg(beta)?, groups, epsilon
+            }),
             Op::SoftmaxAxis(r,x,groups) => (r, Edge::SoftmaxAxis { x:self.reg(x)?,groups }),
             Op::Scale(r,x,factor) => (r, Edge::Scale { x:self.reg(x)?,factor }),
             Op::Constant(r, _) | Op::Unary(r, _, 5) => (r, Edge::Leaf),
@@ -510,6 +514,10 @@ impl ForwardPass {
                         for axis in 0..rank { input_index = input_index * input_shape[axis] + input_coords[axis]; }
                         before[x].gradient[input_index] += node.gradient[output_index];
                     }
+                },
+                Edge::LayerNorm { x,gamma,beta,groups,epsilon } => {
+                    groups.layer_norm_vjp(&before[x].value,&before[gamma].value,&node.gradient,epsilon,
+                        &mut before[x].gradient,&mut before[gamma].gradient,&mut before[beta].gradient)?;
                 },
                 Edge::SoftmaxAxis { x,groups } => groups.softmax_vjp(&node.value,&node.gradient,&mut before[x].gradient),
                 Edge::Scale { x,factor } => {
