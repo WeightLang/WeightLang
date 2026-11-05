@@ -2230,6 +2230,34 @@
       "defaults": {}
     },
     {
+      "name": "permute",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Permute tensor axes by a complete output-to-input axis order; accepts integer indices or declared axis names. Current CPU/compiler paths materialize the reordered tensor.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/tensor-geometry.md",
+      "position": "expression",
+      "signature": "permute(x,[axes])",
+      "defaults": {}
+    },
+    {
+      "name": "batch_matmul",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Rank-3 [B,M,K] @ [B,K,N] -> [B,M,N]; batch dimensions must match exactly and are not broadcast.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/tensor-geometry.md",
+      "position": "expression",
+      "signature": "batch_matmul(a,b)",
+      "defaults": {}
+    },
+    {
       "name": "agent",
       "kind": "syntax",
       "contexts": [
