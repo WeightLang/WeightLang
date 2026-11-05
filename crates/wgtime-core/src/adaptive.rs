@@ -688,6 +688,14 @@ impl AdaptiveSession {
         self.materialize_view(index);
         Ok(())
     }
+    fn detach_views_of(&mut self, base: usize) {
+        let dependents = self.views.iter().enumerate()
+            .filter_map(|(register, view)| view.filter(|view| view.base == base).map(|_| register))
+            .collect::<Vec<_>>();
+        for register in dependents {
+            self.materialize_view(register);
+        }
+    }
     fn make_view(&mut self, op: Op, output: usize) -> Result<TensorView> {
         let output_shape = self.program.registers[output].shape.clone();
         match op {
@@ -1213,6 +1221,7 @@ impl AdaptiveSession {
                     if let Some(tape) = tape.as_deref_mut() {
                         tape.record(op, &self.scratch[..n])?;
                     }
+                    self.detach_views_of(r);
                     self.registers[r].resize(n, 0.);
                     self.registers[r].copy_from_slice(&self.scratch[..n]);
                     self.views[r] = None;
