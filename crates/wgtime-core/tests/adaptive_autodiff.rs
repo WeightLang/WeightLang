@@ -348,3 +348,39 @@ fn forward(x) {
     }
     assert!(output.is_finite());
 }
+
+#[test]
+fn layer_norm_input_and_parameter_gradients_match_finite_differences() {
+    let source = r#"wgt 0.5
+model LayerNormGradient
+input x: f32[6]
+output y: f32[1]
+parameter gamma: f32[3] = [0.8,1.1,-0.4]
+parameter beta: f32[3] = [0.1,-0.2,0.3]
+fn forward(x) {
+    let tokens: f32[sequence=2, hidden=3] = x;
+    let normalized = layer_norm(tokens,gamma,beta,"hidden",0.0001);
+    let weights = reshape([1,2,3,4,5,6],[2,3]);
+    return (normalized * weights).mean;
+}
+"#;
+    let mut session = model(source);
+    let input = [0.2, -0.1, 0.7, 0.4, -0.3, 0.9];
+    let mut pass = session.forward(&input, 1000, 32_768).unwrap();
+    let output = pass.output()[0];
+    pass.backward(&[1.], &BTreeMap::new()).unwrap();
+    let gradient = pass.input_gradient().unwrap().to_vec();
+    assert!(pass.parameter_gradient("gamma").unwrap().iter().any(|g| g.abs() > 1e-4));
+    assert!(pass.parameter_gradient("beta").unwrap().iter().any(|g| g.abs() > 1e-4));
+    let epsilon = 0.001;
+    for index in 0..6 {
+        let mut plus = input;
+        plus[index] += epsilon;
+        let yp = session.forward(&plus, 1000, 32_768).unwrap().output()[0];
+        let mut minus = input;
+        minus[index] -= epsilon;
+        let ym = session.forward(&minus, 1000, 32_768).unwrap().output()[0];
+        close(&[gradient[index]], &[(yp - ym) / (2. * epsilon)]);
+    }
+    assert!(output.is_finite());
+}
