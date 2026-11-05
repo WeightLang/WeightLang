@@ -47,6 +47,66 @@ impl AxisGroups {
             }
         } }
     }
+    pub fn layer_norm(self, input: &[f32], gamma: &[f32], beta: &[f32], epsilon: f32, output: &mut [f32]) -> Result<()> {
+        ensure!(input.len() == self.len() && output.len() == self.len(), "layer_norm tensor storage/shape mismatch");
+        ensure!(gamma.len() == self.width && beta.len() == self.width, "layer_norm scale/bias width mismatch");
+        ensure!(epsilon.is_finite() && epsilon > 0., "normalization epsilon must be positive and finite");
+        for outer in 0..self.outer {
+            for inner in 0..self.inner {
+                let mean = (0..self.width).map(|axis| f64::from(input[self.index(outer, axis, inner)])).sum::<f64>() / self.width as f64;
+                let variance = (0..self.width).map(|axis| {
+                    let delta = f64::from(input[self.index(outer, axis, inner)]) - mean;
+                    delta * delta
+                }).sum::<f64>() / self.width as f64;
+                let inverse = (variance + f64::from(epsilon)).sqrt().recip();
+                for axis in 0..self.width {
+                    let index = self.index(outer, axis, inner);
+                    let normalized = (f64::from(input[index]) - mean) * inverse;
+                    output[index] = (normalized * f64::from(gamma[axis]) + f64::from(beta[axis])) as f32;
+                }
+            }
+        }
+        Ok(())
+    }
+    pub fn layer_norm_vjp(self, input: &[f32], gamma: &[f32], gradient: &[f32], epsilon: f32,
+        input_gradient: &mut [f32], gamma_gradient: &mut [f32], beta_gradient: &mut [f32]) -> Result<()> {
+        ensure!(input.len() == self.len() && gradient.len() == self.len() && input_gradient.len() == self.len(),
+            "layer_norm gradient tensor storage/shape mismatch");
+        ensure!(gamma.len() == self.width && gamma_gradient.len() == self.width && beta_gradient.len() == self.width,
+            "layer_norm gradient scale/bias width mismatch");
+        ensure!(epsilon.is_finite() && epsilon > 0., "normalization epsilon must be positive and finite");
+        for outer in 0..self.outer {
+            for inner in 0..self.inner {
+                let mean = (0..self.width).map(|axis| f64::from(input[self.index(outer, axis, inner)])).sum::<f64>() / self.width as f64;
+                let variance = (0..self.width).map(|axis| {
+                    let delta = f64::from(input[self.index(outer, axis, inner)]) - mean;
+                    delta * delta
+                }).sum::<f64>() / self.width as f64;
+                let inverse = (variance + f64::from(epsilon)).sqrt().recip();
+                let mut sum_gradient = 0f64;
+                let mut sum_gradient_normalized = 0f64;
+                for axis in 0..self.width {
+                    let index = self.index(outer, axis, inner);
+                    let normalized = (f64::from(input[index]) - mean) * inverse;
+                    let scaled_gradient = f64::from(gradient[index]) * f64::from(gamma[axis]);
+                    sum_gradient += scaled_gradient;
+                    sum_gradient_normalized += scaled_gradient * normalized;
+                    gamma_gradient[axis] += (f64::from(gradient[index]) * normalized) as f32;
+                    beta_gradient[axis] += gradient[index];
+                }
+                for axis in 0..self.width {
+                    let index = self.index(outer, axis, inner);
+                    let normalized = (f64::from(input[index]) - mean) * inverse;
+                    let scaled_gradient = f64::from(gradient[index]) * f64::from(gamma[axis]);
+                    let dx = inverse * (scaled_gradient
+                        - sum_gradient / self.width as f64
+                        - normalized * sum_gradient_normalized / self.width as f64);
+                    input_gradient[index] += dx as f32;
+                }
+            }
+        }
+        Ok(())
+    }
     pub fn rms(self, input: &[f32], epsilon: f32, output: &mut [f32]) -> Result<()> {
         ensure!(input.len() == self.len() && output.len() == self.len(), "rms tensor storage/shape mismatch");
         ensure!(epsilon.is_finite() && epsilon > 0., "normalization epsilon must be positive and finite");
