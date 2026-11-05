@@ -695,8 +695,9 @@ impl Lower {
                 }
                 let expected_len = crate::model::validate_shape(&expected_shape)?;
                 if actual_shape != expected_shape {
-                    ensure!(actual_shape.len() == 1 && actual_shape[0] == expected_len,
-                        "tensor annotation shape mismatch: actual {actual_shape:?}, declared {expected_shape:?}");
+                    let actual_len = crate::model::validate_shape(&actual_shape)?;
+                    ensure!(actual_len == expected_len,
+                        "tensor annotation element count mismatch: actual {actual_shape:?}, declared {expected_shape:?}");
                     let register = self.program.registers.iter_mut()
                         .find(|register| register.name == out)
                         .context("missing annotated tensor register")?;
