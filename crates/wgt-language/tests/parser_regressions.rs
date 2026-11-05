@@ -74,8 +74,8 @@ fn matrix_product_uses_native_at_operator() {
         expression,
         Expr::Binary(ref op, ref left, ref right)
             if op == "@"
-                && matches!(**left, Expr::Name(ref name) if name == "q")
-                && matches!(**right, Expr::Name(ref name) if name == "k")
+                && matches!(&**left, Expr::Name(name) if name == "q")
+                && matches!(&**right, Expr::Name(name) if name == "k")
     ));
 }
 
@@ -101,7 +101,7 @@ fn matrix_product_precedes_addition() {
         expression,
         Expr::Binary(ref op, _, ref right)
             if op == "+"
-                && matches!(**right, Expr::Binary(ref inner, _, _) if inner == "@")
+                && matches!(&**right, Expr::Binary(inner, _, _) if inner == "@")
     ));
 }
 
