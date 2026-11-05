@@ -676,22 +676,32 @@ impl Lower {
                     bail!("invalid internal tensor annotation");
                 };
                 self.assign(out, value)?;
-                let shape = self.shape(out)?;
-                ensure!(dimensions.len() == shape.len(),
-                    "tensor annotation rank mismatch: expected {}, got {}", shape.len(), dimensions.len());
+                let actual_shape = self.shape(out)?;
+                let mut expected_shape = Vec::with_capacity(dimensions.len());
                 let mut axes = Vec::with_capacity(dimensions.len());
                 let mut seen = std::collections::HashSet::new();
-                for (index, dimension) in dimensions.iter().enumerate() {
+                for dimension in dimensions {
                     let Expr::List(pair) = dimension else { bail!("invalid tensor dimension annotation"); };
                     let [Expr::Text(axis), dimension] = pair.as_slice() else { bail!("invalid tensor dimension annotation"); };
                     let expected = scalar_literal(dimension)?;
-                    ensure!(expected >= 1. && expected.fract() == 0. && expected as usize == shape[index],
-                        "tensor dimension mismatch at axis {index}: expected {expected}, got {}", shape[index]);
+                    ensure!(expected >= 1. && expected <= 16384. && expected.fract() == 0.,
+                        "tensor annotation dimensions must be integers in 1..16384");
+                    expected_shape.push(expected as usize);
                     let axis = if axis.is_empty() { None } else {
                         ensure!(seen.insert(axis.clone()), "duplicate tensor axis: {axis}");
                         Some(axis.clone())
                     };
                     axes.push(axis);
+                }
+                let expected_len = crate::model::validate_shape(&expected_shape)?;
+                if actual_shape != expected_shape {
+                    ensure!(actual_shape.len() == 1 && actual_shape[0] == expected_len,
+                        "tensor annotation shape mismatch: actual {actual_shape:?}, declared {expected_shape:?}");
+                    let register = self.program.registers.iter_mut()
+                        .find(|register| register.name == out)
+                        .context("missing annotated tensor register")?;
+                    register.shape = expected_shape;
+                    self.program.version = 3;
                 }
                 self.axes.insert(out.into(), axes);
                 return Ok(());
