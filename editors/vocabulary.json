@@ -180,6 +180,7 @@
     "detach",
     "exp",
     "gate",
+    "layer_norm",
     "linear",
     "log",
     "log_softmax",
