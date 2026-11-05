@@ -19,6 +19,27 @@ pub enum Optimizer {
     Adam,
 }
 
+/// Immutable parameter/gradient view passed to a user-defined update strategy.
+#[derive(Clone, Debug)]
+pub struct ParameterGradient {
+    pub name: String,
+    pub shape: Vec<usize>,
+    pub values: Vec<f32>,
+    pub gradients: Vec<f32>,
+    pub frozen: bool,
+}
+
+/// Algorithm-independent CPU update hook. The strategy owns its state (momentum,
+/// moments, population, schedules, etc.) and returns absolute candidate values.
+/// The trainer validates every candidate before committing any parameter.
+pub trait UpdateStrategy {
+    fn update(
+        &mut self,
+        parameters: &[ParameterGradient],
+        step: u64,
+    ) -> Result<Vec<Vec<f32>>>;
+}
+
 pub enum Objective<'a> {
     Mse(&'a [Vec<f32>]),
     /// Minimize mean(-advantage * log pi(action)); CE uses advantages of one.
@@ -137,6 +158,75 @@ impl Trainer {
         rate: f32,
     ) -> Result<f32> {
         self.step_clipped(inputs, objective, rate, None)
+    }
+
+    /// Run one CPU training step with a caller-defined parameter update algorithm.
+    ///
+    /// The caller owns strategy state and may implement Momentum, AdamW, SAM,
+    /// evolutionary search, or another rule. This path deliberately does not
+    /// select or mutate the built-in SGD/Adam state. Candidate validation is
+    /// completed before any model parameter or revision is changed.
+    pub fn step_with_strategy<S: UpdateStrategy>(
+        &mut self,
+        inputs: &[Vec<f32>],
+        objective: Objective<'_>,
+        strategy: &mut S,
+    ) -> Result<f32> {
+        ensure!(
+            matches!(self.backend, TrainingBackend::Cpu),
+            "user-defined update strategies currently require the CPU backend"
+        );
+        ensure!(
+            self.optimizer.is_none(),
+            "select optimizer none when using a user-defined update strategy"
+        );
+        self.session.ensure_mutable()?;
+        let next_step = self.steps.checked_add(1).context("strategy step overflow")?;
+        let next_revision = self.session.revision.checked_add(1).context("revision overflow")?;
+        let (loss, gradients) = self.gradients(inputs, objective)?;
+        let parameters = self.session.parameters.iter().enumerate().map(|(i, p)| {
+            let values = match &p.storage {
+                Storage::Resident(values) => values.to_vec(),
+                _ => Vec::new(),
+            };
+            ParameterGradient {
+                name: p.name.clone(),
+                shape: p.shape.clone(),
+                values,
+                gradients: gradients.get(i).cloned().unwrap_or_default(),
+                frozen: p.frozen,
+            }
+        }).collect::<Vec<_>>();
+        let candidates = strategy.update(&parameters, next_step)?;
+        ensure!(candidates.len() == parameters.len(), "strategy candidate count mismatch");
+        for (parameter, candidate) in parameters.iter().zip(&candidates) {
+            ensure!(
+                candidate.len() == parameter.values.len(),
+                "strategy candidate shape mismatch for {}",
+                parameter.name
+            );
+            ensure!(
+                candidate.iter().all(|value| value.is_finite()),
+                "strategy produced nonfinite values for {}",
+                parameter.name
+            );
+            if parameter.frozen {
+                ensure!(
+                    candidate == &parameter.values,
+                    "strategy attempted to update frozen parameter {}",
+                    parameter.name
+                );
+            }
+        }
+        // All fallible validation has completed. Commit the full candidate set.
+        for (parameter, candidate) in self.session.parameters.iter_mut().zip(candidates) {
+            if !parameter.frozen {
+                parameter.storage = Storage::Resident(candidate.into_boxed_slice());
+            }
+        }
+        self.steps = next_step;
+        self.session.revision = next_revision;
+        Ok(loss)
     }
 
     pub fn step_clipped(&mut self, inputs: &[Vec<f32>], objective: Objective<'_>, rate: f32, clip: Option<f32>) -> Result<f32> {
