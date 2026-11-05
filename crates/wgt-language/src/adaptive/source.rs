@@ -1189,6 +1189,27 @@ impl Lower {
                         geometry.shape(),
                     ))
                 }
+                ("max_pool2d", [x, Expr::List(kernel), Expr::List(stride)])
+                | ("avg_pool2d", [x, Expr::List(kernel), Expr::List(stride)]) => {
+                    let dimensions = |items: &[Expr]| -> Result<Vec<usize>> {
+                        items.iter().map(|item| {
+                            let n = scalar_literal(item)?;
+                            ensure!(n >= 1. && n <= 16384. && n.fract() == 0.,
+                                "pool2d dimensions must be integer literals in 1..=16384");
+                            Ok(n as usize)
+                        }).collect()
+                    };
+                    let kernel = dimensions(kernel)?;
+                    let stride = dimensions(stride)?;
+                    let x = self.value(x)?;
+                    let geometry = super::Pool2dGeometry::new(&self.shape(&x)?, &kernel, &stride)?;
+                    let instruction = if op == "max_pool2d" {
+                        I::MaxPool2d { out: out.into(), input: x, kernel, stride }
+                    } else {
+                        I::AvgPool2d { out: out.into(), input: x, kernel, stride }
+                    };
+                    Some((instruction, geometry.shape()))
+                }
                 ("transpose", [x]) => {
                     let x = self.value(x)?;
                     ensure!(x != out, "in-place transpose is unsupported; bind the view to a new name");
