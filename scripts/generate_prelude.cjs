@@ -22,6 +22,13 @@ function catalog() {
       documentation: 'docs/tensor-geometry.md', position: 'expression',
       signature: 'batch_matmul(a,b)', defaults: {},
     },
+    {
+      name: 'layer_norm', kind: 'intrinsic', contexts: ['tensor_forward', 'tensor_loss'],
+      purpose: 'Normalize a named or indexed tensor axis with trainable scale and bias; input shape is preserved.',
+      implementation: 'crates/wgt-language/src/adaptive/source.rs',
+      documentation: 'docs/tensor-geometry.md', position: 'expression',
+      signature: 'layer_norm(x,gamma,beta,axis,epsilon)', defaults: {},
+    },
   ];
   return {...metadata, entries: [...parseDeclarations(fs.readFileSync(path.join(root, 'std/prelude.wgt'), 'utf8')), ...tensorIntrinsics, ...metadata.entries]};
 }
