@@ -151,7 +151,7 @@ model NamedAxes
 input x: f32[6]
 output y: f32[1]
 fn forward(x) {
-    let tokens: f32[sequence=2, hidden=3] = reshape(x,[2,3]);
+    let tokens: f32[sequence=2, hidden=3] = x;
     let projection: f32[hidden=3, channel=2] = reshape(x,[3,2]);
     let q = tokens @ projection;
     return q.mean;
@@ -202,7 +202,7 @@ model NamedPermute
 input x: f32[24]
 output y: f32[1]
 fn forward(x) {
-    let tensor: f32[sequence=2, heads=3, dim=4] = reshape(x,[2,3,4]);
+    let tensor: f32[sequence=2, heads=3, dim=4] = x;
     let reordered = permute(tensor,[dim,sequence,heads]);
     return reordered.mean;
 }
