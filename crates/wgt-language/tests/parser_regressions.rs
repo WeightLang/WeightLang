@@ -231,3 +231,40 @@ fn forward(x) {
         .expect_err("permutation axes must be unique");
     assert!(error.to_string().contains("permute axes must form a bijection"));
 }
+
+#[test]
+fn batch_matmul_checks_batch_and_contracting_axes() {
+    let source = r#"wgt 0.5
+model BatchMatmul
+input x: f32[24]
+output y: f32[1]
+fn forward(x) {
+    let left: f32[batch=2, rows=2, inner=3] = reshape(x[0:12],[2,2,3]);
+    let right: f32[batch=2, inner=3, cols=2] = reshape(x[12:24],[2,3,2]);
+    let product = batch_matmul(left,right);
+    return product.mean;
+}
+"#;
+    let program = wgt_language::adaptive::parse(source)
+        .expect("rank-3 batched matrix multiplication should lower");
+    assert!(program.instructions.iter().any(|instruction|
+        matches!(instruction, wgt_language::adaptive::Instruction::BatchMatmul { .. })));
+}
+
+#[test]
+fn batch_matmul_rejects_batch_or_contracting_axis_mismatch() {
+    let source = r#"wgt 0.5
+model BadBatchMatmul
+input x: f32[24]
+output y: f32[1]
+fn forward(x) {
+    let left: f32[batch=2, rows=2, inner=3] = reshape(x[0:12],[2,2,3]);
+    let right: f32[other_batch=2, inner=3, cols=2] = reshape(x[12:24],[2,3,2]);
+    let product = batch_matmul(left,right);
+    return product.mean;
+}
+"#;
+    let error = wgt_language::adaptive::parse(source)
+        .expect_err("different named batch axes must be rejected");
+    assert!(error.to_string().contains("batch_matmul batch axis mismatch"));
+}
