@@ -22,6 +22,7 @@ enum Op {
     Transpose(usize, usize, usize, usize),
     Permute(usize, usize, [usize; 8], [usize; 8], usize),
     Matmul(usize, usize, usize, usize, usize, usize),
+    BatchMatmul(usize, usize, usize, usize, usize, usize, usize),
     SoftmaxAxis(usize, usize, tensor::AxisGroups),
     Scale(usize, usize, f32),
 
@@ -100,7 +101,7 @@ impl AdaptiveSession {
             && !program.instructions.iter().any(|i| matches!(i, Instruction::ValidateProbabilities { .. }))),
             "categorical output metadata and validation require adaptive IR version 2");
         ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,
-            Instruction::Conv { .. } | Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Permute { .. } | Instruction::Matmul { .. }
+            Instruction::Conv { .. } | Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Permute { .. } | Instruction::Matmul { .. } | Instruction::BatchMatmul { .. }
             | Instruction::SoftmaxAxis { .. } | Instruction::Scale { .. })), "tensor operations require adaptive IR version 3");
         ensure!(!program.instructions.is_empty(), "empty adaptive program");
         if let Some(loss) = &program.loss {
@@ -245,6 +246,16 @@ impl AdaptiveSession {
                         let sa = &program.registers[a].shape; let sb = &program.registers[b].shape;
                         ensure!(sa.len() == 2 && sb.len() == 2 && sa[1] == sb[0] && program.registers[r].shape == [sa[0],sb[1]], "matmul shape mismatch");
                         Op::Matmul(r,a,b,sa[0],sa[1],sb[1])
+                    },
+                    Instruction::BatchMatmul { out, left, right } => {
+                        let (r,a,b) = (dest(out)?,reg(left)?,reg(right)?);
+                        let sa = &program.registers[a].shape;
+                        let sb = &program.registers[b].shape;
+                        ensure!(sa.len() == 3 && sb.len() == 3
+                            && sa[0] == sb[0] && sa[2] == sb[1]
+                            && program.registers[r].shape == [sa[0],sa[1],sb[2]],
+                            "batch_matmul shape mismatch");
+                        Op::BatchMatmul(r,a,b,sa[0],sa[1],sa[2],sb[2])
                     },
                     Instruction::SoftmaxAxis { out, input, axis } => {
                         let (r,x) = (dest(out)?,reg(input)?);
@@ -863,6 +874,23 @@ impl AdaptiveSession {
                         for q in 0..k { sum += f64::from(self.registers[a][i*k+q]) * f64::from(self.registers[b][q*n+j]); }
                         self.scratch[i*n+j] = sum as f32;
                     } }
+                    output = Some(r);
+                },
+                Op::BatchMatmul(r,a,b,batch,m,k,n) => {
+                    self.ready(a)?; self.ready(b)?;
+                    for batch_index in 0..batch {
+                        let a_base = batch_index * m * k;
+                        let b_base = batch_index * k * n;
+                        let out_base = batch_index * m * n;
+                        for i in 0..m { for j in 0..n {
+                            let mut sum = 0f64;
+                            for q in 0..k {
+                                sum += f64::from(self.registers[a][a_base+i*k+q])
+                                    * f64::from(self.registers[b][b_base+q*n+j]);
+                            }
+                            self.scratch[out_base+i*n+j] = sum as f32;
+                        } }
+                    }
                     output = Some(r);
                 },
                 Op::SoftmaxAxis(r,x,groups) => {
