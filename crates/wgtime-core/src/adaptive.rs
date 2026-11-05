@@ -20,6 +20,7 @@ enum Op {
     Conv(usize, usize, usize, usize, wgt_language::adaptive::ConvGeometry),
     Reshape(usize, usize),
     Transpose(usize, usize, usize, usize),
+    Permute(usize, usize, [usize; 8], usize),
     Matmul(usize, usize, usize, usize, usize, usize),
     SoftmaxAxis(usize, usize, tensor::AxisGroups),
     Scale(usize, usize, f32),
@@ -99,7 +100,7 @@ impl AdaptiveSession {
             && !program.instructions.iter().any(|i| matches!(i, Instruction::ValidateProbabilities { .. }))),
             "categorical output metadata and validation require adaptive IR version 2");
         ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,
-            Instruction::Conv { .. } | Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Matmul { .. }
+            Instruction::Conv { .. } | Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Permute { .. } | Instruction::Matmul { .. }
             | Instruction::SoftmaxAxis { .. } | Instruction::Scale { .. })), "tensor operations require adaptive IR version 3");
         ensure!(!program.instructions.is_empty(), "empty adaptive program");
         if let Some(loss) = &program.loss {
@@ -219,6 +220,23 @@ impl AdaptiveSession {
                         let shape = &program.registers[x].shape;
                         ensure!(shape.len() == 2 && program.registers[r].shape == [shape[1],shape[0]], "transpose shape mismatch");
                         Op::Transpose(r,x,shape[0],shape[1])
+                    },
+                    Instruction::Permute { out, input, axes } => {
+                        let (r,x) = (dest(out)?,reg(input)?);
+                        let shape = &program.registers[x].shape;
+                        ensure!(axes.len() == shape.len() && (1..=8).contains(&axes.len()),
+                            "permute rank mismatch");
+                        let mut seen = [false; 8];
+                        let mut order = [0usize; 8];
+                        for (out_axis, &input_axis) in axes.iter().enumerate() {
+                            ensure!(input_axis < shape.len() && !seen[input_axis],
+                                "permute axes must form a bijection");
+                            seen[input_axis] = true;
+                            order[out_axis] = input_axis;
+                        }
+                        let output_shape = axes.iter().map(|&axis| shape[axis]).collect::<Vec<_>>();
+                        ensure!(program.registers[r].shape == output_shape, "permute output shape mismatch");
+                        Op::Permute(r,x,order,axes.len())
                     },
                     Instruction::Matmul { out, left, right } => {
                         let (r,a,b) = (dest(out)?,reg(left)?,reg(right)?);
@@ -811,6 +829,29 @@ impl AdaptiveSession {
                 Op::Transpose(r,x,m,n) => {
                     self.ready(x)?;
                     for i in 0..m { for j in 0..n { self.scratch[j*m+i] = self.registers[x][i*n+j]; } }
+                    output = Some(r);
+                },
+                Op::Permute(r,x,axes,rank) => {
+                    self.ready(x)?;
+                    let input_shape = &self.program.registers[x].shape;
+                    let output_shape = &self.program.registers[r].shape;
+                    for output_index in 0..self.registers[r].len() {
+                        let mut remainder = output_index;
+                        let mut output_coords = [0usize; 8];
+                        let mut input_coords = [0usize; 8];
+                        for axis in (0..rank).rev() {
+                            output_coords[axis] = remainder % output_shape[axis];
+                            remainder /= output_shape[axis];
+                        }
+                        for axis in 0..rank {
+                            input_coords[axes[axis]] = output_coords[axis];
+                        }
+                        let mut input_index = 0usize;
+                        for axis in 0..rank {
+                            input_index = input_index * input_shape[axis] + input_coords[axis];
+                        }
+                        self.scratch[output_index] = self.registers[x][input_index];
+                    }
                     output = Some(r);
                 },
                 Op::Matmul(r,a,b,m,k,n) => {
