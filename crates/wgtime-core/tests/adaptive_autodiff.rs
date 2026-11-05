@@ -283,3 +283,35 @@ fn forward(x) {
     }
     assert!(output.is_finite());
 }
+
+#[test]
+fn batched_matmul_vjp_matches_finite_differences() {
+    let source = r#"wgt 0.5
+model BatchMatmulGradient
+input x: f32[24]
+output y: f32[1]
+fn forward(x) {
+    let left: f32[batch=2, rows=2, inner=3] = reshape(x[0:12],[2,2,3]);
+    let right: f32[batch=2, inner=3, cols=2] = reshape(x[12:24],[2,3,2]);
+    let product = batch_matmul(left,right);
+    return product.mean;
+}
+"#;
+    let mut session = model(source);
+    let input = (0..24).map(|n| (n as f32 + 1.) * 0.05).collect::<Vec<_>>();
+    let mut pass = session.forward(&input, 1000, 32_768).unwrap();
+    let output = pass.output()[0];
+    pass.backward(&[1.], &BTreeMap::new()).unwrap();
+    let gradient = pass.input_gradient().unwrap().to_vec();
+    let epsilon = 0.001;
+    for index in 0..24 {
+        let mut plus = input.clone();
+        plus[index] += epsilon;
+        let yp = session.forward(&plus, 1000, 32_768).unwrap().output()[0];
+        let mut minus = input.clone();
+        minus[index] -= epsilon;
+        let ym = session.forward(&minus, 1000, 32_768).unwrap().output()[0];
+        close(&[gradient[index]], &[(yp - ym) / (2. * epsilon)]);
+    }
+    assert!(output.is_finite());
+}
