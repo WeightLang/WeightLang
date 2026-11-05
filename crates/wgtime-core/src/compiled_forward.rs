@@ -379,7 +379,7 @@ impl<'a> Generator<'a> {
         let mut registers = HashMap::new();
         let mut workspace = 0usize;
         let mut max = 0;
-        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Conv { .. } | I::Reshape { .. } | I::Transpose { .. } | I::Permute { .. } | I::Matmul { .. } | I::BatchMatmul { .. } | I::LayerNorm { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
+        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Conv { .. } | I::MaxPool2d { .. } | I::AvgPool2d { .. } | I::Reshape { .. } | I::Transpose { .. } | I::Permute { .. } | I::Matmul { .. } | I::BatchMatmul { .. } | I::LayerNorm { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
         for (i, r) in program.registers.iter().enumerate() {
             ensure!(r.shape.len() <= 8 && r.shape.iter().all(|d| *d <= 16384) && crate::elements(&r.shape)? == r.len, "compiled register geometry/storage mismatch");
             ensure!(program.version >= 3 || r.shape == [r.len], "multiaxis registers require compiled IR version 3");
