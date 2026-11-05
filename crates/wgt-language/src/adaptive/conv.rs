@@ -138,3 +138,62 @@ impl ConvGeometry {
         }
     }
 }
+
+
+/// Checked channel-first 2D pooling geometry. Pooling operates on [C,H,W].
+#[derive(Clone, Copy, Debug)]
+pub struct Pool2dGeometry {
+    pub channels: usize,
+    pub input_h: usize,
+    pub input_w: usize,
+    pub kernel_h: usize,
+    pub kernel_w: usize,
+    pub stride_h: usize,
+    pub stride_w: usize,
+    pub output_h: usize,
+    pub output_w: usize,
+}
+impl Pool2dGeometry {
+    pub fn new(input: &[usize], kernel: &[usize], stride: &[usize]) -> Result<Self> {
+        ensure!(input.len() == 3, "pool2d input must have shape [C,H,W]");
+        ensure!(kernel.len() == 2 && stride.len() == 2, "pool2d kernel and stride must have two dimensions");
+        crate::model::validate_shape(input)?;
+        ensure!(kernel.iter().all(|&n| n > 0 && n <= 16384)
+            && stride.iter().all(|&n| n > 0 && n <= 16384),
+            "pool2d kernel and stride must be in 1..=16384");
+        ensure!(input[1] >= kernel[0] && input[2] >= kernel[1],
+            "pool2d window exceeds input");
+        let output_h = (input[1] - kernel[0]) / stride[0] + 1;
+        let output_w = (input[2] - kernel[1]) / stride[1] + 1;
+        let geometry = Self {
+            channels: input[0], input_h: input[1], input_w: input[2],
+            kernel_h: kernel[0], kernel_w: kernel[1],
+            stride_h: stride[0], stride_w: stride[1], output_h, output_w,
+        };
+        crate::model::validate_shape(&geometry.shape())?;
+        geometry.work()?;
+        Ok(geometry)
+    }
+    pub fn shape(self) -> Vec<usize> { vec![self.channels, self.output_h, self.output_w] }
+    pub fn input_len(self) -> usize { self.channels * self.input_h * self.input_w }
+    pub fn output_len(self) -> usize { self.channels * self.output_h * self.output_w }
+    pub fn window_len(self) -> usize { self.kernel_h * self.kernel_w }
+    pub fn work(self) -> Result<usize> {
+        self.output_len().checked_mul(self.window_len())
+            .and_then(|n| n.checked_add(1)).context("pool2d work overflow")
+    }
+    pub fn visit(self, output: usize, mut visit: impl FnMut(usize)) {
+        let spatial = self.output_h * self.output_w;
+        let channel = output / spatial;
+        let pos = output % spatial;
+        let oy = pos / self.output_w;
+        let ox = pos % self.output_w;
+        for ky in 0..self.kernel_h {
+            for kx in 0..self.kernel_w {
+                let iy = oy * self.stride_h + ky;
+                let ix = ox * self.stride_w + kx;
+                visit((channel * self.input_h + iy) * self.input_w + ix);
+            }
+        }
+    }
+}
