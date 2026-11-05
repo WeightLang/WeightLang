@@ -2,7 +2,7 @@
 if exists("b:current_syntax") | finish | endif
 syntax keyword wgtKeywords @@keywords_SPACE@@
 syntax match wgtNativeDecl /\%(\<native\>\s\+\%(fn\|intrinsic\)\s\+\)\@<=\<[A-Za-z_][A-Za-z0-9_]*/
-syntax keyword wgtBuiltins @@builtins_SPACE@@ @@intrinsics_SPACE@@ @@layers_SPACE@@ permute batch_matmul
+syntax keyword wgtBuiltins @@builtins_SPACE@@ @@intrinsics_SPACE@@ @@layers_SPACE@@
 syntax keyword wgtConstants @@constants_SPACE@@
 syntax keyword wgtTypes @@types_SPACE@@
 syntax match wgtNumber /\v<\d+(\.\d*)?([eE][+-]?\d+)?/
