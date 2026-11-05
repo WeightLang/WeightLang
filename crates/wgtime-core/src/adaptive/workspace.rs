@@ -76,7 +76,7 @@ pub(super) fn validate(
             | I::Neg { out, input }
             | I::Mean { out, input }
             | I::Slice { out, input, .. } => vec![out, input],
-            I::Matmul { out, left, right } | I::Add { out, left, right }
+            I::Matmul { out, left, right } | I::BatchMatmul { out, left, right } | I::Add { out, left, right }
             | I::Mul { out, left, right }
             | I::Minimum { out, left, right } => vec![out, left, right],
             I::Gate {
