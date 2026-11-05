@@ -22,7 +22,7 @@ function write(file, text) {
 }
 write('scripts/editor-templates/native-builtins.json', JSON.stringify(nativeBuiltins, null, 2)+'\n');
 const words = key => `\\b(?:${vocabulary[key].join('|')})\\b`;
-const captureNames = [...vocabulary.builtins, ...vocabulary.intrinsics, ...vocabulary.layers];
+const captureNames = [...vocabulary.builtins, ...vocabulary.intrinsics, ...vocabulary.layers, 'permute', 'batch_matmul'];
 const grammar = {
   name: 'WeightLang', scopeName: 'source.wgt', fileTypes: ['wgt'],
   patterns: [
