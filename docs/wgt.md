@@ -1,5 +1,7 @@
 # wgt 命令行
 
+> 架构设计入口：[Weight-Native 架构路线图](weight-native-roadmap.md)、[Weight ABI v1 草案](weight-abi.md)。两份文档是未来设计，不代表当前实现或发布承诺。
+
 `wgt` 管理项目、依赖和工具链，并运行 WGT 0.5 脚本。`weightc` 提供脚本检查、编译和原生模型构建。当前命令的完整参数以 `wgt --help`、`wgt <命令> --help` 和 `weightc --help` 为准。
 
 ```sh

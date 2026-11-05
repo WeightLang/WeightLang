@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weightlang.org/schemas/weight-abi-v1.schema.json",
+  "title": "WeightLang Weight ABI v1 manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "format_version",
+    "weight_set_id",
+    "model",
+    "weights",
+    "aliases",
+    "extensions"
+  ],
+  "properties": {
+    "format": {
+      "const": "weightlang.weight-abi"
+    },
+    "format_version": {
+      "const": 1
+    },
+    "weight_set_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "revision",
+        "interface_hash"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interface_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "weights": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "bindings",
+          "shape",
+          "dtype",
+          "layout",
+          "trainability",
+          "constraints",
+          "storage"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bindings": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "shape": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "dtype": {
+            "enum": [
+              "f32",
+              "f16",
+              "bf16",
+              "i8",
+              "u8",
+              "i32"
+            ]
+          },
+          "layout": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "order"
+            ],
+            "properties": {
+              "kind": {
+                "const": "dense"
+              },
+              "order": {
+                "const": "row_major"
+              }
+            }
+          },
+          "trainability": {
+            "enum": [
+              "trainable",
+              "frozen",
+              "inference_only"
+            ]
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "initializer": {
+            "type": "object"
+          },
+          "storage": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "shard",
+              "offset",
+              "length",
+              "alignment",
+              "sha256"
+            ],
+            "properties": {
+              "shard": {
+                "type": "string",
+                "minLength": 1
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "length": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "alignment": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "binding",
+          "weight_id"
+        ],
+        "properties": {
+          "binding": {
+            "type": "string",
+            "minLength": 1
+          },
+          "weight_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object"
+    }
+  }
+}
