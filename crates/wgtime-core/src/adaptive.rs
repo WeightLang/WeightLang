@@ -529,10 +529,17 @@ impl AdaptiveSession {
             ops.push(op);
         }
         let output_len = output_len.context("program requires a return")?;
+        let view_registers = ops.iter().filter_map(|op| match op {
+            Op::Reshape(register, _) | Op::Transpose(register, _, _, _) | Op::Permute(register, _, _, _) => Some(*register),
+            _ => None,
+        }).collect::<std::collections::HashSet<_>>();
         let registers = program
             .registers
             .iter()
-            .map(|r| crate::zero_buffer(r.len))
+            .enumerate()
+            .map(|(index, register)| {
+                if view_registers.contains(&index) { Ok(Vec::new()) } else { crate::zero_buffer(register.len) }
+            })
             .collect::<Result<_>>()?;
         let backup = program
             .parameters
@@ -669,7 +676,8 @@ impl AdaptiveSession {
     }
     fn materialize_view(&mut self, register: usize) {
         let Some(view) = self.views[register] else { return; };
-        let len = self.registers[register].len();
+        let len = self.program.registers[register].len;
+        self.registers[register].resize(len, 0.);
         for index in 0..len {
             let mut remainder = index;
             let mut offset = view.offset;
@@ -896,9 +904,8 @@ impl AdaptiveSession {
                 .context("adaptive program fell through without return")?;
             let cost = match op {
                 Op::Conv(_,_,_,_,g) => g.work()? as u64,
-                Op::Reshape(r,_) => (self.registers[r].len() as u64).saturating_add(1),
+                Op::Reshape(r,_) | Op::Permute(r,_,_,_) => (self.program.registers[r].len as u64).saturating_add(1),
                 Op::Transpose(_,_,m,n) => m.checked_mul(n).and_then(|v|v.checked_add(1)).context("transpose work overflow")? as u64,
-                Op::Permute(r,_,_,_) => (self.registers[r].len() as u64).saturating_add(1),
                 Op::Matmul(_,_,_,m,k,n) => m.checked_mul(k).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("matmul work overflow")? as u64,
                 Op::BatchMatmul(_,_,_,batch,m,k,n) => batch.checked_mul(m).and_then(|v|v.checked_mul(k)).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("batch_matmul work overflow")? as u64,
                 _ => self.workspace.cost(op)?,
@@ -1199,7 +1206,7 @@ impl AdaptiveSession {
                     self.views[r] = Some(view);
                     self.initialized[r] = true;
                     if let Some(tape) = tape.as_deref_mut() {
-                        let values = (0..self.registers[r].len())
+                        let values = (0..self.program.registers[r].len)
                             .map(|index| self.read_value(r, index))
                             .collect::<Vec<_>>();
                         tape.record(op, &values)?;
@@ -1213,6 +1220,7 @@ impl AdaptiveSession {
                     if let Some(tape) = tape.as_deref_mut() {
                         tape.record(op, &self.scratch[..n])?;
                     }
+                    self.registers[r].resize(n, 0.);
                     self.registers[r].copy_from_slice(&self.scratch[..n]);
                     self.views[r] = None;
                     self.initialized[r] = true;
