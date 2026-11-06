@@ -172,3 +172,8 @@ WGSL 工作组数量受普通脚本整数范围限制，每项为 1..1000000000 
 用 `wgt 0.5
 fn main() { return 7; }` 验证基本执行，直接 `jsonl("data.jsonl")` 在策略下应拒绝。
 此处描述本地实现与分阶段接线，不表示设备/隔离扩展已经随权限底座发布。
+
+
+### Transformer Encoder acceptance
+
+The fixed-shape two-head encoder acceptance model is `crates/wgt-model/tests/fixtures/transformer_encoder/model.wgt`; its Rust definition/service checks are in `crates/wgt-model/tests/transformer_encoder.rs`. The fixture uses distinct `query_sequence` and `key_sequence` axis names: attention contracts the `head_dim` axis and softmax reduces `key_sequence`. Heads are represented as the batch dimension of rank-3 `batch_matmul`. Keep the single-vector facade boundary explicit. Do not claim dynamic batch, masking, dropout, positional embeddings, arbitrary dtype or GPU fusion from this fixture. See `docs/transformer-encoder.md`; record only tests that were actually run.
