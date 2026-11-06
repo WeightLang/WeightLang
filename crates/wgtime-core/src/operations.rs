@@ -141,24 +141,32 @@ impl OperationSession {
                 schema.name
             );
         }
-        let input = if inputs.is_empty() {
-            vec![0.]
-        } else {
-            inputs.iter().flatten().copied().collect()
+        let combined;
+        let input = match inputs {
+            [] => &[0.][..],
+            [input] => input.as_slice(),
+            _ => {
+                combined = inputs.iter().flatten().copied().collect::<Vec<_>>();
+                &combined
+            }
         };
         let values = entry
             .bindings
             .iter()
             .map(|&slot| self.storage[slot].data.as_slice())
             .collect::<Vec<_>>();
-        let mut updates = BTreeMap::new();
+        let mut updates: BTreeMap<usize, Vec<f32>> = BTreeMap::new();
         let writes = &entry.writes;
         let output =
             entry
                 .code
-                .run_with_hook(&input, &values, budget, false, &mut |index, values| {
+                .run_with_hook(input, &values, budget, false, &mut |index, values| {
                     if let Some(&slot) = writes.get(&index) {
-                        updates.insert(slot, values.to_vec());
+                        if let Some(candidate) = updates.get_mut(&slot) {
+                            candidate.copy_from_slice(values);
+                        } else {
+                            updates.insert(slot, values.to_vec());
+                        }
                     }
                     Ok(())
                 })?;

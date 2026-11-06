@@ -248,3 +248,105 @@ fn operation_storage_rejects_ambiguous_parameter_state_names() {
             .contains("duplicate operation storage identity")
     );
 }
+#[test]
+fn repeated_writes_roll_back_before_retry() {
+    let source = SOURCE.replace(
+        "activity <- input; gain <- input; return log([0,0]);",
+        "activity <- input; activity <- activity + input; gain <- activity; return log([0,0]);",
+    );
+    let ModelPlan::Operations(plan) = ModelDefinition::parse(&source)
+        .unwrap()
+        .instantiate_plan()
+        .unwrap()
+    else {
+        panic!("expected operations plan")
+    };
+    let mut session = OperationSession::prepare(plan, 1024 * 1024).unwrap();
+    session.call("twice", &[vec![2., 3.]], 1000).unwrap();
+    for input in [vec![7., 8.], vec![-4., 9.], vec![0., 0.]] {
+        let parameters = session.parameter_values();
+        let state = session.state_values();
+        let revision = session.revision();
+        let calls = session.native_calls();
+        assert!(session.call("bad", &[input], 1000).is_err());
+        assert_eq!(session.parameter_values(), parameters);
+        assert_eq!(session.state_values(), state);
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.native_calls(), calls);
+        assert_eq!(
+            session.call("advance", &[vec![1., 1.]], 1000).unwrap(),
+            Some(state[0].2.iter().map(|value| value + 1.).collect())
+        );
+        assert_eq!(session.revision(), revision + 1);
+        assert_eq!(session.native_calls(), calls + 1);
+    }
+}
+
+#[test]
+fn candidate_validation_rejects_whole_batches_without_mutation() {
+    let source = r#"wgt 0.5
+model Domains
+# Parameters include continuous, frozen, probability and discrete domains.
+parameter value: f32[1] = [1]
+frozen fixed: f32[1] = [2]
+parameter chance: prob = 0.5
+learn enabled: bool = true;
+learn depth: int in 0..=3 = 1;
+# State is separate from all external parameter candidates.
+state total: f32[1] = [0]
+fn observe() -> f32[1] { return total + value + enabled + depth; }
+"#;
+    let ModelPlan::Operations(plan) = ModelDefinition::parse(source)
+        .unwrap()
+        .instantiate_plan()
+        .unwrap()
+    else {
+        panic!("expected operations plan")
+    };
+    let mut session = OperationSession::prepare(plan, 1024 * 1024).unwrap();
+    let parameters = session.parameter_values();
+    let state = session.state_values();
+    for invalid in [
+        ("unknown", vec![1], vec![1.]),
+        ("total", vec![1], vec![1.]),
+        ("value", vec![1], vec![5.]),
+        ("fixed", vec![1], vec![2.]),
+        ("chance", vec![1], vec![0.]),
+        ("enabled", vec![1], vec![0.25]),
+        ("depth", vec![1], vec![1.5]),
+        ("depth", vec![1], vec![4.]),
+        ("depth", vec![1], vec![-1.]),
+        ("enabled", vec![1, 1], vec![0.]),
+        ("enabled", vec![1], vec![]),
+        ("enabled", vec![1], vec![f32::NAN]),
+        ("enabled", vec![1], vec![f32::INFINITY]),
+    ] {
+        assert!(
+            session
+                .update_parameters(&[
+                    ("value".into(), vec![1], vec![9.]),
+                    (invalid.0.into(), invalid.1, invalid.2),
+                ])
+                .is_err(),
+            "accepted invalid candidate for {}",
+            invalid.0
+        );
+        assert_eq!(session.parameter_values(), parameters);
+        assert_eq!(session.state_values(), state);
+        assert_eq!(session.revision(), 0);
+        assert_eq!(session.native_calls(), 0);
+    }
+    assert!(session.update_parameters(&[]).is_err());
+    session
+        .update_parameters(&[
+            ("value".into(), vec![1], vec![3.]),
+            ("enabled".into(), vec![1], vec![0.]),
+            ("depth".into(), vec![1], vec![2.]),
+        ])
+        .unwrap();
+    assert_eq!(session.revision(), 1);
+    assert_eq!(session.native_calls(), 0);
+    assert_eq!(session.state_values(), state);
+    assert_eq!(session.call("observe", &[], 1000).unwrap(), Some(vec![5.]));
+    assert_eq!(session.revision(), 1);
+}
