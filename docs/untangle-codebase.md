@@ -1,8 +1,14 @@
-# Codebase structure and verification
+# WeightLang codebase structure and verification
 
 This refactor follows [untangle-codebase](https://github.com/caldoai/skills/blob/main/skills/untangle-codebase/SKILL.md): code that must change together should share an explicit contract, and independent policies should remain separate. The review covers the workspace crates, language catalogs, editor generators, viewer, packages and their tests. Existing language syntax, artifact formats and runtime ownership boundaries remain the compatibility baseline.
 
 The source baseline is `e23488f83b9a4ef91255d6793c8dc94dcf95ce7e`. Discovery was completed before implementation. The observations in the decision inventory describe that baseline. Comments that merely repeat code and tests that cannot detect behavior regressions are included in the cleanup; meaningful regression coverage is retained.
+
+## Outcome
+
+The thirteen-group structural inventory and the behavior corrections exposed by its regression review are complete. Code checkpoint [`2a00ce6`](https://github.com/WeightLang/WeightLang/commit/2a00ce64106b5b1dfb13943df52999c3f3afff28) passed both jobs in [CI run 42162234756](https://github.com/WeightLang/WeightLang/actions/runs/42162234756): workspace compilation with all targets, 314 selected Rust tests with zero failures or ignored cases, 12 catalog contract checks and 16 viewer tests. The generated editor assets also match their source catalog.
+
+The final service checks include successful model-state writes, rollback after failed output, real generated-client execution, and byte-identical checkpoint resume. The code retains the existing limits on ordinary compiled-forward writes and the other acceptance boundaries described below.
 
 ## Decisions and the problems they resolve
 
@@ -203,3 +209,23 @@ WGTIME_TEST_DAEMON="$PWD/target/debug/wgtime" \
 ```
 
 Each test owns its service process and endpoint, checks an actual protocol handshake, and cleans up the process. Generated clients receive the endpoint on their own `Command`; tests do not change the process-global environment. This keeps concurrent tests independent and makes a missing or failed daemon an explicit failure.
+
+## Final verification — 2026-11-06
+
+The final code checkpoint is [`2a00ce6`](https://github.com/WeightLang/WeightLang/commit/2a00ce64106b5b1dfb13943df52999c3f3afff28), `fix: commit adaptive writes on ordinary model calls`. Both `tensor-language` and `host-runtime` completed successfully in [the final code CI run](https://github.com/WeightLang/WeightLang/actions/runs/42162234756).
+
+| Rust test group in that workflow | Passed |
+| --- | ---: |
+| WGT parser and language | 37 |
+| Runtime and autodiff | 95 |
+| Compiled tensor backend | 27 |
+| Core source execution regressions | 67 |
+| Client and host control | 46 |
+| Service lifecycle and transport | 15 |
+| Rust model API, including real-service integration | 11 |
+| CLI and artifact lifecycle | 16 |
+| **Total selected Rust tests** | **314** |
+
+The workflow recorded zero failed and zero ignored Rust tests. All ten CLI targets completed; the original stateful AOT case now passes with its expected result of 9. The new request-level commit/rollback test also passes. Existing ignored service cases are explicitly included by the workflow, rather than treated as executed by default.
+
+Separately, workspace compilation with all targets, generated-editor consistency, 12 positive/negative catalog cases and all 16 viewer tests passed. The local documentation diff and referenced file paths were checked. These results describe the selected executable gates, not an assertion that every test or every unfinished capability in the repository has been accepted. Hardware GPU execution and broader compiled-forward/import acceptance retain their existing project status.
