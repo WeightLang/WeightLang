@@ -39,7 +39,7 @@ jobs:
         run: >-
           cargo test --locked --no-default-features -p wgtime-core
           --test compiled_forward --test compiled_training --test compiled_control_flow
-          --test unified_training --test custom_optimization
+          --test unified_training --test custom_optimization --test operations
       - name: Check source execution regressions
         run: |
           cargo build --locked --no-default-features -p wgtime-core --example core-transport-test

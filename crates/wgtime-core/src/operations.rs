@@ -10,11 +10,13 @@ use wgt_language::{
 struct Entry {
     schema: OperationSchema,
     code: CompiledForward,
-    writes: BTreeMap<usize, String>,
+    bindings: Vec<usize>,
+    writes: BTreeMap<usize, usize>,
 }
 pub struct OperationSession {
-    parameters: Vec<Parameter>,
-    states: Vec<Parameter>,
+    storage: Vec<Parameter>,
+    parameter_count: usize,
+    names: BTreeMap<String, usize>,
     entries: BTreeMap<String, Entry>,
     revision: u64,
     native_calls: u64,
@@ -22,16 +24,28 @@ pub struct OperationSession {
 }
 impl OperationSession {
     pub fn prepare(plan: OperationsPlan, memory: usize) -> Result<Self> {
-        let storage: usize = plan
-            .parameters
-            .iter()
-            .chain(&plan.states)
-            .map(|p| p.data.len() * 4)
-            .sum();
+        let parameter_count = plan.parameters.len();
+        let mut storage = plan.parameters;
+        storage.extend(plan.states);
+        let mut names = BTreeMap::new();
+        let mut storage_bytes = 0usize;
+        for (index, parameter) in storage.iter().enumerate() {
+            ensure!(
+                names.insert(parameter.name.clone(), index).is_none(),
+                "duplicate operation storage identity: {}",
+                parameter.name
+            );
+            storage_bytes = parameter
+                .data
+                .len()
+                .checked_mul(4)
+                .and_then(|bytes| storage_bytes.checked_add(bytes))
+                .context("operation storage overflow")?;
+        }
         // Storage, candidate writes and persistence staging are covered by admission.
         let mut remaining = memory
             .checked_sub(
-                storage
+                storage_bytes
                     .checked_mul(4)
                     .context("operation storage overflow")?,
             )
@@ -39,44 +53,58 @@ impl OperationSession {
         let mut entries = BTreeMap::new();
         for (schema, mut program) in plan.entries {
             for parameter in &mut program.parameters {
-                parameter.data = plan
-                    .parameters
-                    .iter()
-                    .chain(&plan.states)
-                    .find(|p| p.name == parameter.name)
-                    .context("operation initializer schema mismatch")?
-                    .data
-                    .clone();
+                let &slot = names
+                    .get(&parameter.name)
+                    .context("operation initializer schema mismatch")?;
+                parameter.data.clone_from(&storage[slot].data);
             }
             let code = CompiledForward::compile_transaction(&program, remaining)?;
             remaining = remaining
                 .checked_sub(code.workspace_bytes())
                 .context("operation workspace budget exceeded")?;
+            let bindings = code
+                .parameter_names()
+                .iter()
+                .map(|name| {
+                    names
+                        .get(name)
+                        .copied()
+                        .context("operation storage schema mismatch")
+                })
+                .collect::<Result<Vec<_>>>()?;
             let writes = program
                 .instructions
                 .iter()
                 .enumerate()
                 .filter_map(|(i, op)| {
                     if let Instruction::Write { parameter, .. } = op {
-                        Some((i, parameter.clone()))
+                        Some(
+                            names
+                                .get(parameter)
+                                .copied()
+                                .context("operation write schema mismatch")
+                                .map(|slot| (i, slot)),
+                        )
                     } else {
                         None
                     }
                 })
-                .collect();
+                .collect::<Result<_>>()?;
             entries.insert(
                 schema.name.clone(),
                 Entry {
                     schema,
                     code,
+                    bindings,
                     writes,
                 },
             );
             // Program initializer copies are released here; only native code/schema survive.
         }
         Ok(Self {
-            parameters: plan.parameters,
-            states: plan.states,
+            storage,
+            parameter_count,
+            names,
             entries,
             revision: 0,
             native_calls: 0,
@@ -118,58 +146,45 @@ impl OperationSession {
         } else {
             inputs.iter().flatten().copied().collect()
         };
-        let all = self
-            .parameters
-            .iter()
-            .chain(&self.states)
-            .map(|p| (p.name.as_str(), p))
-            .collect::<BTreeMap<_, _>>();
         let values = entry
-            .code
-            .parameter_names()
+            .bindings
             .iter()
-            .map(|n| {
-                all.get(n.as_str())
-                    .map(|p| p.data.as_slice())
-                    .context("operation storage schema mismatch")
-            })
-            .collect::<Result<Vec<_>>>()?;
+            .map(|&slot| self.storage[slot].data.as_slice())
+            .collect::<Vec<_>>();
         let mut updates = BTreeMap::new();
         let writes = &entry.writes;
         let output =
             entry
                 .code
                 .run_with_hook(&input, &values, budget, false, &mut |index, values| {
-                    if let Some(name) = writes.get(&index) {
-                        updates.insert(name.clone(), values.to_vec());
+                    if let Some(&slot) = writes.get(&index) {
+                        updates.insert(slot, values.to_vec());
                     }
                     Ok(())
                 })?;
-        for (name, data) in &updates {
-            validate(all[name.as_str()], data, true)?;
+        for (&slot, data) in &updates {
+            validate(&self.storage[slot], data, true)?;
         }
         let next = if updates.is_empty() {
             self.revision
         } else {
             self.revision.checked_add(1).context("revision overflow")?
         };
-        for p in self.parameters.iter_mut().chain(&mut self.states) {
-            if let Some(data) = updates.remove(&p.name) {
-                p.data = data;
-            }
+        for (slot, data) in updates {
+            self.storage[slot].data = data;
         }
         self.revision = next;
         self.native_calls = self.native_calls.saturating_add(1);
         Ok(entry.schema.output.map(|_| output))
     }
     pub fn parameter_values(&self) -> Vec<(String, Vec<usize>, Vec<f32>)> {
-        self.parameters
+        self.storage[..self.parameter_count]
             .iter()
             .map(|p| (p.name.clone(), p.shape.clone(), p.data.clone()))
             .collect()
     }
     pub fn state_values(&self) -> Vec<(String, Vec<usize>, Vec<f32>)> {
-        self.states
+        self.storage[self.parameter_count..]
             .iter()
             .map(|p| (p.name.clone(), p.shape.clone(), p.data.clone()))
             .collect()
@@ -181,28 +196,26 @@ impl OperationSession {
     ) -> Result<()> {
         ensure!(!candidates.is_empty(), "empty parameter candidate batch");
         let mut seen = BTreeSet::new();
+        let mut updates = Vec::with_capacity(candidates.len());
         for (name, shape, data) in candidates {
-            ensure!(seen.insert(name), "duplicate candidate parameter");
-            let p = self
-                .parameters
-                .iter()
-                .find(|p| &p.name == name)
+            let &slot = self
+                .names
+                .get(name)
+                .filter(|&&slot| slot < self.parameter_count)
                 .context("unknown candidate parameter")?;
+            ensure!(seen.insert(slot), "duplicate candidate parameter");
+            let p = &self.storage[slot];
             ensure!(
                 !p.frozen && !p.probability,
                 "candidate cannot update frozen or probability parameter"
             );
             ensure!(&p.shape == shape, "candidate parameter shape mismatch");
             validate(p, data, true)?;
+            updates.push((slot, data));
         }
         let next = self.revision.checked_add(1).context("revision overflow")?;
-        for (name, _, data) in candidates {
-            self.parameters
-                .iter_mut()
-                .find(|p| &p.name == name)
-                .unwrap()
-                .data
-                .clone_from(data);
+        for (slot, data) in updates {
+            self.storage[slot].data.clone_from(data);
         }
         self.revision = next;
         Ok(())
@@ -215,13 +228,13 @@ impl OperationSession {
             optimizer == "none",
             "typed operations do not support optimizers or differentiation"
         );
-        let schema = self
-            .parameters
+        let parameters = &mut self.storage[..self.parameter_count];
+        let schema = parameters
             .iter()
             .map(|p| (p.name.clone(), p.shape.clone()))
             .collect::<Vec<_>>();
         let decoded = crate::weight_artifact::decode(&schema, bytes, self.memory)?;
-        for (p, data) in self.parameters.iter().zip(&decoded) {
+        for (p, data) in parameters.iter().zip(&decoded) {
             validate(p, data, false)?;
             ensure!(
                 !p.frozen || p.data == *data,
@@ -229,7 +242,7 @@ impl OperationSession {
             );
         }
         let next = self.revision.checked_add(1).context("revision overflow")?;
-        for (p, data) in self.parameters.iter_mut().zip(decoded) {
+        for (p, data) in parameters.iter_mut().zip(decoded) {
             p.data = data;
         }
         self.revision = next;

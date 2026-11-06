@@ -156,3 +156,95 @@ fn schemas_are_pure_and_invalid_updates_rejected() {
     assert!(ModelDefinition::parse(&SOURCE.replace("gain <- input", "fixed <- input")).is_err());
     assert!(ModelDefinition::parse(&SOURCE.replace("fn update", "fn forward")).is_err());
 }
+
+#[test]
+fn operation_bindings_preserve_identity_across_declaration_orders() {
+    let source = r#"wgt 0.5
+model Slots
+state total: f32[1] = [5];
+parameter gain: f32[1] = [2]
+state stamp: f32[1] = [11];
+parameter offset: f32[1] = [3]
+fn read(x: f32[1]) -> f32[1] { return total + stamp + gain * x + offset; }
+fn write(x: f32[1]) -> f32[1] { total <- x; stamp <- total + [7]; gain <- stamp; return gain + offset; }
+fn fail(x: f32[1]) -> f32[1] { total <- x; gain <- x; return log([0]); }
+"#;
+    let ModelPlan::Operations(mut plan) = ModelDefinition::parse(source)
+        .unwrap()
+        .instantiate_plan()
+        .unwrap()
+    else {
+        panic!()
+    };
+    plan.parameters.reverse();
+    plan.states.reverse();
+    for (index, (_, program)) in plan.entries.iter_mut().enumerate() {
+        let len = program.parameters.len();
+        program.parameters.rotate_left((index + 1) % len);
+    }
+    let mut s = OperationSession::prepare(plan, 1 << 20).unwrap();
+    assert_eq!(s.call("read", &[vec![4.]], 1000).unwrap(), Some(vec![27.]));
+    assert_eq!(
+        s.call("write", &[vec![13.]], 1000).unwrap(),
+        Some(vec![23.])
+    );
+    assert_eq!(
+        s.parameter_values(),
+        vec![
+            ("offset".into(), vec![1], vec![3.]),
+            ("gain".into(), vec![1], vec![20.]),
+        ]
+    );
+    assert_eq!(
+        s.state_values(),
+        vec![
+            ("stamp".into(), vec![1], vec![20.]),
+            ("total".into(), vec![1], vec![13.]),
+        ]
+    );
+    assert_eq!(s.revision(), 1);
+    s.update_parameters(&[
+        ("gain".into(), vec![1], vec![4.]),
+        ("offset".into(), vec![1], vec![17.]),
+    ])
+    .unwrap();
+    assert_eq!(s.call("read", &[vec![2.]], 1000).unwrap(), Some(vec![58.]));
+    let before = (
+        s.parameter_values(),
+        s.state_values(),
+        s.revision(),
+        s.native_calls(),
+    );
+    assert!(s.call("fail", &[vec![9.]], 1000).is_err());
+    assert!(
+        s.update_parameters(&[("total".into(), vec![1], vec![9.])])
+            .is_err()
+    );
+    assert_eq!(
+        before,
+        (
+            s.parameter_values(),
+            s.state_values(),
+            s.revision(),
+            s.native_calls()
+        )
+    );
+}
+
+#[test]
+fn operation_storage_rejects_ambiguous_parameter_state_names() {
+    let ModelPlan::Operations(mut plan) = ModelDefinition::parse(SOURCE)
+        .unwrap()
+        .instantiate_plan()
+        .unwrap()
+    else {
+        panic!()
+    };
+    plan.states[0].name.clone_from(&plan.parameters[0].name);
+    let error = OperationSession::prepare(plan, 1 << 20).err().unwrap();
+    assert!(
+        error
+            .to_string()
+            .contains("duplicate operation storage identity")
+    );
+}
