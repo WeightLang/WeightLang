@@ -370,8 +370,8 @@ pub fn entry_named(functions: Vec<(&'static str, Function)>, root: &str, entry: 
     let result = runtime.call(entry, vec![])?;
     if let Some(output) = build_output {
         ensure!(matches!(result, Value::Model(_)), "build entry must return a model");
-        let model = output.join("model.json");
-        let checkpoint = output.join("checkpoint.json");
+        let model = output.join(persistence::BUILD_MODEL_FILE);
+        let checkpoint = output.join(persistence::BUILD_CHECKPOINT_FILE);
         runtime.save_file("model", result.clone(), Value::Data(json!(model.to_str().context("UTF-8 build path required")?)), false)?;
         runtime.save_file("checkpoint", result, Value::Data(json!(checkpoint.to_str().context("UTF-8 build path required")?)), false)?;
         let build = persistence::inspect_artifact(&checkpoint, true)?;

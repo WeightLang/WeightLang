@@ -8,6 +8,23 @@ use std::{
 
 pub type Lock = BTreeMap<(String, String, String), String>;
 
+pub(crate) fn record_lock(
+    lock: &mut Lock,
+    known: &Lock,
+    module: &str,
+    version: &str,
+    item: &str,
+    value: String,
+) -> Result<()> {
+    let key = (module.into(), version.into(), item.into());
+    ensure!(
+        known.get(&key).is_none_or(|old| old == &value),
+        "published version changed: {module}@{version} {item} differs from wgt.sum"
+    );
+    lock.insert(key, value);
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Manifest {
     pub module: String,

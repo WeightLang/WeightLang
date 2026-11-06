@@ -1,19 +1,20 @@
 //! Row-major tensor geometry shared by native tensor instructions.
 //! Storage is flat; geometry is never inferred from equal element counts.
 use anyhow::{ensure, Context, Result};
+use wgt_language::tensor::MAX_RANK;
 
 #[derive(Clone, Copy)]
 pub(super) struct TensorView {
     pub base: usize,
     offset: usize,
-    shape: [usize; 8],
-    strides: [usize; 8],
+    shape: [usize; MAX_RANK],
+    strides: [usize; MAX_RANK],
     rank: usize,
 }
 
 impl TensorView {
     pub fn contiguous(base: usize, dimensions: &[usize]) -> Self {
-        let mut shape = [1; 8];
+        let mut shape = [1; MAX_RANK];
         shape[..dimensions.len()].copy_from_slice(dimensions);
         Self {
             base,
@@ -24,8 +25,8 @@ impl TensorView {
         }
     }
 
-    fn contiguous_strides(shape: &[usize]) -> [usize; 8] {
-        let mut strides = [1; 8];
+    fn contiguous_strides(shape: &[usize]) -> [usize; MAX_RANK] {
+        let mut strides = [1; MAX_RANK];
         let mut stride = 1;
         for axis in (0..shape.len()).rev() {
             strides[axis] = stride;
@@ -52,7 +53,7 @@ impl TensorView {
     }
 
     pub fn validate(self, storage_elements: usize) -> Result<Self> {
-        ensure!((1..=wgt_language::tensor::MAX_RANK).contains(&self.rank), "invalid tensor view rank");
+        ensure!((1..=MAX_RANK).contains(&self.rank), "invalid tensor view rank");
         wgt_language::tensor::validate_layout(&self.shape[..self.rank], &self.strides[..self.rank],
             self.offset, storage_elements, wgt_language::tensor::ShapeLimits::REGISTER)?;
         Ok(self)

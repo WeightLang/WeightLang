@@ -268,3 +268,46 @@ fn tensor_instruction_versions_are_checked_by_both_backends() {
     assert_eq!(interpreter.evaluate(&[1., 3., 4., 2.], 1000).unwrap(), [4.]);
     assert_eq!(compiled.run(&[1., 3., 4., 2.], &[]).unwrap(), [4.]);
 }
+
+#[test]
+fn native_compilation_rejects_equal_size_incompatible_tensor_geometry() {
+    use wgt_language::adaptive::{Instruction as I, Register};
+    use wgtime_core::adaptive::AdaptiveSession;
+
+    let cases = [
+        (I::Add { out: "result".into(), left: "matrix".into(), right: "other".into() }, "tensor shape mismatch"),
+        (I::Tanh { out: "result".into(), input: "other".into() }, "tensor shape mismatch"),
+        (I::Gate { out: "result".into(), probability: "other".into(), input: "matrix".into() }, "gate shape mismatch"),
+        (I::Route { out: "result".into(), probability: "matrix".into(), yes: "matrix".into(), no: "other".into() }, "tensor shape mismatch"),
+        (I::Softmax { out: "result".into(), input: "matrix".into() }, "vector normalization requires rank 1"),
+    ];
+    for (instruction, reason) in cases {
+        let program = Program {
+            version: 3,
+            output_type: wgt_language::categorical::VectorType::F32,
+            input: "x".into(),
+            registers: [("x", vec![6]), ("matrix", vec![2, 3]), ("other", vec![3, 2]),
+                ("result", vec![2, 3]), ("flat", vec![6])]
+                .into_iter().map(|(name, shape)| Register { name: name.into(), len: 6, shape }).collect(),
+            parameters: vec![],
+            instructions: vec![
+                I::Reshape { out: "matrix".into(), input: "x".into() },
+                I::Reshape { out: "other".into(), input: "x".into() },
+                instruction,
+                I::Reshape { out: "flat".into(), input: "result".into() },
+                I::Return { value: "flat".into() },
+            ],
+            loss: None,
+        };
+        for (backend, error) in [
+            ("interpreter", AdaptiveSession::prepare(program.clone(), 65536).err()),
+            ("compiled", CompiledForward::compile(&program, 65536).err()),
+            ("transaction", CompiledForward::compile_transaction(&program, 65536).err()),
+        ] {
+            let error = error.unwrap_or_else(|| panic!("{backend} accepted {reason}"));
+            let diagnostic = format!("{error:#}");
+            assert!(diagnostic.contains(reason), "{backend}: {diagnostic}");
+            assert!(diagnostic.contains("instruction 2"), "{backend}: {diagnostic}");
+        }
+    }
+}

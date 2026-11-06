@@ -62,8 +62,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check client and host control
         run: cargo test --locked -p wgtime -p wgtime-control
-      - name: Check native artifact publication
-        run: cargo test --locked -p weightlang-wgt --test native_publication
+      - name: Check source packages and native artifact publication
+        run: cargo test --locked -p weightlang-wgt --test source_package --test native_publication
       - name: Check service lifecycle and transport
         run: cargo test --locked -p wgtime-service --bin wgtime --test service --test startup --test strategy
       - name: Build the model service

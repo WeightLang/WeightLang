@@ -165,9 +165,10 @@ fn main() {
 完整示例见 [连续声明回归](../crates/wgtime-core/tests/continuous_let.rs)。
 
 支持函数调用、列表/对象索引、一元 `- !`、算术 `+ - * / % @ **`、比较及短路 `&& ||`。
-矩阵乘法可写为 `A @ B`，等价于 `matmul(A,B)`；rank-2 转置可写为 `A.T`，等价于 `transpose(A)`。
+矩阵乘法可写为 `A @ B`，等价于内置 `matmul(A,B)`，并且不受同名子模型实例影响；rank-2 转置可写为 `A.T`，等价于 `transpose(A)`。
 `@` 与 `* / %` 同优先级并左结合；`.T` 是高优先级后缀，仅支持 rank-2 张量。
 `A:[M,K]` 与 `B:[K,N]` 的 `A @ B` 得到 `[M,N]`，不做 batch broadcasting。局部绑定支持 `let q: f32[sequence=8, hidden=32] = value;` 形式的固定 Shape 注解；命名轴可用于矩阵收缩、Softmax 轴和 `permute` 的编译期一致性检查。
+`@` 与 `matmul` 共用形状和命名轴合同：两个已命名的收缩轴必须同名，结果保留未收缩轴名且名称不得重复。`batch_matmul` 同样检查 batch 名称，并保留任一侧提供的名称。复制、保形单输入算子保留轴名；同形逐元素运算按位置合并匿名与命名轴，冲突或重复名称拒绝。同一寄存器的后续赋值及条件分支须兼容已有名称，匿名结果不会清除它们。显式 `reshape` 清除结果轴名，新绑定的类型注解可重新声明；完整命名模型见[张量几何](tensor-geometry.md)。
 二元优先级从低到高为：`||`、`&&`、`== !=`、`< <= > >=`、`+ -`、`* / % @`、`**`；
 幂运算优先于一元负号，即 `-2 ** 2` 等价于 `-(2 ** 2)`；一元 `!` 仍按一元运算解析。
 幂运算右结合（`2 ** 3 ** 2` 等价于 `2 ** (3 ** 2)`），其他二元运算左结合。
@@ -326,21 +327,22 @@ workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 | `read(w)` | 读取参数当前值，结果为扁平向量；直接引用参数也会读取 |
 | `write(w, value);` | 全量替换非冻结参数，元素数须相同 |
 | `linear(x,w[,b])` | w=[O,I]、x=[I]、结果=[O]，可选 b=[O] |
-| `add(a,b)` / `mul(a,b)` / `a+b` / `a*b` | 等长逐元素运算，无广播 |
-| `relu(x)` / `tanh(x)` / `sigmoid(x)` | 等长逐元素运算 |
+| `add(a,b)` / `mul(a,b)` / `a+b` / `a*b` | 同形逐元素运算，命名轴按位置兼容；无广播 |
+| `relu(x)` / `tanh(x)` / `sigmoid(x)` | 逐元素运算，保留 shape 和轴名 |
 | `softmax(x)` / `softmax(x,axis)` | `softmax(x)` 保持 rank-1 向量语义；多轴形式沿非负整数字面量轴归一化，使用稳定计算和 f64 累加，行为待验证 |
 | `reshape(x,[d1,...,dn])` | 固定 shape 重解释，1..8 个正整数常量轴，每轴 1..16384、总元素数不超过 16777216；元素数须相同，行为待验证 |
 | `x.T` / `transpose(x)` | rank-2 张量交换两个轴，两种写法等价 |
-| `a @ b` / `matmul(a,b)` | rank-2 `[M,K] @ [K,N] -> [M,N]`，内轴须相等，无广播，两种写法等价 |
+| `a @ b` / `matmul(a,b)` | rank-2 `[M,K] @ [K,N] -> [M,N]`，内轴维度及已有名称须相等，保留未收缩轴名；无广播，两种写法等价 |
 | `permute(x,[...])` | rank 1..8 的完整轴排列；interpreter 为零拷贝 strided view，其他算子按需物化 |
-| `batch_matmul(a,b)` | rank-3 `[B,M,K] @ [B,K,N] -> [B,M,N]`，batch 维相等，不广播 |
+| `batch_matmul(a,b)` | rank-3 `[B,M,K] @ [B,K,N] -> [B,M,N]`，batch 维及已有名称相等，保留任一侧的 batch 名称；不广播 |
+| `layer_norm(x,gamma,beta,axis,epsilon)` | 输出保留 x 的 shape/轴名；gamma、beta 为所选轴宽度的向量，已有名称须与该轴一致；axis 为范围内的非负整数字面量或轴名字符串，epsilon 为正有限数字面量 |
 | `scale(x,literal)` | 乘以有限有符号数值字面量，不广播且保持 shape，行为待验证 |
 | `conv(x,kernel,bias,stride,padding,dilation,groups)` | 完整七参数签名，无默认值；无批次、通道优先的 f32 卷积。输入 `x` 为 `[Cin,S1,...,Sd]`，kernel 为 `[Cout,Cin/groups,K1,...,Kd]`，bias 必须为 `[Cout]`；空间 rank `d` 为 1..3，输出为 `[Cout,O1,...,Od]`，`Oa=floor((Sa+2*padding[a]-(dilation[a]*(Ka-1)+1))/stride[a])+1`。stride/dilation 各为长度 d 的正整数常量列表，元素 1..16384；padding 为长度 d 的非负整数常量列表，元素 0..16384，对称零填充；groups 为 1..16384 的整数常量，必须整除 Cin、Cout，kernel 输入通道轴须等于 Cin/groups。输入/权重参数以行优先扁平 f32 存储，必须显式 `reshape` 出所需几何；单向量模型入口不提供 batch 轴。完整语义见[卷积专题](convolution.md)。core 卷积 3/3 和真实 wgtime service 3 项已通过，覆盖训练、权重恢复续训和释放；这是局部验证 |
-| `gate(p,x)` | 返回 p*x；p 的 shape 为 [1] 或与 x 完全相同，每项须在 [0,1]；[1] 门按元素应用；推理时 p 全为 0 跳过 x 表达式 |
-| `route(p,a,b)` | 返回 p*a+(1-p)*b；a/b shape 完全相同，p 的 shape 为 [1] 或与 a 完全相同且各项在 [0,1]；仅元素数相同不足以匹配。推理时 p 全为 1 只求值 a，全为 0 只求值 b，否则计算两边 |
+| `gate(p,x)` | 返回 p*x；p 的 shape 为 [1] 或与 x 完全相同，每项须在 [0,1]；同形 p/x 的轴名按位置兼容并合并到输出。[1] 门按元素应用；推理时 p 全为 0 跳过 x 表达式 |
+| `route(p,a,b)` | 返回 p*a+(1-p)*b；a/b shape 完全相同且轴名兼容，p 的 shape 为 [1] 或与 a 完全相同且各项在 [0,1]；同形 p 参与轴名合并，仅元素数相同不足以匹配。推理时 p 全为 1 只求值 a，全为 0 只求值 b，否则计算两边 |
 | `slice(x,start,length)` | start 非负整数、length 正整数，范围不得越界 |
 | `positive(x)` | 仅作为条件；x 必须 f32[1]，严格大于零选真分支 |
-| `let y = x;` | 复制张量值并保留梯度，不创建参数别名 |
+| `let y = x;` | 复制张量值并保留 shape、轴名和梯度，不创建参数别名 |
 | `memory_alloc(slots,width)` | 两个 1..16384 的整数常量，分配零初始化 f32[N,D] 工作区并返回专用句柄；禁止复制或当作张量 |
 | `memory_read(bank,address)` | address:f32[N] 每项在 [0,1]，返回加权读取的 f32[D]；不隐式归一化，支持内存和地址梯度 |
 | `memory_write(bank,address,value);` | value:f32[D]，每槽更新为 `(1-address[i])*旧值+address[i]*value`；支持地址、旧值和新值梯度 |

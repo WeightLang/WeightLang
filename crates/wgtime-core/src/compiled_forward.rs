@@ -371,51 +371,28 @@ struct Generator<'a> {
 }
 impl<'a> Generator<'a> {
     fn new(program: &'a Program) -> Result<Self> {
-        ensure!(matches!(program.version, 1 | 2 | 3), "unsupported compiled adaptive IR version");
         ensure!(
             program.instructions.len() <= 16_384 && program.registers.len() <= 16_384,
             "compiled model instruction/register limit exceeded"
         );
+        program.validate_tensor_contracts()?;
         let mut registers = HashMap::new();
         let mut workspace = 0usize;
         let mut max = 0;
-        ensure!(program.instructions.iter().all(|i| i.metadata().minimum_version <= program.version), "tensor operations require compiled IR version 3");
         for (i, r) in program.registers.iter().enumerate() {
-            ensure!(r.shape.len() <= 8 && r.shape.iter().all(|d| *d <= 16384) && crate::elements(&r.shape)? == r.len, "compiled register geometry/storage mismatch");
-            ensure!(program.version >= 3 || r.shape == [r.len], "multiaxis registers require compiled IR version 3");
-            ensure!(
-                r.len > 0 && r.len <= 16_777_216,
-                "invalid compiled register width"
-            );
-            ensure!(
-                registers
-                    .insert(r.name.as_str(), (workspace, r.len, i))
-                    .is_none(),
-                "duplicate compiled register"
-            );
+            registers.insert(r.name.as_str(), (workspace, r.len, i));
             workspace = workspace.checked_add(r.len).context("workspace overflow")?;
             max = max.max(r.len);
         }
         let mut parameters = HashMap::new();
         for (i, p) in program.parameters.iter().enumerate() {
+            let len = p.shape.iter().product::<usize>();
             ensure!(
-                !p.shape.is_empty() && p.shape.iter().all(|axis| *axis > 0),
-                "invalid compiled parameter shape"
-            );
-            let len = p
-                .shape
-                .iter()
-                .try_fold(1usize, |a, b| a.checked_mul(*b))
-                .context("parameter shape overflow")?;
-            ensure!(
-                len > 0 && len == p.data.len(),
+                len == p.data.len(),
                 "compiled parameter data/shape mismatch"
             );
             ensure!(p.data.iter().all(|v| v.is_finite()), "nonfinite parameter");
-            ensure!(
-                parameters.insert(p.name.as_str(), (i, len)).is_none(),
-                "duplicate compiled parameter"
-            );
+            parameters.insert(p.name.as_str(), (i, len));
         }
         Ok(Self {
             program,
@@ -485,10 +462,9 @@ impl<'a> Generator<'a> {
             let mut reads = metadata.inputs;
             let mut body = String::new();
             match instruction {
-                I::Conv { out:o,input:x,kernel,bias,stride,padding,dilation,groups } => {
+                I::Conv { input:x,kernel,bias,stride,padding,dilation,groups,.. } => {
                     let (a,_,xi)=self.reg(x)?;let (k,_,ki)=self.reg(kernel)?;let (b,_,bi)=self.reg(bias)?;
                     let g=wgt_language::adaptive::ConvGeometry::new(&self.program.registers[xi].shape,&self.program.registers[ki].shape,&self.program.registers[bi].shape,stride,padding,dilation,*groups)?;
-                    ensure!(self.program.registers[self.reg(o)?.2].shape==g.shape(),"compiled conv output shape mismatch");
                     let work=g.work()?-1;let ov=g.output_volume();let iv=g.input_volume();let kv=g.kernel_volume();let cg=g.channels/g.groups;let og=g.outputs/g.groups;let count=g.outputs*ov;
                     body+=&format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{count};z++){{size_t oc=z/{ov},pos=z%{ov},coords[3]={{0}};");
                     for d in (0..g.rank).rev(){body+=&format!("coords[{d}]=pos%{};pos/={};",g.output[d],g.output[d]);}
@@ -503,9 +479,7 @@ impl<'a> Generator<'a> {
                     let g = wgt_language::adaptive::Pool2dGeometry::new(
                         &self.program.registers[xi].shape, kernel, stride
                     )?;
-                    let (_,out_len,out_id) = self.reg(o)?;
-                    ensure!(self.program.registers[out_id].shape == g.shape(),
-                        "compiled pool2d output geometry mismatch");
+                    let (_,out_len,_) = self.reg(o)?;
                     let work = g.work()?;
                     let spatial = g.output_h * g.output_w;
                     let window = g.window_len();
@@ -518,35 +492,22 @@ impl<'a> Generator<'a> {
                             g.output_w,g.output_w,g.kernel_h,g.kernel_w,g.input_h,g.stride_h,g.input_w,g.stride_w);
                     }
                 },
-                I::Reshape { out:o,input:x } => {
-
+                I::Reshape { input:x,.. } => {
                     let (a,n,_) = self.reg(x)?;
-                    ensure!(n == self.reg(o)?.1, "compiled reshape count mismatch");
                     body += &format!("memcpy(t,r+{a},{n}*sizeof(float));");
                 },
-                I::Transpose { out:o,input:x } => {
+                I::Transpose { input:x,.. } => {
                     let (a,_,_) = self.reg(x)?;
                     let shape = &self.program.registers[self.reg(x)?.2].shape;
-                    ensure!(shape.len() == 2, "compiled transpose requires rank 2");
                     let (m,n) = (shape[0],shape[1]);
-                    ensure!(self.program.registers[self.reg(o)?.2].shape == [n,m], "compiled transpose output geometry mismatch");
                     body += &format!("for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++)t[j*{m}+i]=r[{a}+i*{n}+j];");
                 },
                 I::Permute { out:o,input:x,axes } => {
                     let (a,_,xi) = self.reg(x)?;
                     let input_shape = &self.program.registers[xi].shape;
                     let rank = input_shape.len();
-                    ensure!((1..=8).contains(&rank) && axes.len() == rank,
-                        "compiled permute rank mismatch");
-                    let mut seen = vec![false; rank];
-                    let output_shape = axes.iter().map(|&axis| {
-                        ensure!(axis < rank && !seen[axis], "compiled permute axes must form a bijection");
-                        seen[axis] = true;
-                        Ok(input_shape[axis])
-                    }).collect::<Result<Vec<_>>>()?;
                     let (_,out_len,out_id) = self.reg(o)?;
-                    ensure!(self.program.registers[out_id].shape == output_shape,
-                        "compiled permute output geometry mismatch");
+                    let output_shape = &self.program.registers[out_id].shape;
                     let mut body_code = format!("if(budget-*used<{out_len})return 2;*used+={out_len};for(size_t z=0;z<{out_len};z++){{size_t rem=z,oc[{rank}]={{0}},ic[{rank}]={{0}};");
                     for axis in (0..rank).rev() {
                         body_code += &format!("oc[{axis}]=rem%{};rem/={};", output_shape[axis], output_shape[axis]);
@@ -561,67 +522,49 @@ impl<'a> Generator<'a> {
                     body_code += &format!("t[z]=r[{a}+src];}}");
                     body += &body_code;
                 },
-                I::Matmul { out:o,left,right } => {
+                I::Matmul { left,right,.. } => {
                     let (a,_,ai) = self.reg(left)?; let (b,_,bi) = self.reg(right)?;
                     let sa = &self.program.registers[ai].shape; let sb = &self.program.registers[bi].shape;
-                    ensure!(sa.len()==2 && sb.len()==2 && sa[1]==sb[0], "compiled matmul geometry mismatch");
                     let (m,k,n)=(sa[0],sa[1],sb[1]);
-                    ensure!(self.program.registers[self.reg(o)?.2].shape == [m,n], "compiled matmul output geometry mismatch");
                     let work=m.checked_mul(k).and_then(|v|v.checked_mul(n)).context("matmul work overflow")?;
                     body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+i*{k}+q]*(double)r[{b}+q*{n}+j];t[i*{n}+j]=(float)sum;}}");
                 },
-                I::BatchMatmul { out:o,left,right } => {
+                I::BatchMatmul { left,right,.. } => {
                     let (a,_,ai) = self.reg(left)?;
                     let (b,_,bi) = self.reg(right)?;
                     let sa = &self.program.registers[ai].shape;
                     let sb = &self.program.registers[bi].shape;
-                    ensure!(sa.len()==3 && sb.len()==3 && sa[0]==sb[0] && sa[2]==sb[1],
-                        "compiled batch_matmul geometry mismatch");
                     let (batch,m,k,n)=(sa[0],sa[1],sa[2],sb[2]);
-                    let (_,_,out_id)=self.reg(o)?;
-                    ensure!(self.program.registers[out_id].shape == [batch,m,n],
-                        "compiled batch_matmul output geometry mismatch");
                     let work=batch.checked_mul(m).and_then(|v|v.checked_mul(k))
                         .and_then(|v|v.checked_mul(n)).context("batch_matmul work overflow")?;
                     body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{batch};z++)for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+z*{m}*{k}+i*{k}+q]*(double)r[{b}+z*{k}*{n}+q*{n}+j];t[z*{m}*{n}+i*{n}+j]=(float)sum;}}");
                 },
                 I::LayerNorm { out:o,input:x,gamma,beta,axis,epsilon } => {
                     let (a,_,ai) = self.reg(x)?;
-                    let (g,_,gi) = self.reg(gamma)?;
-                    let (b,_,bi) = self.reg(beta)?;
+                    let (g,_,_) = self.reg(gamma)?;
+                    let (b,_,_) = self.reg(beta)?;
                     let shape = &self.program.registers[ai].shape;
-                    ensure!(*axis < shape.len(), "compiled LayerNorm axis out of range");
                     let (outer,width,inner) = (
                         shape[..*axis].iter().product::<usize>(),
                         shape[*axis],
                         shape[axis+1..].iter().product::<usize>(),
                     );
-                    ensure!(self.program.registers[gi].shape == [width]
-                        && self.program.registers[bi].shape == [width],
-                        "compiled LayerNorm scale/bias geometry mismatch");
-                    let (_,out_len,out_id)=self.reg(o)?;
-                    ensure!(self.program.registers[out_id].shape == *shape && epsilon.is_finite() && *epsilon > 0.,
-                        "compiled LayerNorm output geometry or epsilon mismatch");
+                    let (_,out_len,_)=self.reg(o)?;
                     let work=out_len.checked_mul(3).and_then(|v|v.checked_add(1)).context("LayerNorm work overflow")?;
                     body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t o=0;o<{outer};o++)for(size_t i=0;i<{inner};i++){{double mean=0.;for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;mean+=(double)r[{a}+idx];}}mean/={width};double variance=0.;for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;double delta=(double)r[{a}+idx]-mean;variance+=delta*delta;}}variance/={width};double inv=1.0/sqrt(variance+{epsilon:.17});for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;t[idx]=(float)(((double)r[{a}+idx]-mean)*inv*(double)r[{g}+a]+(double)r[{b}+a]);}}}}");
                 },
-                I::Scale { out:o,input:x,factor } => {
-                    let (a,n,id) = self.reg(x)?;
-                    ensure!(self.program.registers[id].shape == self.program.registers[self.reg(o)?.2].shape, "compiled scale geometry mismatch");
+                I::Scale { input:x,factor,.. } => {
+                    let (a,n,_) = self.reg(x)?;
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]=r[{a}+i]*{};",Self::literal(*factor)?);
                 },
-                I::SoftmaxAxis { out:o,input:x,axis } => {
+                I::SoftmaxAxis { input:x,axis,.. } => {
                     let (a,_,id)=self.reg(x)?;
                     let shape=&self.program.registers[id].shape;
-                    ensure!(*shape == self.program.registers[self.reg(o)?.2].shape, "compiled axis softmax geometry mismatch");
-                    ensure!(*axis<shape.len(), "compiled softmax axis out of range");
                     let outer:usize=shape[..*axis].iter().product();
                     let width=shape[*axis]; let inner:usize=shape[*axis+1..].iter().product();
                     body += &format!("for(size_t o=0;o<{outer};o++)for(size_t j=0;j<{inner};j++){{float maximum=-INFINITY;for(size_t q=0;q<{width};q++)maximum=fmaxf(maximum,r[{a}+(o*{width}+q)*{inner}+j]);double sum=0.;for(size_t q=0;q<{width};q++)sum+=exp((double)r[{a}+(o*{width}+q)*{inner}+j]-(double)maximum);for(size_t q=0;q<{width};q++){{size_t z=(o*{width}+q)*{inner}+j;t[z]=(float)(exp((double)r[{a}+z]-(double)maximum)/sum);}}}}");
                 },
-                I::Constant { out: o, data } => {
-                    let (_, n, _) = self.reg(o)?;
-                    ensure!(n == data.len(), "compiled constant shape mismatch");
+                I::Constant { data, .. } => {
                     for (i, v) in data.iter().enumerate() {
                         body += &format!("t[{i}]={};", Self::literal(*v)?);
                     }
@@ -661,26 +604,22 @@ impl<'a> Generator<'a> {
                     );
                 }
                 I::Add {
-                    out: o,
                     left,
                     right,
+                    ..
                 }
                 | I::Mul {
-                    out: o,
                     left,
                     right,
+                    ..
                 }
                 | I::Minimum {
-                    out: o,
                     left,
                     right,
+                    ..
                 } => {
                     let (a, n, _) = self.reg(left)?;
-                    let (b, m, _) = self.reg(right)?;
-                    ensure!(
-                        n == m && n == self.reg(o)?.1,
-                        "compiled binary shape mismatch"
-                    );
+                    let (b, _, _) = self.reg(right)?;
                     let value = match instruction {
                         I::Add { .. } => format!("r[{a}+i]+r[{b}+i]"),
                         I::Mul { .. } => format!("r[{a}+i]*r[{b}+i]"),
@@ -688,16 +627,15 @@ impl<'a> Generator<'a> {
                     };
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]={value};");
                 }
-                I::Tanh { out: o, input: x }
-                | I::Sigmoid { out: o, input: x }
-                | I::Relu { out: o, input: x }
-                | I::Neg { out: o, input: x }
-                | I::Detach { out: o, input: x }
-                | I::Exp { out: o, input: x }
-                | I::Log { out: o, input: x }
-                | I::ValidateProbabilities { out: o, input: x } => {
+                I::Tanh { input: x, .. }
+                | I::Sigmoid { input: x, .. }
+                | I::Relu { input: x, .. }
+                | I::Neg { input: x, .. }
+                | I::Detach { input: x, .. }
+                | I::Exp { input: x, .. }
+                | I::Log { input: x, .. }
+                | I::ValidateProbabilities { input: x, .. } => {
                     let (a, n, _) = self.reg(x)?;
-                    ensure!(n == self.reg(o)?.1, "compiled unary shape mismatch");
                     let value = match instruction {
                         I::Tanh { .. } => format!("tanhf(r[{a}+i])"),
                         I::Sigmoid { .. } => format!("1.0f/(1.0f+expf(-r[{a}+i]))"),
@@ -714,9 +652,8 @@ impl<'a> Generator<'a> {
                     }
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]={value};");
                 }
-                I::Softmax { out: o, input: x } | I::LogSoftmax { out: o, input: x } => {
+                I::Softmax { input: x, .. } | I::LogSoftmax { input: x, .. } => {
                     let (a, n, _) = self.reg(x)?;
-                    ensure!(n == self.reg(o)?.1, "compiled softmax shape mismatch");
                     body += &format!(
                         "float maximum=-INFINITY;for(size_t i=0;i<{n};i++)maximum=fmaxf(maximum,r[{a}+i]);double sum=0.;for(size_t i=0;i<{n};i++)sum+=exp((double)r[{a}+i]-(double)maximum);"
                     );
@@ -727,9 +664,8 @@ impl<'a> Generator<'a> {
                     };
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]=(float)({value});");
                 }
-                I::Sum { out: o, input: x } | I::Mean { out: o, input: x } => {
+                I::Sum { input: x, .. } | I::Mean { input: x, .. } => {
                     let (a, n, _) = self.reg(x)?;
-                    ensure!(self.reg(o)?.1 == 1, "compiled reduction shape mismatch");
                     body += &format!(
                         "double sum=0.;for(size_t i=0;i<{n};i++)sum+=r[{a}+i];t[0]=(float)(sum/{});",
                         if matches!(instruction, I::Mean { .. }) {
@@ -740,16 +676,12 @@ impl<'a> Generator<'a> {
                     );
                 }
                 I::Clip {
-                    out: o,
                     input: x,
                     low: min,
                     high: max,
+                    ..
                 } => {
                     let (a, n, _) = self.reg(x)?;
-                    ensure!(
-                        n == self.reg(o)?.1 && min <= max,
-                        "compiled clip shape/range mismatch"
-                    );
                     body += &format!(
                         "for(size_t i=0;i<{n};i++)t[i]=fminf(fmaxf(r[{a}+i],{}),{});",
                         Self::literal(*min)?,
@@ -761,12 +693,8 @@ impl<'a> Generator<'a> {
                     input: x,
                     start,
                 } => {
-                    let (a, n, _) = self.reg(x)?;
+                    let (a, _, _) = self.reg(x)?;
                     let m = self.reg(o)?.1;
-                    ensure!(
-                        start.checked_add(m).is_some_and(|end| end <= n),
-                        "compiled slice out of bounds"
-                    );
                     body += &format!("memcpy(t,r+{},{}*sizeof(float));", a + start, m);
                 }
                 I::Label { .. } => {}
@@ -801,27 +729,21 @@ impl<'a> Generator<'a> {
                     );
                 }
                 I::Gate {
-                    out: o,
                     probability,
                     input: x,
+                    ..
                 }
                 | I::Route {
-                    out: o,
                     probability,
                     yes: x,
-                    no: _,
+                    ..
                 } => {
                     // Endpoint inference only reads the selected branch; traced calls read both.
                     reads = [Some(probability.as_str()), None, None];
                     let (a, n, aid) = self.reg(x)?;
                     let (p, pn, _) = self.reg(probability)?;
-                    ensure!(
-                        n == self.reg(o)?.1 && (pn == 1 || pn == n),
-                        "compiled gate shape mismatch"
-                    );
                     let other = if let I::Route { no, .. } = instruction {
-                        let (b, m, bid) = self.reg(no)?;
-                        ensure!(n == m, "compiled route shape mismatch");
+                        let (b, _, bid) = self.reg(no)?;
                         Some((b, bid))
                     } else {
                         None

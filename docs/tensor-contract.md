@@ -2,7 +2,7 @@
 
 本变更提供一套可复用的固定形状元数据与校验代码，不是新增一套张量数值存储。`wgt_language::tensor` 定义 `TensorType`、`DType`、`ShapeLimits` 和 `Layout`；源码 lowering、Adaptive IR、CPU view 和旧制品通过明确入口复用它。权重身份、梯度所有权、优化器状态与服务实例仍属于原有实现。
 
-**验证状态：实现候选，尚未在交付环境执行 Cargo。** 新增的 Rust 测试、工作区检查与既有回归必须全部运行后，才能确认可合并。Node 数值模拟和清单检查不能代替 Rust、真实服务或 GPU 验收；本文件不构成发布声明。
+**验证状态：M1 已合入 `2157424`，该提交的 [CI](https://github.com/WeightLang/WeightLang/actions/runs/42166728657) 与 [Tensor operator tests](https://github.com/WeightLang/WeightLang/actions/runs/42166728686) 均通过。** 后续统一源码与执行入口的决策、精确验证命令和结果见 [Post-M1 重构记录](untangle-post-m1.md)。各项结果按实际执行范围解释；完整 compiled-forward、模块导入和硬件 GPU 的项目验收边界仍见 `AGENTS.md`。
 
 ## 范围与兼容性
 
@@ -43,7 +43,7 @@ fn forward(x) {
 }
 ```
 
-这个完整例子同时进入语言与运行时回归测试；当前交付未执行这些 Rust 测试。注解显式形成视图时使用 IR v3；不会把所有未使用张量几何的旧程序自动升级。
+这个完整例子同时进入语言与运行时的 `tensor_contracts` 回归测试。注解显式形成视图时使用 IR v3；不会把所有未使用张量几何的旧程序自动升级。
 
 ## Layout 与物化
 
@@ -64,20 +64,20 @@ node scripts/check_tensor_contracts.cjs
 
 检查器同时对照真实 enum 和生成的 Rust 清单。它不把 `language/primitive_specs.json` 的旧制品 graph 原语混作 WGT 内置函数，也不把目录存在解释为 GPU 或 AD 已验收。
 
-`Program::validate_tensor_contracts()` 在源码 lowering 结束和 CPU prepare 入口调用。共享 pass 覆盖寄存器、参数形状、几何/逐元素/归约/卷积/池化检查和引用存在性；初始化、控制流、内存句柄、参数可写性与事务语义仍由已有运行时校验负责。这不是一个完整的新 Semantic/Execution Graph 系统。
+`Program::validate_tensor_contracts()` 在源码 lowering 结束、CPU prepare 入口以及普通/事务原生编译共用的 generator 入口调用。共享 pass 覆盖寄存器、参数形状、几何/逐元素/归约/卷积/池化检查和引用存在性；初始化、控制流、内存句柄、参数可写性与事务语义仍由已有运行时校验负责。这不是一个完整的新 Semantic/Execution Graph 系统。
 
 ## 既有编译缺陷与梯度边界
 
-补丁针对基线 CI 的缺失 `bail!` 导入、三个 Permute 模式字段数错误、workspace 自由函数误用 `self`、不存在的 `Tensor.name`、LayerNorm VJP 重叠借用提供修复；同时补齐 workspace 对两个 pooling 变体的匹配。是否消除所有工作区错误仍以实际 Cargo 结果为准。
+前一轮重构已修复运行时编译缺陷、Permute 模式匹配、workspace pooling 操作匹配和参数名称来源，验证记录见 [codebase structure and verification](untangle-codebase.md)。本轮继续将 M1 的形状规则统一接入源码 lowering 与执行后端。
 
 LayerNorm 的输入、gamma、beta 可以引用同一个 tape node。VJP 从不可变原值计算标量贡献，再分别累加到对应梯度；不假定三个 ID 不同，不引入 unsafe 或未经预算的临时梯度 Vec。新增测试覆盖全部别名对、非末轴以及有限差分。
 
-自定义 `UpdateStrategy` 的参数名称从已有 Session 名称索引获得，不新建第二份权重身份系统。该入口目前只能替换 resident 参数；对 View/Add/File/Packed 显式拒绝，避免把共享存储分离或替换为空数组。拒绝发生在梯度计算和策略提交前，参数、步数、策略状态保持不变。普通训练及原有 View/Add 功能没有被移除。
+自定义 `UpdateStrategy` 的参数名称从已有 Session 名称索引获得。候选更新提交到 resident owner，保留共享 View 的存储关系；非 resident 条目不会被替换为空数组。候选数量、长度、有限值和 frozen 约束在提交前校验，失败保留参数、步数和策略状态。`tensor_strategy_contracts::custom_strategy_updates_shared_view_without_detaching_storage` 覆盖更新后的预测变化与快照中的 View 身份。
 
 ## 验收入口与尚未完成的部分
 
 新增测试分别位于三个 crate 的 `tests/tensor_contracts.rs`，以及 core 的 `tests/tensor_strategy_contracts.rs`。它们覆盖限制边界、溢出、命名轴、dtype 拒绝、布局地址、排列属性、旧 JSON 兼容、注解生产者形状、独立数值参考、有限差分和失败不提交。既有 `permuted_batch_view_feeds_batched_matmul_without_materialization` 回归保留。
 
-工作区编译检查、语言测试、CPU/AD/compiled 回归与旧制品测试已加入 CI 候选变更；不取消原有编辑器/prelude 检查。交付包的 `verify.sh` 列出完整命令，并要求该具名回归确实存在，不能用筛选到零项测试代替通过。
+工作区编译检查、语言测试、CPU/AD/compiled 回归与旧制品测试由 [CI 工作流](../.github/workflows/ci.yml) 持续执行，保留编辑器/prelude 检查。具名零分配回归位于 core 的 `workspace` 测试目标；执行结果必须显示实际运行该项。
 
-动态/符号 Shape、通用广播、多 dtype 内核、JVP、自定义梯度注册、跨后端别名分析、GPU 性能、Weight ABI 运行时绑定与统一执行图不在本实现候选中。M1 的运行时验收也仍待执行；不能把本补丁描述为整个架构路线图完成。
+动态/符号 Shape、通用广播、多 dtype 内核、JVP、自定义梯度注册、跨后端别名分析、GPU 性能、Weight ABI 运行时绑定与统一执行图不在本实现候选中。已通过的检查覆盖上述 M1 固定形状合同，不表示整个架构路线图完成。

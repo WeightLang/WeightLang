@@ -1,6 +1,6 @@
 //! Reverse-mode differentiation of the executed program, using immutable value
 //! versions. A write rebinds a parameter to a value node; it never severs an edge.
-use super::{AdaptiveSession, Op, Unary};
+use super::{AdaptiveSession, Op, Unary, MAX_RANK};
 use anyhow::{ensure, Context, Result};
 use std::collections::BTreeMap;
 
@@ -13,7 +13,7 @@ enum Edge {
     BatchMatmul { a: usize, b: usize, batch: usize, m: usize, k: usize, n: usize },
     LayerNorm { x: usize, gamma: usize, beta: usize, groups: super::tensor::AxisGroups, epsilon: f32 },
     Transpose { x: usize, m: usize, n: usize },
-    Permute { x: usize, input_shape: [usize; 8], axes: [usize; 8], rank: usize },
+    Permute { x: usize, input_shape: [usize; MAX_RANK], axes: [usize; MAX_RANK], rank: usize },
     SoftmaxAxis { x: usize, groups: super::tensor::AxisGroups },
     Scale { x: usize, factor: f32 },
 

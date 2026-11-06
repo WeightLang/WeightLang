@@ -163,17 +163,6 @@ impl Remote for Github {
         Ok(out)
     }
 }
-fn record(lock: &mut Lock, known: &Lock, m: &str, v: &str, k: &str, value: String) -> Result<()> {
-    let key = (m.into(), v.into(), k.into());
-    if let Some(old) = known.get(&key) {
-        ensure!(
-            old == &value,
-            "published version changed: {m}@{v} {k} differs from wgt.sum"
-        );
-    }
-    lock.insert(key, value);
-    Ok(())
-}
 pub fn verify(manifest: &Manifest, lock: &Lock, cache: &Path) -> Result<Vec<Value>> {
     let mut result = Vec::new();
     for (m, v) in &manifest.dependencies {
@@ -277,8 +266,8 @@ pub fn fetch_selected(
         );
         let bytes = remote.download(&format!("{base}/wgt.index.json"), 16 * 1024 * 1024)?;
         let mut entries = Lock::new();
-        record(&mut entries, known, m, v, "commit", commit.clone())?;
-        record(
+        manifest::record_lock(&mut entries, known, m, v, "commit", commit.clone())?;
+        manifest::record_lock(
             &mut entries,
             known,
             m,
@@ -336,7 +325,7 @@ pub fn fetch_selected(
                             && hash(&bytes) == meta["sha256"].as_str().context("missing hash")?,
                         "asset size/hash mismatch: {asset}"
                     );
-                    record(
+                    manifest::record_lock(
                         &mut entries,
                         known,
                         m,

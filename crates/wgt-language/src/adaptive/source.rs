@@ -1,6 +1,7 @@
 //! Lower ordinary WGT 0.5 forward functions to bounded transactional tensor IR.
 use super::{Instruction as I, Parameter, Program, Register};
 use crate::script::parse::{Expr, Statement, Stmt};
+use crate::tensor::{DType, ShapeLimits, TensorType};
 use anyhow::{Context, Result, bail, ensure};
 use std::collections::HashMap;
 
@@ -524,6 +525,15 @@ fn scalar_literal(expr: &Expr) -> Result<f32> {
     ensure!((n as f32).is_finite(), "nonfinite numeric literal");
     Ok(n as f32)
 }
+fn tensor_axis(tensor: &TensorType, expr: &Expr) -> Result<usize> {
+    if let Expr::Text(name) = expr {
+        return Ok(tensor.axis(name)?);
+    }
+    let value = scalar_literal(expr)?;
+    ensure!(value >= 0. && value.fract() == 0. && value < tensor.rank() as f32,
+        "tensor axis must be a nonnegative in-range integer or declared axis name");
+    Ok(value as usize)
+}
 #[derive(Clone)]
 struct ModuleInstance {
     functions: crate::script::parse::Program,
@@ -619,6 +629,31 @@ impl Lower {
             .shape
             .clone())
     }
+    fn tensor_type(&self, name: &str) -> Result<TensorType> {
+        let shape = self.shape(name)?;
+        let axes = self.axes.get(name).cloned().unwrap_or_else(|| vec![None; shape.len()]);
+        Ok(TensorType::new(DType::F32, shape, axes, ShapeLimits::REGISTER)?)
+    }
+    fn gated_type(&self, probability: &str, value: TensorType) -> Result<TensorType> {
+        let probability = self.tensor_type(probability)?;
+        if probability.shape() == [1] {
+            Ok(value)
+        } else {
+            value.elementwise(&probability, ShapeLimits::REGISTER)
+                .context("gate/route probability shape or axis mismatch")
+        }
+    }
+    fn register_tensor(&mut self, name: &str, tensor: TensorType) -> Result<()> {
+        let tensor = if self.sizes.contains_key(name) {
+            self.tensor_type(name)?.elementwise(&tensor, ShapeLimits::REGISTER)
+                .with_context(|| format!("register tensor type changes: {name}"))?
+        } else {
+            tensor
+        };
+        self.register_shape(name, tensor.shape().to_vec())?;
+        self.axes.insert(name.into(), tensor.axes().to_vec());
+        Ok(())
+    }
     fn register_shape(&mut self, name: &str, shape: Vec<usize>) -> Result<()> {
         let len = crate::tensor::validate_shape(&shape, crate::tensor::ShapeLimits::REGISTER)
             .with_context(|| format!("tensor register {name}"))?;
@@ -678,10 +713,8 @@ impl Lower {
                     bail!("invalid internal tensor annotation");
                 };
                 let input = self.value(value)?;
-                let actual_shape = self.shape(&input)?;
                 let mut expected_shape = Vec::with_capacity(dimensions.len());
                 let mut axes = Vec::with_capacity(dimensions.len());
-                let mut seen = std::collections::HashSet::new();
                 for dimension in dimensions {
                     let Expr::List(pair) = dimension else { bail!("invalid tensor dimension annotation"); };
                     let [Expr::Text(axis), dimension] = pair.as_slice() else { bail!("invalid tensor dimension annotation"); };
@@ -689,16 +722,13 @@ impl Lower {
                     ensure!(expected >= 1. && expected <= 16384. && expected.fract() == 0.,
                         "tensor annotation dimensions must be integers in 1..16384");
                     expected_shape.push(expected as usize);
-                    let axis = if axis.is_empty() { None } else {
-                        ensure!(seen.insert(axis.clone()), "duplicate tensor axis: {axis}");
-                        Some(axis.clone())
-                    };
+                    let axis = if axis.is_empty() { None } else { Some(axis.clone()) };
                     axes.push(axis);
                 }
-                let expected_len = crate::model::validate_shape(&expected_shape)?;
-                ensure!(self.size(&input)? == expected_len,
-                    "tensor annotation element count mismatch: actual {actual_shape:?}, declared {expected_shape:?}");
-                self.register_shape(out, expected_shape)?;
+                let tensor = self.tensor_type(&input)?
+                    .reshape(expected_shape, axes, ShapeLimits::REGISTER)
+                    .context("tensor annotation")?;
+                self.register_tensor(out, tensor)?;
                 if input != out {
                     self.program.instructions.push(I::Reshape {
                         out: out.into(),
@@ -707,7 +737,6 @@ impl Lower {
                 }
                 self.program.version = 3;
                 self.types.insert(out.into(), self.types.get(&input).copied().unwrap_or_default());
-                self.axes.insert(out.into(), axes);
                 return Ok(());
             }
             if name == "__probabilities" {
@@ -720,7 +749,8 @@ impl Lower {
                     self.shape(&input)?.len() == 1,
                     ".probabilities requires a rank-1 f32, logits or probabilities tensor"
                 );
-                self.register(out, self.size(&input)?)?;
+                ensure!(out != self.program.input, "cannot overwrite model input");
+                self.register_tensor(out, self.tensor_type(&input)?)?;
                 self.program
                     .instructions
                     .push(if kind != VectorType::Probabilities {
@@ -1105,8 +1135,17 @@ impl Lower {
                 return Ok(());
             }
         }
-        if let Expr::Call(op, args) = expr {
-            let tensor = match (op.as_str(), args.as_slice()) {
+        let matrix_arguments;
+        let tensor_call = match expr {
+            Expr::Call(op, args) => Some((op.as_str(), args.as_slice())),
+            Expr::Binary(op, left, right) if op == "@" => {
+                matrix_arguments = [(**left).clone(), (**right).clone()];
+                Some(("matmul", matrix_arguments.as_slice()))
+            }
+            _ => None,
+        };
+        if let Some((op, args)) = tensor_call {
+            let tensor = match (op, args) {
                 ("reshape", [x, Expr::List(dims)]) => {
                     let x = self.value(x)?;
                     ensure!(x != out, "in-place reshape is unsupported; bind the view to a new name");
@@ -1121,16 +1160,15 @@ impl Lower {
                             Ok(n as usize)
                         })
                         .collect::<Result<Vec<_>>>()?;
-                    ensure!(
-                        crate::model::validate_shape(&shape)? == self.size(&x)?,
-                        "reshape element count mismatch"
-                    );
+                    let tensor = self.tensor_type(&x)?.reshape(
+                        shape.clone(), vec![None; shape.len()], ShapeLimits::REGISTER,
+                    )?;
                     Some((
                         I::Reshape {
                             out: out.into(),
                             input: x,
                         },
-                        shape,
+                        tensor,
                     ))
                 }
                 (
@@ -1189,7 +1227,7 @@ impl Lower {
                             dilation,
                             groups: g as usize,
                         },
-                        geometry.shape(),
+                        TensorType::unnamed(DType::F32, geometry.shape(), ShapeLimits::REGISTER)?,
                     ))
                 }
                 ("max_pool2d", [x, Expr::List(kernel), Expr::List(stride)])
@@ -1211,176 +1249,110 @@ impl Lower {
                     } else {
                         I::AvgPool2d { out: out.into(), input: x, kernel, stride }
                     };
-                    Some((instruction, geometry.shape()))
+                    Some((instruction, TensorType::unnamed(DType::F32, geometry.shape(), ShapeLimits::REGISTER)?))
                 }
                 ("transpose", [x]) => {
                     let x = self.value(x)?;
                     ensure!(x != out, "in-place transpose is unsupported; bind the view to a new name");
-                    let shape = self.shape(&x)?;
-                    ensure!(shape.len() == 2, "transpose requires rank 2");
+                    let tensor = self.tensor_type(&x)?.transpose(ShapeLimits::REGISTER)?;
                     Some((
                         I::Transpose {
                             out: out.into(),
                             input: x,
                         },
-                        vec![shape[1], shape[0]],
+                        tensor,
                     ))
                 }
                 ("permute", [x, Expr::List(order)]) => {
                     let x = self.value(x)?;
                     ensure!(x != out, "in-place permute is unsupported; bind the view to a new name");
-                    let shape = self.shape(&x)?;
-                    let input_axes = self.axes.get(&x).cloned().unwrap_or_else(|| vec![None; shape.len()]);
-                    ensure!(order.len() == shape.len(), "permute requires one axis per tensor dimension");
+                    let input = self.tensor_type(&x)?;
                     let mut axes = Vec::with_capacity(order.len());
-                    let mut seen = std::collections::HashSet::new();
                     for axis in order {
                         let index = match axis {
-                            Expr::Number(_) | Expr::Unary(_, _) => {
-                                let value = scalar_literal(axis)?;
-                                ensure!(value >= 0. && value.fract() == 0. && value < shape.len() as f32,
-                                    "permute axis index is out of range");
-                                value as usize
-                            }
-                            Expr::Name(name) => input_axes.iter().position(|axis| axis.as_deref() == Some(name.as_str()))
-                                .with_context(|| format!("unknown named permute axis: {name}"))?,
+                            Expr::Number(_) | Expr::Unary(_, _) => tensor_axis(&input, axis)?,
+                            Expr::Name(name) => input.axis(name)?,
                             _ => bail!("permute axes must be integer indices or declared axis names"),
                         };
-                        ensure!(seen.insert(index), "permute axes must form a bijection");
                         axes.push(index);
                     }
-                    let output_shape = axes.iter().map(|&axis| shape[axis]).collect::<Vec<_>>();
+                    let tensor = input.permute(&axes, ShapeLimits::REGISTER)
+                        .context("permute axes must form a bijection")?;
                     Some((
-                        I::Permute { out: out.into(), input: x, axes: axes.clone() },
-                        output_shape,
+                        I::Permute { out: out.into(), input: x, axes },
+                        tensor,
                     ))
                 }
                 ("batch_matmul", [a, b]) => {
                     let a = self.value(a)?;
                     let b = self.value(b)?;
-                    let sa = self.shape(&a)?;
-                    let sb = self.shape(&b)?;
-                    ensure!(sa.len() == 3 && sb.len() == 3
-                        && sa[0] == sb[0] && sa[2] == sb[1],
-                        "batch_matmul requires [B,M,K] and [B,K,N] with equal B");
-                    let left_axes = self.axes.get(&a).cloned().unwrap_or_else(|| vec![None; 3]);
-                    let right_axes = self.axes.get(&b).cloned().unwrap_or_else(|| vec![None; 3]);
-                    for (left, right, message) in [
-                        (&left_axes[0], &right_axes[0], "batch"),
-                        (&left_axes[2], &right_axes[1], "contracting"),
-                    ] {
-                        if let (Some(left), Some(right)) = (left, right) {
-                            ensure!(left == right, "batch_matmul {message} axis mismatch: {left} vs {right}");
-                        }
-                    }
-                    let output_shape = vec![sa[0], sa[1], sb[2]];
+                    let tensor = self.tensor_type(&a)?
+                        .batch_matmul(&self.tensor_type(&b)?, ShapeLimits::REGISTER)
+                        .context("batch_matmul")?;
                     Some((
                         I::BatchMatmul { out: out.into(), left: a, right: b },
-                        output_shape,
+                        tensor,
                     ))
                 }
                 ("matmul", [a, b]) => {
                     let a = self.value(a)?;
                     let b = self.value(b)?;
-                    let sa = self.shape(&a)?;
-                    let sb = self.shape(&b)?;
-                    ensure!(
-                        sa.len() == 2 && sb.len() == 2 && sa[1] == sb[0],
-                        "matmul requires [M,K] and [K,N]"
-                    );
+                    let tensor = self.tensor_type(&a)?
+                        .matmul(&self.tensor_type(&b)?, ShapeLimits::REGISTER)
+                        .context("matrix product axis mismatch")?;
                     Some((
                         I::Matmul {
                             out: out.into(),
                             left: a,
                             right: b,
                         },
-                        vec![sa[0], sb[1]],
+                        tensor,
                     ))
                 }
                 ("layer_norm", [x, gamma, beta, axis, epsilon]) => {
                     let x = self.value(x)?;
                     let gamma = self.value(gamma)?;
                     let beta = self.value(beta)?;
-                    let shape = self.shape(&x)?;
-                    let axis = if let Expr::Text(name) = axis {
-                        self.axes.get(&x)
-                            .and_then(|axes| axes.iter().position(|axis| axis.as_deref() == Some(name.as_str())))
-                            .with_context(|| format!("unknown named LayerNorm axis: {name}"))?
-                    } else {
-                        let value = scalar_literal(axis)?;
-                        ensure!(value >= 0. && value.fract() == 0. && value < shape.len() as f32,
-                            "LayerNorm axis must be a nonnegative in-range integer");
-                        value as usize
-                    };
-                    let width = shape[axis];
-                    ensure!(self.shape(&gamma)? == vec![width] && self.shape(&beta)? == vec![width],
-                        "LayerNorm gamma/beta must match the normalized axis width");
+                    let tensor = self.tensor_type(&x)?;
+                    let axis = tensor_axis(&tensor, axis).context("LayerNorm")?;
+                    tensor.validate_normalization(&self.tensor_type(&gamma)?, &self.tensor_type(&beta)?, axis)?;
                     let epsilon = scalar_literal(epsilon)?;
                     ensure!(epsilon > 0., "LayerNorm epsilon must be positive");
                     Some((
                         I::LayerNorm { out: out.into(), input: x, gamma, beta, axis, epsilon },
-                        shape,
+                        tensor,
                     ))
                 }
                 ("softmax", [x, axis]) => {
                     let x = self.value(x)?;
-                    let shape = self.shape(&x)?;
-                    let axis = if let Expr::Text(name) = axis {
-                        self.axes.get(&x)
-                            .and_then(|axes| axes.iter().position(|axis| axis.as_deref() == Some(name.as_str())))
-                            .with_context(|| format!("unknown named softmax axis: {name}"))? as f32
-                    } else {
-                        scalar_literal(axis)?
-                    };
-                    ensure!(
-                        axis >= 0. && axis.fract() == 0. && axis < shape.len() as f32,
-                        "softmax axis must be a nonnegative in-range integer or declared axis name"
-                    );
+                    let tensor = self.tensor_type(&x)?;
+                    let axis = tensor_axis(&tensor, axis).context("softmax")?;
                     Some((
                         I::SoftmaxAxis {
                             out: out.into(),
                             input: x,
-                            axis: axis as usize,
+                            axis,
                         },
-                        shape,
+                        tensor,
                     ))
                 }
                 ("scale", [x, factor]) => {
                     let factor = scalar_literal(factor)?;
                     let x = self.value(x)?;
-                    let shape = self.shape(&x)?;
+                    let tensor = self.tensor_type(&x)?;
                     Some((
                         I::Scale {
                             out: out.into(),
                             input: x,
                             factor,
                         },
-                        shape,
+                        tensor,
                     ))
                 }
                 _ => None,
             };
-            if let Some((instruction, shape)) = tensor {
-                let output_axes = match &instruction {
-                    I::Transpose { input, .. } => self.axes.get(input).map(|axes| vec![axes[1].clone(), axes[0].clone()]),
-                    I::Permute { input, axes, .. } => self.axes.get(input).map(|labels| axes.iter().map(|&axis| labels[axis].clone()).collect()),
-                    I::Matmul { left, right, .. } => {
-                        let a = self.axes.get(left).cloned().unwrap_or_else(|| vec![None; 2]);
-                        let b = self.axes.get(right).cloned().unwrap_or_else(|| vec![None; 2]);
-                        Some(vec![a[0].clone(), b[1].clone()])
-                    }
-                    I::BatchMatmul { left, right, .. } => {
-                        let a = self.axes.get(left).cloned().unwrap_or_else(|| vec![None; 3]);
-                        let b = self.axes.get(right).cloned().unwrap_or_else(|| vec![None; 3]);
-                        Some(vec![a[0].clone(), a[1].clone(), b[2].clone()])
-                    }
-                    I::SoftmaxAxis { input, .. } | I::Scale { input, .. } | I::LayerNorm { input, .. } => self.axes.get(input).cloned(),
-                    _ => None,
-                };
-                self.register_shape(out, shape)?;
-                if let Some(axes) = output_axes {
-                    self.axes.insert(out.into(), axes);
-                }
+            if let Some((instruction, tensor)) = tensor {
+                self.register_tensor(out, tensor)?;
                 self.program.version = 3;
                 self.types.insert(out.into(), VectorType::F32);
                 self.program.instructions.push(instruction);
@@ -1465,44 +1437,13 @@ impl Lower {
                     p.shape.iter().product(),
                 )
             }
-            Expr::Binary(op, a, b) if op == "@" => {
-                let a = self.value(a)?;
-                let b = self.value(b)?;
-                let sa = self.shape(&a)?;
-                let sb = self.shape(&b)?;
-                ensure!(
-                    sa.len() == 2 && sb.len() == 2 && sa[1] == sb[0],
-                    "matrix product requires [M,K] @ [K,N]"
-                );
-                let left_axes = self.axes.get(&a).cloned().unwrap_or_else(|| vec![None; 2]);
-                let right_axes = self.axes.get(&b).cloned().unwrap_or_else(|| vec![None; 2]);
-                if let (Some(left), Some(right)) = (&left_axes[1], &right_axes[0]) {
-                    ensure!(left == right,
-                        "matrix product axis mismatch: left contracts {left}, right contracts {right}");
-                }
-                self.program.version = 3;
-                let output_shape = vec![sa[0], sb[1]];
-                let len = output_shape.iter().product();
-                (
-                    I::Matmul {
-                        out: out.into(),
-                        left: a,
-                        right: b,
-                    },
-                    len,
-                )
-            }
             Expr::Binary(op, a, b) if op == "+" || op == "*" || op == "-" => {
                 let a = self.value(a)?;
                 let b = self.value(b)?;
                 let len = self.size(&a)?;
-                ensure!(
-                    self.shape(&a)? == self.shape(&b)?,
-                    "tensor arithmetic shape mismatch"
-                );
                 let b = if op == "-" {
                     let neg = self.fresh();
-                    self.register_shape(&neg, self.shape(&a)?)?;
+                    self.register_tensor(&neg, self.tensor_type(&b)?)?;
                     self.program.instructions.push(I::Neg {
                         out: neg.clone(),
                         input: b,
@@ -1558,7 +1499,6 @@ impl Lower {
                     let a = self.value(a)?;
                     let b = self.value(b)?;
                     let len = self.size(&a)?;
-                    ensure!(self.shape(&a)? == self.shape(&b)?, "minimum shape mismatch");
                     (
                         I::Minimum {
                             out: out.into(),
@@ -1658,10 +1598,6 @@ impl Lower {
                     let a = self.value(a)?;
                     let b = self.value(b)?;
                     let len = self.size(&a)?;
-                    ensure!(
-                        self.shape(&a)? == self.shape(&b)?,
-                        "tensor arithmetic shape mismatch"
-                    );
                     (
                         if op == "add" {
                             I::Add {
@@ -1712,10 +1648,6 @@ impl Lower {
                     let x = self.value(x)?;
                     let len = self.size(&x)?;
                     self.program.instructions.push(I::Label { name: after_a });
-                    ensure!(
-                        self.shape(&p)? == vec![1] || self.shape(&p)? == self.shape(&x)?,
-                        "gate/route probability shape mismatch"
-                    );
                     let instruction = if op == "gate" {
                         I::Gate {
                             out: out.into(),
@@ -1731,10 +1663,6 @@ impl Lower {
                         });
                         let b = self.value(&args[2])?;
                         self.program.instructions.push(I::Label { name: after_b });
-                        ensure!(
-                            self.shape(&b)? == self.shape(&x)?,
-                            "route branch shape mismatch"
-                        );
                         I::Route {
                             out: out.into(),
                             probability: p,
@@ -1800,12 +1728,11 @@ impl Lower {
             I::Softmax { .. } => VectorType::Probabilities,
             _ => VectorType::F32,
         };
-        let shape = match &instruction {
-            I::Read { .. } => vec![len],
-            I::Reshape { input, .. } => self.shape(input)?,
+        let tensor = match &instruction {
+            I::Reshape { input, .. } => self.tensor_type(input)?,
             I::Slice {
                 input, start: 0, ..
-            } if matches!(expr, Expr::Name(_)) => self.shape(input)?,
+            } if matches!(expr, Expr::Name(_)) => self.tensor_type(input)?,
             I::Neg { input, .. }
             | I::Detach { input, .. }
             | I::Exp { input, .. }
@@ -1813,41 +1740,34 @@ impl Lower {
             | I::Tanh { input, .. }
             | I::Sigmoid { input, .. }
             | I::Relu { input, .. }
-            | I::Clip { input, .. } => self.shape(input)?,
-            I::Add { left, .. } | I::Mul { left, .. } | I::Minimum { left, .. } => {
-                self.shape(left)?
+            | I::Clip { input, .. } => self.tensor_type(input)?,
+            I::Add { left, right, .. } | I::Mul { left, right, .. } | I::Minimum { left, right, .. } => {
+                self.tensor_type(left)?.elementwise(&self.tensor_type(right)?, ShapeLimits::REGISTER)?
             }
-            I::Matmul { left, right, .. } => {
-                let left = self.shape(left)?;
-                let right = self.shape(right)?;
-                ensure!(
-                    left.len() == 2 && right.len() == 2 && left[1] == right[0],
-                    "matrix product requires [M,K] @ [K,N]"
-                );
-                vec![left[0], right[1]]
+            I::Gate { probability, input, .. } => self.gated_type(probability, self.tensor_type(input)?)?,
+            I::Route { probability, yes, no, .. } => {
+                let value = self.tensor_type(yes)?.elementwise(&self.tensor_type(no)?, ShapeLimits::REGISTER)?;
+                self.gated_type(probability, value)?
             }
-            I::Gate { input, .. } | I::Route { yes: input, .. } => self.shape(input)?,
             I::Softmax { input, .. } | I::LogSoftmax { input, .. } => {
-                ensure!(
-                    self.shape(input)?.len() == 1,
-                    "rank > 1 softmax requires explicit axis"
-                );
-                vec![len]
+                let tensor = self.tensor_type(input)?;
+                ensure!(tensor.rank() == 1, "rank > 1 softmax requires explicit axis");
+                tensor
             }
             I::Linear { input, .. } => {
                 ensure!(
                     self.shape(input)?.len() == 1,
                     "linear requires vector input; use matmul for matrices"
                 );
-                vec![len]
+                TensorType::unnamed(DType::F32, vec![len], ShapeLimits::REGISTER)?
             }
             I::Slice { input, .. } => {
                 ensure!(self.shape(input)?.len() == 1, "slice requires vector input");
-                vec![len]
+                TensorType::unnamed(DType::F32, vec![len], ShapeLimits::REGISTER)?
             }
-            _ => vec![len],
+            _ => TensorType::unnamed(DType::F32, vec![len], ShapeLimits::REGISTER)?,
         };
-        self.register_shape(out, shape)?;
+        self.register_tensor(out, tensor)?;
 
         self.types.insert(out.into(), kind);
         self.program.instructions.push(instruction);

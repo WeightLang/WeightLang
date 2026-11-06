@@ -30,6 +30,31 @@ fn schema(bytes: &[u8]) -> Result<Value> {
             .collect(),
     ))
 }
+
+// Resolve declared imports first; semantic validation needs the complete source closure.
+fn source_dependencies(file: &str, source: &str) -> Result<Vec<String>> {
+    let mut dependencies = Vec::new();
+    for (_, import) in wgt_language::script::operators::imports(source)? {
+        if let Some(relative) = import.strip_prefix("./") {
+            manifest::relative_file(relative)?;
+            let parent = Path::new(file).parent().context("source parent")?;
+            dependencies.push(
+                parent
+                    .join(relative)
+                    .to_str()
+                    .context("non-UTF8 import")?
+                    .replace('\\', "/"),
+            );
+        } else {
+            ensure!(
+                !import.starts_with('.') && !Path::new(&import).is_absolute(),
+                "unsafe source import: {import}"
+            );
+        }
+    }
+    Ok(dependencies)
+}
+
 fn source_files(project: &Path) -> Result<BTreeSet<String>> {
     let tracked: BTreeSet<String> = registry::git(project, &["ls-files", "-z"])?
         .split('\0')
@@ -67,27 +92,12 @@ fn source_files(project: &Path) -> Result<BTreeSet<String>> {
         );
         regular(&project.join(&file))?;
         let text = fs::read_to_string(project.join(&file))?;
-        wgt_language::script::parse(&text)?;
-        for (_, import) in wgt_language::script::operators::imports(&text)? {
-            if let Some(relative) = import.strip_prefix("./") {
-                manifest::relative_file(relative)?;
-                let parent = Path::new(&file).parent().context("source parent")?;
-                let dependency = parent
-                    .join(relative)
-                    .to_str()
-                    .context("non-UTF8 import")?
-                    .replace('\\', "/");
-                ensure!(
-                    tracked.contains(&dependency),
-                    "missing tracked source module: {dependency}"
-                );
-                pending.push(dependency);
-            } else {
-                ensure!(
-                    !import.starts_with('.') && !Path::new(&import).is_absolute(),
-                    "unsafe source import: {import}"
-                );
-            }
+        for dependency in source_dependencies(&file, &text)? {
+            ensure!(
+                tracked.contains(&dependency),
+                "missing tracked source module: {dependency}"
+            );
+            pending.push(dependency);
         }
     }
     ensure!(
@@ -99,6 +109,9 @@ fn source_files(project: &Path) -> Result<BTreeSet<String>> {
             regular(&project.join(file))?;
             files.insert(file.into());
         }
+    }
+    for file in files.iter().filter(|file| file.ends_with(".wgt")) {
+        crate::source_check::check_file(&project.join(file))?;
     }
     Ok(files)
 }
@@ -201,15 +214,6 @@ pub fn package(
     Ok(index)
 }
 
-fn record(lock: &mut Lock, known: &Lock, m: &str, v: &str, key: &str, value: String) -> Result<()> {
-    let k = (m.into(), v.into(), key.into());
-    ensure!(
-        known.get(&k).is_none_or(|old| old == &value),
-        "published version changed: {m}@{v} {key}"
-    );
-    lock.insert(k, value);
-    Ok(())
-}
 fn payload(remote: &dyn Remote, base: &str, meta: &Value) -> Result<Vec<u8>> {
     let asset = meta["asset"].as_str().context("asset")?;
     manifest::relative_file(asset)?;
@@ -246,7 +250,7 @@ pub fn install(
         let target = stage.join(path);
         fs::create_dir_all(target.parent().context("source parent")?)?;
         fs::write(target, &bytes)?;
-        record(
+        manifest::record_lock(
             entries,
             known,
             m,
@@ -257,25 +261,15 @@ pub fn install(
     }
     for path in sources.keys().filter(|path| path.ends_with(".wgt")) {
         let text = fs::read_to_string(stage.join(path))?;
-        wgt_language::script::parse(&text)?;
-        for (_, import) in wgt_language::script::operators::imports(&text)? {
-            if let Some(relative) = import.strip_prefix("./") {
-                manifest::relative_file(relative)?;
-                let dependency = Path::new(path)
-                    .parent()
-                    .context("source parent")?
-                    .join(relative);
-                ensure!(
-                    sources.contains_key(dependency.to_str().context("import path")?),
-                    "missing packaged source module: {import}"
-                );
-            } else {
-                ensure!(
-                    !import.starts_with('.') && !Path::new(&import).is_absolute(),
-                    "unsafe source import: {import}"
-                );
-            }
+        for dependency in source_dependencies(path, &text)? {
+            ensure!(
+                sources.contains_key(&dependency),
+                "missing packaged source module: {dependency}"
+            );
         }
+    }
+    for path in sources.keys().filter(|path| path.ends_with(".wgt")) {
+        crate::source_check::check_file(&stage.join(path))?;
     }
     // Previously selected variants remain selected on subsequent locked fetches.
     let mut selected: BTreeSet<String> = known
@@ -313,7 +307,7 @@ pub fn install(
         fs::create_dir_all(stage.join("weights"))?;
         let path = format!("weights/{name}.safetensors");
         fs::write(stage.join(&path), &bytes)?;
-        record(
+        manifest::record_lock(
             entries,
             known,
             m,

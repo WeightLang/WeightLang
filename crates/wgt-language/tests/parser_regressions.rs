@@ -320,7 +320,7 @@ fn forward(x) {
 "#;
     let error = wgt_language::adaptive::parse(source)
         .expect_err("different named batch axes must be rejected");
-    assert!(format!("{error:#}").contains("batch_matmul batch axis mismatch"));
+    assert!(format!("{error:#}").contains("tensor axis names disagree: batch vs other_batch"));
 }
 
 #[test]

@@ -5,7 +5,7 @@ use serde_json::json;
 use std::{fs, path::PathBuf};
 use weightlang_wgt::{
     artifact::hash_file,
-    package_artifact::{publish_native_payloads, NATIVE_FORMAT, NATIVE_PAYLOADS},
+    package_artifact::{publish_native_payloads, NATIVE_FORMAT, NATIVE_PAYLOADS, NATIVE_SOURCE_FILE},
 };
 use wgt_language::script;
 
@@ -115,7 +115,7 @@ fn main() -> Result<()> {
                 let steps = build["steps"].as_u64().context("missing training steps")?;
                 let input = build["input"].as_u64().context("missing input width")?;
                 let output_width = build["output"].as_u64().context("missing output width")?;
-                fs::write(stage.path().join("source.wgt"), &text)?;
+                fs::write(stage.path().join(NATIVE_SOURCE_FILE), &text)?;
                 let mut manifest = json!({
                     "format": NATIVE_FORMAT,
                     "name": text.lines().find_map(|l| l.split('#').next().unwrap_or("").trim().strip_prefix("model ")).map(str::trim).unwrap_or(source.file_stem().unwrap().to_str().context("UTF-8 model name")?),

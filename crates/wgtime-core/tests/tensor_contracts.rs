@@ -104,3 +104,16 @@ fn annotated_computed_value_keeps_numeric_and_gradient_semantics() {
     pass.backward(&[1.; 6], &BTreeMap::new()).unwrap();
     close(pass.input_gradient().unwrap(), &input.map(|x| 1. - x.tanh().powi(2)), 0.00001);
 }
+
+#[test]
+fn maximum_rank_permutation_preserves_values_and_gradient_order() {
+    let source = "wgt 0.5\nmodel RankEight\ninput x: f32[6]\noutput y: f32[6]\nfn forward(x) { let tensor = reshape(x,[1,1,1,1,1,1,2,3]); return reshape(permute(tensor,[7,6,5,4,3,2,1,0]),[6]); }\n";
+    for compiled in [false, true] {
+        let mut model = session(source);
+        if compiled { model.enable_compiled().unwrap(); }
+        let mut pass = model.forward(&[1., 2., 3., 4., 5., 6.], 1000, 1 << 20).unwrap();
+        assert_eq!(pass.output(), &[1., 4., 2., 5., 3., 6.]);
+        pass.backward(&[1., 2., 3., 4., 5., 6.], &BTreeMap::new()).unwrap();
+        assert_eq!(pass.input_gradient().unwrap(), &[1., 3., 5., 2., 4., 6.]);
+    }
+}

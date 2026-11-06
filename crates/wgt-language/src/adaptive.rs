@@ -263,23 +263,18 @@ pub struct InstructionMetadata<'a> {
 impl Instruction {
     pub fn metadata(&self) -> InstructionMetadata<'_> {
         use Instruction::*;
-        let (minimum_version, output, inputs, memory) = match self {
+        let (output, inputs, memory) = match self {
             Conv { out, input, kernel, bias, .. }
             | LayerNorm { out, input, gamma: kernel, beta: bias, .. } =>
-                (3, Some(out), [Some(input), Some(kernel), Some(bias)], None),
+                (Some(out), [Some(input), Some(kernel), Some(bias)], None),
             MaxPool2d { out, input, .. }
             | AvgPool2d { out, input, .. }
             | Reshape { out, input }
             | Transpose { out, input }
             | Permute { out, input, .. }
             | SoftmaxAxis { out, input, .. }
-            | Scale { out, input, .. } =>
-                (3, Some(out), [Some(input), None, None], None),
-            Matmul { out, left, right } | BatchMatmul { out, left, right } =>
-                (3, Some(out), [Some(left), Some(right), None], None),
-            ValidateProbabilities { out, input } =>
-                (2, Some(out), [Some(input), None, None], None),
-            Linear { out, input, .. }
+            | Scale { out, input, .. }
+            | Linear { out, input, .. }
             | Tanh { out, input }
             | Sigmoid { out, input }
             | Relu { out, input }
@@ -288,38 +283,41 @@ impl Instruction {
             | Exp { out, input }
             | Log { out, input }
             | LogSoftmax { out, input }
+            | ValidateProbabilities { out, input }
             | Clip { out, input, .. }
             | Sum { out, input }
             | Neg { out, input }
             | Mean { out, input }
             | Slice { out, input, .. } =>
-                (1, Some(out), [Some(input), None, None], None),
-            Add { out, left, right }
+                (Some(out), [Some(input), None, None], None),
+            Matmul { out, left, right }
+            | BatchMatmul { out, left, right }
+            | Add { out, left, right }
             | Mul { out, left, right }
             | Minimum { out, left, right } =>
-                (1, Some(out), [Some(left), Some(right), None], None),
+                (Some(out), [Some(left), Some(right), None], None),
             Constant { out, .. } | Read { out, .. } | ResourceState { out } =>
-                (1, Some(out), [None; 3], None),
+                (Some(out), [None; 3], None),
             Write { value, .. } | Return { value } =>
-                (1, None, [Some(value), None, None], None),
+                (None, [Some(value), None, None], None),
             Gate { out, probability, input } =>
-                (1, Some(out), [Some(probability), Some(input), None], None),
+                (Some(out), [Some(probability), Some(input), None], None),
             Route { out, probability, yes, no } =>
-                (1, Some(out), [Some(probability), Some(yes), Some(no)], None),
+                (Some(out), [Some(probability), Some(yes), Some(no)], None),
             InferenceSkip { probability, .. } =>
-                (1, None, [Some(probability), None, None], None),
+                (None, [Some(probability), None, None], None),
             Branch { condition, .. } =>
-                (1, None, [Some(condition), None, None], None),
+                (None, [Some(condition), None, None], None),
             MemoryAlloc { out, .. } | MemoryFree { memory: out } =>
-                (1, None, [None; 3], Some(out)),
+                (None, [None; 3], Some(out)),
             MemoryRead { out, memory, address } =>
-                (1, Some(out), [Some(address), None, None], Some(memory)),
+                (Some(out), [Some(address), None, None], Some(memory)),
             MemoryWrite { memory, address, value } =>
-                (1, None, [Some(address), Some(value), None], Some(memory)),
-            Label { .. } | Jump { .. } => (1, None, [None; 3], None),
+                (None, [Some(address), Some(value), None], Some(memory)),
+            Label { .. } | Jump { .. } => (None, [None; 3], None),
         };
         InstructionMetadata {
-            minimum_version,
+            minimum_version: self.contract().min_ir_version,
             output: output.map(String::as_str),
             inputs: inputs.map(|input| input.map(String::as_str)),
             memory: memory.map(String::as_str),

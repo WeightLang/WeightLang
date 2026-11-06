@@ -4,6 +4,10 @@ use anyhow::{ensure, Context, Result};
 use std::{fs::{self, OpenOptions}, path::Path};
 use wgtime::{publication::{self, Mode}, Request};
 
+/// Fixed output names shared by compiled build clients and native artifact tooling.
+pub const BUILD_MODEL_FILE: &str = "model.json";
+pub const BUILD_CHECKPOINT_FILE: &str = "checkpoint.json";
+
 fn artifact_client() -> Result<wgtime::Client> {
     let endpoint = std::env::var("WGTIME_ENDPOINT").unwrap_or_else(|_| wgtime::DEFAULT_ENDPOINT.into());
     wgtime::Client::connect(Path::new(&endpoint), unsafe { libc::geteuid() })

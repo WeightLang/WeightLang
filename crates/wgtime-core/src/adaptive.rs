@@ -2,6 +2,7 @@
 //! call, and committed only when that call returns successfully.
 use anyhow::{bail, ensure, Context, Result};
 use std::collections::HashMap;
+use wgt_language::tensor::MAX_RANK;
 
 pub use wgt_language::adaptive::{parse, parse_with_functions};
 mod autodiff;
@@ -25,7 +26,7 @@ enum Op {
     AvgPool2d(usize, usize, wgt_language::adaptive::Pool2dGeometry),
     Reshape(usize, usize),
     Transpose(usize, usize, usize, usize),
-    Permute(usize, usize, [usize; 8], [usize; 8], usize),
+    Permute(usize, usize, [usize; MAX_RANK], [usize; MAX_RANK], usize),
     Matmul(usize, usize, usize, usize, usize, usize),
     BatchMatmul(usize, usize, usize, usize, usize, usize, usize),
     LayerNorm(usize, usize, usize, usize, tensor::AxisGroups, f32),
@@ -189,11 +190,6 @@ impl AdaptiveSession {
         }
         let mut maximum = 0;
         for r in &program.registers {
-            r.validate_tensor_shape(program.version)?;
-            // Older IR carries explicit geometry too. Its operations retain their
-            // historical flat semantics; only v3 admits multidimensional registers.
-            ensure!(program.version >= 3 || r.shape == [r.len], "multiaxis registers require adaptive IR version 3");
-
             floats = floats
                 .checked_add(r.len)
                 .context("register size overflow")?;
@@ -216,86 +212,59 @@ impl AdaptiveSession {
                     Instruction::Conv { out,input,kernel,bias,stride,padding,dilation,groups } => {
                         let (r,x,k,b)=(dest(out)?,reg(input)?,reg(kernel)?,reg(bias)?);
                         let g=wgt_language::adaptive::ConvGeometry::new(&program.registers[x].shape,&program.registers[k].shape,&program.registers[b].shape,stride,padding,dilation,*groups)?;
-                        ensure!(program.registers[r].shape==g.shape(),"conv output shape mismatch");
                         Op::Conv(r,x,k,b,g)
                     },
                     Instruction::MaxPool2d { out, input, kernel, stride } => {
                         let (r, x) = (dest(out)?, reg(input)?);
                         let g = wgt_language::adaptive::Pool2dGeometry::new(&program.registers[x].shape, kernel, stride)?;
-                        ensure!(program.registers[r].shape == g.shape(), "max_pool2d output shape mismatch");
                         Op::MaxPool2d(r, x, g)
                     },
                     Instruction::AvgPool2d { out, input, kernel, stride } => {
                         let (r, x) = (dest(out)?, reg(input)?);
                         let g = wgt_language::adaptive::Pool2dGeometry::new(&program.registers[x].shape, kernel, stride)?;
-                        ensure!(program.registers[r].shape == g.shape(), "avg_pool2d output shape mismatch");
                         Op::AvgPool2d(r, x, g)
                     },
                     Instruction::Reshape { out, input } => {
 
                         let (r,x) = (dest(out)?,reg(input)?);
-                        ensure!(len(r) == len(x), "reshape element count mismatch");
                         Op::Reshape(r,x)
                     },
                     Instruction::Transpose { out, input } => {
                         let (r,x) = (dest(out)?,reg(input)?);
                         let shape = &program.registers[x].shape;
-                        ensure!(shape.len() == 2 && program.registers[r].shape == [shape[1],shape[0]], "transpose shape mismatch");
                         Op::Transpose(r,x,shape[0],shape[1])
                     },
                     Instruction::Permute { out, input, axes } => {
                         let (r,x) = (dest(out)?,reg(input)?);
                         let shape = &program.registers[x].shape;
-                        ensure!(axes.len() == shape.len() && (1..=8).contains(&axes.len()),
-                            "permute rank mismatch");
-                        let mut seen = [false; 8];
-                        let mut order = [0usize; 8];
-                        for (out_axis, &input_axis) in axes.iter().enumerate() {
-                            ensure!(input_axis < shape.len() && !seen[input_axis],
-                                "permute axes must form a bijection");
-                            seen[input_axis] = true;
-                            order[out_axis] = input_axis;
-                        }
-                        let output_shape = axes.iter().map(|&axis| shape[axis]).collect::<Vec<_>>();
-                        ensure!(program.registers[r].shape == output_shape, "permute output shape mismatch");
-                        let mut input_shape = [1usize; 8];
+                        let mut order = [0usize; MAX_RANK];
+                        order[..axes.len()].copy_from_slice(axes);
+                        let mut input_shape = [1usize; MAX_RANK];
                         input_shape[..shape.len()].copy_from_slice(shape);
                         Op::Permute(r,x,input_shape,order,axes.len())
                     },
                     Instruction::Matmul { out, left, right } => {
                         let (r,a,b) = (dest(out)?,reg(left)?,reg(right)?);
                         let sa = &program.registers[a].shape; let sb = &program.registers[b].shape;
-                        ensure!(sa.len() == 2 && sb.len() == 2 && sa[1] == sb[0] && program.registers[r].shape == [sa[0],sb[1]], "matmul shape mismatch");
                         Op::Matmul(r,a,b,sa[0],sa[1],sb[1])
                     },
                     Instruction::BatchMatmul { out, left, right } => {
                         let (r,a,b) = (dest(out)?,reg(left)?,reg(right)?);
                         let sa = &program.registers[a].shape;
                         let sb = &program.registers[b].shape;
-                        ensure!(sa.len() == 3 && sb.len() == 3
-                            && sa[0] == sb[0] && sa[2] == sb[1]
-                            && program.registers[r].shape == [sa[0],sa[1],sb[2]],
-                            "batch_matmul shape mismatch");
                         Op::BatchMatmul(r,a,b,sa[0],sa[1],sa[2],sb[2])
                     },
                     Instruction::LayerNorm { out, input, gamma, beta, axis, epsilon } => {
                         let (r,x,g,b) = (dest(out)?,reg(input)?,reg(gamma)?,reg(beta)?);
                         let groups = tensor::AxisGroups::new(&program.registers[x].shape, *axis)?;
-                        ensure!(program.registers[g].shape == [groups.width]
-                            && program.registers[b].shape == [groups.width]
-                            && program.registers[r].shape == program.registers[x].shape,
-                            "LayerNorm tensor geometry mismatch");
-                        ensure!(epsilon.is_finite() && *epsilon > 0., "LayerNorm epsilon must be positive and finite");
                         Op::LayerNorm(r,x,g,b,groups,*epsilon)
                     },
                     Instruction::SoftmaxAxis { out, input, axis } => {
                         let (r,x) = (dest(out)?,reg(input)?);
-                        ensure!(program.registers[r].shape == program.registers[x].shape, "axis softmax shape mismatch");
                         Op::SoftmaxAxis(r,x,tensor::AxisGroups::new(&program.registers[x].shape,*axis)?)
                     },
                     Instruction::Scale { out, input, factor } => {
                         let (r,x) = (dest(out)?,reg(input)?);
-                        ensure!(factor.is_finite() && program.registers[r].shape == program.registers[x].shape, "scale shape/factor mismatch");
                         Op::Scale(r,x,*factor)
                     },
                     Instruction::MemoryAlloc { out, slots, width } => {
@@ -382,26 +351,14 @@ impl AdaptiveSession {
                     Instruction::Add { out, left, right }
                     | Instruction::Mul { out, left, right } => {
                         let (r, a, b) = (dest(out)?, reg(left)?, reg(right)?);
-                        ensure!(
-                            len(r) == len(a) && len(r) == len(b),
-                            "elementwise length mismatch"
-                        );
                         Op::Binary(r, a, b, matches!(instruction, Instruction::Mul { .. }))
                     }
-                    Instruction::Constant { out, data } => {
+                    Instruction::Constant { out, .. } => {
                         let r = dest(out)?;
-                        ensure!(
-                            data.len() == len(r) && data.iter().all(|v| v.is_finite()),
-                            "invalid tensor constant"
-                        );
                         Op::Constant(r, ops.len())
                     }
                     Instruction::Minimum { out, left, right } => {
                         let (r, a, b) = (dest(out)?, reg(left)?, reg(right)?);
-                        ensure!(
-                            len(r) == len(a) && len(a) == len(b),
-                            "minimum shape mismatch"
-                        );
                         Op::Minimum(r, a, b)
                     }
                     Instruction::Clip {
@@ -411,15 +368,10 @@ impl AdaptiveSession {
                         high,
                     } => {
                         let (r, x) = (dest(out)?, reg(input)?);
-                        ensure!(
-                            len(r) == len(x) && low.is_finite() && high.is_finite() && low <= high,
-                            "invalid clip shape or bounds"
-                        );
                         Op::Clip(r, x, *low, *high)
                     }
                     Instruction::Sum { out, input } => {
                         let (r, x) = (dest(out)?, reg(input)?);
-                        ensure!(len(r) == 1, "sum output must be f32[1]");
                         Op::Sum(r, x)
                     }
                     Instruction::Detach { out, input }
@@ -433,7 +385,6 @@ impl AdaptiveSession {
                     | Instruction::Neg { out, input }
                     | Instruction::Relu { out, input } => {
                         let (r, x) = (dest(out)?, reg(input)?);
-                        ensure!(len(r) == len(x), "unary length mismatch");
                         let kind = match instruction {
                             Instruction::Tanh { .. } => Unary::Tanh,
                             Instruction::Sigmoid { .. } => Unary::Sigmoid,
@@ -451,7 +402,6 @@ impl AdaptiveSession {
                     }
                     Instruction::Mean { out, input } => {
                         let (r, x) = (dest(out)?, reg(input)?);
-                        ensure!(len(r) == 1, "mean output must be f32[1]");
                         Op::Mean(r, x)
                     }
                     Instruction::Gate {
@@ -460,10 +410,6 @@ impl AdaptiveSession {
                         input,
                     } => {
                         let (r, p, x) = (dest(out)?, reg(probability)?, reg(input)?);
-                        ensure!(
-                            len(r) == len(x) && (len(p) == 1 || len(p) == len(r)),
-                            "gate shape mismatch"
-                        );
                         Op::Blend(r, p, x, None)
                     }
                     Instruction::Route {
@@ -473,12 +419,6 @@ impl AdaptiveSession {
                         no,
                     } => {
                         let (r, p, a, b) = (dest(out)?, reg(probability)?, reg(yes)?, reg(no)?);
-                        ensure!(
-                            len(r) == len(a)
-                                && len(r) == len(b)
-                                && (len(p) == 1 || len(p) == len(r)),
-                            "route shape mismatch"
-                        );
                         Op::Blend(r, p, a, Some(b))
                     }
                     Instruction::InferenceSkip {
@@ -488,10 +428,6 @@ impl AdaptiveSession {
                     } => Op::InferenceSkip(reg(probability)?, *when_one, label(target)?),
                     Instruction::Slice { out, input, start } => {
                         let (r, x) = (dest(out)?, reg(input)?);
-                        ensure!(
-                            start.checked_add(len(r)).is_some_and(|end| end <= len(x)),
-                            "slice out of bounds"
-                        );
                         Op::Slice(r, x, *start)
                     }
                     Instruction::Label { .. } => Op::Label,
@@ -525,15 +461,8 @@ impl AdaptiveSession {
                 match op {
                     Op::Read(r,_) => ensure!(*shape(r) == [program.registers[r].len], "parameter reads require a vector; reshape explicitly"),
                     Op::Write(_,r) => ensure!(*shape(r) == [program.registers[r].len], "parameter writes require a vector; reshape explicitly"),
-                    Op::Binary(r,a,b,_) | Op::Minimum(r,a,b) => ensure!(shape(r) == shape(a) && shape(a) == shape(b), "elementwise geometry mismatch"),
-                    Op::Unary(r,x,k) => {
-                        ensure!(shape(r) == shape(x), "unary geometry mismatch");
-                        ensure!(!matches!(k, Unary::Softmax | Unary::LogSoftmax | Unary::ValidateProbabilities) || shape(x).len() == 1, "vector softmax/validation requires rank 1");
-                    },
-                    Op::Clip(r,x,_,_) => ensure!(shape(r) == shape(x), "clip geometry mismatch"),
                     Op::Linear(r,x,_,_) => ensure!(shape(r).len() == 1 && shape(x).len() == 1, "linear requires vectors"),
                     Op::Slice(r,x,_) => ensure!(shape(r).len() == 1 && shape(x).len() == 1, "slice requires vectors"),
-                    Op::Blend(r,p,a,b) => ensure!(shape(r) == shape(a) && b.is_none_or(|b| shape(b) == shape(a)) && (shape(p) == &[1] || shape(p) == shape(a)), "blend geometry mismatch"),
                     Op::Return(r) => ensure!(shape(r).len() == 1, "model output requires explicit vector reshape"),
                     _ => {},
                 }

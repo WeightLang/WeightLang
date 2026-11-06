@@ -11,6 +11,10 @@ description: 编写和验证本仓库当前 WGT 模型定义与 Rust 主程序�
 
 固定 Shape/DType/命名轴和 stride 元数据共用 `wgt_language::tensor`，详见 [Tensor Contract](../../../docs/tensor-contract.md)。源定义和未信任 IR 都经过 `Program::validate_tensor_contracts`；保留 IR v1/v2/v3 的线格式和 f32 执行边界。新增 Instruction 必须同步 `language/tensor_contracts.json`，运行 `node scripts/check_tensor_contracts.cjs --write` 后再运行不带参数的检查，补齐源级正反例、CPU 数值和 VJP 测试。不能把 metadata dtype、可读重叠 view 或制品 graph 原语当作通用执行能力。
 
+源级变换、矩阵乘法、归一化和逐元素规则直接复用 `TensorType`；Instruction 最低版本从合同目录取得，不另建版本名单。`@` 和 `matmul` 的命名收缩轴检查相同，结果保留未收缩轴名，输出名称必须唯一；命名 attention 为查询和键使用不同轴名。batch 轴只在一侧命名时也保留该名称。复制和保形单输入算子保留轴名，同形逐元素运算按位置细化匿名轴并拒绝冲突或重复；同一寄存器的赋值和条件分支必须兼容已有名称。显式 reshape 清除结果名称，新绑定的类型注解重新声明。LayerNorm 仿射向量的已命名轴须匹配归一化轴。维护这些规则时运行 `cargo test -p wgt-language --test tensor_source_contracts`，并保留既有 CPU/VJP 回归。
+
+gate/route 的同形概率张量也参与轴名合并与冲突检查；route 两支必须兼容。只保留既有 `[1]` 标量门例外，不把 `[1,1]` 或其他单元素 shape 扩展成标量广播。
+
 ## 架构迁移方向
 
 Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT 与 `std/` 聚焦可复用模型架构及模型内部参数/张量流、子模块、分支、循环和状态，并可定义可微 loss。旧通用 WGT 宿主脚本架构正在退出，不新建宿主控制脚本，也不将其描述为持续支持方向；这不表示现有代码已经删除。

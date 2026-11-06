@@ -2,6 +2,7 @@
 use crate::package_artifact::{publish_native_payloads, Info, NATIVE_FORMAT};
 use anyhow::{ensure, Context, Result};
 use std::{fs, path::Path};
+use wgtime_control::persistence::BUILD_MODEL_FILE;
 
 fn regular(path: &Path) -> Result<()> {
     ensure!(
@@ -42,7 +43,7 @@ fn verified(path: &Path) -> Result<Info> {
     for name in crate::package_artifact::index_files(&manifest)? {
         regular(&path.join(name))?;
     }
-    self_contained(&path.join("model.json"))?;
+    self_contained(&path.join(BUILD_MODEL_FILE))?;
     Info::read(path)
 }
 fn destination(output: &Path) -> Result<&Path> {
@@ -64,7 +65,7 @@ pub fn export(input: &Path, output: &Path) -> Result<()> {
     ensure!(input.extension().is_none_or(|e| e != "wgt"), "source export is unsupported; explicitly train/build first, then export a native build directory or model.json");
     let model_path = if input.is_dir() {
         verified(input)?;
-        input.join("model.json")
+        input.join(BUILD_MODEL_FILE)
     } else {
         input.to_path_buf()
     };

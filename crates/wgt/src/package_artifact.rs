@@ -5,14 +5,16 @@ use crate::{
 };
 use anyhow::{ensure, Context, Result};
 use std::{fs, path::Path};
+use wgtime_control::persistence::{BUILD_CHECKPOINT_FILE, BUILD_MODEL_FILE};
 
 pub const NATIVE_FORMAT: &str = "weightlang.native-build.v1";
+pub const NATIVE_SOURCE_FILE: &str = "source.wgt";
 pub const OPERATOR_FORMAT: &str = "weightlang.operators.v1";
 pub const OPERATOR_FILES: [&str; 2] = ["manifest.json", "source.wgt"];
 pub const NATIVE_PAYLOADS: [(&str, &str); 3] = [
-    ("model", "model.json"),
-    ("checkpoint", "checkpoint.json"),
-    ("source", "source.wgt"),
+    ("model", BUILD_MODEL_FILE),
+    ("checkpoint", BUILD_CHECKPOINT_FILE),
+    ("source", NATIVE_SOURCE_FILE),
 ];
 pub const NATIVE_FILES: [&str; 4] = [
     "manifest.json",
@@ -102,9 +104,9 @@ impl Info {
                 "native {key} checksum mismatch"
             );
         }
-        let source = fs::read_to_string(path.join("source.wgt"))?;
+        let source = fs::read_to_string(path.join(NATIVE_SOURCE_FILE))?;
         wgt_language::script::parse(&source)?;
-        let model_report = wgtime_control::persistence::inspect_artifact(&path.join("model.json"), false)?;
+        let model_report = wgtime_control::persistence::inspect_artifact(&path.join(BUILD_MODEL_FILE), false)?;
         ensure!(
             m["interface"]["input"]["shape"] == serde_json::json!([model_report["input"].as_u64().context("missing input")?])
                 && m["interface"]["output"]["shape"]
@@ -112,14 +114,14 @@ impl Info {
             "native interface mismatch"
         );
         let checkpoint: serde_json::Value =
-            serde_json::from_slice(&fs::read(path.join("checkpoint.json"))?)?;
+            serde_json::from_slice(&fs::read(path.join(BUILD_CHECKPOINT_FILE))?)?;
         let inference: serde_json::Value =
-            serde_json::from_slice(&fs::read(path.join("model.json"))?)?;
+            serde_json::from_slice(&fs::read(path.join(BUILD_MODEL_FILE))?)?;
         ensure!(
             checkpoint["model"] == inference,
             "checkpoint/model weights differ"
         );
-        let checkpoint_report = wgtime_control::persistence::inspect_artifact(&path.join("checkpoint.json"), true)?;
+        let checkpoint_report = wgtime_control::persistence::inspect_artifact(&path.join(BUILD_CHECKPOINT_FILE), true)?;
         let steps = m["training_steps"].as_u64().context("training_steps")?;
         ensure!(checkpoint_report["steps"].as_u64().context("missing checkpoint steps")? == steps, "checkpoint step mismatch");
         Ok(Self {
