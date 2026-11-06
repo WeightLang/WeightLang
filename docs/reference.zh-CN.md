@@ -643,7 +643,9 @@ N 为 1..1000000 整数字面量，index 是运行时 [0,N) 整数；优先级�
 
 当前 WGT 0.5 内置训练使用 `train MODEL on INPUTS against TARGETS {rate:RATE; loss:LOSS; clip:MAX_NORM;}`；
 `rate` 必填且为有限正 f32，`loss` 默认 mse，可选 mse/cross_entropy/loss，`clip` 可选。
-表达式形式返回更新前 f32 批次平均损失。自定义 `fn loss` 和全局 L2 梯度裁剪目前仅 CPU forward 训练支持；裁剪后原子提交一次更新，失败不改变参数或优化器。
+表达式形式返回更新前 f32 批次平均损失。自定义 `fn loss` 仅 CPU forward 训练支持；全局 L2 梯度裁剪仅 CPU 训练支持。
+裁剪范数只包含可更新存储所有者的批次平均梯度；View/Add 的贡献先累加，每个所有者计入一次，冻结所有者不计入。
+裁剪后原子提交一次更新，失败不改变参数或优化器。
 `target NAME: f32[N]` 可指定损失第二参数宽度（1..16384），NAME 须匹配 fn loss 第二形参；
 未声明时沿用输出宽度。它不改变 forward 输入，也不改变内置 MSE 的目标契约。
 新增 forward/loss 数字向量字面量、detach、exp、log、log_softmax、sum、minimum、clip。

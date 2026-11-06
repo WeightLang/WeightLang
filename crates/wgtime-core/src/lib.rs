@@ -7,6 +7,7 @@ pub mod adaptive;
 pub mod categorical;
 pub mod collection;
 pub mod execution;
+mod file_io;
 pub mod isolation;
 mod parameter_ops;
 mod quantized;

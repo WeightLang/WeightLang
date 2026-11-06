@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 mod backend;
 mod cpu;
+pub(crate) mod optimizer;
+use optimizer::GradientClip;
 pub use backend::{TrainingBackend, TrainingError};
 #[cfg(feature = "gpu")]
 mod gpu;
@@ -236,7 +238,7 @@ impl Trainer {
 
     pub fn step_clipped(&mut self, inputs: &[Vec<f32>], objective: Objective<'_>, rate: f32, clip: Option<f32>) -> Result<f32> {
         let optimizer = self.optimizer.context("training requires an explicitly selected optimizer")?;
-        ensure!(clip.is_none_or(|v| v.is_finite() && v > 0.), "gradient clip norm must be positive and finite");
+        let clipping = GradientClip::new(clip)?;
         self.session.ensure_mutable()?;
         ensure!(
             rate.is_finite() && rate > 0.,
@@ -278,14 +280,10 @@ impl Trainer {
             return Ok(loss);
         }
         let (loss, mut gradients) = self.gradients(inputs, objective)?;
-        if let Some(limit) = clip {
-            let norm = gradients.iter().enumerate().filter(|(i, _)| !self.session.parameters[*i].frozen)
-                .flat_map(|(_, values)| values).map(|g| f64::from(*g).powi(2)).sum::<f64>().sqrt();
-            if norm > f64::from(limit) {
-                let scale = f64::from(limit) / norm;
-                for g in gradients.iter_mut().flatten() { *g = (f64::from(*g) * scale) as f32; }
-            }
-        }
+        clipping.apply(&mut gradients, |index| {
+            let parameter = &self.session.parameters[index];
+            !parameter.frozen && matches!(parameter.storage, Storage::Resident(_))
+        });
         let (mut first, mut second) = (self.first.clone(), self.second.clone());
         let mut updates = Vec::new();
         for (i, parameter) in self.session.parameters.iter().enumerate() {
@@ -295,17 +293,7 @@ impl Trainer {
             if let Storage::Resident(values) = &parameter.storage {
                 let mut updated = values.to_vec();
                 for j in 0..values.len() {
-                    let g = gradients[i][j];
-                    let direction = match optimizer {
-                        Optimizer::Sgd => g,
-                        Optimizer::Adam => {
-                            first[i][j] = 0.9 * first[i][j] + 0.1 * g;
-                            second[i][j] = 0.999 * second[i][j] + 0.001 * g * g;
-                            let m = first[i][j] / (1. - 0.9f32.powf(step as f32));
-                            let v = second[i][j] / (1. - 0.999f32.powf(step as f32));
-                            m / (v.sqrt() + 1e-8)
-                        }
-                    };
+                    let direction = optimizer.direction(gradients[i][j], &mut first[i][j], &mut second[i][j], step);
                     updated[j] -= rate * direction;
                 }
                 ensure!(
@@ -438,7 +426,8 @@ impl Trainer {
 
     /// Create a new checkpoint; never overwrite an existing file.
     pub fn save(&mut self, path: &Path) -> Result<()> {
-        write_new(path, &self.checkpoint_bytes()?)
+        crate::file_io::publish(path, &self.checkpoint_bytes()?, false)?;
+        Ok(())
     }
 
     pub(crate) fn checkpoint_bytes(&mut self) -> Result<Vec<u8>> {
@@ -455,13 +444,14 @@ impl Trainer {
             first: self.first.clone(),
             second: self.second.clone(),
         };
-        crate::script::file_io::encode_json(&record, limit)
+        crate::file_io::encode_json(&record, limit)
     }
 
     /// Export native inference IR, without optimizer state or training callbacks.
     pub fn export(&mut self, path: &Path) -> Result<()> {
         let bytes = serde_json::to_vec(&self.snapshot()?)?;
-        write_new(path, &bytes)
+        crate::file_io::publish(path, &bytes, false)?;
+        Ok(())
     }
 
     pub fn restore(path: &Path, budget: usize) -> Result<Self> {
@@ -513,34 +503,6 @@ impl Trainer {
         trainer.second = c.second;
         Ok(trainer)
     }
-}
-
-pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
-    use std::io::Write;
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_nanos();
-    let temporary = parent.join(format!(".wgt-save-{}-{nonce}", std::process::id()));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)?;
-    let result: Result<()> = (|| {
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        // Link publication is atomic and refuses an existing destination, including symlinks.
-        std::fs::hard_link(&temporary, path)?;
-        Ok(())
-    })();
-    drop(file);
-    let cleanup = std::fs::remove_file(&temporary);
-    result?;
-    cleanup?;
-    Ok(())
 }
 
 /// Deterministic local PRNG; does not touch process-global random state.

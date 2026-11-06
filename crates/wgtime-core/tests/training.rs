@@ -131,6 +131,110 @@ fn shared_parameters_accumulate_and_frozen_weights_stay_fixed() {
         .unwrap();
     assert_eq!(before, after);
 }
+
+#[test]
+fn clipping_counts_each_shared_owner_once() {
+    for depth in 0..=2 {
+        let mut parameters = vec![Parameter {
+            name: "w".into(),
+            shape: vec![1, 1],
+            frozen: false,
+            value: Value::Resident { data: vec![2.] },
+        }];
+        let mut reference = "w".to_owned();
+        for index in 0..depth {
+            let name = format!("alias{index}");
+            parameters.push(Parameter {
+                name: name.clone(),
+                shape: vec![1, 1],
+                frozen: false,
+                value: Value::View { source: reference, start: 0 },
+            });
+            reference = name;
+        }
+        let model = Model {
+            output_type: Default::default(),
+            version: 1,
+            input: 1,
+            parameters,
+            layers: vec![
+                Layer::Linear { weight: "w".into(), bias: None },
+                Layer::Linear { weight: reference, bias: None },
+            ],
+        };
+        let mut trainer = Trainer::new(model, Path::new("."), 10000, Optimizer::Sgd).unwrap();
+        let loss = trainer.step_clipped(&[vec![1.]], Objective::Mse(&[vec![0.]]), 0.1, Some(1.)).unwrap();
+        // L = w^4 gives dL/dw = 32 at w = 2; clipping to 1 yields w = 1.9.
+        assert_eq!(loss, 16.);
+        let mut weight = [0.];
+        trainer.session.read_parameter("w", 0, &mut weight).unwrap();
+        assert!((weight[0] - 1.9).abs() < 1e-6, "view depth {depth}: {weight:?}");
+        assert!((trainer.predict(&[1.]).unwrap()[0] - 3.61).abs() < 1e-6);
+        assert_eq!(trainer.steps(), 1);
+        assert_eq!(trainer.session.revision(), 1);
+    }
+}
+
+#[test]
+fn clipping_counts_add_owners_and_omits_frozen_ones() {
+    for frozen in [false, true] {
+        let model = Model {
+            output_type: Default::default(),
+            version: 1,
+            input: 1,
+            parameters: vec![
+                Parameter { name: "base".into(), shape: vec![1, 1], frozen,
+                    value: Value::Resident { data: vec![2.] } },
+                Parameter { name: "delta".into(), shape: vec![1, 1], frozen: false,
+                    value: Value::Resident { data: vec![1.] } },
+                Parameter { name: "sum".into(), shape: vec![1, 1], frozen: false,
+                    value: Value::Add { base: "base".into(), delta: "delta".into() } },
+            ],
+            layers: vec![Layer::Linear { weight: "sum".into(), bias: None }],
+        };
+        let mut trainer = Trainer::new(model, Path::new("."), 10000, Optimizer::Sgd).unwrap();
+        let loss = trainer.step_clipped(&[vec![1.]], Objective::Mse(&[vec![0.]]), 0.1, Some(1.)).unwrap();
+        // L = (base + delta)^2 gives gradient 6 for each trainable owner.
+        let change = if frozen { 0.1 } else { 0.1 / 2f32.sqrt() };
+        let mut base = [0.];
+        let mut delta = [0.];
+        trainer.session.read_parameter("base", 0, &mut base).unwrap();
+        trainer.session.read_parameter("delta", 0, &mut delta).unwrap();
+        assert_eq!(loss, 9.);
+        assert!((base[0] - if frozen { 2. } else { 2. - change }).abs() < 1e-6);
+        assert!((delta[0] - (1. - change)).abs() < 1e-6, "frozen={frozen}: {delta:?}");
+        assert!((trainer.predict(&[1.]).unwrap()[0] - base[0] - delta[0]).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn clipping_ignores_views_of_frozen_storage() {
+    let model = Model {
+        output_type: Default::default(),
+        version: 1,
+        input: 1,
+        parameters: vec![
+            Parameter { name: "fixed".into(), shape: vec![1, 1], frozen: true,
+                value: Value::Resident { data: vec![2.] } },
+            Parameter { name: "alias".into(), shape: vec![1, 1], frozen: false,
+                value: Value::View { source: "fixed".into(), start: 0 } },
+            Parameter { name: "w".into(), shape: vec![1, 1], frozen: false,
+                value: Value::Resident { data: vec![1.5] } },
+        ],
+        layers: vec![
+            Layer::Linear { weight: "alias".into(), bias: None },
+            Layer::Linear { weight: "w".into(), bias: None },
+        ],
+    };
+    let mut trainer = Trainer::new(model, Path::new("."), 10000, Optimizer::Sgd).unwrap();
+    trainer.step_clipped(&[vec![1.]], Objective::Mse(&[vec![0.]]), 0.1, Some(1.)).unwrap();
+    for (name, expected) in [("fixed", 2.), ("alias", 2.), ("w", 1.4)] {
+        let mut value = [0.];
+        trainer.session.read_parameter(name, 0, &mut value).unwrap();
+        assert!((value[0] - expected).abs() < 1e-6, "{name}: {value:?}");
+    }
+}
+
 #[test]
 fn sgd_and_adam_train_and_invalid_batches_do_not_mutate() {
     for optimizer in [Optimizer::Sgd, Optimizer::Adam] {

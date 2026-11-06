@@ -5,7 +5,6 @@ mod async_codegen;
 pub mod codegen;
 pub mod compiled;
 mod dataset;
-pub(crate) mod file_io;
 mod persistence;
 mod math;
 mod one_hot;

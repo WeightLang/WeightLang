@@ -1,6 +1,9 @@
 //! Runtime implementation shared by interpreted and compiled file syntax.
-use super::{file_io, Runtime, Value};
+use super::{Runtime, Value};
+use crate::file_io;
 use anyhow::{bail, ensure, Context, Result};
+
+const MAX_FILE_BYTES: usize = 64 * 1024 * 1024;
 
 enum LoadedModel {
     Adaptive(crate::adaptive::AdaptiveSession),
@@ -18,7 +21,7 @@ impl Runtime {
 
     fn charge_file_bytes(&mut self, bytes: usize) -> Result<()> {
         ensure!(
-            bytes <= file_io::MAX_FILE_BYTES,
+            bytes <= MAX_FILE_BYTES,
             "file exceeds 64 MiB syntax IO limit"
         );
         ensure!(
@@ -39,12 +42,12 @@ impl Runtime {
     ) -> Result<()> {
         self.authorize_file_syntax()?;
         let path = self.root.join(path.text()?);
-        let limit = file_io::MAX_FILE_BYTES.min(self.remaining as usize);
+        let limit = MAX_FILE_BYTES.min(self.remaining as usize);
         let bytes = match format {
             "text" => {
                 let text = value.text()?;
                 ensure!(
-                    text.len() <= file_io::MAX_FILE_BYTES && text.len() as u64 <= self.remaining,
+                    text.len() <= MAX_FILE_BYTES && text.len() as u64 <= self.remaining,
                     "text exceeds IO byte budget"
                 );
                 text.as_bytes().to_vec()
@@ -109,7 +112,7 @@ impl Runtime {
         );
         let path = self.root.join(path.text()?);
         let bytes =
-            file_io::read_bounded(&path, file_io::MAX_FILE_BYTES.min(self.remaining as usize))?;
+            file_io::read_bounded(&path, MAX_FILE_BYTES.min(self.remaining as usize))?;
         self.charge_file_bytes(bytes.len())?;
         if format == "weights" {
             self.permissions.check_deadline()?;
@@ -137,7 +140,7 @@ impl Runtime {
         self.authorize_file_syntax()?;
         let path = self.root.join(args[0].text()?);
         let bytes =
-            file_io::read_bounded(&path, file_io::MAX_FILE_BYTES.min(self.remaining as usize))?;
+            file_io::read_bounded(&path, MAX_FILE_BYTES.min(self.remaining as usize))?;
         self.charge_file_bytes(bytes.len())?;
         match format {
             "text" => Ok(Value::Text(String::from_utf8(bytes)?)),

@@ -192,8 +192,9 @@ SGD 无 momentum/weight decay；Adam 固定 beta1=0.9、beta2=0.999、eps=1e-8�
 混合精度、独立梯度累积接口、任意自定义损失反传或 forward 模型的 GPU 训练。顺序模型可用 training_device 选择 GPU；forward 模型支持受限的
 `fn loss(prediction,target)` 一阶反传，约束与示例见[可微程序](differentiable-programs.md)。
 
-原生 IR 的 resident/view/add 梯度汇总到存储所有者，共享参数只更新一次；冻结依赖沿用 Session
-规则，冻结参数不更新。可训练的 file 存储拒绝，冻结 file 可读取。全部批次与候选更新检查通过后
+原生 IR 的 resident/view/add 梯度汇总到存储所有者，共享参数只更新一次。全局 L2 裁剪只统计
+可更新 resident 所有者的批次平均梯度；View/Add 的中间梯度先累加到所有者，每个所有者计入范数一次。
+冻结依赖沿用 Session 规则，冻结参数及其只读引用不参与裁剪或更新。可训练的 file 存储拒绝，冻结 file 可读取。全部批次与候选更新检查通过后
 再提交权重和优化器状态；非有限输入、损失、梯度、参数/矩状态均报错，不部分更新。
 `mlp` 使用独立确定性 Xavier uniform 权重、零 bias；不承诺与 Python/PyTorch 的 seed 初始化逐位相同。
 

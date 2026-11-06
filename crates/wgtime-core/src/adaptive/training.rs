@@ -1,7 +1,7 @@
 //! Optimize initial parameters through a complete executed forward program.
 //! Forward writes are differentiable local state, never batch-side effects.
 use super::AdaptiveSession;
-use crate::training::{Objective, Optimizer};
+use crate::training::{Objective, Optimizer, optimizer::GradientClip};
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
@@ -131,7 +131,7 @@ impl AdaptiveSession {
         mode: LossMode,
         clip: Option<f32>,
     ) -> Result<f32> {
-        ensure!(clip.is_none_or(|value| value.is_finite() && value > 0.), "gradient clip norm must be positive and finite");
+        let clipping = GradientClip::new(clip)?;
         self.ensure_mutable()?;
         self.ensure_idle()?;
         let mut loss_session = if matches!(mode, LossMode::Custom) {
@@ -246,20 +246,7 @@ impl AdaptiveSession {
             loss.is_finite() && gradients.iter().flatten().all(|v| v.is_finite()),
             "nonfinite loss or gradient"
         );
-        if let Some(limit) = clip {
-            let norm = gradients
-                .iter()
-                .flatten()
-                .map(|g| f64::from(*g).powi(2))
-                .sum::<f64>()
-                .sqrt();
-            if norm > f64::from(limit) {
-                let scale = f64::from(limit) / norm;
-                for g in gradients.iter_mut().flatten() {
-                    *g = (f64::from(*g) * scale) as f32;
-                }
-            }
-        }
+        clipping.apply(&mut gradients, |index| !self.program.parameters[index].frozen);
         state.steps = state
             .steps
             .checked_add(1)
@@ -270,17 +257,7 @@ impl AdaptiveSession {
             let mut values = p.data.clone();
             if !p.frozen {
                 for (j, value) in values.iter_mut().enumerate() {
-                    let g = gradients[i][j];
-                    let direction = match state.optimizer {
-                        Optimizer::Sgd => g,
-                        Optimizer::Adam => {
-                            state.first[i][j] = 0.9 * state.first[i][j] + 0.1 * g;
-                            state.second[i][j] = 0.999 * state.second[i][j] + 0.001 * g * g;
-                            let m = state.first[i][j] / (1. - 0.9f32.powf(state.steps as f32));
-                            let v = state.second[i][j] / (1. - 0.999f32.powf(state.steps as f32));
-                            m / (v.sqrt() + 1e-8)
-                        }
-                    };
+                    let direction = state.optimizer.direction(gradients[i][j], &mut state.first[i][j], &mut state.second[i][j], state.steps);
                     *value -= rate * direction;
                     ensure!(value.is_finite(), "nonfinite learn/parameter optimizer update");
                     if let Some(domain) = &p.learn { *value = domain.project(*value); }
@@ -306,7 +283,8 @@ impl AdaptiveSession {
     }
 
     pub fn save_checkpoint(&self, path: &Path) -> Result<()> {
-        crate::training::write_new(path, &self.checkpoint_bytes()?)
+        crate::file_io::publish(path, &self.checkpoint_bytes()?, false)?;
+        Ok(())
     }
 
     fn checkpoint_value(&self) -> Result<serde_json::Value> {
@@ -324,7 +302,7 @@ impl AdaptiveSession {
     }
 
     pub fn checkpoint_bytes_bounded(&self, limit: usize) -> Result<Vec<u8>> {
-        crate::script::file_io::encode_json(&self.checkpoint_value()?, limit)
+        crate::file_io::encode_json(&self.checkpoint_value()?, limit)
     }
 
     pub fn restore_checkpoint(value: serde_json::Value, budget: usize) -> Result<Self> {
