@@ -103,7 +103,7 @@ The review retains transport poisoning versus complete application errors, descr
 
 ## Implementation and review
 
-The inventory was published before implementation in `caea8bc`. Operation storage bindings were published in `f876135`; persistence and resident strategy call identities followed in `584f72c`. Parallel changes on `main`, including `21b76f9` and `2f32461`, were integrated before the final verification. The changes retain the repository's migration direction: Rust owns application orchestration; improvements to existing WGT host paths do not restore them as the preferred application architecture.
+The inventory was published before implementation in [caea8bc](https://github.com/WeightLang/WeightLang/commit/caea8bccf333c0b026feb2314e3050428ab3d00a). Operation storage bindings were published in [f876135](https://github.com/WeightLang/WeightLang/commit/f876135a39e292d9b696f03e43f991b097f5e454); persistence and resident strategy call identities followed in [584f72c](https://github.com/WeightLang/WeightLang/commit/584f72c2124c9d0eb09e12b2ef06a53a128db6da). Client expression and binding changes were published in [1c42ac1](https://github.com/WeightLang/WeightLang/commit/1c42ac1403b199788498285ccb81a9d7946a4c0a), and editor/viewer changes with their CI gates in [37e4751](https://github.com/WeightLang/WeightLang/commit/37e4751bebb04a3fc2cc104f7d7d259e3ac2da01). Parallel changes on `main`, including `21b76f9` and `2f32461`, were integrated before the final verification. The changes retain the repository's migration direction: Rust owns application orchestration; improvements to existing WGT host paths do not restore them as the preferred application architecture.
 
 | Boundary | Result |
 | --- | --- |
@@ -137,10 +137,22 @@ Local Rust checks use Cargo/Rust 1.99.0, locked offline dependencies, two build 
 | Resident strategy | Eleven tests pass; one pre-existing, explicitly opt-in timing probe remains ignored. No performance result is claimed. |
 | Macro consumers | Seven tests pass, including renamed dependencies and rebuild after transitive WGT source changes. |
 | Client admission | Four boundary tests pass, including selected-entry reachability and early rejection of imported resident strategies without executable output. |
-| Generated clients | Eight native client executables compiled locally. Runtime acceptance is assigned to the real-service CI gate, not inferred from compilation. |
+| Generated clients | Eight native client executables compiled locally. The real-service CI gate also passes: two `async_aot` tests and four `script_compiler` tests, including the shared-helper and selected-entry regression. |
 | Viewer logic | Seventeen Node tests pass, including both translation directions and embedded-catalog precedence. |
 | Editor parsing | Twenty Tree-sitter corpus tests and 59 shared source-conformance cases pass. A deliberately wrong highlight expectation still fails after the case ID is changed. |
 | Editor archive | The extracted 105-file archive contains all nine declared generation inputs; generation checks and shared conformance pass. Three XML formats parse locally. The full editor runner requires CI's `xmllint`. |
-| Browser scripts | All eight scripts pass JavaScript syntax checking. Actual Chromium behavior is checked by the standalone-viewer CI job. |
+| Browser scripts | All eight scripts pass JavaScript syntax checking. The axes scenario passes in actual Chromium against a fresh standalone viewer; the other seven model-specific browser scenarios were not executed in this pass. |
 
-The local container rejects Unix-listener creation and Chromium socket creation with `EPERM`. Consequently, local service-launch failures are recorded as environment-blocked checks, not successes or silently skipped tests. The workflow now runs the resident strategy suite, actual macro consumers, async core/client regressions, full editor checks and a real standalone Chromium viewer check. Final CI results and the tested commit are recorded below after the run completes.
+The local container rejects Unix-listener creation and Chromium socket creation with `EPERM`. Local service-launch failures remain recorded as environment-blocked checks; the corresponding real-service and browser gates passed remotely. The workflow now runs the resident strategy suite, actual macro consumers, async core/client regressions, full editor checks and a real standalone Chromium viewer check.
+
+### Published CI acceptance
+
+[CI run 42179505172](https://github.com/WeightLang/WeightLang/actions/runs/42179505172) completed successfully on 2026-11-06 for code commit `37e4751bebb04a3fc2cc104f7d7d259e3ac2da01`. All three jobs passed:
+
+| Job | Verified result |
+| --- | --- |
+| [tensor-language](https://github.com/WeightLang/WeightLang/actions/runs/42179505172/job/127765994646) | Complete workspace check; language, tensor, autodiff, compiled-backend and source-execution suites; operation and async regressions; generated metadata, prelude and viewer logic checks. |
+| [host-runtime](https://github.com/WeightLang/WeightLang/actions/runs/42179505172/job/127765994621) | Client/control and source-package/publication suites; 14 service binary tests, two service integration tests, one startup test, and 11 strategy tests with the existing timing probe ignored; actual model APIs, macro consumers and generated clients against the service. |
+| [editor-viewer](https://github.com/WeightLang/WeightLang/actions/runs/42179505172/job/127765994179) | Regenerated parser has no drift; full editor runner passes, including 59 conformance cases and 16 native examples; actual Chromium verifies axis selection and bounds, scalar slicing, language/theme persistence and responsive layout. |
+
+The final read-only review found no further concrete issue in the changed boundaries. Accelerator hardware acceptance and strategy performance benchmarks remain outside this verification. Linked resident-strategy imports remain unsupported and are rejected before executable generation. The extracted archive's local dependency and conformance checks passed; full extracted-archive verification is now a release-workflow gate, and no editor release was published by this work.
