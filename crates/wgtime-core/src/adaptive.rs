@@ -104,7 +104,6 @@ impl AdaptiveSession {
     }
     pub(crate) fn ensure_mutable(&self) -> Result<()> { self.collection.ensure_mutable() }
     pub fn prepare(program: Program, budget_bytes: usize) -> Result<Self> {
-        program.validate_tensor_contracts()?;
         ensure!(matches!(program.version, 1 | 2 | 3), "unsupported adaptive IR version");
         ensure!(program.version >= 2 || (program.output_type.is_plain()
             && !program.instructions.iter().any(|i| i.metadata().minimum_version == 2)),
@@ -154,6 +153,9 @@ impl AdaptiveSession {
         };
         let len = |r: usize| program.registers[r].len;
         let memories = workspace::validate(&program, &regs)?;
+        // Reject memory handles as tensor operands before tensor shape inference,
+        // so invalid memory access cannot be obscured by an unrelated shape error.
+        program.validate_tensor_contracts()?;
         let mut floats = 0usize;
         for p in &program.parameters {
             if let Some(domain) = &p.learn {
