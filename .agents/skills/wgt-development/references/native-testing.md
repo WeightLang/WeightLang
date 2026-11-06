@@ -8,6 +8,8 @@
 
 `crates/wgt-model/tests/service.rs` 的纯定义测试默认运行；真实服务用例需要先构建 `wgtime-service --bin wgtime`，设置 `WGTIME_TEST_DAEMON` 并使用 `--include-ignored`。具体命令见 `docs/native-testing.md`，共享服务启动与回收 helper 在 `crates/wgt-model/tests/support/mod.rs`。不要用尚未执行的 ignored 用例作为验收证据。
 
+状态回归必须区分普通调用与类别采样：服务 Adaptive JSON 会话的 `Request::Predict` 通过 `run` 成功提交 forward 写入，失败回滚；旧 core `sample_model_result` 使用 `evaluate`，保留模型与优化器状态，但仍消耗 RNG 和操作预算。对应回归为 `crates/wgtime-service/src/main.rs` 的 `adaptive_predict_commits_writes_and_rolls_back_failed_output` 与 core `sample_from.rs` 的 `sampling_discards_forward_writes_and_keeps_optimizer_state`。`InitializeDefinition` 的 `CompiledForward` 仍拒绝 `Write`，不从兼容路径推断该入口支持可写 forward；本次不新增协议或 ABI。
+
 ## core 兼容层
 
 `wgtime_core::script::testing::Suite` 只从传入源码发现普通 `test_*` 函数，函数名排序，每次显式调用独立运行且不执行 main。调用方提供 root、操作预算和依赖；错误保留源码行号，后续调用及汇总由 Rust 调用方决定。带参测试调用失败，构造器不是测试函数。它不扫描文件系统或汇总 JSON fixtures。

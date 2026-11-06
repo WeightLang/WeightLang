@@ -24,6 +24,14 @@ WGTIME_TEST_DAEMON="$(pwd)/target/debug/wgtime" \
 
 测试 helper 启动隔离服务、等待协议握手并在结束时回收进程；实现见[服务测试 helper](../crates/wgt-model/tests/support/mod.rs)。仅运行默认测试集或成功解析定义，不能计作真实服务执行通过。
 
+### 普通调用与类别采样的状态规则
+
+在服务的 Adaptive JSON 会话路径，普通 `model(input)` 对应 `Request::Predict`，使用 `AdaptiveSession::run`：成功完成才提交 forward 内的 `Write`，执行失败保留调用前状态。[服务内回归](../crates/wgtime-service/src/main.rs) `adaptive_predict_commits_writes_and_rolls_back_failed_output` 检查连续调用提交和写后失败回滚。
+
+旧 core 的类别采样 `sample_model_result` 单独使用 `evaluate`，不提交 forward 写入，也不改变优化器状态；它仍消耗采样 RNG 和操作预算。“只读”指模型状态，不表示没有采样开销。该行为由[采样回归](../crates/wgtime-core/tests/sample_from.rs) `sampling_discards_forward_writes_and_keeps_optimizer_state` 验证。
+
+这项接线修复沿用既有协议与 ABI。`InitializeDefinition` 仍启用 `CompiledForward`，后者拒绝 `Write`；Adaptive JSON 兼容路径的提交行为不扩大该定义入口的编译能力。服务内回归同时检查这一拒绝边界。
+
 ## 保留的 core Suite API
 
 `wgtime_core::script::testing::Suite` 是旧普通脚本运行时的库级兼容接口。它接收调用方提供的源码，不扫描 `tests/` 目录，也不提供 CLI filter、JSON fixture 汇总或退出码协议。其[实现](../crates/wgtime-core/src/script/testing.rs)与[行为测试](../crates/wgtime-core/tests/native_testing.rs)界定了以下范围：

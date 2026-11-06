@@ -240,7 +240,10 @@ impl Connection {
                 self.execute(Request::TrainStep {handle,inputs,targets,rate,loss,clip},shared)
             }
             Request::Predict { handle, input } => match self.sessions.get_mut(&handle) {
-                Some(Session::Adaptive(session)) => Ok(serde_json::json!({"output": session.evaluate(&input, 1_000_000)?, "revision": session.revision()})),
+                Some(Session::Adaptive(session)) => {
+                    let output = session.run(&input, 1_000_000)?.to_vec();
+                    Ok(serde_json::json!({"output": output, "revision": session.revision()}))
+                }
                 Some(Session::Trainer(trainer)) => Ok(serde_json::json!({"output": trainer.predict(&input)?, "steps": trainer.steps()})),
                 _ => bail!("unknown session or foreign owner"),
             },
@@ -808,6 +811,69 @@ mod lifecycle_tests {
             memory: 1024 * 1024,
             optimizer: None,
         }
+    }
+
+    #[test]
+    fn adaptive_predict_commits_writes_and_rolls_back_failed_output() -> Result<()> {
+        let source = r#"wgt 0.5
+model AdaptiveMemory
+input x: f32[2]
+output y: f32[1]
+parameter memory: f32[1,1] = [0]
+frozen updater: f32[1,1] = [0.5]
+fn forward(x) {
+    let observation = slice(x, 0, 1);
+    let query = slice(x, 1, 1);
+    let next = add(read(memory), linear(observation, updater));
+    write(memory, next);
+    return linear(query, memory);
+}
+"#;
+        let shared = shared();
+        let mut owner = state();
+        let program = wgt_language::adaptive::parse(source)?;
+        let handle = owner.execute(
+            Request::CreateTrainingProgram {
+                program: serde_json::to_value(program)?,
+                memory: 1024 * 1024,
+                optimizer: "none".into(),
+            },
+            &shared,
+        )?["handle"]
+            .as_u64()
+            .unwrap();
+        for (input, output, revision) in [([2., 3.], 3., 1), ([4., 3.], 9., 2)] {
+            assert_eq!(
+                owner.execute(Request::Predict { handle, input: input.into() }, &shared)?,
+                serde_json::json!({"output": [output], "revision": revision})
+            );
+        }
+        let parameters = owner.execute(Request::ParameterValues { handle }, &shared)?;
+        let error = owner.execute(
+            Request::Predict { handle, input: vec![4., f32::MAX] },
+            &shared,
+        ).unwrap_err();
+        assert!(error.to_string().contains("nonfinite activation"), "{error:#}");
+        assert_eq!(owner.execute(Request::ParameterValues { handle }, &shared)?, parameters);
+        assert_eq!(
+            owner.execute(Request::Predict { handle, input: vec![0., 3.] }, &shared)?,
+            serde_json::json!({"output": [9.], "revision": 3})
+        );
+
+        let stats = owner.execute(Request::Stats, &shared)?;
+        let error = owner.execute(
+            Request::InitializeDefinition {
+                source: source.into(),
+                memory: 1024 * 1024,
+                optimizer: None,
+            },
+            &shared,
+        ).unwrap_err();
+        assert!(error.to_string().contains("ordinary forward does not support state writes"), "{error:#}");
+        let after = owner.execute(Request::Stats, &shared)?;
+        assert_eq!(after["sessions"], stats["sessions"]);
+        assert_eq!(after["reserved"], stats["reserved"]);
+        Ok(())
     }
 
     #[test]
