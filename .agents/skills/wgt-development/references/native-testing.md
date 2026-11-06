@@ -23,4 +23,6 @@
 
 保留 `weightc compile` 的客户端边界：`script_compiler` 当前转到 `client_compiler`，不支持的 `SampleFrom`、`LetSample`、`Slice` 在构建前拒绝。旧 core codegen 中存在对应实现，不代表当前 compiler 已迁移。删除旧 AOT 成功预期前，保留其尚未被等价覆盖的解释器数值/状态断言，并单独验证编译拒绝。
 
+驻留策略要求单一源码单元；含 import 且所选入口可达静态策略调用的组合在客户端生成前拒绝，使用 `client_compiler_boundaries.rs` 检查不产生可执行文件。`script_compiler.rs` 覆盖命名入口及客户端/策略共享辅助函数，`async_aot.rs` 覆盖实际生成程序中的嵌套任务、索引、绑定与布尔错误；两者使用隔离服务 fixture。核心同步/异步绑定对照见 `wgtime-core/tests/async_tasks.rs`，驻留调用和短路对照见 `wgtime-service/tests/strategy.rs`。外部服务启动失败应明确报告，不添加环境条件将它变成通过。
+
 benchmark 属于旧脚本兼容层：mode 默认为 cpu，也支持 gpu/适配器 ID 与 train:cpu。训练 workload 为 `[inputs,targets,rate,"mse"]`，warmup/repeats 均更新模型；GPU 测量同步上传到回读的主机耗时，无设备报错，不回退 CPU。它不是 Rust facade 的 benchmark API，GPU 训练计时未接入。

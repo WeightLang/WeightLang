@@ -206,8 +206,10 @@ train net on inputs against targets using momentum;
 `momentum` 必须是同编译单元声明的同步普通用户函数，签名为 `fn momentum(model,inputs,targets)`，
 恰好三个必填形参。函数可以在调用后声明；内置函数、模型构造器、缺失名称、错误形参数和 async 函数均拒绝。
 `using` 绑定声明函数，局部同名变量不改变目标；不提供函数值或捕获。
-模型表达式、inputs、targets 从左到右各求值一次，策略只调用一次，return 值由语句丢弃。
+模型表达式、inputs、targets 从左到右各求值一次，策略只调用一次。表达式返回策略的实际纯数据结果；作为独立语句使用时丢弃结果。
 超参数在策略函数内显式定义；`using` 不能与配置块混用。
+
+轻客户端的驻留策略要求单一源码单元。源码含 `import` 且所选入口可达静态策略调用时，客户端在生成可执行程序前明确拒绝；服务注册不读取导入文件。普通客户端和驻留策略可共享同单元辅助函数。相关编译边界见 [client_compiler_boundaries.rs](../crates/wgt/tests/client_compiler_boundaries.rs)，真实服务调用见 [script_compiler.rs](../crates/wgt/tests/script_compiler.rs)。
 
 策略自行调用 differentiate/differentiate_at/commit_gradients，可选择零次、一次或多次更新。
 高层语句不添加优化器、梯度裁剪或额外提交，不隐式重试；只有每次显式 commit 是原子的，

@@ -5,6 +5,51 @@ use weightlang_wgt::script_compiler;
 use wgtime_core::script;
 
 #[test]
+fn client_entry_keeps_helpers_shared_with_resident_strategies() {
+    let directory = support::scratch().unwrap();
+    let source = directory.path().join("model.wgt");
+    let executable = directory.path().join("program");
+    let text = r#"wgt 0.5
+model Identity
+input x:f32[1]
+output y:f32[1]
+fn forward(x){return x;}
+fn shared(x){return x+1;}
+fn condition(x){return x==3;}
+fn samples(){return [[2]];}
+fn resident_helper(x){if x>0{return shared(x);}return 0;}
+fn strategy(model,inputs,targets){return resident_helper(inputs[0][0]);}
+async fn next(x){return x+1;}
+async fn nested(x){return await next(shared(x));}
+fn main(){return [1,2,3][1:];}
+fn chosen(){
+    let model=Identity("none");
+    let boxed={value:shared(2)};
+    assert condition(boxed.value),"client helper was omitted";
+    let asynchronous=0;
+    if condition(boxed.value){tasks{let job=spawn nested(boxed.value);asynchronous=await job;}}
+    let result=train model on samples() against [[0]] using strategy;
+    return [boxed.value,result,asynchronous];
+}
+"#;
+    fs::write(&source, text).unwrap();
+    script_compiler::compile_text_entry(text, directory.path(), &executable, "chosen").unwrap();
+    fs::remove_file(source).unwrap();
+    let service = support::Service::start().unwrap();
+    let output = service
+        .configure(Command::new(executable).env("PATH", "/nonexistent"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["result"], serde_json::json!([3., 3., 5.]));
+}
+
+#[test]
 fn compiled_control_flow_training_and_persistence_need_no_source_or_toolchain() {
     let directory = support::scratch().unwrap();
     let text = r#"wgt 0.5

@@ -25,6 +25,7 @@ pub mod source_check;
 pub mod script_compiler;
 pub mod client_compiler;
 mod client_async_codegen;
+mod client_expression;
 pub mod script_dependencies;
 
 pub mod package_artifact;

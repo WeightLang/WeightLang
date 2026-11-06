@@ -406,9 +406,12 @@ fn eval<'a>(
                 for arg in args {
                     values.push(eval(rt.clone(), arg, env).await?);
                 }
-                rt.borrow_mut()
-                    .call_in_env(name, values, env)
-                    .map_err(task_error)
+                let mut runtime = rt.borrow_mut();
+                match expr {
+                    Expr::BuiltinCall(..) => runtime.call(name, values),
+                    _ => runtime.call_in_env(name, values, env),
+                }
+                .map_err(task_error)
             }
             Expr::Binary(op, a, b) => {
                 let a = eval(rt.clone(), a, env).await?;

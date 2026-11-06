@@ -15,7 +15,8 @@ fn expr(e: &Expr) -> Result<String> {
             anyhow::ensure!(args.len()==1,"sleep expects one millisecond argument");
             format!("{{ let ms={}; let value=rt.borrow_mut().cold_call(\"__async_sleep\",vec![ms])?; value }}",expr(&args[0])?)
         }
-        Expr::Call(n,args) | Expr::BuiltinCall(n,args)=>format!("{{ let args=vec![{}]; let value=rt.borrow_mut().call_in_env({n:?},args,&env)?; value }}",args.iter().map(expr).collect::<Result<Vec<_>>>()?.join(",")),
+        Expr::BuiltinCall(n,args)=>format!("{{ let args=vec![{}]; let value=rt.borrow_mut().call({n:?},args)?; value }}",args.iter().map(expr).collect::<Result<Vec<_>>>()?.join(",")),
+        Expr::Call(n,args)=>format!("{{ let args=vec![{}]; let value=rt.borrow_mut().call_in_env({n:?},args,&env)?; value }}",args.iter().map(expr).collect::<Result<Vec<_>>>()?.join(",")),
         Expr::Unary(op,x)=>format!("compiled::unary({op:?},{})?",expr(x)?),
         Expr::Binary(op,a,b)=>{
             let (a,b)=(expr(a)?,expr(b)?);

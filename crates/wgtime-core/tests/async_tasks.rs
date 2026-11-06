@@ -3,6 +3,23 @@ use std::path::Path;
 use wgtime_core::script;
 
 #[test]
+fn async_syntax_calls_ignore_local_bindings_like_synchronous_calls() {
+    for (qualifier, invocation) in [("", "value(record)"), ("async ", "await value(record)")] {
+        let source = format!(
+            "wgt 0.5\n{qualifier}fn value(record){{let __record_field=0;return record.values[1];}}\nfn main(){{let record={{values:[1,2]}};return {invocation};}}"
+        );
+        assert_eq!(
+            script::run(&source, Path::new("."), 100_000).unwrap().result,
+            serde_json::json!(2.)
+        );
+
+        let source = source.replace("let __record_field=0;return record.values[1];", "let len=0;return len(record.values);");
+        let error = script::run(&source, Path::new("."), 100_000).unwrap_err();
+        assert!(format!("{error:#}").contains("local binding len is not callable"));
+    }
+}
+
+#[test]
 fn async_read_charges_exact_successful_bytes() {
     let root=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.cache/weightlang/async-scheduler-sol/budget-test");
     std::fs::create_dir_all(&root).unwrap();

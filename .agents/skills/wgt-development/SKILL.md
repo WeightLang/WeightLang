@@ -65,6 +65,7 @@ language/primitive_specs.json 是制品 graph 原语域，不是源码内置表�
 await sleep(ms)与await load text from path通过固定两线程/64队列阻塞池执行；文本最多64MiB，metadata后按大小预留共享操作预算，worker按实际字节结算，未用预留恰一次归还。解释/AOT均须真实运行，不把解析通过当并发支持；AOT生成原生future，不回放AST。
 `train model on inputs against targets using strategy` 是旧通用 WGT 脚本训练接口，静态调用同单元同步用户fn strategy(model,inputs,targets)，
 三参各求值一次且左至右、策略调用一次并返回实际结果；局部同名值不覆盖静态目标，拒绝builtin/构造器/async/错误形参。新 Rust 主程序模型 API 不通过扩展此脚本入口实现。
+为轻客户端驻留策略使用单一源码单元：源码包含 import 且所选入口可达静态策略调用时，编译会在调用 Cargo 前拒绝。服务注册不解析导入文件；普通客户端与策略可共享同单元辅助函数。保留普通调用的局部绑定检查、语法内置的直接绑定和严格短路 bool 规则；修改时同时验证同步客户端、异步客户端和驻留策略。
 结果限纯数据，允许null，最大深度32、计量1MiB，拒绝资源句柄。超参写在策略体内，与配置块互斥；策略决定零/多次显式commit，无隐式提交或重试；失败不撤销已成功commit。
 例crates/wgtime-core/tests/train_strategies.rs；完整契约docs/native-training.md。
 CPU forward 自定义算法：以 none 构造，differentiate(model,inputs,targets) 对受限 fn loss 求批次平均梯度；

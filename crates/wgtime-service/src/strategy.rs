@@ -18,7 +18,11 @@ enum Op {
     Binary(String),
     Index,
     ReadPath(String, Vec<PathIndex>),
-    Call(CallTarget, usize),
+    Call {
+        target: CallTarget,
+        arguments: usize,
+        local_name: Option<String>,
+    },
     RequireBoolean,
     Jump(usize),
     Unless(usize),
@@ -153,11 +157,11 @@ impl Strategy {
             compiler.code.push(Op::Constant(Value::Null));
             compiler.code.push(Op::Return);
             for op in &compiler.code {
-                if let Op::Call(CallTarget::Function(target), n) = op {
+                if let Op::Call { target: CallTarget::Function(target), arguments, .. } = op {
                     let called = program
                         .get(target)
                         .with_context(|| format!("forbidden strategy call: {target}"))?;
-                    ensure!(called.args.len() == *n, "invalid helper arity");
+                    ensure!(called.args.len() == *arguments, "invalid helper arity");
                     visit(target, program, result, active)?;
                 }
             }
@@ -302,7 +306,11 @@ impl Compiler {
                     Some(builtin) => CallTarget::Builtin(builtin),
                     None => CallTarget::Function(n.clone()),
                 };
-                self.code.push(Op::Call(target, args.len()));
+                self.code.push(Op::Call {
+                    target,
+                    arguments: args.len(),
+                    local_name: matches!(e, Expr::Call(..)).then(|| n.clone()),
+                });
             }
             _ => bail!("unsupported expression in resident strategy"),
         }
@@ -370,7 +378,11 @@ impl Compiler {
                     let start = self.code.len();
                     self.code.push(Op::Load(index.clone()));
                     self.code.push(Op::Load(values.clone()));
-                    self.code.push(Op::Call(CallTarget::Builtin(Builtin::Len), 1));
+                    self.code.push(Op::Call {
+                        target: CallTarget::Builtin(Builtin::Len),
+                        arguments: 1,
+                        local_name: None,
+                    });
                     self.code.push(Op::Binary("<".into()));
                     let end = self.jump(true);
                     self.code.push(Op::Load(values));
@@ -651,8 +663,14 @@ impl Vm<'_> {
                     }
                     stack.push(self.clone_value(value)?);
                 }
-                Op::Call(target, count) => {
-                    let args = stack.split_off(stack.len() - count);
+                Op::Call { target, arguments, local_name } => {
+                    let args = stack.split_off(stack.len() - arguments);
+                    if let Some(name) = local_name {
+                        ensure!(
+                            !env.contains_key(name),
+                            "local binding {name} is not callable in resident strategy"
+                        );
+                    }
                     let value = match target {
                         CallTarget::Function(name) => self.call(strategy, name, args)?,
                         CallTarget::Builtin(builtin) => self.builtin(*builtin, args)?,

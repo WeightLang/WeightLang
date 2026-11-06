@@ -103,6 +103,61 @@ fn resident_helpers_and_builtins_preserve_values() {
 }
 
 #[test]
+fn resident_ordinary_calls_reject_shadowing_local_bindings() {
+    for (name, call) in [("len", "len(inputs)"), ("helper", "helper(1)")] {
+        let text = format!(
+            "{}\nfn helper(x){{return x+1;}}",
+            source(&format!("let {name}=0;return {call};"))
+        );
+        let strategy = Strategy::compile(&text).unwrap();
+        let error = execute(&strategy, &mut session()).unwrap_err();
+        let message = format!("local binding {name} is not callable");
+        assert!(format!("{error:#}").contains(&message), "{error:#}");
+        let direct = text.replace(
+            "fn main(){return null;}",
+            "fn main(){return strategy(null,[[1],[2]],[[2],[4]]);}",
+        );
+        let error = wgtime_core::script::run(
+            &direct,
+            std::path::Path::new("/tmp/weightlang"),
+            100000,
+        ).unwrap_err();
+        assert!(format!("{error:#}").contains(&message), "{error:#}");
+    }
+}
+
+#[test]
+fn resident_syntax_and_loop_calls_keep_their_bound_targets() {
+    let cases = [
+        (
+            source("let len=0;let __record=0;let sum=0;for row in inputs {sum=sum+row[0];}return {sum:sum};"),
+            serde_json::json!({"sum":3.}),
+        ),
+        (
+            format!(
+                "{}\nfn helper(net,inputs,targets){{return inputs[0][0];}}",
+                source("let helper=0;return train net on inputs against targets using helper;")
+            ),
+            serde_json::json!(1.),
+        ),
+    ];
+    for (text, expected) in cases {
+        let strategy = Strategy::compile(&text).unwrap();
+        assert_eq!(execute(&strategy, &mut session()).unwrap()["result"], expected);
+        let direct = text.replace(
+            "fn main(){return null;}",
+            "fn main(){return strategy(null,[[1],[2]],[[2],[4]]);}",
+        );
+        let report = wgtime_core::script::run(
+            &direct,
+            std::path::Path::new("/tmp/weightlang"),
+            100000,
+        ).unwrap();
+        assert_eq!(report.result, expected);
+    }
+}
+
+#[test]
 fn resident_boolean_expressions_match_interpreter_and_short_circuit() {
     for (expression, expected) in [
         ("true && false", false),
