@@ -68,7 +68,7 @@ jobs:
         env:
           WGTIME_TEST_DAEMON: ${{ github.workspace }}/target/debug/wgtime
         run: >-
-          cargo test --locked -p weightlang-wgt
+          cargo test --locked --no-fail-fast -p weightlang-wgt
           --test assert_syntax --test categorical_roundtrip --test cli_service
           --test client_compiler_boundaries --test lifecycle --test model_calls_aot
           --test native_testing --test postfix_mean --test ppo_typed --test script_compiler

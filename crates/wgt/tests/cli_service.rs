@@ -6,8 +6,21 @@ use weightlang_wgt::script_compiler;
 #[test]
 #[ignore = "requires prebuilt WGTIME_TEST_DAEMON and local Cargo toolchain"]
 fn explicit_entries_build_and_export_use_service() {
-    let service = support::Service::start().unwrap();
     let dir = support::scratch().unwrap();
+    // Compile the local operator closure before connecting, then remove its source.
+    let dependency = dir.path().join("dependency");
+    fs::create_dir(&dependency).unwrap();
+    fs::write(
+        dependency.join("model.wgt"),
+        "wgt 0.5\noperators Shift\nfn shifted(x){return x+x;}\n",
+    )
+    .unwrap();
+    let imported_source = "wgt 0.5\nimport shift from \"./dependency/model.wgt\"\nmodel Probe\ninput x:f32[1]\noutput y:f32[1]\nfn forward(x){return shift.shifted(x);}\nfn main(){let net=Probe(\"none\");return net([2]);}\n";
+    let imported_executable = dir.path().join("imported-client");
+    script_compiler::compile_text_entry(imported_source, dir.path(), &imported_executable, "main")
+        .unwrap();
+    fs::remove_dir_all(&dependency).unwrap();
+    let service = support::Service::start().unwrap();
     let source = dir.path().join("model.wgt");
     fs::write(&source,"wgt 0.5\nfn main(){let net=mlp([1,1],\"identity\",7,\"sgd\");save model net to \"model.json\";return net([1]);}").unwrap();
     let executable = dir.path().join("client");
@@ -109,35 +122,7 @@ fn explicit_entries_build_and_export_use_service() {
         before
     );
 
-    // A local source package is resolved explicitly at compile time; runtime needs neither source.
-    let dependency = dir.path().join("dependency");
-    fs::create_dir(&dependency).unwrap();
-    fs::write(
-        dependency.join("model.wgt"),
-        "wgt 0.5\noperators Shift\nfn shifted(x){return x+x;}\n",
-    )
-    .unwrap();
-    fs::write(
-        dependency.join("wgt.index.json"),
-        r#"{"format_version":2,"sources":{"model.wgt":{}}}"#,
-    )
-    .unwrap();
-    let source = "wgt 0.5\nimport shift from \"local/dependency/Shift\"\nmodel Probe\ninput x:f32[1]\noutput y:f32[1]\nfn forward(x){return shift.shifted(x);}\nfn main(){let net=Probe(\"none\");return net([2]);}\n";
-    let dependencies = std::collections::BTreeMap::from([(
-        "local/dependency".into(),
-        dependency.to_str().unwrap().to_owned(),
-    )]);
-    let executable = dir.path().join("imported-client");
-    weightlang_wgt::script_compiler::compile_text_entry_with_dependencies(
-        source,
-        dir.path(),
-        &executable,
-        "main",
-        &dependencies,
-    )
-    .unwrap();
-    fs::remove_dir_all(&dependency).unwrap();
-    let imported = Command::new(&executable)
+    let imported = Command::new(&imported_executable)
         .env("PATH", "/nonexistent")
         .env("WGTIME_ENDPOINT", service.endpoint())
         .output()

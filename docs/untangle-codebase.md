@@ -179,3 +179,23 @@ Additional core fixtures were repaired without lowering numerical requirements. 
 The removed duplicate WorkingMemory AOT assumption retains an exact executable counterpart in `wgtime-core/tests/workspace.rs::complete_wgt_memory_training_example_runs`. That test passed with the same 300-step address training, loss below 1% of the initial value, held-out MSE below 0.05, two-operation execution resumes, identical resumed output and a 16-byte workspace peak.
 
 `docs/native-testing.md`, the Chinese reference and the repository-owned WGT skill now point to the existing Rust/service tests and describe the remaining compatibility layer accurately. Their 101 local Markdown link targets were checked. The CLI CI gate explicitly includes the retained service-dependent ignored test; no environment-based passing or skipping branch was added.
+
+Commit [`7367f91`](https://github.com/WeightLang/WeightLang/commit/7367f911228ad6301e282f4967f0cd4960aa5de5), `fix: align client semantics and lifecycle coverage`, contains these changes. Its independent local snapshot passed workspace compilation with all targets and 23 additional selected tests: the 17 core cases above and six CLI/core compatibility cases. The client control suite also passed after the binding fix. Locally, the ten remaining selected CLI service tests reached the known Unix-listener restriction; their executable result is supplied by the remote service gate.
+
+The first remote CLI run exposed one further stale assumption in the previously ignored `cli_service` fixture: it used a package import path that the current script module loader rejects before dependency resolution. The client execution, persistence, explicit-entry and build/package phases before it passed. The fixture now exercises the implemented relative operator import, retaining the requirement that the generated executable works after dependency sources are deleted. No import implementation or acceptance status was broadened. The CI command uses `--no-fail-fast` to collect every selected target's result while still failing the job on any failure.
+
+## Reproducing the service verification
+
+The exact maintained suites are in [the CI workflow](../.github/workflows/ci.yml). Local reproduction requires a Linux environment that permits Unix listeners and a Rust toolchain compatible with the lockfile. For the client and artifact checks:
+
+```sh
+cargo +1.99.0 build --locked -p wgtime-service --bin wgtime
+WGTIME_TEST_DAEMON="$PWD/target/debug/wgtime" \
+  cargo +1.99.0 test --locked --no-fail-fast -p weightlang-wgt \
+  --test assert_syntax --test categorical_roundtrip --test cli_service \
+  --test client_compiler_boundaries --test lifecycle --test model_calls_aot \
+  --test native_testing --test postfix_mean --test ppo_typed --test script_compiler \
+  -- --include-ignored
+```
+
+Each test owns its service process and endpoint, checks an actual protocol handshake, and cleans up the process. Generated clients receive the endpoint on their own `Command`; tests do not change the process-global environment. This keeps concurrent tests independent and makes a missing or failed daemon an explicit failure.
