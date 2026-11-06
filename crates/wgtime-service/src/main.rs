@@ -15,6 +15,7 @@ use wgtime::receive;
 
 mod admission;
 mod metrics;
+mod persistence;
 mod sessions;
 use sessions::{Session, Sessions, MAX_SESSION_BYTES};
 #[cfg(feature="allocation-metrics")]
@@ -442,157 +443,8 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                 Err(_) => break,
             };
             if request.uses_persistence_descriptor() {
-                use std::io::{Read, Seek, Write};
-                let mut file = wgtime::buffer::receive_file(&stream)?;
-                let result = (|| -> Result<serde_json::Value> {
-                    ensure!(
-                        state.ready && file.metadata()?.is_file(),
-                        "invalid persistence descriptor"
-                    );
-                    match request {
-                        Request::ExportWeightsFd { handle } => {
-                            ensure!(file.metadata()?.len() == 0, "destination must be empty staging file");
-                            let bytes = match state.sessions.get_mut(&handle) {
-                                Some(Session::Operations(session)) => session.weights_bytes(64 * 1024 * 1024)?,
-                                Some(Session::Adaptive(session)) => session.weights_bytes(64 * 1024 * 1024)?,
-                                Some(Session::Trainer(trainer)) => trainer.weights_bytes(64 * 1024 * 1024)?,
-                                _ => bail!("unknown session or foreign owner"),
-                            };
-                            file.write_all(&bytes)?;
-                            file.sync_all()?;
-                            Ok(serde_json::json!({"bytes":bytes.len()}))
-                        }
-                        Request::BindWeightsFd { handle, optimizer } => {
-                            ensure!(file.metadata()?.len() <= 64 * 1024 * 1024, "weights byte limit exceeded");
-                            file.rewind()?;
-                            let mut bytes = Vec::new();
-                            file.take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
-                            ensure!(bytes.len() <= 64 * 1024 * 1024, "weights byte limit exceeded");
-                            match state.sessions.get_mut(&handle) {
-                                Some(Session::Operations(session)) => session.bind_weights(&bytes, &optimizer)?,
-                                Some(Session::Adaptive(session)) => session.bind_weights(&bytes, &optimizer)?,
-                                Some(Session::Trainer(trainer)) => trainer.bind_weights(&bytes, &optimizer)?,
-                                _ => bail!("unknown session or foreign owner"),
-                            }
-                            Ok(serde_json::json!({}))
-                        }
-                        Request::PersistFd { handle, checkpoint } => {
-                            ensure!(
-                                file.metadata()?.len() == 0,
-                                "destination must be empty staging file"
-                            );
-                            let bytes = match state.sessions.get_mut(&handle) {
-                                Some(Session::Adaptive(session)) => {
-                                    if checkpoint { session.checkpoint_bytes_bounded(64 * 1024 * 1024)? }
-                                    else { serde_json::to_vec(session.program())? }
-                                }
-                                Some(Session::Trainer(trainer)) => {
-                                    if checkpoint { trainer.checkpoint_bytes_bounded(64 * 1024 * 1024)? }
-                                    else { serde_json::to_vec(&trainer.snapshot()?)? }
-                                }
-                                _ => bail!("unknown session or foreign owner"),
-                            };
-                            ensure!(
-                                bytes.len() <= 64 * 1024 * 1024,
-                                "persistence byte limit exceeded"
-                            );
-                            file.write_all(&bytes)?;
-                            file.sync_all()?;
-                            Ok(serde_json::json!({"bytes":bytes.len()}))
-                        }
-                        Request::InspectArtifactFd { checkpoint, memory } => {
-                            ensure!(memory > 0 && memory <= MAX_SESSION_BYTES, "inspection memory budget exceeded");
-                            ensure!(file.metadata()?.len() <= 64 * 1024 * 1024, "artifact byte limit exceeded");
-                            file.rewind()?;
-                            let mut bytes = Vec::new();
-                            file.take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
-                            ensure!(bytes.len() <= 64 * 1024 * 1024, "artifact byte limit exceeded");
-                            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-                            let trainer = if checkpoint {
-                                Trainer::restore_self_contained_value(value, memory)?
-                            } else {
-                                Trainer::new_self_contained(serde_json::from_value(value)?, memory, Optimizer::Sgd)?
-                            };
-                            let report = trainer.session.report();
-                            Ok(serde_json::json!({"input":report.input,"output":report.output,"steps":trainer.steps()}))
-                        }
-                        Request::LoadFd {
-                            checkpoint,
-                            optimizer,
-                            memory,
-                        } => {
-                            let admission = state.sessions.admit(memory).context("load admission budget exceeded")?;
-                            ensure!(
-                                file.metadata()?.len() <= 64 * 1024 * 1024,
-                                "checkpoint byte limit exceeded"
-                            );
-                            file.rewind()?;
-                            let mut bytes = Vec::new();
-                            file.take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
-                            ensure!(
-                                bytes.len() <= 64 * 1024 * 1024,
-                                "checkpoint byte limit exceeded"
-                            );
-                            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-                            let artifact_checkpoint = match value.get("format") {
-                                None => false,
-                                Some(tag) if matches!(tag.as_str(), Some(
-                                    "weightlang.forward-training.v1"
-                                        | "weightlang.forward-training.v2"
-                                        | "weightlang.native-training.v1"
-                                )) => true,
-                                Some(_) => bail!("unsupported checkpoint format"),
-                            };
-                            ensure!(
-                                checkpoint == artifact_checkpoint,
-                                "load format does not match model/checkpoint kind"
-                            );
-                            let handle = shared.next_handle()?;
-                            if value
-                                .get("format")
-                                .and_then(|n| n.as_str())
-                                .is_some_and(|n| n.starts_with("weightlang.forward"))
-                                || (!checkpoint && value.get("instructions").is_some())
-                            {
-                                let mut session = if checkpoint {
-                                    wgtime_core::adaptive::AdaptiveSession::restore_checkpoint(value,memory)?
-                                } else {
-                                    wgtime_core::adaptive::AdaptiveSession::prepare(
-                                        serde_json::from_value(value)?,
-                                        memory,
-                                    )?
-                                };
-                                if !checkpoint {
-                                    match optimizer.as_str() {
-                                        "none" => {}
-                                        "adam" => session.set_optimizer(Optimizer::Adam)?,
-                                        "sgd" => session.set_optimizer(Optimizer::Sgd)?,
-                                        _ => bail!("unsupported optimizer"),
-                                    }
-                                }
-                                admission.insert(handle, Session::Adaptive(session));
-                            } else {
-                                let trainer = if checkpoint {
-                                    Trainer::restore_self_contained_value(value, memory)?
-                                } else {
-                                    let optimizer = match optimizer.as_str() {
-                                        "adam" => Optimizer::Adam,
-                                        "sgd" => Optimizer::Sgd,
-                                        _ => bail!("unsupported optimizer"),
-                                    };
-                                    Trainer::new_self_contained(
-                                        serde_json::from_value(value)?,
-                                        memory,
-                                        optimizer,
-                                    )?
-                                };
-                                admission.insert(handle, Session::Trainer(trainer));
-                            }
-                            Ok(serde_json::json!({"handle":handle}))
-                        }
-                        _ => unreachable!(),
-                    }
-                })();
+                let file = wgtime::buffer::receive_file(&stream)?;
+                let result = state.execute_persistence(request, file, &shared);
                 send(&mut stream, &Reply::result(result))?;
                 continue;
             }

@@ -86,6 +86,53 @@ fn execute(s: &Strategy, m: &mut AdaptiveSession) -> anyhow::Result<serde_json::
         16 * 1024 * 1024,
     )
 }
+
+#[test]
+fn resident_helpers_and_builtins_preserve_values() {
+    let text = format!(
+        "{}\nfn square_value(x){{return x*x;}}",
+        source("let values=[]; for x in range(1,4){values=append(values,square_value(x));} return {values:values,count:len(values),root:sqrt(81),absolute:abs(-2),low:min(4,1),high:max(4,1)};")
+    );
+    let expected = serde_json::json!({
+        "values": [1., 4., 9.], "count": 3., "root": 9.,
+        "absolute": 2., "low": 1., "high": 4.,
+    });
+    let strategy = Strategy::compile(&text).unwrap();
+    assert_eq!(execute(&strategy, &mut session()).unwrap()["result"], expected);
+    assert!(Strategy::compile(&text.replace("append(values,square_value(x))", "append(values,square_value(x,x))")).is_err());
+}
+
+#[test]
+fn resident_boolean_expressions_match_interpreter_and_short_circuit() {
+    for (expression, expected) in [
+        ("true && false", false),
+        ("false || true", true),
+        ("false && sqrt(-1)", false),
+        ("true || sqrt(-1)", true),
+        ("false && 7", false),
+        ("true || 7", true),
+        ("(false || true) && true", true),
+        ("true && (false || false)", false),
+    ] {
+        let strategy = Strategy::compile(&source(&format!("return {expression};"))).unwrap();
+        assert_eq!(execute(&strategy, &mut session()).unwrap()["result"], expected, "{expression}");
+        let direct = format!("wgt 0.5\nfn main(){{return {expression};}}");
+        assert_eq!(
+            wgtime_core::script::run(&direct, std::path::Path::new("/tmp/weightlang"), 100000).unwrap().result,
+            expected,
+            "{expression}",
+        );
+    }
+    for expression in ["true && 7", "false || 7", "7 && false", "7 || true"] {
+        let strategy = Strategy::compile(&source(&format!("return {expression};"))).unwrap();
+        let error = execute(&strategy, &mut session()).unwrap_err();
+        assert!(format!("{error:#}").contains("condition must be bool"), "{expression}: {error:#}");
+        let direct = format!("wgt 0.5\nfn main(){{return {expression};}}");
+        let error = wgtime_core::script::run(&direct, std::path::Path::new("/tmp/weightlang"), 100000).unwrap_err();
+        assert!(format!("{error:#}").contains("condition must be bool"), "{expression}: {error:#}");
+    }
+}
+
 #[test]
 fn bounded_actual_results_and_resource_rejection() {
  for (body,expected) in [("return null;",serde_json::Value::Null),("return 17;",serde_json::json!(17.)),("return {value:17,trace:[1,2]};",serde_json::json!({"value":17.,"trace":[1.,2.]}))] {
@@ -132,6 +179,10 @@ fn rejects_capabilities_recursion_and_invalid_arity() {
         "load text from \"secret\";",
         "http_get(\"https://example.com\");",
         "differentiate(net,inputs);",
+        "sqrt(1,2);",
+        "len();",
+        "range(1);",
+        "append([]);",
         "strategy(net,inputs,targets);",
         "save checkpoint net to \"x\";",
     ] {

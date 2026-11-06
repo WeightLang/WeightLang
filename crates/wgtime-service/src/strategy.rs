@@ -18,7 +18,8 @@ enum Op {
     Binary(String),
     Index,
     ReadPath(String, Vec<PathIndex>),
-    Call(String, usize),
+    Call(CallTarget, usize),
+    RequireBoolean,
     Jump(usize),
     Unless(usize),
     Return,
@@ -55,20 +56,54 @@ pub struct Strategy {
     entry: String,
     functions: HashMap<String, Function>,
 }
-const PURE: &[(&str, usize)] = &[
-    ("len", 1),
-    ("range", 2),
-    ("append", 2),
-    ("sqrt", 1),
-    ("abs", 1),
-    ("min", 2),
-    ("max", 2),
-    ("differentiate", 3),
-    ("differentiate_at", 2),
-    ("gradient_snapshot", 1),
-    ("commit_gradients", 3),
-    ("release_gradient", 1),
-];
+#[derive(Clone, Debug)]
+enum CallTarget {
+    Builtin(Builtin),
+    Function(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Builtin {
+    Record,
+    Len,
+    Range,
+    Append,
+    Sqrt,
+    Abs,
+    Min,
+    Max,
+    Differentiate,
+    DifferentiateAt,
+    GradientSnapshot,
+    CommitGradients,
+    ReleaseGradient,
+}
+
+impl Builtin {
+    fn resolve(name: &str, arguments: usize) -> Result<Option<Self>> {
+        let (builtin, arity) = match name {
+            "__record" => {
+                ensure!(arguments % 2 == 0, "invalid record fields");
+                return Ok(Some(Self::Record));
+            }
+            "len" => (Self::Len, 1),
+            "range" => (Self::Range, 2),
+            "append" => (Self::Append, 2),
+            "sqrt" => (Self::Sqrt, 1),
+            "abs" => (Self::Abs, 1),
+            "min" => (Self::Min, 2),
+            "max" => (Self::Max, 2),
+            "differentiate" => (Self::Differentiate, 3),
+            "differentiate_at" => (Self::DifferentiateAt, 2),
+            "gradient_snapshot" => (Self::GradientSnapshot, 1),
+            "commit_gradients" => (Self::CommitGradients, 3),
+            "release_gradient" => (Self::ReleaseGradient, 1),
+            _ => return Ok(None),
+        };
+        ensure!(arguments == arity, "invalid strategy builtin arity: {name}");
+        Ok(Some(builtin))
+    }
+}
 
 impl Strategy {
     pub fn compile(source: &str) -> Result<Self> {
@@ -118,17 +153,12 @@ impl Strategy {
             compiler.code.push(Op::Constant(Value::Null));
             compiler.code.push(Op::Return);
             for op in &compiler.code {
-                if let Op::Call(target, n) = op {
-                    if target == "__record" { ensure!(n % 2 == 0, "invalid record fields"); }
-                    else if let Some((_, arity)) = PURE.iter().find(|(s, _)| *s == target) {
-                        ensure!(n == arity, "invalid strategy builtin arity: {target}");
-                    } else {
-                        let called = program
-                            .get(target)
-                            .with_context(|| format!("forbidden strategy call: {target}"))?;
-                        ensure!(called.args.len() == *n, "invalid helper arity");
-                        visit(target, program, result, active)?;
-                    }
+                if let Op::Call(CallTarget::Function(target), n) = op {
+                    let called = program
+                        .get(target)
+                        .with_context(|| format!("forbidden strategy call: {target}"))?;
+                    ensure!(called.args.len() == *n, "invalid helper arity");
+                    visit(target, program, result, active)?;
                 }
             }
             active.remove(name);
@@ -247,6 +277,7 @@ impl Compiler {
                     self.code.push(Op::Constant(Value::Bool(false)));
                 }
                 self.patch(end, self.code.len());
+                self.code.push(Op::RequireBoolean);
             }
             Expr::Binary(op, a, b) => {
                 self.expr(a)?;
@@ -267,7 +298,11 @@ impl Compiler {
                 for a in args {
                     self.expr(a)?;
                 }
-                self.code.push(Op::Call(n.clone(), args.len()));
+                let target = match Builtin::resolve(n, args.len())? {
+                    Some(builtin) => CallTarget::Builtin(builtin),
+                    None => CallTarget::Function(n.clone()),
+                };
+                self.code.push(Op::Call(target, args.len()));
             }
             _ => bail!("unsupported expression in resident strategy"),
         }
@@ -335,7 +370,7 @@ impl Compiler {
                     let start = self.code.len();
                     self.code.push(Op::Load(index.clone()));
                     self.code.push(Op::Load(values.clone()));
-                    self.code.push(Op::Call("len".into(), 1));
+                    self.code.push(Op::Call(CallTarget::Builtin(Builtin::Len), 1));
                     self.code.push(Op::Binary("<".into()));
                     let end = self.jump(true);
                     self.code.push(Op::Load(values));
@@ -533,107 +568,116 @@ impl Vm<'_> {
         ))
     }
     fn call(&mut self, strategy: &Strategy, name: &str, args: Vec<Value>) -> Result<Value> {
-        if let Some(f) = strategy.functions.get(name) {
-            self.reserve(f.args.iter().map(|n| n.len() + 64).sum())?;
-            let mut env: HashMap<_, _> = f.args.iter().cloned().zip(args).collect();
-            let mut stack: Vec<Value> = vec![];
-            let mut pc = 0;
-            while pc < f.code.len() {
-                self.tick(1)?;
-                let op = &f.code[pc];
-                pc += 1;
-                match op {
-                    Op::Constant(v) => stack.push(self.clone_value(v)?),
-                    Op::Load(n) => {
-                        let v = env
-                            .get(n)
-                            .with_context(|| format!("undefined strategy variable: {n}"))?;
-                        stack.push(self.clone_value(v)?);
-                    }
-                    Op::Store(n, declared) => {
-                        ensure!(
-                            !*declared || env.contains_key(n),
-                            "assignment to undeclared variable"
-                        );
-                        env.insert(n.clone(), stack.pop().context("invalid strategy stack")?);
-                    }
-                    Op::Drop => {
-                        stack.pop().context("invalid strategy stack")?;
-                    }
-                    Op::List(n) => {
-                        self.reserve(128)?;
-                        let xs = stack.split_off(stack.len() - n);
-                        stack.push(Value::List(xs));
-                    }
-                    Op::Unary(op) => {
-                        let v = stack.pop().unwrap();
-                        stack.push(script::compiled::unary(op, v)?);
-                    }
-                    Op::Binary(op) => {
-                        let b = stack.pop().unwrap();
-                        let a = stack.pop().unwrap();
-                        self.reserve(
-                            size(&a)?
-                                .checked_add(size(&b)?)
-                                .context("binary size overflow")?,
-                        )?;
-                        let v = script::compiled::binary(op, a, b)?;
-                        stack.push(v);
-                    }
-                    Op::Index => {
-                        let i = stack.pop().unwrap();
-                        let a = stack.pop().unwrap();
-                        let v = match &a {
+        let f = strategy.functions.get(name).context("unknown strategy function")?;
+        self.reserve(f.args.iter().map(|n| n.len() + 64).sum())?;
+        let mut env: HashMap<_, _> = f.args.iter().cloned().zip(args).collect();
+        let mut stack: Vec<Value> = vec![];
+        let mut pc = 0;
+        while pc < f.code.len() {
+            self.tick(1)?;
+            let op = &f.code[pc];
+            pc += 1;
+            match op {
+                Op::Constant(v) => stack.push(self.clone_value(v)?),
+                Op::Load(n) => {
+                    let v = env
+                        .get(n)
+                        .with_context(|| format!("undefined strategy variable: {n}"))?;
+                    stack.push(self.clone_value(v)?);
+                }
+                Op::Store(n, declared) => {
+                    ensure!(
+                        !*declared || env.contains_key(n),
+                        "assignment to undeclared variable"
+                    );
+                    env.insert(n.clone(), stack.pop().context("invalid strategy stack")?);
+                }
+                Op::Drop => {
+                    stack.pop().context("invalid strategy stack")?;
+                }
+                Op::List(n) => {
+                    self.reserve(128)?;
+                    let xs = stack.split_off(stack.len() - n);
+                    stack.push(Value::List(xs));
+                }
+                Op::Unary(op) => {
+                    let v = stack.pop().unwrap();
+                    stack.push(script::compiled::unary(op, v)?);
+                }
+                Op::Binary(op) => {
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    self.reserve(
+                        size(&a)?
+                            .checked_add(size(&b)?)
+                            .context("binary size overflow")?,
+                    )?;
+                    let v = script::compiled::binary(op, a, b)?;
+                    stack.push(v);
+                }
+                Op::Index => {
+                    let i = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    let v = match &a {
+                        Value::List(xs) => {
+                            xs.get(i.integer()?).context("list index out of bounds")?
+                        }
+                        Value::Object(xs) => {
+                            xs.get(i.text()?).context("missing object field")?
+                        }
+                        _ => bail!("index requires list or object"),
+                    };
+                    stack.push(self.clone_value(v)?);
+                }
+                Op::ReadPath(name, path) => {
+                    self.tick(path.len())?;
+                    let mut value = env.get(name).context("undefined strategy variable")?;
+                    for index in path {
+                        let key = match index {
+                            PathIndex::Literal(v) => v,
+                            PathIndex::Variable(n) => {
+                                env.get(n).context("undefined strategy index")?
+                            }
+                        };
+                        value = match value {
                             Value::List(xs) => {
-                                xs.get(i.integer()?).context("list index out of bounds")?
+                                xs.get(key.integer()?).context("list index out of bounds")?
                             }
                             Value::Object(xs) => {
-                                xs.get(i.text()?).context("missing object field")?
+                                xs.get(key.text()?).context("missing object field")?
                             }
                             _ => bail!("index requires list or object"),
                         };
-                        stack.push(self.clone_value(v)?);
                     }
-                    Op::ReadPath(name, path) => {
-                        self.tick(path.len())?;
-                        let mut value = env.get(name).context("undefined strategy variable")?;
-                        for index in path {
-                            let key = match index {
-                                PathIndex::Literal(v) => v,
-                                PathIndex::Variable(n) => {
-                                    env.get(n).context("undefined strategy index")?
-                                }
-                            };
-                            value = match value {
-                                Value::List(xs) => {
-                                    xs.get(key.integer()?).context("list index out of bounds")?
-                                }
-                                Value::Object(xs) => {
-                                    xs.get(key.text()?).context("missing object field")?
-                                }
-                                _ => bail!("index requires list or object"),
-                            };
-                        }
-                        stack.push(self.clone_value(value)?);
-                    }
-                    Op::Call(n, count) => {
-                        let args = stack.split_off(stack.len() - count);
-                        stack.push(self.call(strategy, n, args)?);
-                    }
-                    Op::Jump(n) => pc = *n,
-                    Op::Unless(n) => {
-                        if !stack.pop().unwrap().boolean()? {
-                            pc = *n;
-                        }
-                    }
-                    Op::Return => return Ok(stack.pop().unwrap()),
-                    Op::Assert => bail!("{}", stack.pop().unwrap().text()?),
+                    stack.push(self.clone_value(value)?);
                 }
+                Op::Call(target, count) => {
+                    let args = stack.split_off(stack.len() - count);
+                    let value = match target {
+                        CallTarget::Function(name) => self.call(strategy, name, args)?,
+                        CallTarget::Builtin(builtin) => self.builtin(*builtin, args)?,
+                    };
+                    stack.push(value);
+                }
+                Op::RequireBoolean => {
+                    stack.last().context("invalid strategy stack")?.boolean()?;
+                }
+                Op::Jump(n) => pc = *n,
+                Op::Unless(n) => {
+                    if !stack.pop().unwrap().boolean()? {
+                        pc = *n;
+                    }
+                }
+                Op::Return => return Ok(stack.pop().unwrap()),
+                Op::Assert => bail!("{}", stack.pop().unwrap().text()?),
             }
-            return Ok(Value::Null);
         }
-        match name {
-            "__record" => {
+        Ok(Value::Null)
+    }
+
+    fn builtin(&mut self, builtin: Builtin, args: Vec<Value>) -> Result<Value> {
+        match builtin {
+            Builtin::Record => {
                 let mut record = std::collections::BTreeMap::new();
                 for pair in args.chunks(2) {
                     let key = pair[0].text()?.to_owned();
@@ -642,8 +686,8 @@ impl Vm<'_> {
                 }
                 Ok(Value::Object(record))
             }
-            "len" => number(args[0].list()?.len() as f64),
-            "range" => {
+            Builtin::Len => number(args[0].list()?.len() as f64),
+            Builtin::Range => {
                 let a = args[0].integer()?;
                 let b = args[1].integer()?;
                 let n = b.saturating_sub(a);
@@ -656,7 +700,7 @@ impl Vm<'_> {
                     (a..b).map(|n| Value::Number(n as f64)).collect(),
                 ))
             }
-            "append" => {
+            Builtin::Append => {
                 let mut args = args.into_iter();
                 let Value::List(mut xs) = args.next().unwrap() else {
                     bail!("append requires list")
@@ -665,11 +709,11 @@ impl Vm<'_> {
                 xs.push(args.next().unwrap());
                 Ok(Value::List(xs))
             }
-            "sqrt" => number(args[0].number()?.sqrt()),
-            "abs" => number(args[0].number()?.abs()),
-            "min" => number(args[0].number()?.min(args[1].number()?)),
-            "max" => number(args[0].number()?.max(args[1].number()?)),
-            "differentiate" | "differentiate_at" => {
+            Builtin::Sqrt => number(args[0].number()?.sqrt()),
+            Builtin::Abs => number(args[0].number()?.abs()),
+            Builtin::Min => number(args[0].number()?.min(args[1].number()?)),
+            Builtin::Max => number(args[0].number()?.max(args[1].number()?)),
+            Builtin::Differentiate | Builtin::DifferentiateAt => {
                 ensure!(
                     self.gradients.len() < 16,
                     "live gradient handle limit exceeded"
@@ -677,7 +721,7 @@ impl Vm<'_> {
                 let budget = self
                     .memory
                     .saturating_sub(self.allocated + self.gradient_bytes);
-                let snapshot = if name == "differentiate" {
+                let snapshot = if builtin == Builtin::Differentiate {
                     ensure!(
                         matches!(args[0], Value::Adaptive(0)),
                         "expected current session"
@@ -720,7 +764,7 @@ impl Vm<'_> {
                 self.gradients.insert(self.next, snapshot);
                 Ok(Value::Gradient(self.next))
             }
-            "gradient_snapshot" => {
+            Builtin::GradientSnapshot => {
                 let Value::Gradient(id) = args[0] else {
                     bail!("expected gradient handle")
                 };
@@ -774,11 +818,11 @@ impl Vm<'_> {
                 );
                 Ok(Value::Object(fields))
             }
-            "commit_gradients" | "release_gradient" => {
+            Builtin::CommitGradients | Builtin::ReleaseGradient => {
                 let Value::Gradient(id) = args[0] else {
                     bail!("expected gradient handle")
                 };
-                if name == "commit_gradients" {
+                if builtin == Builtin::CommitGradients {
                     self.reserve(size(&args[1])? + size(&args[2])?)?;
                     let s = self
                         .gradients
@@ -795,13 +839,12 @@ impl Vm<'_> {
                     .remove(&id)
                     .context("gradient handle released or committed")?;
                 self.gradient_bytes -= s.bytes;
-                if name == "commit_gradients" {
+                if builtin == Builtin::CommitGradients {
                     number(self.loss.unwrap() as f64)
                 } else {
                     Ok(Value::Null)
                 }
             }
-            _ => bail!("forbidden resident strategy operation"),
         }
     }
 }

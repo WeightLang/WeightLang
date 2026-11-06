@@ -65,13 +65,13 @@ jobs:
       - name: Check native artifact publication
         run: cargo test --locked -p weightlang-wgt --test native_publication
       - name: Check service lifecycle and transport
-        run: cargo test --locked -p wgtime-service --bin wgtime --test service --test startup
+        run: cargo test --locked -p wgtime-service --bin wgtime --test service --test startup --test strategy
       - name: Build the model service
         run: cargo build --locked -p wgtime-service --bin wgtime
       - name: Check model APIs against the real service
         env:
           WGTIME_TEST_DAEMON: ${{ github.workspace }}/target/debug/wgtime
-        run: cargo test --locked -p wgt-model --tests -- --include-ignored
+        run: cargo test --locked -p wgt-model -p wgt-model-macros --tests -- --include-ignored
       - name: Check client compiler and artifact lifecycle
         env:
           WGTIME_TEST_DAEMON: ${{ github.workspace }}/target/debug/wgtime

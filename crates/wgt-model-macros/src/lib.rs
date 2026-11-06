@@ -170,17 +170,6 @@ mod tests {
     }
 
     #[test]
-    fn manifest_relative_file_emits_tracked_include_and_alias() {
-        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let input: Input =
-            syn::parse2(quote!(crate = renamed_wgt; "tests/fixtures/model.wgt")).unwrap();
-        let output = file(input, manifest).unwrap().to_string();
-        assert!(output.contains("renamed_wgt :: ModelDefinition :: parse"));
-        assert!(output.contains("include_str"));
-        assert!(output.contains(manifest.to_str().unwrap()));
-    }
-
-    #[test]
     fn rejects_missing_and_absolute_files() {
         for name in ["", "/absolute/model.wgt", "missing-model.wgt"] {
             let input: Input = syn::parse2(quote!(#name)).unwrap();
