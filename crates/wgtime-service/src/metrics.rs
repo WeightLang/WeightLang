@@ -1,9 +1,12 @@
 //! Process-local allocator accounting; counters include all service threads.
+#[cfg(feature = "allocation-metrics")]
 use std::alloc::{GlobalAlloc,Layout,System};
 use std::sync::atomic::{AtomicU64,Ordering};
+#[cfg(feature = "allocation-metrics")]
 pub struct Counting;
 static ALLOCATIONS:AtomicU64=AtomicU64::new(0);
 static ALLOCATED_BYTES:AtomicU64=AtomicU64::new(0);
+#[cfg(feature = "allocation-metrics")]
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: GlobalAlloc requires forwarding the caller's valid layout to the system allocator.

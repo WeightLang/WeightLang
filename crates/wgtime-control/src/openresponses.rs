@@ -3,6 +3,8 @@
 //! Provider extensions are retained as data and never dispatched as tools.
 #[path = "openresponses/budget.rs"]
 pub mod budget;
+#[path = "openresponses/profiles.rs"]
+pub mod profiles;
 #[path = "openresponses/session.rs"]
 pub mod session;
 #[path = "openresponses/sse.rs"]

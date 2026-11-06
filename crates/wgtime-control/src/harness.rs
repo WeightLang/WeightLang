@@ -2,6 +2,7 @@
 use crate::{
     openresponses::{
         budget::{Budget, Grant, Limits},
+        profiles,
         session::Session,
         transport::Endpoint,
     },
@@ -167,32 +168,7 @@ impl Harness {
                 };
                 let path =
                     std::env::var_os("WGT_RESPONSES_PROFILES").context("profiles are required")?;
-                use std::io::Read;
-                let mut bytes = Vec::new();
-                std::fs::File::open(path)?
-                    .take(1024 * 1024 + 1)
-                    .read_to_end(&mut bytes)?;
-                ensure!(bytes.len() <= 1024 * 1024, "profiles exceed limit");
-                let profiles: Json = serde_json::from_slice(&bytes)?;
-                let mut endpoints = BTreeMap::new();
-                for (alias, profile) in
-                    profiles.as_object().context("profiles must be an object")?
-                {
-                    let auth = profile["authorization_env"]
-                        .as_str()
-                        .map(|key| {
-                            std::env::var(key)
-                                .map_err(|_| anyhow::anyhow!("authorization environment missing"))
-                        })
-                        .transpose()?;
-                    endpoints.insert(
-                        alias.clone(),
-                        Arc::new(Endpoint::new(
-                            profile["url"].as_str().context("profile URL missing")?,
-                            auth.as_deref(),
-                        )?),
-                    );
-                }
+                let endpoints = profiles::load(Path::new(&path))?;
                 let allowed = names(args[1].data()?)?;
                 ensure!(
                     allowed.iter().all(|n| endpoints.contains_key(n)),

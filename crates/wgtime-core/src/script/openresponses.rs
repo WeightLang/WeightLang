@@ -2,6 +2,7 @@
 use super::*;
 use crate::openresponses::{
     budget::{Budget, Grant, Limits},
+    profiles,
     session::Session,
     transport::Endpoint,
 };
@@ -54,31 +55,7 @@ impl Runtime {
                 let limits=Limits{requests:limit("requests")?,bytes:limit("bytes")?,tools:limit("tools")?,rounds:limit("rounds")?,concurrency:limit("concurrency")?,deadline_ms:limit("deadline_ms")?};
                 let path = std::env::var_os("WGT_RESPONSES_PROFILES")
                     .context("WGT_RESPONSES_PROFILES is required")?;
-                let file = std::fs::File::open(path)?;
-                use std::io::Read;
-                let mut bytes = Vec::new();
-                file.take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
-                ensure!(bytes.len() <= 1024 * 1024, "profile exceeds limit");
-                let profiles: serde_json::Value = serde_json::from_slice(&bytes)?;
-                let mut endpoints = BTreeMap::new();
-                for (alias, profile) in
-                    profiles.as_object().context("profiles must be an object")?
-                {
-                    let auth = profile
-                        .get("authorization_env")
-                        .and_then(serde_json::Value::as_str)
-                        .map(|key| {
-                            std::env::var(key).map_err(|_| {
-                                anyhow::anyhow!("profile authorization environment is missing")
-                            })
-                        })
-                        .transpose()?;
-                    let endpoint = Endpoint::new(
-                        profile["url"].as_str().context("profile URL missing")?,
-                        auth.as_deref(),
-                    )?;
-                    endpoints.insert(alias.clone(), Arc::new(endpoint));
-                }
+                let endpoints = profiles::load(std::path::Path::new(&path))?;
                 let allowed = names(&args[1])?;
                 ensure!(
                     allowed.iter().all(|n| endpoints.contains_key(n)),
