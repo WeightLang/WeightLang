@@ -1,352 +1,474 @@
-//! End-to-end native lifecycle. Fixtures and all outputs stay in an owned disk-backed directory.
-use serde_json::{json, Value};
+//! Pure model definitions and a Rust host exercise the native artifact lifecycle.
+mod support;
+
+use anyhow::{Context, Result, ensure};
+use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     process::{Command, Output},
 };
+use support::Service;
+use weightlang_wgt::artifact::{hash, hash_file};
+use wgtime::{Client, Request, publication};
 
 const WGT: &str = env!("CARGO_BIN_EXE_wgt");
 const WEIGHTC: &str = env!("CARGO_BIN_EXE_weightc");
+const MEMORY: usize = 4 * 1024 * 1024;
+const TRAINING: &[(f32, f32)] = &[(-1., -1.), (0., 1.), (1., 3.)];
+const HELD_OUT: &[(f32, f32)] = &[(-0.5, 0.), (0.25, 1.5)];
+const MODEL: &str = "wgt 0.5\nmodel LifecycleRegression\ninput x: f32[1]\noutput y: f32[1]\nlayer result: linear(out=1)\ninit seed=42\n";
 
-fn scratch() -> tempfile::TempDir {
-    let root =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/weightlang/lifecycle-tests");
-    fs::create_dir_all(&root).unwrap();
-    tempfile::tempdir_in(root).unwrap()
-}
-fn fixture(root: &Path, steps: u64, resume: bool, complete: bool) {
-    for (name, text) in [
-        (
-            "model.wgt",
-            r#"wgt 0.5
-model LifecycleRegression
-input x: f32[1]
-output y: f32[1]
-layer result: linear(out=1)
-init seed=42
-fn main() {
-    let config_reader = jsonl("run.jsonl");
-    let config = batch(config_reader, 1)[0];
-    close(config_reader);
-    let reader = jsonl("data.jsonl");
-    let inputs = [];
-    let targets = [];
-    let held_out = [];
-    let rows = batch(reader, 2);
-    while len(rows) > 0 {
-        for row in rows {
-            if row["split"] == "train" {
-                inputs = append(inputs, row["input"]);
-                targets = append(targets, row["target"]);
-            } else {
-                assert(row["split"] == "test", "unknown split");
-                held_out = append(held_out, row);
-            }
-        }
-        rows = batch(reader, 2);
-    }
-    close(reader);
-    assert(len(inputs) == 3 && len(held_out) == 2, "incorrect data split");
-    let net = LifecycleRegression("adam");
-    if config["resume"] { net = load_checkpoint("out/resume.json"); }
-    let initial = 0;
-    for i in range(0, len(inputs)) {
-        initial = initial + mse(net(inputs[i]), targets[i]);
-    }
-    initial = initial / len(inputs);
-    for step in range(0, config["steps"]) {
-        fit(net, inputs, targets, 0.05, "mse");
-    }
-    let final = 0;
-    for i in range(0, len(inputs)) {
-        final = final + mse(net(inputs[i]), targets[i]);
-    }
-    final = final / len(inputs);
-    assert(final < initial * 0.01, "loss must decrease by at least 99 percent");
-    let evaluation = 0;
-    for row in held_out {
-        evaluation = evaluation + mse(net(row["input"]), row["target"]);
-    }
-    evaluation = evaluation / len(held_out);
-    if config["complete"] { assert(evaluation < 0.000001, "held-out MSE too high"); }
-    metric("initial_loss", initial);
-    metric("final_loss", final);
-    metric("held_out_mse", evaluation);
-    metric("prediction", net([0.25]));
-    save_model(net, "out/model.json");
-    save_checkpoint(net, "out/checkpoint.json");
-    if config["build"] { return net; }
-    return net([0.25]);
-}
-"#,
-        ),
-        (
-            "data.jsonl",
-            "{\"split\":\"train\",\"input\":[-1],\"target\":[-1]}\n{\"split\":\"test\",\"input\":[-0.5],\"target\":[0]}\n{\"split\":\"train\",\"input\":[0],\"target\":[1]}\n{\"split\":\"test\",\"input\":[0.25],\"target\":[1.5]}\n{\"split\":\"train\",\"input\":[1],\"target\":[3]}\n",
-        ),
-        ("wgt.mod", "module github.com/example/lifecycle\nwgt 0.5\n"),
-        (
-            "tests/evaluation.wgt",
-            r#"wgt 0.5
-fn test_held_out_loss() {
-    let net = load_model("../out/model.json", "adam");
-    let reader = jsonl("../data.jsonl");
-    let rows = batch(reader, 2);
-    let count = 0;
-    let loss = 0;
-    while len(rows) > 0 {
-        for row in rows {
-            if row["split"] == "test" {
-                loss = loss + mse(net(row["input"]), row["target"]);
-                count = count + 1;
-            }
-        }
-        rows = batch(reader, 2);
-    }
-    close(reader);
-    assert(count == 2, "held-out split must contain two rows");
-    metric("held_out_mse", loss / count);
-    assert(loss / count < 0.000001, "held-out MSE exceeds threshold");
-}
-fn test_cpu_benchmark() {
-    let net = load_model("../out/model.json", "adam");
-    let report = benchmark(net, [0.25], 2, 8, "cpu_forward", "cpu");
-    assert(report["device"] == "cpu", "CPU benchmark device");
-    assert(report["repeats"] == 8 && report["unit"] == "us", "benchmark contract");
-    assert(report["mean"] >= 0 && report["p95"] >= report["p50"], "invalid timing");
-    let training = benchmark(net, [[[0], [1]], [[1], [3]], 0.01, "mse"], 2, 8, "cpu_train", "train:cpu");
-    assert(training["device"] == "cpu" && training["mean"] >= 0, "training benchmark");
-}
-"#,
-        ),
-        (
-            "gpu/model.wgt",
-            r#"wgt 0.5
-fn main() {
-    let net = load_model("../out/model.json", "adam");
-    let report = benchmark(net, [0.25], 2, 8, "gpu_forward", "gpu");
-    assert(report["device"] != "cpu", "GPU benchmark must use hardware GPU");
-    assert(report["repeats"] == 8 && report["unit"] == "us", "benchmark contract");
-    assert(report["mean"] >= 0 && report["p95"] >= report["p50"], "invalid timing");
-    return report;
-}
-"#,
-        ),
-    ] {
-        let path = root.join(name);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, text).unwrap();
-    }
-    fs::create_dir_all(root.join("out")).unwrap();
-    fs::write(
-        root.join("run.jsonl"),
-        json!({"steps": steps, "resume": resume, "complete": complete, "build": false}).to_string(),
-    )
-    .unwrap();
-}
-fn command(binary: &str, root: &Path) -> Command {
-    let mut cmd = Command::new(binary);
-    cmd.current_dir(root)
+fn command(service: &Service, binary: &str, root: &Path) -> Command {
+    let mut command = Command::new(binary);
+    command
+        .current_dir(root)
         .env("WEIGHTLANG_CACHE", root.parent().unwrap().join("cli-cache"));
-    cmd
+    service.configure(&mut command);
+    command
 }
-fn success(output: Output) -> Output {
-    assert!(
+
+fn success(output: Output) -> Result<Output> {
+    ensure!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    output
+    Ok(output)
 }
-fn run(root: &Path) -> Value {
-    let output = success(
-        command(WGT, root)
-            .args(["run", "model.wgt"])
-            .output()
-            .unwrap(),
+
+fn failure(output: Output, diagnostic: &str) -> Result<()> {
+    ensure!(!output.status.success(), "unexpected success");
+    let error = String::from_utf8_lossy(&output.stderr);
+    ensure!(
+        error.contains(diagnostic),
+        "expected {diagnostic:?}: {error}"
     );
-    serde_json::from_slice(&output.stdout).unwrap()
+    Ok(())
 }
-fn read_json(path: impl AsRef<Path>) -> Value {
-    serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+
+fn read_json(path: impl AsRef<Path>) -> Result<Value> {
+    Ok(serde_json::from_slice(&fs::read(path)?)?)
 }
-fn snapshot(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
-    fn visit(root: &Path, path: &Path, files: &mut BTreeMap<PathBuf, Vec<u8>>) {
-        for item in fs::read_dir(path).unwrap() {
-            let path = item.unwrap().path();
+
+fn snapshot(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>> {
+    fn visit(root: &Path, path: &Path, files: &mut BTreeMap<PathBuf, Vec<u8>>) -> Result<()> {
+        for item in fs::read_dir(path)? {
+            let path = item?.path();
             if path.is_dir() {
-                visit(root, &path, files);
+                visit(root, &path, files)?;
             } else {
-                files.insert(
-                    path.strip_prefix(root).unwrap().to_path_buf(),
-                    fs::read(path).unwrap(),
-                );
+                files.insert(path.strip_prefix(root)?.to_path_buf(), fs::read(path)?);
             }
         }
+        Ok(())
     }
     let mut files = BTreeMap::new();
-    visit(root, root, &mut files);
-    files
+    visit(root, root, &mut files)?;
+    Ok(files)
 }
-fn assert_checkpoint(root: &Path, steps: u64) {
-    let checkpoint = read_json(root.join("out/checkpoint.json"));
+
+fn create(client: &mut Client) -> Result<u64> {
+    let (_, graph) = wgt_language::source::graph(MODEL)?;
+    client.call(Request::CreateGraph {
+        graph: serde_json::to_value(graph)?,
+        optimizer: "adam".into(),
+        memory: MEMORY,
+    })?["handle"]
+        .as_u64()
+        .context("missing graph handle")
+}
+
+fn load(client: &mut Client, path: &Path, checkpoint: bool) -> Result<u64> {
+    client.call_with_file(
+        Request::LoadFd {
+            checkpoint,
+            optimizer: "adam".into(),
+            memory: MEMORY,
+        },
+        &fs::File::open(path)?,
+    )?["handle"]
+        .as_u64()
+        .context("missing loaded handle")
+}
+
+fn predict(client: &mut Client, handle: u64, input: f32) -> Result<Vec<f32>> {
+    let reply = client.call(Request::Predict {
+        handle,
+        input: vec![input],
+    })?;
+    Ok(serde_json::from_value(reply["output"].clone())?)
+}
+
+fn mse(client: &mut Client, handle: u64, samples: &[(f32, f32)]) -> Result<f64> {
+    let mut total = 0.;
+    for &(input, target) in samples {
+        let output = predict(client, handle, input)?;
+        ensure!(output.len() == 1, "scalar regression output required");
+        total += (f64::from(output[0]) - f64::from(target)).powi(2);
+    }
+    Ok(total / samples.len() as f64)
+}
+
+fn publish(client: &mut Client, request: Request, path: &Path) -> Result<()> {
+    publication::write(path, publication::Mode::CreateNew, |file| {
+        client.call_with_file(request, file)?;
+        Ok(())
+    })
+}
+
+fn train_fixture(
+    service: &Service,
+    root: &Path,
+    steps: u64,
+    resume: Option<&Path>,
+    complete: bool,
+) -> Result<Value> {
+    fs::create_dir_all(root.join("out"))?;
+    fs::write(root.join("model.wgt"), MODEL)?;
+    fs::write(
+        root.join("wgt.mod"),
+        "module github.com/example/lifecycle\nwgt 0.5\n",
+    )?;
+    success(
+        command(service, WEIGHTC, root)
+            .args(["check", "model.wgt"])
+            .output()?,
+    )?;
+    assert!(fs::read_dir(root.join("out"))?.next().is_none());
+
+    let mut client = service.client()?;
+    let handle = match resume {
+        Some(path) => load(&mut client, path, true)?,
+        None => create(&mut client)?,
+    };
+    let initial = mse(&mut client, handle, TRAINING)?;
+    for _ in 0..steps {
+        let reply = client.call(Request::TrainStep {
+            handle,
+            inputs: TRAINING.iter().map(|&(input, _)| vec![input]).collect(),
+            targets: json!(
+                TRAINING
+                    .iter()
+                    .map(|&(_, target)| vec![target])
+                    .collect::<Vec<_>>()
+            ),
+            rate: 0.05,
+            loss: "mse".into(),
+            clip: None,
+        })?;
+        ensure!(
+            reply["loss"].as_f64().is_some_and(f64::is_finite),
+            "non-finite training loss"
+        );
+    }
+    let final_loss = mse(&mut client, handle, TRAINING)?;
+    let held_out = mse(&mut client, handle, HELD_OUT)?;
+    assert!(
+        final_loss < initial * 0.01,
+        "loss must decrease by at least 99 percent: {initial} -> {final_loss}"
+    );
+    if complete {
+        assert!(held_out < 1e-6, "held-out MSE too high: {held_out}");
+    }
+    let prediction = predict(&mut client, handle, 0.25)?;
+    let metrics = json!({"initial_loss":initial,"final_loss":final_loss,"held_out_mse":held_out,"prediction":prediction});
+    eprintln!("lifecycle training metrics: {metrics}");
+
+    let output = root.join("out");
+    for checkpoint in [false, true] {
+        let file = if checkpoint {
+            "checkpoint.json"
+        } else {
+            "model.json"
+        };
+        publish(
+            &mut client,
+            Request::PersistFd { handle, checkpoint },
+            &output.join(file),
+        )?;
+    }
+    publish(
+        &mut client,
+        Request::ExportWeightsFd { handle },
+        &output.join("weights.safetensors"),
+    )?;
+    fs::write(output.join("source.wgt"), MODEL)?;
+    let total_steps = read_json(output.join("checkpoint.json"))?["steps"]
+        .as_u64()
+        .context("missing checkpoint steps")?;
+    let manifest = json!({
+        "format":"weightlang.native-build.v1", "name":"LifecycleRegression", "edition":"0.5",
+        "compiler_version":env!("CARGO_PKG_VERSION"),
+        "model":"model.json", "checkpoint":"checkpoint.json", "source":"source.wgt",
+        "model_sha256":hash_file(&output.join("model.json"))?,
+        "checkpoint_sha256":hash_file(&output.join("checkpoint.json"))?,
+        "source_sha256":hash(MODEL.as_bytes()), "training_steps":total_steps,
+        "interface":{"input":{"dtype":"f32","shape":[1]},"output":{"dtype":"f32","shape":[1]}},
+        "state":"updated", "report":{"metrics":metrics}
+    });
+    fs::write(
+        output.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest)?,
+    )?;
+    Ok(metrics)
+}
+
+fn assert_checkpoint(root: &Path, steps: u64) -> Result<()> {
+    let checkpoint = read_json(root.join("out/checkpoint.json"))?;
     assert_eq!(checkpoint["format"], "weightlang.native-training.v1");
     assert_eq!(checkpoint["steps"], steps);
     assert_eq!(checkpoint["optimizer"], "adam");
     for name in ["first", "second"] {
-        let moments = checkpoint[name].as_array().unwrap();
+        let moments = checkpoint[name]
+            .as_array()
+            .context("missing Adam moments")?;
         assert!(!moments.is_empty());
-        assert!(moments
-            .iter()
-            .flat_map(|v| v.as_array().unwrap())
-            .any(|v| v.as_f64().unwrap() != 0.0));
+        assert!(
+            moments
+                .iter()
+                .flat_map(|v| v.as_array().unwrap())
+                .any(|v| v.as_f64().unwrap() != 0.)
+        );
     }
+    Ok(())
 }
-fn infer(root: &Path, model: &Path, expected: &Value) {
-    let source = format!(
-        "wgt 0.5\nfn main() {{ let net = model({}, \"adam\"); return net([0.25]); }}",
-        serde_json::to_string(model.to_str().unwrap()).unwrap()
+
+fn infer(service: &Service, root: &Path, model: &Path, expected: &Value) -> Result<()> {
+    let before = snapshot(root)?;
+    let mut client = service.client()?;
+    let handle = load(&mut client, model, false)?;
+    assert_eq!(
+        serde_json::to_value(predict(&mut client, handle, 0.25)?)?,
+        *expected
     );
-    let source_dir = root.join("inference");
-    fs::create_dir_all(&source_dir).unwrap();
-    fs::write(source_dir.join("model.wgt"), source).unwrap();
-    let before = snapshot(root);
-    let output = success(
-        command(WGT, root)
-            .args(["run", "inference/model.wgt"])
-            .output()
-            .unwrap(),
+    assert_eq!(
+        client.call(Request::Predict {
+            handle,
+            input: vec![0.25]
+        })?["steps"],
+        0
     );
-    let actual: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(&actual["result"], expected);
     assert_eq!(
         before,
-        snapshot(root),
-        "loading/inference must neither train nor create artifacts"
+        snapshot(root)?,
+        "loading and inference must not train or write artifacts"
     );
+    Ok(())
 }
 
 #[test]
-fn training_resume_evaluation_artifacts_and_negative_paths() {
-    let temp = scratch();
+fn training_resume_evaluation_artifacts_and_negative_paths() -> Result<()> {
+    let temp = support::scratch()?;
+    let service = Service::start()?;
     let full = temp.path().join("full");
-    fixture(&full, 300, false, true);
-    for source in ["model.wgt", "tests/evaluation.wgt", "gpu/model.wgt"] {
-        success(
-            command(WEIGHTC, &full)
-                .args(["check", source])
-                .output()
-                .unwrap(),
-        );
-    }
-    assert!(fs::read_dir(full.join("out")).unwrap().next().is_none());
-    let report = run(&full);
-    let metrics = &report["metrics"];
-    assert!(
-        metrics["final_loss"].as_f64().unwrap() < metrics["initial_loss"].as_f64().unwrap() * 0.01
-    );
-    assert!(metrics["held_out_mse"].as_f64().unwrap() < 1e-6);
-    eprintln!("lifecycle training metrics: {metrics}");
-    assert_checkpoint(&full, 300);
+    let metrics = train_fixture(&service, &full, 300, None, true)?;
+    assert_checkpoint(&full, 300)?;
 
-    // Separate CLI processes make this a real interruption, not two handles in one runtime.
+    // Each fixture owns a separate client connection; only the checkpoint crosses the interruption.
     let first = temp.path().join("first");
-    fixture(&first, 100, false, false);
-    run(&first);
-    assert_checkpoint(&first, 100);
+    train_fixture(&service, &first, 100, None, false)?;
+    assert_checkpoint(&first, 100)?;
     let resumed = temp.path().join("resumed");
-    fixture(&resumed, 200, true, true);
-    fs::copy(
-        first.join("out/checkpoint.json"),
-        resumed.join("out/resume.json"),
-    )
-    .unwrap();
-    run(&resumed);
-    assert_checkpoint(&resumed, 300);
-    for name in ["model.json", "checkpoint.json"] {
+    train_fixture(
+        &service,
+        &resumed,
+        200,
+        Some(&first.join("out/checkpoint.json")),
+        true,
+    )?;
+    assert_checkpoint(&resumed, 300)?;
+    for name in ["model.json", "checkpoint.json", "weights.safetensors"] {
         assert_eq!(
-            fs::read(full.join("out").join(name)).unwrap(),
-            fs::read(resumed.join("out").join(name)).unwrap(),
+            fs::read(full.join("out").join(name))?,
+            fs::read(resumed.join("out").join(name))?,
             "deterministic resume: {name}"
         );
     }
-    let before = snapshot(&full);
-    let output = success(command(WGT, &full).arg("test").output().unwrap());
-    let text = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        text.contains("test_held_out_loss") && text.contains("test_cpu_benchmark"),
-        "{text}"
-    );
-    assert_eq!(before, snapshot(&full));
-    infer(&full, &full.join("out/model.json"), &metrics["prediction"]);
+    infer(
+        &service,
+        &full,
+        &full.join("out/model.json"),
+        &metrics["prediction"],
+    )?;
 
-    let before = snapshot(&full);
-    let duplicate = command(WGT, &full)
-        .args(["run", "model.wgt"])
-        .output()
-        .unwrap();
-    assert!(!duplicate.status.success());
-    assert!(String::from_utf8_lossy(&duplicate.stderr).contains("exist"));
-    assert_eq!(before, snapshot(&full));
-    let corrupt = temp.path().join("corrupt");
-    fixture(&corrupt, 200, true, true);
-    let mut checkpoint = read_json(first.join("out/checkpoint.json"));
-    checkpoint["format"] = json!("broken");
-    fs::write(corrupt.join("out/resume.json"), checkpoint.to_string()).unwrap();
-    let failed = command(WGT, &corrupt)
-        .args(["run", "model.wgt"])
-        .output()
-        .unwrap();
-    assert!(!failed.status.success());
-    assert!(String::from_utf8_lossy(&failed.stderr).contains("unsupported checkpoint format"));
-    assert!(!corrupt.join("out/model.json").exists());
-
-    let build = temp.path().join("build");
-    fixture(&build, 300, false, true);
-    fs::write(
-        build.join("run.jsonl"),
-        json!({"steps":300,"resume":false,"complete":true,"build":true}).to_string(),
-    )
-    .unwrap();
-    let artifacts = temp.path().join("artifacts");
-    let artifact = artifacts.join("LifecycleRegression");
-    let output = success(
-        command(WEIGHTC, &build)
-            .args(["build", "model.wgt", "-o"])
-            .arg(&artifact)
-            .output()
-            .unwrap(),
-    );
-    let manifest: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(manifest["training_steps"], 300);
-    assert_eq!(
-        fs::read(artifact.join("model.json")).unwrap(),
-        fs::read(full.join("out/model.json")).unwrap()
-    );
-    assert_eq!(
-        fs::read(artifact.join("checkpoint.json")).unwrap(),
-        fs::read(full.join("out/checkpoint.json")).unwrap()
-    );
-    let before = snapshot(&artifact);
-    let duplicate = command(WEIGHTC, &build)
-        .args(["build", "model.wgt", "-o"])
-        .arg(&artifact)
-        .output()
-        .unwrap();
-    assert!(!duplicate.status.success());
-    assert!(String::from_utf8_lossy(&duplicate.stderr).contains("output already exists"));
-    assert_eq!(before, snapshot(&artifact));
-    infer(&build, &artifact.join("model.json"), &metrics["prediction"]);
-
-    // release-assets is the native packaging path; it requires a clean local Git source tree.
-    let package = temp.path().join("package");
-    fs::create_dir(&package).unwrap();
-    for name in ["model.wgt", "data.jsonl", "run.jsonl", "wgt.mod"] {
-        fs::copy(build.join(name), package.join(name)).unwrap();
+    let mut client = service.client()?;
+    let handle = load(&mut client, &full.join("out/model.json"), false)?;
+    for checkpoint in [false, true] {
+        let file = if checkpoint {
+            "checkpoint.json"
+        } else {
+            "model.json"
+        };
+        let report = client.call_with_file(
+            Request::InspectArtifactFd {
+                checkpoint,
+                memory: MEMORY,
+            },
+            &fs::File::open(full.join("out").join(file))?,
+        )?;
+        assert_eq!(report["input"], 1);
+        assert_eq!(report["output"], 1);
+        assert_eq!(report["steps"], if checkpoint { 300 } else { 0 });
     }
+    let before = snapshot(&full)?;
+    assert!(
+        publish(
+            &mut client,
+            Request::PersistFd {
+                handle,
+                checkpoint: false
+            },
+            &full.join("out/model.json")
+        )
+        .is_err()
+    );
+    assert_eq!(
+        before,
+        snapshot(&full)?,
+        "failed publication changed retained artifacts"
+    );
+
+    let mut checkpoint = read_json(first.join("out/checkpoint.json"))?;
+    checkpoint["format"] = json!("broken");
+    let corrupt = temp.path().join("corrupt.json");
+    fs::write(&corrupt, serde_json::to_vec(&checkpoint)?)?;
+    let stats = client.call(Request::Stats)?;
+    let error = load(&mut client, &corrupt, true).unwrap_err();
+    assert!(
+        error.to_string().contains("unsupported checkpoint format"),
+        "{error:#}"
+    );
+    let after = client.call(Request::Stats)?;
+    assert_eq!(after["sessions"], stats["sessions"]);
+    assert_eq!(after["reserved"], stats["reserved"]);
+    assert_eq!(
+        serde_json::to_value(predict(&mut client, handle, 0.25)?)?,
+        metrics["prediction"]
+    );
+    assert_eq!(before, snapshot(&full)?);
+    Ok(())
+}
+
+#[test]
+fn package_and_export_native_artifacts() -> Result<()> {
+    let temp = support::scratch()?;
+    let service = Service::start()?;
+    let project = temp.path().join("project");
+    let root = project.as_path();
+    let metrics = train_fixture(&service, root, 300, None, true)?;
+    for args in [
+        vec!["package", "--entry", "out", "-o", "packaged"],
+        vec!["export", "packaged", "-o", "exported.json"],
+        vec!["export", "exported.json", "-o", "copy.json"],
+    ] {
+        success(
+            command(&service, WGT, root)
+                .env("PATH", "/nonexistent")
+                .args(args)
+                .output()?,
+        )?;
+    }
+    for file in weightlang_wgt::package_artifact::NATIVE_FILES {
+        assert_eq!(
+            fs::read(root.join("out").join(file))?,
+            fs::read(root.join("packaged").join(file))?
+        );
+    }
+    assert_eq!(
+        read_json(root.join("out/model.json"))?,
+        read_json(root.join("exported.json"))?
+    );
+    assert_eq!(
+        fs::read(root.join("exported.json"))?,
+        fs::read(root.join("copy.json"))?
+    );
+    assert!(
+        read_json(root.join("exported.json"))?
+            .get("optimizer")
+            .is_none()
+    );
+    infer(
+        &service,
+        root,
+        &root.join("exported.json"),
+        &metrics["prediction"],
+    )?;
+    let before = snapshot(root)?;
+    for args in [
+        vec!["package", "--entry", "out", "-o", "packaged"],
+        vec!["export", "out", "-o", "exported.json"],
+    ] {
+        failure(
+            command(&service, WGT, root).args(args).output()?,
+            "output already exists",
+        )?;
+        assert_eq!(before, snapshot(root)?);
+    }
+    let mut manifest = read_json(root.join("out/manifest.json"))?;
+    manifest["checkpoint_sha256"] = json!("wrong");
+    fs::write(
+        root.join("out/manifest.json"),
+        serde_json::to_vec(&manifest)?,
+    )?;
+    failure(
+        command(&service, WGT, root)
+            .args(["export", "out", "-o", "corrupt.json"])
+            .output()?,
+        "checkpoint checksum mismatch",
+    )?;
+    assert!(!root.join("corrupt.json").exists());
+    Ok(())
+}
+
+#[test]
+fn release_assets_verify_and_reload_explicit_trained_weights() -> Result<()> {
+    let temp = support::scratch()?;
+    let service = Service::start()?;
+    let trained = temp.path().join("trained");
+    let metrics = train_fixture(&service, &trained, 300, None, true)?;
+    let weights = temp.path().join("weights");
+    fs::create_dir(&weights)?;
+    fs::copy(
+        trained.join("out/weights.safetensors"),
+        weights.join("weights.safetensors"),
+    )?;
+    fs::write(weights.join("source.wgt"), MODEL)?;
+    fs::write(
+        weights.join("weights.json"),
+        json!({"trained":{"file":"weights.safetensors","model":"model.wgt"}}).to_string(),
+    )?;
+    // The CLI verifier accepts the tensor artifact schema; native directory packages use service inspection.
+    let manifest = json!({
+        "format":"weightlang.artifact", "format_version":2, "model":"LifecycleRegression",
+        "source":{"file":"source.wgt","sha256":hash(MODEL.as_bytes())},
+        "weights":{"file":"weights.safetensors","sha256":hash_file(&weights.join("weights.safetensors"))?,"tensors":{
+            "result.weight":{"shape":[1,1],"dtype":"float32","origin":"trained"},
+            "result.bias":{"shape":[1],"dtype":"float32","origin":"trained"}}},
+        "interface":{"input":{"name":"x","dtype":"f32","shape":[1]},"output":{"name":"y","dtype":"f32","shape":[1]}},
+        "layers":[{"name":"result","op":"linear","args":{"in":1,"out":1}}]
+    });
+    fs::write(
+        weights.join("manifest.json"),
+        serde_json::to_vec(&manifest)?,
+    )?;
+    success(
+        command(&service, WGT, &trained)
+            .env("PATH", "/nonexistent")
+            .arg("verify")
+            .arg(&weights)
+            .output()?,
+    )?;
+
+    let package = temp.path().join("package");
+    fs::create_dir(&package)?;
+    fs::write(package.join("model.wgt"), MODEL)?;
+    fs::write(
+        package.join("wgt.mod"),
+        "module github.com/example/lifecycle\nwgt 0.5\n",
+    )?;
     for args in [
         vec!["init", "-q"],
         vec!["add", "."],
@@ -366,155 +488,89 @@ fn training_resume_evaluation_artifacts_and_negative_paths() {
             Command::new("git")
                 .current_dir(&package)
                 .args(args)
-                .output()
-                .unwrap(),
-        );
+                .output()?,
+        )?;
     }
-    // Only git is exposed for packaging. Neither python nor python3 can be resolved.
     let tools = temp.path().join("tools");
-    fs::create_dir(&tools).unwrap();
-    #[cfg(unix)]
-    std::os::unix::fs::symlink("/usr/bin/git", tools.join("git")).unwrap();
+    fs::create_dir(&tools)?;
+    std::os::unix::fs::symlink("/usr/bin/git", tools.join("git"))?;
     let release = temp.path().join("release");
-    success(
-        command(WGT, &package)
-            .env("PATH", &tools)
-            .args(["release-assets", "--version", "v0.5.0", "--artifacts"])
-            .arg(&artifacts)
-            .arg("-o")
-            .arg(&release)
-            .output()
-            .unwrap(),
-    );
-    let index = read_json(release.join("wgt.index.json"));
-    let files = index["artifacts"]["LifecycleRegression"]["files"]
-        .as_object()
-        .unwrap();
-    for record in files.values() {
-        let bytes = fs::read(release.join(record["asset"].as_str().unwrap())).unwrap();
-        assert_eq!(
-            weightlang_wgt::artifact::hash(&bytes),
-            record["sha256"].as_str().unwrap()
-        );
-        assert_eq!(bytes.len() as u64, record["size"].as_u64().unwrap());
-    }
-    infer(
-        &build,
-        &release.join("LifecycleRegression.model.json"),
-        &metrics["prediction"],
-    );
-    let before = snapshot(&release);
-    let duplicate = command(WGT, &package)
+    let mut release_command = command(&service, WGT, &package);
+    release_command
         .env("PATH", &tools)
         .args(["release-assets", "--version", "v0.5.0", "--artifacts"])
-        .arg(&artifacts)
+        .arg(&weights)
         .arg("-o")
-        .arg(&release)
-        .output()
-        .unwrap();
-    assert!(!duplicate.status.success());
-    assert!(String::from_utf8_lossy(&duplicate.stderr).contains("output directory must be empty"));
-    assert_eq!(before, snapshot(&release));
-}
-
-#[test]
-fn aot_matches_interpreter_and_runs_without_toolchain_or_python() {
-    let temp = scratch();
-    let interpreted = temp.path().join("interpreted");
-    let compiled = temp.path().join("compiled");
-    fixture(&interpreted, 300, false, true);
-    fixture(&compiled, 300, false, true);
-    let expected = run(&interpreted);
-    let executable = temp.path().join("lifecycle");
-    // Compilation needs Cargo/rustc/linker; execution below has no PATH at all.
-    success(
-        Command::new(WEIGHTC)
-            .current_dir(temp.path())
-            .arg("compile")
-            .arg(compiled.join("model.wgt"))
-            .arg("-o")
-            .arg(&executable)
-            .output()
-            .unwrap(),
-    );
-    assert!(
-        fs::read_dir(compiled.join("out")).unwrap().next().is_none(),
-        "compilation must not execute training"
-    );
-    fs::remove_file(compiled.join("model.wgt")).unwrap();
-    let output = success(
-        Command::new(executable.to_str().unwrap())
-            .current_dir(&compiled)
-            .env("PATH", "/nonexistent")
-            .arg("--root")
-            .arg(&compiled)
-            .output()
-            .unwrap(),
-    );
-    let actual: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(actual, expected);
-    for name in ["model.json", "checkpoint.json"] {
-        assert_eq!(
-            fs::read(interpreted.join("out").join(name)).unwrap(),
-            fs::read(compiled.join("out").join(name)).unwrap()
+        .arg(&release);
+    success(release_command.output()?)?;
+    let index = read_json(release.join("wgt.index.json"))?;
+    assert_eq!(index["format_version"], 2);
+    assert_eq!(index["module"], "github.com/example/lifecycle");
+    assert_eq!(index["sources"].as_object().unwrap().len(), 2);
+    assert_eq!(index["weights"].as_object().unwrap().len(), 1);
+    for record in index["sources"]
+        .as_object()
+        .unwrap()
+        .values()
+        .chain(index["weights"].as_object().unwrap().values())
+    {
+        let bytes = fs::read(release.join(record["asset"].as_str().unwrap()))?;
+        assert_eq!(hash(&bytes), record["sha256"]);
+        assert_eq!(bytes.len() as u64, record["size"]);
+    }
+    let record = &index["weights"]["trained"];
+    assert_eq!(record["model"], "model.wgt");
+    assert_eq!(record["compatibility"], "parameter-schema-only");
+    assert_eq!(record["training"], "unspecified");
+    let schema = record["parameters"]
+        .as_array()
+        .context("missing weight schema")?;
+    assert_eq!(schema.len(), 2);
+    for (name, shape) in [
+        ("result.weight", json!([1, 1])),
+        ("result.bias", json!([1])),
+    ] {
+        assert!(
+            schema
+                .iter()
+                .any(|p| p["name"] == name && p["shape"] == shape && p["dtype"] == "F32")
         );
     }
-}
-
-#[cfg(feature = "gpu")]
-#[test]
-fn gpu_benchmark_when_explicitly_required() {
-    if std::env::var("WGT_REQUIRE_GPU").as_deref() != Ok("1") {
-        eprintln!("GPU lifecycle skipped: set WGT_REQUIRE_GPU=1 to require hardware");
-        return;
-    }
-    let temp = scratch();
-    fixture(temp.path(), 300, false, true);
-    run(temp.path());
-    let output = success(
-        command(WGT, temp.path())
-            .args(["run", "gpu/model.wgt"])
-            .output()
-            .unwrap(),
+    assert_eq!(
+        fs::read_dir(&release)?.count(),
+        4,
+        "release must contain only indexed source, weights and index"
     );
-    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_ne!(report["result"]["device"], "cpu");
-    eprintln!("GPU lifecycle benchmark: {}", report["result"]);
-}
-
-#[test]
-fn package_and_export_native_artifacts() {
-    let temp = scratch();
-    fixture(temp.path(), 300, false, true);
-    fs::write(
-        temp.path().join("run.jsonl"),
-        json!({"steps":300,"resume":false,"complete":true,"build":true}).to_string(),
-    )
-    .unwrap();
-    success(
-        command(WEIGHTC, temp.path())
-            .args(["build", "model.wgt", "-o", "built"])
-            .output()
-            .unwrap(),
-    );
-    success(
-        command(WGT, temp.path())
-            .args(["package", "--entry", "built", "-o", "packaged"])
-            .output()
-            .unwrap(),
-    );
-    success(
-        command(WGT, temp.path())
-            .args(["export", "packaged", "-o", "exported.json"])
-            .output()
-            .unwrap(),
+    let before = snapshot(&release)?;
+    let mut client = service.client()?;
+    let handle = create(&mut client)?;
+    client.call_with_file(
+        Request::BindWeightsFd {
+            handle,
+            optimizer: "none".into(),
+        },
+        &fs::File::open(release.join(record["asset"].as_str().unwrap()))?,
+    )?;
+    assert_eq!(
+        serde_json::to_value(predict(&mut client, handle, 0.25)?)?,
+        metrics["prediction"]
     );
     assert_eq!(
-        read_json(temp.path().join("built/model.json")),
-        read_json(temp.path().join("exported.json"))
+        mse(&mut client, handle, HELD_OUT)?,
+        metrics["held_out_mse"].as_f64().unwrap()
     );
-    let expected = read_json(temp.path().join("built/manifest.json"))["report"]["metrics"]
-        ["prediction"]
-        .clone();
-    infer(temp.path(), &temp.path().join("exported.json"), &expected);
+    failure(release_command.output()?, "output directory must be empty")?;
+    assert_eq!(before, snapshot(&release)?);
+
+    let mut corrupted = fs::read(weights.join("weights.safetensors"))?;
+    *corrupted.last_mut().context("empty weight artifact")? ^= 1;
+    fs::write(weights.join("weights.safetensors"), corrupted)?;
+    failure(
+        command(&service, WGT, &trained)
+            .arg("verify")
+            .arg(&weights)
+            .output()?,
+        "weights sha256 mismatch",
+    )?;
+    Ok(())
 }

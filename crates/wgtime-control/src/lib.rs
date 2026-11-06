@@ -258,7 +258,10 @@ impl Runtime {
         }
     }
     pub fn call_in_env(&mut self, name: &str, args: Vec<Value>, env: &Env) -> Result<Value> {
-        if let Some(Value::Model(model)) = env.get(name) {
+        if let Some(value) = env.get(name) {
+            let Value::Model(model) = value else {
+                bail!("local binding {name} is not callable; expected a model handle");
+            };
             ensure!(args.len() == 1, "model requires one input");
             self.tick()?;
             let reply = self.client.call(Request::Predict {

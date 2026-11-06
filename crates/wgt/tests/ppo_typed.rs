@@ -1,14 +1,11 @@
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path};
 use wgtime_core::script;
-use weightlang_wgt::script_compiler;
 
 #[test]
-fn typed_ppo_aot_preserves_training_and_probability_evaluation() {
+fn typed_ppo_preserves_training_and_probability_evaluation() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cache/weightlang/aot-tests");
     fs::create_dir_all(&root).unwrap();
     let dir = tempfile::tempdir_in(root).unwrap();
-    let source = dir.path().join("model.wgt");
-    let executable = dir.path().join("compiled");
     let text = r#"wgt 0.5
 model Policy
 input observation: f32[2]
@@ -52,31 +49,27 @@ fn main() {
         };
         for epoch in range(0, 4) {
             for minibatch in rollout size 16 {
-                train policy on (minibatch.observation, minibatch.target) rate 0.03 clip 0.5;
+                train policy on minibatch.observation against minibatch.target {rate:0.03;clip:0.5;loss:loss;};
             }
         }
-        fit(critic, rollout.observation, rollout.value_target, 0.03, "mse");
+        train critic on rollout.observation against rollout.value_target {rate:0.03;loss:mse;};
     }
     let success = policy([1,0]).probabilities[1] * policy([0,1]).probabilities[1];
     metric("initial_success_probability", initial);
     metric("final_success_probability", success);
-    assert(success > 0.85, "PPO did not learn delayed reward");
+    assert success > 0.85, "PPO did not learn delayed reward";
     return success;
 }
 "#;
-    fs::write(&source, text).unwrap();
-    script_compiler::compile(&source, &executable).unwrap();
-    fs::remove_file(source).unwrap();
-    let expected = script::run(text, dir.path(), 10_000_000).unwrap();
-    let output = Command::new(&executable).env("PATH", "/nonexistent")
-        .arg("--root").arg(dir.path()).args(["--max-operations", "10000000"]).output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let actual: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let expected = serde_json::to_value(expected).unwrap();
-    assert_eq!(actual["operations"], expected["operations"]);
-    for key in ["initial_success_probability", "final_success_probability"] {
-        assert!((actual["metrics"][key].as_f64().unwrap()-expected["metrics"][key].as_f64().unwrap()).abs()<1e-12);
-    }
-    assert!((actual["result"].as_f64().unwrap()-expected["result"].as_f64().unwrap()).abs()<1e-12);
-    assert!(actual["result"].as_f64().unwrap()>0.85);
+    let report = script::run(text, dir.path(), 10_000_000).unwrap();
+    assert_eq!(
+        report.metrics["initial_success_probability"],
+        serde_json::json!(0.25)
+    );
+    let success = report.result.as_f64().unwrap();
+    assert!(
+        success > 0.85,
+        "PPO did not learn delayed reward: {success}"
+    );
+    assert_eq!(report.metrics["final_success_probability"], report.result);
 }

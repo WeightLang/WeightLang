@@ -1,131 +1,123 @@
-use std::{
-    fs,
-    process::{Command, Output},
-};
+mod support;
 
-fn project() -> tempfile::TempDir {
-    let project = tempfile::tempdir().unwrap();
-    fs::write(
-        project.path().join("wgt.toml"),
-        "[project]\nmodule = \"local/native-tests\"\nedition = \"0.5\"\n",
-    )
-    .unwrap();
-    fs::create_dir(project.path().join("tests")).unwrap();
-    project
-}
-fn run(project: &tempfile::TempDir, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_wgt"))
-        .env("WGT_WEIGHTFS", "off")
-        .current_dir(project.path())
-        .args(args)
-        .output()
-        .unwrap()
+use std::{fs, process::Command};
+use weightlang_wgt::script_compiler;
+use wgtime_core::script;
+
+#[test]
+fn retired_execution_commands_require_extensions_without_running_sources() {
+    let directory = support::scratch().unwrap();
+    let source =
+        "wgt 0.5\nfn main(){save text \"executed\" to \"marker\";}\nfn test_ok(){assert true;}";
+    fs::write(directory.path().join("model.wgt"), source).unwrap();
+    fs::create_dir(directory.path().join("tests")).unwrap();
+    fs::write(directory.path().join("tests/check.wgt"), source).unwrap();
+    fs::write(directory.path().join("tests/fixture.json"), "{}").unwrap();
+    let empty_path = directory.path().join("empty-path");
+    fs::create_dir(&empty_path).unwrap();
+    for args in [
+        vec!["run", "model.wgt"],
+        vec!["test", "--filter", "test_ok"],
+        vec!["script", "model.wgt", "--compiled"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_wgt"))
+            .current_dir(directory.path())
+            .env("PATH", &empty_path)
+            .env("WGT_WEIGHTFS", "off")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("unknown command")
+                && error.contains(&format!("install wgt-{} on PATH", args[0])),
+            "{error}"
+        );
+        assert!(output.stdout.is_empty());
+        assert!(!directory.path().join("marker").exists());
+        assert_eq!(
+            fs::read_to_string(directory.path().join("model.wgt")).unwrap(),
+            source
+        );
+    }
 }
 
 #[test]
-fn discovery_filter_failure_isolation_location_and_exit_status() {
-    let project = project();
-    fs::write(project.path().join("tests/check.wgt"), "wgt 0.5\nfn test_a_fail() {\n assert(false, \"threshold failed\");\n}\nfn test_b_pass() { assert(true, \"ok\"); }\nfn helper() {}\n").unwrap();
-    let output = run(&project, &["test"]);
-    assert!(!output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stdout.contains("test_b_pass"), "{stdout} {stderr}");
-    assert!(stdout.contains("1 passed; 1 failed; 2 total"), "{stdout}");
-    assert!(stderr.contains("check.wgt:3"), "{stderr}");
-    assert!(stderr.contains("threshold failed"));
-    let filtered = run(&project, &["test", "--filter", "test_b"]);
-    assert!(
-        filtered.status.success(),
-        "{}",
-        String::from_utf8_lossy(&filtered.stderr)
-    );
-    assert!(String::from_utf8_lossy(&filtered.stdout).contains("1 passed; 0 failed; 1 total"));
-    assert!(!run(&project, &["test", "--filter", "missing"])
-        .status
-        .success());
-}
-
-#[test]
-fn broken_files_and_json_fixtures_coexist_and_compiled_is_explicitly_rejected() {
-    let project = project();
-    fs::write(
-        project.path().join("tests/broken.wgt"),
-        "wgt 0.5\nfn test_broken( {",
-    )
-    .unwrap();
-    fs::write(
-        project.path().join("tests/ok.wgt"),
-        "wgt 0.5\nfn test_ok() {} ",
-    )
-    .unwrap();
-    fs::write(project.path().join("tests/fixture.json"), "{}").unwrap();
-    let result = run(&project, &["test"]);
-    assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed; 2 failed; 3 total"));
-    assert!(String::from_utf8_lossy(&result.stderr).contains("test requires source"));
-    let result = run(&project, &["test", "--compiled"]);
-    assert!(!result.status.success());
-    assert!(
-        String::from_utf8_lossy(&result.stderr).contains("wgt test --compiled is not supported")
-    );
-}
-
-#[test]
-fn successful_native_json_fixture_and_wgt_share_one_summary() {
-    let project = project();
-    let model =
-        serde_json::json!({"version":1,"input":1,"parameters":[],"layers":[{"op":"identity"}]});
-    fs::write(project.path().join("model.json"), model.to_string()).unwrap();
-    fs::write(
-        project.path().join("tests/fixed.json"),
-        r#"{"model":"model.json","input":[2],"expected":[2]}"#,
-    )
-    .unwrap();
-    fs::write(
-        project.path().join("tests/script.wgt"),
-        "wgt 0.5\nfn test_ok() { assert(true, \"ok\"); }",
-    )
-    .unwrap();
-    let result = run(&project, &["test"]);
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    assert!(String::from_utf8_lossy(&result.stdout).contains("2 passed; 0 failed; 2 total"));
-}
-
-#[test]
-fn evaluation_and_benchmark_share_interpreted_and_aot_semantics() {
-    use wgtime_core::script;
-    let cache = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.cache/weightlang/native-test-task");
-    fs::create_dir_all(&cache).unwrap();
-    let temp = tempfile::tempdir_in(cache).unwrap();
+fn evaluation_and_benchmark_retain_core_statistics_and_training_effects() {
+    let directory = support::scratch().unwrap();
     let source = r#"wgt 0.5
 fn test_evaluation() {
     let reader = jsonl("flag.jsonl");
-    assert(batch(reader,1)[0]["ok"], "evaluation flag failed");
+    assert batch(reader,1)[0]["ok"], "evaluation flag failed";
     close(reader);
     let net = mlp([1,1], "identity", 42, "sgd");
     let before = net([1]);
     let timing = benchmark(net, [[[0],[1]],[[1],[3]],0.1,"mse"], 2, 4, "step", "train:cpu");
-    assert(timing["repeats"] == 4, "repeat count");
-    assert(net([1]) != before, "training benchmark must update weights");
+    assert timing["repeats"] == 4, "repeat count";
+    assert net([1]) != before, "training benchmark must update weights";
     return mse(net([1]), [3]);
 }
 fn main() { return test_evaluation(); }
 "#;
-    fs::write(temp.path().join("model.wgt"), source).unwrap();
-    fs::write(temp.path().join("flag.jsonl"), "{\"ok\":true}\n").unwrap();
-    let interpreted = script::run(source, temp.path(), 10000).unwrap();
-    let executable = temp
-        .path()
-        .join(format!("evaluation{}", std::env::consts::EXE_SUFFIX));
-    weightlang_wgt::script_compiler::compile(&temp.path().join("model.wgt"), &executable).unwrap();
-    let output = Command::new(&executable)
-        .env("WGT_WEIGHTFS", "off")
+    fs::write(directory.path().join("flag.jsonl"), "{\"ok\":true}\n").unwrap();
+    let report = script::run(source, directory.path(), 10000).unwrap();
+    assert!(report.result.as_f64().unwrap().is_finite());
+    let timing = &report.metrics["step"];
+    assert_eq!(timing["device"], "cpu");
+    assert_eq!(timing["mode"], "train:cpu");
+    assert_eq!(timing["unit"], "us");
+    assert_eq!(timing["warmup"], 2);
+    assert_eq!(timing["repeats"], 4);
+    assert!(timing["p95"].as_f64().unwrap() >= timing["p50"].as_f64().unwrap());
+    fs::write(directory.path().join("flag.jsonl"), "{\"ok\":false}\n").unwrap();
+    let error = script::run(source, directory.path(), 10000).unwrap_err();
+    let error = format!("{error:#}");
+    assert!(
+        error.contains("line 4") && error.contains("evaluation flag failed"),
+        "{error}"
+    );
+}
+
+#[test]
+fn explicit_named_entry_evaluates_and_trains_through_service() {
+    let service = support::Service::start().unwrap();
+    let directory = support::scratch().unwrap();
+    let source = r#"wgt 0.5
+model Regression
+input x:f32[1]
+output y:f32[1]
+parameter w:f32[1]=[0]
+fn forward(x){return x*w;}
+fn main(){assert false,"main must not run";}
+fn test_evaluation(){
+ let net=Regression("sgd");
+ let before=net([1])[0];
+ let loss=train net on [[1]] against [[2]] {rate:0.1;loss:mse;};
+ let after=net([1])[0];
+ assert loss==4,"initial loss";
+ assert after>before,"training must update weights";
+ metric("before",before);metric("after",after);
+ return loss;
+}
+"#;
+    let reference = script::testing::Suite::parse(source)
+        .unwrap()
+        .run(
+            "test_evaluation",
+            directory.path(),
+            10000,
+            Default::default(),
+        )
+        .unwrap();
+    let path = directory.path().join("model.wgt");
+    fs::write(&path, source).unwrap();
+    let executable = directory.path().join("evaluate");
+    script_compiler::compile_text_entry(source, directory.path(), &executable, "test_evaluation")
+        .unwrap();
+    fs::remove_file(path).unwrap();
+    let output = service
+        .configure(Command::new(executable).env("PATH", "/nonexistent"))
         .output()
         .unwrap();
     assert!(
@@ -133,28 +125,15 @@ fn main() { return test_evaluation(); }
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let compiled: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(
-        (compiled["result"].as_f64().unwrap() - interpreted.result.as_f64().unwrap()).abs() < 1e-12
+    let actual: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        actual["result"].as_f64().unwrap() as f32,
+        reference.result.as_f64().unwrap() as f32
     );
-    assert_eq!(compiled["operations"], interpreted.operations);
-    for key in ["device", "mode", "unit", "warmup", "repeats", "scope"] {
+    for name in ["before", "after"] {
         assert_eq!(
-            compiled["metrics"]["step"][key],
-            interpreted.metrics["step"][key]
+            actual["metrics"][name].as_f64().unwrap() as f32,
+            reference.metrics[name].as_f64().unwrap() as f32
         );
     }
-    fs::write(temp.path().join("flag.jsonl"), "{\"ok\":false}\n").unwrap();
-    let error = script::run(source, temp.path(), 10000).unwrap_err();
-    assert!(format!("{error:#}").contains("line 4"));
-    let output = Command::new(&executable)
-        .env("WGT_WEIGHTFS", "off")
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    let error = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        error.contains("line 4") && error.contains("evaluation flag failed"),
-        "{error}"
-    );
 }

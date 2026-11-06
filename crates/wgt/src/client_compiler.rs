@@ -20,7 +20,14 @@ fn expression(e: &Expr) -> Result<String> {
             ensure!(!name.starts_with("__") || matches!(name.as_str(),"__graph"|"__adaptive"),"unsupported internal constructor");
             format!("{{let args=vec![{}];rt.call_in_env({name:?},args,env)?}}",args.iter().map(expression).collect::<Result<Vec<_>>>()?.join(","))
         }
-        Expr::Binary(op,a,b)=>{let a=expression(a)?;let b=expression(b)?;match op.as_str(){"&&"=>format!("{{if {a}.boolean()?{{{b}}}else{{Value::Data(json!(false))}}}}"),"||"=>format!("{{if {a}.boolean()?{{Value::Data(json!(true))}}else{{{b}}}}}"),_=>format!("{{let a={a};let b={b};binary({op:?},a,b)?}}")}},
+        Expr::Binary(op, a, b) => {
+            let a = expression(a)?;
+            let b = expression(b)?;
+            match op.as_str() {
+                "&&" | "||" => format!("Value::Data(json!({a}.boolean()? {op} {b}.boolean()?))"),
+                _ => format!("{{let a={a};let b={b};binary({op:?},a,b)?}}"),
+            }
+        }
         Expr::Unary(op,e)=>match op.as_str(){"!"=>format!("Value::Data(json!(!{}.boolean()?))",expression(e)?),"-"=>format!("number(-{}.number()?)?",expression(e)?),_=>bail!("unsupported unary")},
         Expr::Index(a,b)=>format!("{{let a={};let b={};wgtime_control::records::index(a,b)?}}",expression(a)?,expression(b)?),
         _=>bail!("construct not yet migrated to client-only compiler: {e:?}"),

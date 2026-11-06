@@ -1943,6 +1943,7 @@ dependencies = [
  "tempfile",
  "toml_edit",
  "wgt-language",
+ "wgtime",
  "wgtime-control",
  "wgtime-core",
 ]

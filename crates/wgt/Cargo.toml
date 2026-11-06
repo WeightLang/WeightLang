@@ -32,4 +32,5 @@ tempfile = "3"
 toml_edit = { version = "0.22", features = ["serde"] }
 
 [dev-dependencies]
+wgtime = { path = "../wgtime" }
 wgtime-core = { path = "../wgtime-core", default-features = false }

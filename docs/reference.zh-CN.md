@@ -40,6 +40,8 @@ assert_eq!(output, vec![6.0]);
 
 Rust facade 通过 IPC 连接机器级 `wgtime` 服务，由服务持有模型执行、参数和优化器状态；模型 forward 使用服务端原生编译实现。旧脚本控制与执行路径仍在源码中，正在逐步退出，不能据此认为已全部删除或等同于新模型 API。`wgtime` 服务专题见 [wgtime](wgtime.md)。服务连接失败明确报错，不回退到应用进程内执行。模型定义解析、检查和编译不隐式初始化或训练。
 
+当前 `wgt` 内置命令没有 `run`、`script` 或 `test`，以 [CLI 定义](../crates/wgt/src/main.rs) 为准。新应用使用 Rust 主程序与服务；下文的普通脚本、I/O、采样及 benchmark 描述保留中的 core 兼容接口，不构成这些旧 CLI 入口或整个脚本 AOT 路径的支持承诺。模型测试与兼容层测试的有效入口见[测试边界](native-testing.md)。
+
 ## 语法与能力边界的机器可读规格
 
 [上下文能力规格](../language/source_capabilities.json) 记录当前源码 edition、解析入口及普通函数、
@@ -70,9 +72,9 @@ Rust facade 通过 IPC 连接机器级 `wgtime` 服务，由服务持有模型�
 ## 编译单元与入口
 
 **模型源码入口固定为 `model.wgt`。** 每个独立模型或训练示例使用独立目录，
-例如 `examples/native_training/working_memory/model.wgt`；模型/功能名放在目录名中，
+例如 `models/working_memory/model.wgt`；模型/功能名放在目录名中，
 不能用 `main.wgt`、`train.wgt` 或 `working_memory.wgt` 作为模型入口。
-`model.wgt` 是文件入口，`fn main()` 是显式执行时调用的函数，两者不是同一概念。
+`model.wgt` 是文件入口；旧普通脚本的 `fn main()` 是显式执行入口，纯模型定义不要求它。
 这是项目、示例与技能的组织规范；底层 CLI 接受显式源码路径不代表推荐其他入口名称。
 标准库模块文件和制品中的 `source.wgt` 快照不属于模型源码入口，不随此规范改名。
 
@@ -81,20 +83,17 @@ Rust facade 通过 IPC 连接机器级 `wgtime` 服务，由服务持有模型�
 函数使用 `fn name(args) { ... }`，语句以分号结束，控制流块无需分号。
 名称使用 ASCII 字母或下划线开头、后接字母/数字/下划线；`__` 前缀供编译器使用。
 
-一个文件可声明一个根模型、多个具名子模型定义和多个函数。`fn main()` 无参数，执行程序时才调用。
-模型名成为构造函数，调用才初始化会话；只解析/编译不访问训练数据、不训练、不保存。
-只有模型声明的文件可检查，但执行或编译可执行文件时必须显式定义 main。
+一个文件可声明一个根模型、多个具名子模型定义和多个函数。Rust facade 解析定义后，通过 `Client::initialize` 显式初始化服务实例。
+旧脚本兼容层将模型名作为构造函数，并以无参 `fn main()` 为默认执行入口；只解析/编译不访问训练数据、不训练、不保存。
+只有模型声明的文件可以检查和嵌入 Rust 程序；旧脚本客户端可执行文件则要求显式入口。
 
 ```sh
-weightc check examples/native_training/supervised/model.wgt
-wgt run examples/native_training/supervised/model.wgt
-wgt run examples/native_training/supervised/model.wgt --compiled
-weightc compile examples/native_training/supervised/model.wgt -o .cache/weightlang/regression
+wgt check model.wgt
+weightc check model.wgt
 ```
 
-`wgt script` 是 `wgt run` 的命令别名，不是另一套语言。
-解释和编译模式使用同一前端；编译模式生成 Rust 控制流和静态模型计划，运行时不解析 WGT。
-`weightc check` 检查语法及受支持的模型声明，不证明所有函数调用、路径初始化或循环终止。
+两种检查入口共用[源码检查器](../crates/wgt/src/source_check.rs)，检查语法与原生模型 lowering，不证明所有函数调用、路径初始化或循环终止。
+保留的 `weightc compile` 与 `weightc compile-client` 都使用 [client compiler](../crates/wgt/src/client_compiler.rs)；只接受已经迁移的构造，模型执行需要服务。core 解释器或旧 `script::codegen` 接受的语法，不自动成为当前 client compiler 的支持范围。
 
 ## 多入口模型操作
 
@@ -153,7 +152,7 @@ fn main() {
 调用 async fn 创建冷 future；spawn 仅用于同步 tasks 作用域，await 驱动/等待，正常退出 join，失败取消并等待在途 I/O 清理。
 第一阶段使用本地 future executor 和固定两线程阻塞 I/O 池，支持 async 用户函数、嵌套 await、`await sleep(ms)`、`await load text from path`；
 不支持嵌套 tasks、async fn 内 tasks/spawn、资源参数/返回值或异步模型执行。活跃 host/compute 限制下显式拒绝。
-完整签名、预算、RNG、错误/释放契约和限制见[原生异步任务](async-tasks.md)，例子见[async_tasks/model.wgt](../examples/native_training/async_tasks/model.wgt)。
+完整签名、预算、RNG、错误/释放契约和限制见[原生异步任务](async-tasks.md)，例子见[异步任务回归](../crates/wgtime-core/tests/async_tasks.rs)。
 
 ## 普通函数、训练与数据
 
@@ -161,7 +160,7 @@ fn main() {
 `let name = expr;` 绑定变量，`name = expr;` 修改已有绑定。
 
 `let a = expr, b = expr, c = expr;` 一次声明多项，可在逗号前后换行。每项从左到右求值一次并立即绑定，后项可引用前项；等价于同一块内连续的普通 `let`，不新增作用域或事务，后项失败不回滚前项副作用。普通函数保留原有重绑定规则，forward/loss 保留原有声明与形状约束。函数实参、列表和记录字面量内部的逗号由各自括号消费；最外层逗号才分隔声明，不提供元组或多目标赋值。`collect` 和绑定结果的 `learn` 必须独立书写，不能混入连续声明。组末不能有尾随逗号。
-完整示例见 [continuous_let/model.wgt](../examples/native_training/continuous_let/model.wgt)。
+完整示例见 [连续声明回归](../crates/wgtime-core/tests/continuous_let.rs)。
 
 支持函数调用、列表/对象索引、一元 `- !`、算术 `+ - * / % @ **`、比较及短路 `&& ||`。
 矩阵乘法可写为 `A @ B`，等价于 `matmul(A,B)`；rank-2 转置可写为 `A.T`，等价于 `transpose(A)`。
@@ -174,7 +173,7 @@ fn main() {
 数值运算产生无穷大或 NaN 时报错，包括数字除以零及对零取余；不会隐式替换除数。
 源码入口限制为 4 MiB，函数词法分析最多生成 100000 个 Token；超限在扫描期间拒绝。
 普通脚本中的 `sample p { then { a } else { b } }` 按标量概率 p 在 [0,1] 抽样，只执行选中表达式；
-精确端点不消耗随机数。它不建立张量梯度，示例见 [sample_branch/model.wgt](../examples/native_training/sample_branch/model.wgt)。
+精确端点不消耗随机数。它不建立张量梯度，示例见 [概率分支回归](../crates/wgtime-core/tests/differentiable_syntax.rs)。
 
 类别采样目标语法为 `decode policy(input) {method:sample;}`。parser/runtime 实现前，此形式为规划契约，不可执行；目标模型/输入只求值一次，采样不提交 forward 写入，并沿用模型声明的 logits 或 probabilities 分布语义。返回字段、RNG 消耗和预算限制待实现后补齐。
 条件必须 bool，无隐式数值或张量真假转换；函数参数按位置传递，参数数目严格匹配。
@@ -200,7 +199,7 @@ state/观测/反馈/标志全部验证后原子提交，失败保留实例state/
 普通记录字面量 `{field:expression,...}` 左到右一次求值、字段唯一、有限有界普通数据，不自动可微。
 agent/env资源及嵌套容器不能save json或传入异步；无整实例checkpoint，仅显式保存actor.policy模型状态。
 完整签名、预算、保存边界及有效例子见[专题](agents-environments.md)与
-[agent_environment/model.wgt](../examples/native_training/agent_environment/model.wgt)。
+[agent/environment 回归](../crates/wgtime-core/tests/agent_environment.rs)。
 
 ## 记录批次与对齐小批次
 
@@ -223,7 +222,7 @@ agent/env资源及嵌套容器不能save json或传入异步；无整实例check
 `break` / `continue` 作用于最近循环；`return` 穿透 collect 返回当前函数，未完成批次不绑定到变量。
 错误同样丢弃未完成批次并恢复外层收集状态；已经发生的 RNG、文件或环境副作用不回滚。
 collect/yield/分块不支持 tensor forward/loss，不使记录自动可微；PPO 示例仍显式组装既有 f32[4] target。
-完整例子见 [ppo/model.wgt](../examples/native_training/ppo/model.wgt)。
+完整例子见 [PPO 记录批次回归](../crates/wgtime-core/tests/ppo_records.rs)。
 
 普通函数内的模型句柄可直接写 `net(input)`，包括函数参数 `fn infer(net, x) { return net(x); }`。
 仅接受一个符合模型输入宽度的有限 f32 向量，返回模型输出列表；无默认参数、多输入或广播。
@@ -252,7 +251,7 @@ checkpoint 使用保存的优化器。值、路径各求值一次；相对路径
 控制流为 `if condition { ... } else { ... }`、`while condition { ... }`、
 `for name in list { ... }`、`break;`、`continue;`、`return expr;`。
 当前函数内共享变量环境，if/for 不创建词法局部作用域；重复 let 覆盖绑定。
-普通脚本可导入 `module NAME` 普通脚本模块：固定标准模块用逻辑名，本地开发模块用相对 `./module.wgt` 路径；模块可导出普通及 async 函数，不是 forward/loss 的张量算子，也不能在那里调用。纯张量 `operators NAME` 库是另一套仅供 forward/loss 的导入机制，见[自定义算子](custom-operators.md)。`std/openresponses/harness` 提供 `next(session,profile)`、`submit(session,results)` 与 `finished(step)` 协议辅助；显式工具映射和调用循环由普通 WGT 控制流负责。解释执行、默认编译和显式轻客户端 AOT 已覆盖双 worker 闭环及共享账本；AOT 在不保留模型源码、且 PATH 无构建工具链时运行。性能与吞吐尚未验收；`wgtime` 完整模型执行迁移仍按[OpenResponses 专题](openresponses.md)中的边界处理。
+旧普通脚本兼容层保留 `module NAME` 模块及相对 `./module.wgt` 导入；普通及 async 函数的解析边界见[普通模块解析实现](../crates/wgt-language/src/script/modules.rs)。它们不是 forward/loss 的张量算子。纯张量 `operators NAME` 库是独立的模型导入机制，见[自定义算子](custom-operators.md)。旧 `std/openresponses/harness` 和对应宿主脚本示例已移除；新应用由 Rust 负责工具映射、网络交互与控制循环，不能用历史脚本用例证明当前客户端编译或模型服务支持。
 无任意 Python、shell 或宿主回调。源码函数嵌套与求值均有预算限制。
 
 训练、流式 JSONL、强化学习、保存与 benchmark 的完整内置签名、默认值及限制见
@@ -293,7 +292,7 @@ fn main() {
 ```
 
 包含列表、forward/loss 和显式训练的完整示例：
-[`slicing/model.wgt`](../examples/native_training/slicing/model.wgt)。
+[切片回归](../crates/wgtime-core/tests/slicing.rs)。
 
 ### GPU 与 WGSL 内置函数
 
@@ -352,10 +351,10 @@ workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 普通 `handle(input)` 执行并提交成功写入；失败回滚，步数计入外层操作预算。
 无需 `register`、标签、`jump` 或 `branch` 源码指令，这些仅存在于内部 IR。
 
-完整可执行示例：[self_modifying/model.wgt](../examples/self_modifying/model.wgt)。
+模型内写入的行为用例见[模型内写入回归](../crates/wgtime-core/tests/adaptive.rs)。
 
 固定 shape 多轴几何与 attention 算子合同（行为待验证）见[固定 shape 张量几何](tensor-geometry.md)。实际使用新几何算子或多轴 softmax 时使用 adaptive IR v3；旧 IR v1/v2 不因 AST 中出现新 intrinsic 而全定义升级。参数读取始终为 flat vector，矩阵参数须显式 reshape。既有 forward 入口为单个 f32 向量，矩阵输出须 reshape 回向量；typed 操作多输入的本地验收范围见[模型操作](model-operations.md)。完整模型示例在 [T10 语法总览注释](../language/syntax-tour/model.wgt) 与后端测试 fixture `crates/wgtime-core/tests/fixtures/attention/model.wgt`；本地验证为 core 7 suites / 30 tests、真实 service 集成 1 项和 macro fixture 编译 1 项通过；native-cpu attention 100 步 SGD 的 MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训和资源释放。核心补充 IR 安全校验后须回归。未验证完整 Transformer、多头 attention、动态 batch 或 GPU 路径。
-可微路由训练示例：[soft_routing/model.wgt](../examples/native_training/soft_routing/model.wgt)，
+可微路由训练示例：[软路由回归](../crates/wgtime-core/tests/soft_routing.rs)，
 完整训练、状态与保存约束见[可微程序](differentiable-programs.md)。上述三种算子的张量梯度仅用于 forward，
 全部参数必填，无温度等隐式选项。`p=1` 表示完整通过或完全采用 a 的输出。
 推理短路作用于直接写在 gate/route 内的表达式（支持嵌套），不延迟此前已执行的 let；
@@ -363,7 +362,7 @@ workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 forward 中也可写 `mix p { then { a } else { b } }`，等价于 `route(p,a,b)`；
 分支内各为一个张量表达式，可选尾随分号。`mix` 和 `then` 是保留名称。
 train/reinforce 和显式 VJP 记录梯度时仍计算两边，包括 frozen 门，以保留完整数学梯度。
-短路示例：[lazy_routing/model.wgt](../examples/native_training/lazy_routing/model.wgt)。
+短路示例：[惰性路由回归](../crates/wgtime-core/tests/lazy_routing.rs)。
 路由选择梯度为 a-b，门梯度为 x；标量门梯度在特征轴求和。
 语句 if 保持硬分支；表达式 if 的特定 learn 条件使用 STE，详见下文。源文件文本、宿主函数和 I/O 不因此可微。
 事务、原生一阶自动微分、显式状态及预算细节见[自更新运行时](self-modifying-runtime.md)。
@@ -374,7 +373,7 @@ alloc/read/write 额外按 N×D 计费；释放不丢弃训练 tape 中的历史
 `execution_resume(model,instructions)`、`execution_cancel(model)`，需 compute_budget，
 仅针对 forward 推理；暂停保持状态，完成才提交写入，错误或取消丢弃事务。
 完整形状、预算、返回字段、训练及生命周期契约见[工作内存与分步执行](working-memory.md)，
-可运行例子为 [working_memory/model.wgt](../examples/native_training/working_memory/model.wgt)。
+行为用例见[工作内存回归](../crates/wgtime-core/tests/workspace.rs)。
 forward 工作内存、`resource_state()` 和普通脚本的 `execution_start/resume/cancel` 分段执行
 见[临时工作内存与分段执行](self-modifying-runtime.md#临时工作内存与分段执行)。
 
@@ -385,7 +384,7 @@ forward 工作内存、`resource_state()` 和普通脚本的 `execution_start/re
 目标静态绑定声明，不受局部同名值影响；三个实参从左到右各求值一次，策略只调用一次，并返回策略实际结果。
 返回值限纯数据，允许 null，最大嵌套深度 32、计量 1 MiB，拒绝资源句柄；超参写在策略函数内，using与配置块不能混用。
 策略自行决定differentiate/at/commit及更新次数，语句不隐式提交或重试；每个commit原子，整个策略函数不自动回滚，失败不撤销此前成功的显式提交。
-完整例子 [train_strategy/model.wgt](../examples/native_training/train_strategy/model.wgt) 及限制见
+行为用例[训练策略回归](../crates/wgtime-core/tests/train_strategies.rs) 及限制见
 [原生训练](native-training.md#静态训练策略-train--using)。本语法不使普通host函数自动可微，也不扩展GPU训练范围。
 
 ## 自定义优化器更新
@@ -399,12 +398,12 @@ CPU `forward` 模型可用 `differentiate(model,inputs,targets)` 显式求 `fn l
 旧/已释放句柄、模型版本冲突、错误布局及非有限值报错，不部分提交。
 `save checkpoint` / `load checkpoint` 的 forward v2 保存/恢复用户状态及步数，读取保留 v1 格式；`save model` 导出不含优化器的模型。
 完整签名、预算计量、约束和续训示例见[原生训练](native-training.md#wgt-自定义更新算法cpu-forward)及
-[custom_momentum/model.wgt](../examples/native_training/custom_momentum/model.wgt)。目前不支持此接口的顺序/GPU模型，
+[自定义更新回归](../crates/wgtime-core/tests/custom_optimization.rs)。目前不支持此接口的顺序/GPU模型，
 不自动执行算法、恢复训练循环或导入含循环的 host 模块。
 `differentiate_at(gradient,candidate_parameters)` 在临时参数上使用首次句柄保存的同一 f32 批次重新求一阶梯度，
 不写真实模型；返回的新句柄仍以原 parameters/state/steps 为提交基准，loss/gradients来自临时点。
 它与原接口共享句柄/内存预算，拒绝过期版本；批次保留与临时绑定副本也计入预算。
-[custom_sam/model.wgt](../examples/native_training/custom_sam/model.wgt) 用两次一阶求导与一次提交定义 SAM+SGD/动量；
+[SAM 临时梯度回归](../crates/wgtime-core/tests/custom_optimization.rs) 用两次一阶求导与一次提交定义 SAM+SGD/动量；
 这不提供高阶自动微分、SAM专用对象或GPU自定义优化。完整同批次/状态语义见[原生训练](native-training.md#用普通-wgt-编写-sam)。
 
 ## 模型组合与有界控制表达式
@@ -456,8 +455,8 @@ fn loss(prediction,target) {
 `import alias from "MODULE/LibraryName"` 导入已声明的包依赖，在 forward/loss 调用 `alias.function(args)`。
 库不提供模型或训练入口；模型模块解析器中实现了嵌套导入，仍待行为验收。函数公开、路径与其他分发限制见同页。
 导入与编译不运行算子；原生 IR 和 AOT 内嵌展开结果，保存后不依赖算子源码。
-这是本地 0.5 实现，未发布；完整有效例子为
-[custom_operators/model.wgt](../examples/native_training/custom_operators/model.wgt)。
+这是本地 0.5 实现，未发布；行为用例见
+[自定义算子回归](../crates/wgtime-core/tests/custom_operators.rs)。
 
 ## 实现与验证依据
 
@@ -586,7 +585,7 @@ fn main() {
 ```
 
 可微前向与显式训练的完整例子见
-[`postfix_mean/model.wgt`](../examples/native_training/postfix_mean/model.wgt)。这是本地语言能力，不表示已发布版本。
+[均值后缀回归](../crates/wgtime-core/tests/postfix_mean.rs)。这是本地语言能力，不表示已发布版本。
 
 统计与排序新增 `min(x)`、`max(x)`、`variance(x,ddof)`、`stddev(x,ddof)`、
 `median(x)`、`quantile(x,q)`、`sort(x)`、`argsort(x)`、`argmin(x)`、`argmax(x)`、
@@ -647,10 +646,9 @@ N 为 1..1000000 整数字面量，index 是运行时 [0,N) 整数；优先级�
 
 ## 原生测试与评估
 
-`wgt test` 原生发现 tests/*.wgt 的无参 test_* 函数，逐测试隔离状态与预算；
-支持过滤、行号诊断、JSON 共存、JSONL 评估以及 CPU/GPU 前向和 CPU 训练步计时。
-AOT 测试入口明确拒绝；完整参数、版本与限制见[原生测试](native-testing.md)，
-可运行项目见[评估示例](../examples/native_evaluation/README.md)。
+当前模型测试通过 Cargo 运行 Rust 测试，服务执行用例显式启动并连接 `wgtime`。定义解析成功不代表模型执行通过。
+旧 core `script::testing::Suite` 仍可从调用方提供的源码发现 `test_*` 函数，逐次隔离运行时与预算，保留行号诊断；它不提供已移除的 `wgt test` 目录扫描、filter 或 JSON 汇总。
+JSONL 评估与 benchmark 属于保留中的脚本运行时；具体库级 API、真实服务测试命令和 client compiler 限制见[原生测试](native-testing.md)。
 
 WGSL 工作组数量受普通脚本整数范围限制，每项为 1..1000000000 且不超过所选设备限制；超范围值报错，不截断。
 

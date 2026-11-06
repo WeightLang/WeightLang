@@ -158,4 +158,24 @@ The remaining structural changes were copied to an independent worktree with its
 
 The runtime suite includes interpreter and compiled numerical checks, aliasing, training, checkpointing, allocation behavior, pooling and workspace limits. The source-compatibility suite preserves sampling probabilities, PPO update counts and RNG-tail comparisons while replacing stale fixture syntax. Catalog validation reports 180 entries and 38 tensor intrinsics; 12 catalog contract cases, the generated-editor consistency check and all 16 viewer tests passed. `git diff --check` passed.
 
-CI now retains the allocation regression and the corrected source-compatibility suite. Remaining CLI-test migration is tracked separately because the current client compiler and CLI do not implement all of the retired host-script architecture.
+Commit [`31c0efc`](https://github.com/WeightLang/WeightLang/commit/31c0efcafec6d6c3492a5d881e4d843ca22ad618), `refactor: unify runtime views and service ownership`, contains this checkpoint. Both jobs in [CI run 42158663422](https://github.com/WeightLang/WeightLang/actions/runs/42158663422) passed, including the actual service tests. CI now retains the allocation regression and corrected source-compatibility suite.
+
+### CLI contracts and follow-up corrections
+
+The final test review found that several historical acceptance tests described removed CLI commands or client-compiler constructs that were never migrated. Their underlying model and numerical requirements remain useful. The test changes distinguish the actual execution boundary instead of restoring the retired architecture.
+
+| Previous assumption | Executable coverage retained or corrected |
+| --- | --- |
+| `wgt run`, `wgt script` and `wgt test` execute source internally | A CLI boundary test verifies extension routing without executing source. The core `Suite` tests retain sorting, isolation, error locations and operation budgets. |
+| Scalar sampling, sample-record binding and list slicing compile through the current client compiler | One compiler-boundary suite verifies explicit rejection with no executable produced. Passing core suites retain sampling probabilities, RNG tails, one-time input evaluation, slicing values and gradients. |
+| Every interpreter builtin is available in generated clients | Supported AOT cases use the implemented model, training, metrics and persistence interfaces, with isolated service connections. Unique benchmark and reinforcement assertions remain in interpreter tests. |
+| Generic categorical or PPO checks replace composed tests | Typed model/checkpoint roundtrips remain a separate numerical test. The typed PPO test retains 480 policy updates, initial success probability 0.25 and final probability above 0.85. |
+| A legacy host script is the lifecycle entrypoint | A pure model plus a Rust host performs real training, save/load, package/export and release-asset verification. The 300-step and 100-plus-200-step runs must produce identical model, checkpoint and safetensors bytes, retain Adam moments, reduce training loss by more than 99% and reach held-out MSE below 1e-6. |
+
+Re-establishing those executable checks exposed two actual client semantics bugs. A nonmodel local binding such as `let len = 3` previously fell through to the builtin when called; `Runtime::call_in_env` now rejects it consistently with the core. Synchronous client code generation previously returned an unchecked right operand from `&&` or `||`; the generated Rust now validates both evaluated operands as booleans while preserving short-circuit evaluation. AOT error cases cover both corrections, alongside valid model shadowing and unevaluated erroring right operands.
+
+Additional core fixtures were repaired without lowering numerical requirements. The first-rollout comparison now explicitly returns its 48 collected rows instead of replacing a comment that no longer exists; observation, policy target, value target and RNG-tail equality remain. The model-call checkpoint fixture uses current persistence syntax and retains byte-for-byte transaction checks. Seventeen additional core cases passed across categorical, typed PPO, scalar sampling, rollout and model-call targets.
+
+The removed duplicate WorkingMemory AOT assumption retains an exact executable counterpart in `wgtime-core/tests/workspace.rs::complete_wgt_memory_training_example_runs`. That test passed with the same 300-step address training, loss below 1% of the initial value, held-out MSE below 0.05, two-operation execution resumes, identical resumed output and a 16-byte workspace peak.
+
+`docs/native-testing.md`, the Chinese reference and the repository-owned WGT skill now point to the existing Rust/service tests and describe the remaining compatibility layer accurately. Their 101 local Markdown link targets were checked. The CLI CI gate explicitly includes the retained service-dependent ignored test; no environment-based passing or skipping branch was added.

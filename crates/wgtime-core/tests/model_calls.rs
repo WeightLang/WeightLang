@@ -51,13 +51,13 @@ fn direct_calls_preserve_checkpoints_and_stateful_predict_transactions() {
 fn main() {
  let net=mlp([1,1],"identity",42,"adam");
  train net on [[1]] against [[2]] {rate:0.01;loss:mse;};
- save(net,"before.json");
+ save checkpoint net to "before.json";
  let actual=net([3]);
- save(net,"after.json");
- let restored=restore("before.json");
+ save checkpoint net to "after.json";
+ let restored=load checkpoint from "before.json";
  assert restored([3])==actual, "checkpoint restore";
  save model net to "model.json";
- let loaded=model("model.json","adam");
+ let loaded=load model from "model.json" using "adam";
  assert loaded([3])==actual, "model restore";
  return true;
 }"#;
@@ -78,8 +78,8 @@ fn main() {
  let legacy=Memory("adam");
  assert direct([2])==legacy([2]), "first transaction";
  assert direct([3])==legacy([3]), "second transaction";
- save(direct,"direct.json");
- save(legacy,"legacy.json");
+ save checkpoint direct to "direct.json";
+ save checkpoint legacy to "legacy.json";
  return direct([1]);
 }"#;
     assert_eq!(run(stateful, &root, 100_000).unwrap().result, serde_json::json!([6.]));
