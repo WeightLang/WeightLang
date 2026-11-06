@@ -1,4 +1,4 @@
-//! Storage precision declarations; execution remains an explicit Python operation.
+//! Validate storage precision declarations in retained model artifacts.
 use anyhow::{ensure, Context, Result};
 use serde_json::Value;
 

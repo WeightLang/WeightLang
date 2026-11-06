@@ -43,7 +43,7 @@ jobs:
       - name: Check source execution regressions
         run: |
           cargo build --locked --no-default-features -p wgtime-core --example core-transport-test
-          cargo test --locked --no-default-features -p wgtime-core --test accelerator --test assert_syntax --test async_tasks --test categorical --test collect_records --test compute --test file_syntax --test legacy_syntax --test model_calls --test native_testing --test postfix_mean --test ppo_records --test ppo_rollout --test ppo_typed --test sample_from --test sample_record --test slicing
+          cargo test --locked --no-default-features -p wgtime-core --test accelerator --test assert_syntax --test async_tasks --test categorical --test collect_records --test compute --test file_syntax --test legacy_syntax --test model_calls --test native_testing --test openresponses_core --test postfix_mean --test ppo_records --test ppo_rollout --test ppo_typed --test sample_from --test sample_record --test slicing
       - name: Check generated editor support
         run: node scripts/generate_editor_support.cjs --check
       - name: Check prelude catalog
@@ -64,6 +64,10 @@ jobs:
         run: cargo test --locked -p wgtime -p wgtime-control
       - name: Check source packages and native artifact publication
         run: cargo test --locked -p weightlang-wgt --test source_package --test native_publication
+      - name: Check native toolchain bundle contracts
+        run: cargo test --locked -p weightlang-wgt --test toolchain --test latest
+      - name: Check allocator instrumentation configuration
+        run: cargo check --locked -p wgtime-service --features allocation-metrics
       - name: Check service lifecycle and transport
         run: cargo test --locked -p wgtime-service --bin wgtime --test service --test startup --test strategy
       - name: Build the model service

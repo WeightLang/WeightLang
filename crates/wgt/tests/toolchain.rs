@@ -25,12 +25,21 @@ fn exact_versions_and_checksum_entries() {
     );
     assert!(toolchain::checksum(&format!("{sum} a\n{sum} a\n"), "a").is_err());
     assert!(toolchain::checksum("bad a", "a").is_err());
-    for os in ["linux", "macos", "windows"] {
-        for arch in ["x86_64", "aarch64"] {
-            assert!(toolchain::asset(os, arch).is_ok());
-        }
+    for (os, arch, launcher, compiler) in [
+        ("linux", "x86_64", "wgt-linux-x86_64", "weightc-linux-x86_64"),
+        ("linux", "aarch64", "wgt-linux-aarch64", "weightc-linux-aarch64"),
+        ("macos", "x86_64", "wgt-macos-x86_64", "weightc-macos-x86_64"),
+        ("macos", "aarch64", "wgt-macos-aarch64", "weightc-macos-aarch64"),
+        ("windows", "x86_64", "wgt-windows-x86_64.exe", "weightc-windows-x86_64.exe"),
+        ("windows", "aarch64", "wgt-windows-aarch64.exe", "weightc-windows-aarch64.exe"),
+    ] {
+        assert_eq!(toolchain::asset(os, arch).unwrap(), launcher);
+        assert_eq!(toolchain::compiler_asset(os, arch).unwrap(), compiler);
     }
     assert!(toolchain::asset("linux", "mips").is_err());
+    assert!(toolchain::compiler_asset("linux", "mips").is_err());
+    assert!(toolchain::asset("unsupported", "x86_64").is_err());
+    assert!(toolchain::compiler_asset("unsupported", "x86_64").is_err());
 }
 fn command(root: &Path, cache: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_wgt"));
@@ -206,9 +215,52 @@ fn scratch() -> tempfile::TempDir {
     tempfile::tempdir_in(root).unwrap()
 }
 
+#[cfg(unix)]
+#[test]
+fn wrong_version_compiler_preserves_installed_pair() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = scratch();
+    let root = tmp.path();
+    let cache = root.join("cache");
+    let source = root.join("renamed launcher");
+    let compiler = root.join("weightc");
+    for (path, name) in [(&source, "wgt"), (&compiler, "weightc")] {
+        fs::write(path, format!("#!/bin/sh\necho '{name} 8.9.0'\n")).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let install = || command(root, &cache)
+        .args(["toolchain", "8.9.0", "--offline", "--path"])
+        .arg(&source).output().unwrap();
+    let version = cache.join("toolchains/8.9.0");
+    let installed = version.join(format!(
+        "{}-{}", std::env::consts::OS, std::env::consts::ARCH
+    ));
+    fs::write(&compiler, "#!/bin/sh\necho 'weightc 8.9.1'\n").unwrap();
+    let result = install();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("weightc 8.9.0"));
+    assert!(!installed.exists());
+    assert!(fs::read_dir(&version).unwrap().next().is_none(), "failed install left staging files");
+    fs::write(&compiler, "#!/bin/sh\necho 'weightc 8.9.0'\n").unwrap();
+    let result = install();
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    fs::write(root.join(PIN), "8.9.0\n").unwrap();
+    let before: Vec<_> = ["wgt", "weightc", "sha256", "weightc.sha256"]
+        .into_iter().map(|name| (name, fs::read(installed.join(name)).unwrap())).collect();
+    fs::write(&compiler, "#!/bin/sh\necho 'weightc 8.9.1'\n").unwrap();
+    let result = install();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("weightc 8.9.0"));
+    for (name, bytes) in before {
+        assert_eq!(fs::read(installed.join(name)).unwrap(), bytes, "{name}");
+    }
+    assert_eq!(fs::read_to_string(root.join(PIN)).unwrap(), "8.9.0\n");
+}
+
 #[test]
 fn release_download_is_exact_and_checked() {
     struct Remote {
+        asset: &'static str,
         corrupt: bool,
     }
     impl weightlang_wgt::registry::Remote for Remote {
@@ -221,12 +273,12 @@ fn release_download_is_exact_and_checked() {
             ));
             if url.ends_with("/SHA256SUMS") {
                 return Ok(format!(
-                    "{}  wgt-linux-x86_64\n",
-                    weightlang_wgt::artifact::hash(b"binary")
+                    "{}  {}\n",
+                    weightlang_wgt::artifact::hash(b"binary"), self.asset
                 )
                 .into_bytes());
             }
-            assert!(url.ends_with("/wgt-linux-x86_64"));
+            assert!(url.ends_with(&format!("/{}", self.asset)));
             Ok(if self.corrupt {
                 b"broken".to_vec()
             } else {
@@ -234,12 +286,15 @@ fn release_download_is_exact_and_checked() {
             })
         }
     }
-    assert_eq!(
-        toolchain::download(&Remote { corrupt: false }, "8.9.0", "linux", "x86_64").unwrap(),
-        b"binary"
-    );
-    assert!(toolchain::download(&Remote { corrupt: true }, "8.9.0", "linux", "x86_64").is_err());
-    assert!(toolchain::download(&Remote { corrupt: false }, "../bad", "linux", "x86_64").is_err());
+    type Download = fn(&dyn weightlang_wgt::registry::Remote, &str, &str, &str) -> anyhow::Result<Vec<u8>>;
+    for (asset, download) in [
+        ("wgt-linux-x86_64", toolchain::download as Download),
+        ("weightc-linux-x86_64", toolchain::download_compiler as Download),
+    ] {
+        assert_eq!(download(&Remote { asset, corrupt: false }, "8.9.0", "linux", "x86_64").unwrap(), b"binary");
+        assert!(download(&Remote { asset, corrupt: true }, "8.9.0", "linux", "x86_64").is_err());
+        assert!(download(&Remote { asset, corrupt: false }, "../bad", "linux", "x86_64").is_err());
+    }
 }
 
 #[cfg(unix)]
@@ -373,7 +428,13 @@ fn latest_native_release_filters_and_orders_versions() {
                 {"tag_name":"wgt-v9.0.0", "draft":false, "prerelease":false,
                  "assets":[{"name":"wgt-macos-aarch64"},{"name":"SHA256SUMS"}]},
                 {"tag_name":"wgt-v9.1.0", "draft":false, "prerelease":false,
-                 "assets":[{"name":"wgt-linux-x86_64"}]}
+                 "assets":[{"name":"wgt-linux-x86_64"}]},
+                {"tag_name":"wgt-v9.2.0", "draft":false, "prerelease":false,
+                 "assets":[{"name":"wgt-linux-x86_64"},{"name":"SHA256SUMS"}]},
+                {"tag_name":"wgt-v9.3.0", "draft":false, "prerelease":false,
+                 "assets":[{"name":"weightc-linux-x86_64"},{"name":"SHA256SUMS"}]},
+                {"tag_name":"wgt-v9.4.0", "draft":false, "prerelease":false,
+                 "assets":[{"name":"wgt-linux-x86_64"},{"name":"weightc-linux-x86_64"}]}
             ]))?)
         }
     }
