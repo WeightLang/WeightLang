@@ -676,3 +676,8 @@ WGSL 工作组数量受普通脚本整数范围限制，每项为 1..1000000000 
 用 `wgt 0.5
 fn main() { return 7; }` 验证基本执行，直接 `jsonl("data.jsonl")` 在策略下应拒绝。
 此处描述本地实现与分阶段接线，不表示设备/隔离扩展已经随权限底座发布。
+
+
+## Transformer Encoder 验收模型
+
+固定形状双头 Transformer Encoder 的完整模型、Rust 验收入口、张量轴约定和已知限制见 [Transformer Encoder 专题](transformer-encoder.md)。该样例覆盖 Q/K/V 投影、按 head 分组的 BatchMatmul、key 轴 Softmax、head 合并、残差、LayerNorm 和 FFN。它仍遵守单个 f32 向量服务入口；新增 fixture 不代表动态 batch、dropout、mask、位置编码或 GPU 融合已经实现。只有实际运行相应 CI 与 native service 测试后，才能将对应能力标记为已验收。
