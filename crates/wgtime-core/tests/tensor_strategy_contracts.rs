@@ -38,7 +38,7 @@ fn custom_strategy_gets_names_in_parameter_order_and_commits_once() {
 }
 
 #[test]
-fn custom_strategy_rejects_views_before_detaching_shared_storage() {
+fn custom_strategy_updates_shared_view_without_detaching_storage() {
     let mut definition = model();
     definition.parameters.push(Parameter {
         name: "shared_projection".into(), shape: vec![1, 2], frozen: false,
@@ -48,9 +48,11 @@ fn custom_strategy_rejects_views_before_detaching_shared_storage() {
     let mut trainer = Trainer::inference(definition, Path::new("."), 1 << 20).unwrap();
     let before = trainer.predict(&[1., 2.]).unwrap();
     let mut strategy = Strategy::default();
-    let error = trainer.step_with_strategy(&[vec![1., 2.]], Objective::Mse(&[vec![1.]]), &mut strategy).unwrap_err();
-    assert!(format!("{error:#}").contains("resident"));
-    assert_eq!(strategy.calls, 0);
-    assert_eq!(trainer.steps(), 0);
-    assert_eq!(trainer.predict(&[1., 2.]).unwrap(), before);
+    trainer.step_with_strategy(&[vec![1., 2.]], Objective::Mse(&[vec![1.]]), &mut strategy).unwrap();
+    assert_eq!(strategy.calls, 1);
+    assert_eq!(trainer.steps(), 1);
+    assert_ne!(trainer.predict(&[1., 2.]).unwrap(), before);
+    let saved = trainer.snapshot().unwrap();
+    assert!(matches!(&saved.parameters[2].value,
+        Value::View { source, start: 0 } if source == "projection"));
 }
