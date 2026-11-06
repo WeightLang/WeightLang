@@ -484,6 +484,7 @@ fn parse_definition(
     if !lower.program.output_type.is_plain() {
         lower.program.version = lower.program.version.max(2);
     }
+    lower.program.validate_tensor_contracts()?;
     Ok(lower.program)
 }
 // Endpoints are compile-time scalar arithmetic, never tensor values or host calls.
@@ -619,7 +620,8 @@ impl Lower {
             .clone())
     }
     fn register_shape(&mut self, name: &str, shape: Vec<usize>) -> Result<()> {
-        let len = crate::model::validate_shape(&shape)?;
+        let len = crate::tensor::validate_shape(&shape, crate::tensor::ShapeLimits::REGISTER)
+            .with_context(|| format!("tensor register {name}"))?;
         if shape.len() > 1 {
             self.program.version = 3;
         }

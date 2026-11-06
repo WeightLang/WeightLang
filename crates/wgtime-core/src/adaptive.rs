@@ -153,6 +153,9 @@ impl AdaptiveSession {
         };
         let len = |r: usize| program.registers[r].len;
         let memories = workspace::validate(&program, &regs)?;
+        // Reject memory handles as tensor operands before tensor shape inference,
+        // so invalid memory access cannot be obscured by an unrelated shape error.
+        program.validate_tensor_contracts()?;
         let mut floats = 0usize;
         for p in &program.parameters {
             if let Some(domain) = &p.learn {
@@ -186,8 +189,7 @@ impl AdaptiveSession {
         }
         let mut maximum = 0;
         for r in &program.registers {
-            ensure!(r.len > 0, "register length must be positive");
-            ensure!(crate::elements(&r.shape)? == r.len && r.shape.len() <= 8 && r.len <= 16_777_216 && r.shape.iter().all(|d| *d <= 16384), "register shape/storage mismatch");
+            r.validate_tensor_shape(program.version)?;
             // Older IR carries explicit geometry too. Its operations retain their
             // historical flat semantics; only v3 admits multidimensional registers.
             ensure!(program.version >= 3 || r.shape == [r.len], "multiaxis registers require adaptive IR version 3");
@@ -710,12 +712,13 @@ impl AdaptiveSession {
         }
         let view = self.views[input]
             .unwrap_or_else(|| TensorView::contiguous(input, &self.program.registers[input].shape));
-        Ok(match op {
+        let next = match op {
             Op::Reshape(..) => view.reshaped(&self.program.registers[output].shape),
             Op::Transpose(..) => view.permuted(&[1, 0]),
             Op::Permute(_, _, _, axes, rank) => view.permuted(&axes[..rank]),
             _ => unreachable!(),
-        })
+        };
+        next.validate(self.registers.get(next.base).context("invalid tensor view base")?.len())
     }
 
     /// One forward transaction; state persists between successful calls. Invalid

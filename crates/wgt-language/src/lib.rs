@@ -2,6 +2,7 @@
 pub mod script;
 pub mod source;
 pub mod adaptive;
+pub mod tensor;
 pub mod categorical;
 pub mod weight_artifact;
 pub mod model;

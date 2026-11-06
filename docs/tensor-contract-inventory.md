@@ -1,6 +1,6 @@
 # M1 — Tensor Contract Inventory
 
-> **Status: inventory complete; contract unification not implemented.** This document records the current source, IR, runtime, artifact and test boundaries found in the repository. It is not a proposal that every listed operation is available in every WGT execution path.
+> **Baseline inventory: e23488f83b9a4ef91255d6793c8dc94dcf95ce7e.** The tables below describe that inspected baseline. The subsequent [fixed-shape Tensor Contract implementation candidate](tensor-contract.md) introduces shared metadata/validation and explicit compatibility adapters. It is not fully runtime-verified and does not provide universal dtype, broadcasting, AD or backend support.
 
 ## 1. Scope and terminology
 

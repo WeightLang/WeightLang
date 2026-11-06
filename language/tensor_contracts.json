@@ -1,0 +1,402 @@
+{
+  "schema_version": 1,
+  "scope": "Adaptive IR only. All values are f32. These are contracts, not backend acceptance or release claims. Artifact graph primitives are a separate surface. Typed operations do not enable AD.",
+  "operators": [
+    {
+      "variant": "Conv",
+      "name": "conv",
+      "min_ir_version": 3,
+      "shape": "[C,spatial...] x [O,C/groups,kernel...] + [O]; checked ConvGeometry",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "MaxPool2d",
+      "name": "max_pool2d",
+      "min_ir_version": 3,
+      "shape": "[C,H,W] -> [C,OH,OW]; checked Pool2dGeometry",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "AvgPool2d",
+      "name": "avg_pool2d",
+      "min_ir_version": 3,
+      "shape": "[C,H,W] -> [C,OH,OW]; checked Pool2dGeometry",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Reshape",
+      "name": "reshape",
+      "min_ir_version": 3,
+      "shape": "equal element count; explicit destination shape",
+      "layout": "view_if_contiguous_else_materialize",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Transpose",
+      "name": "transpose",
+      "min_ir_version": 3,
+      "shape": "[M,N] -> [N,M]",
+      "layout": "strided_view",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Permute",
+      "name": "permute",
+      "min_ir_version": 3,
+      "shape": "complete permutation of 1..8 axes",
+      "layout": "strided_view",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Matmul",
+      "name": "matmul",
+      "min_ir_version": 3,
+      "shape": "[M,K] x [K,N] -> [M,N]",
+      "layout": "strided_inputs_materialized_output",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "BatchMatmul",
+      "name": "batch_matmul",
+      "min_ir_version": 3,
+      "shape": "[B,M,K] x [B,K,N] -> [B,M,N]; equal B; no broadcast",
+      "layout": "strided_inputs_materialized_output",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "LayerNorm",
+      "name": "layer_norm",
+      "min_ir_version": 3,
+      "shape": "same input/output shape; gamma,beta=[shape[axis]]; positive finite epsilon",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "SoftmaxAxis",
+      "name": "softmax_axis",
+      "min_ir_version": 3,
+      "shape": "same input/output shape; 0 <= axis < rank",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Scale",
+      "name": "scale",
+      "min_ir_version": 3,
+      "shape": "same shape; finite factor",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Constant",
+      "name": "constant",
+      "min_ir_version": 1,
+      "shape": "data.len == output elements; finite data",
+      "layout": "materialized",
+      "gradient": "stop",
+      "effect": "pure"
+    },
+    {
+      "variant": "Detach",
+      "name": "detach",
+      "min_ir_version": 1,
+      "shape": "same shape",
+      "layout": "materialized",
+      "gradient": "stop",
+      "effect": "pure"
+    },
+    {
+      "variant": "Exp",
+      "name": "exp",
+      "min_ir_version": 1,
+      "shape": "same shape; runtime finite-value checks",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Log",
+      "name": "log",
+      "min_ir_version": 1,
+      "shape": "same shape; runtime finite-value checks",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "LogSoftmax",
+      "name": "log_softmax",
+      "min_ir_version": 1,
+      "shape": "rank-1 input/output of equal width",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Minimum",
+      "name": "minimum",
+      "min_ir_version": 1,
+      "shape": "equal shapes; equal-value gradient split equally",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Clip",
+      "name": "clip",
+      "min_ir_version": 1,
+      "shape": "same shape; finite ordered bounds",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Sum",
+      "name": "sum",
+      "min_ir_version": 1,
+      "shape": "all elements -> f32[1]",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "MemoryAlloc",
+      "name": "memory_alloc",
+      "min_ir_version": 1,
+      "shape": "handle register=[1]; positive bounded slots,width",
+      "layout": "workspace",
+      "gradient": "none",
+      "effect": "workspace_allocate"
+    },
+    {
+      "variant": "MemoryFree",
+      "name": "memory_free",
+      "min_ir_version": 1,
+      "shape": "valid allocated handle",
+      "layout": "workspace",
+      "gradient": "none",
+      "effect": "workspace_free"
+    },
+    {
+      "variant": "MemoryRead",
+      "name": "memory_read",
+      "min_ir_version": 1,
+      "shape": "address=[slots]; output=[width]",
+      "layout": "workspace",
+      "gradient": "workspace_vjp",
+      "effect": "workspace_read"
+    },
+    {
+      "variant": "MemoryWrite",
+      "name": "memory_write",
+      "min_ir_version": 1,
+      "shape": "address=[slots]; value=[width]",
+      "layout": "workspace",
+      "gradient": "workspace_vjp",
+      "effect": "workspace_write"
+    },
+    {
+      "variant": "ResourceState",
+      "name": "resource_state",
+      "min_ir_version": 1,
+      "shape": "output=[3]",
+      "layout": "materialized",
+      "gradient": "stop",
+      "effect": "resource_read"
+    },
+    {
+      "variant": "Read",
+      "name": "read",
+      "min_ir_version": 1,
+      "shape": "output element count equals parameter; legacy flat read",
+      "layout": "materialized",
+      "gradient": "parameter_read_vjp_or_ste",
+      "effect": "parameter_read"
+    },
+    {
+      "variant": "Write",
+      "name": "write",
+      "min_ir_version": 1,
+      "shape": "value count equals parameter; target mutable, non-prob/non-learn",
+      "layout": "parameter",
+      "gradient": "parameter_rebind",
+      "effect": "parameter_write"
+    },
+    {
+      "variant": "Linear",
+      "name": "linear",
+      "min_ir_version": 1,
+      "shape": "weight=[output.len,input.len]; optional bias=[output.len]",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "parameter_read"
+    },
+    {
+      "variant": "Add",
+      "name": "add",
+      "min_ir_version": 1,
+      "shape": "equal shapes; no broadcast",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Mul",
+      "name": "mul",
+      "min_ir_version": 1,
+      "shape": "equal shapes; no broadcast",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Tanh",
+      "name": "tanh",
+      "min_ir_version": 1,
+      "shape": "same shape",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Sigmoid",
+      "name": "sigmoid",
+      "min_ir_version": 1,
+      "shape": "same shape",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Relu",
+      "name": "relu",
+      "min_ir_version": 1,
+      "shape": "same shape",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Softmax",
+      "name": "softmax",
+      "min_ir_version": 1,
+      "shape": "rank-1 input/output of equal width",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "ValidateProbabilities",
+      "name": "validate_probabilities",
+      "min_ir_version": 2,
+      "shape": "rank-1; finite [0,1] values; sum tolerance 1e-5",
+      "layout": "materialized",
+      "gradient": "identity_vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Neg",
+      "name": "neg",
+      "min_ir_version": 1,
+      "shape": "same shape",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Mean",
+      "name": "mean",
+      "min_ir_version": 1,
+      "shape": "all elements -> f32[1]",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Gate",
+      "name": "gate",
+      "min_ir_version": 1,
+      "shape": "output=input shape; probability=[1] or input shape",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Route",
+      "name": "route",
+      "min_ir_version": 1,
+      "shape": "output=yes=no shape; probability=[1] or branch shape",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "InferenceSkip",
+      "name": "inference_skip",
+      "min_ir_version": 1,
+      "shape": "scalar probability; valid branch target",
+      "layout": "control",
+      "gradient": "none",
+      "effect": "control"
+    },
+    {
+      "variant": "Slice",
+      "name": "slice",
+      "min_ir_version": 1,
+      "shape": "flat bounded slice; output rank 1; start + output.len <= input.len",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "Label",
+      "name": "label",
+      "min_ir_version": 1,
+      "shape": "unique nonempty label",
+      "layout": "control",
+      "gradient": "none",
+      "effect": "control"
+    },
+    {
+      "variant": "Branch",
+      "name": "branch",
+      "min_ir_version": 1,
+      "shape": "condition=[1]; valid targets",
+      "layout": "control",
+      "gradient": "none",
+      "effect": "control"
+    },
+    {
+      "variant": "Jump",
+      "name": "jump",
+      "min_ir_version": 1,
+      "shape": "valid target",
+      "layout": "control",
+      "gradient": "none",
+      "effect": "control"
+    },
+    {
+      "variant": "Return",
+      "name": "return",
+      "min_ir_version": 1,
+      "shape": "initialized result register; consistent return shape",
+      "layout": "control",
+      "gradient": "seed_boundary",
+      "effect": "control"
+    }
+  ]
+}

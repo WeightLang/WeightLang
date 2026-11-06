@@ -21,6 +21,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check the complete workspace
         run: cargo check --locked --workspace --all-targets
+      - name: Validate tensor metadata catalog
+        run: node scripts/check_tensor_contracts.cjs
       - name: Check WGT parser and language tests
         run: cargo test --locked -p wgt-language
       - name: Check tensor runtime autodiff
@@ -29,6 +31,10 @@ jobs:
           --lib --test adaptive --test adaptive_autodiff --test workspace --test runtime
           --test pooling --test lazy_routing --test parameter_ops
           --test custom_update_strategy --test training
+      - name: Check tensor geometry, alias VJP and strategy regressions
+        run: cargo test --locked --no-default-features -p wgtime-core --lib --test tensor_contracts --test tensor_strategy_contracts --test attention --test convolution --test workspace
+      - name: Check artifact tensor compatibility
+        run: cargo test --locked -p weightlang-wgt --test tensor_contracts --test dimensions --test tensor_subgraphs --test primitives --test precision
       - name: Check compiled tensor backend
         run: >-
           cargo test --locked --no-default-features -p wgtime-core

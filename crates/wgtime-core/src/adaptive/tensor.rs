@@ -35,7 +35,7 @@ impl TensorView {
     }
 
     pub fn is_contiguous(self) -> bool {
-        self.strides[..self.rank] == Self::contiguous_strides(&self.shape[..self.rank])[..self.rank]
+        wgt_language::tensor::is_contiguous_layout(&self.shape[..self.rank], &self.strides[..self.rank])
     }
 
     pub fn reshaped(self, shape: &[usize]) -> Self {
@@ -49,6 +49,13 @@ impl TensorView {
             self.strides[axis] = previous.strides[source];
         }
         self
+    }
+
+    pub fn validate(self, storage_elements: usize) -> Result<Self> {
+        ensure!((1..=wgt_language::tensor::MAX_RANK).contains(&self.rank), "invalid tensor view rank");
+        wgt_language::tensor::validate_layout(&self.shape[..self.rank], &self.strides[..self.rank],
+            self.offset, storage_elements, wgt_language::tensor::ShapeLimits::REGISTER)?;
+        Ok(self)
     }
 
     pub fn physical_index(self, mut logical_index: usize) -> usize {
@@ -69,16 +76,13 @@ pub(super) struct AxisGroups {
 }
 impl AxisGroups {
     pub fn new(shape: &[usize], axis: usize) -> Result<Self> {
-        ensure!(!shape.is_empty() && shape.len() <= 8, "tensor rank must be 1..8");
+        wgt_language::tensor::validate_shape(shape, wgt_language::tensor::ShapeLimits::REGISTER)
+            .context("normalization tensor shape")?;
         ensure!(axis < shape.len(), "tensor axis out of bounds");
-        let product = |dims: &[usize]| dims.iter().try_fold(1usize, |n, &d| {
-            ensure!(d > 0 && d <= 16384, "tensor dimensions must be 1..16384");
-            n.checked_mul(d).context("tensor shape overflow")
-        });
-        let outer = product(&shape[..axis])?;
-        let width = product(&shape[axis..=axis])?;
-        let inner = product(&shape[axis + 1..])?;
-        outer.checked_mul(width).and_then(|n| n.checked_mul(inner)).context("tensor shape overflow")?;
+        // All extents are positive and the full product is checked above.
+        let outer = shape[..axis].iter().product();
+        let width = shape[axis];
+        let inner = shape[axis + 1..].iter().product();
         Ok(Self { outer, width, inner })
     }
     pub fn len(self) -> usize { self.outer * self.width * self.inner }

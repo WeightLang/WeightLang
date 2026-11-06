@@ -198,7 +198,8 @@ pub fn typed_vector_port(body: &str) -> Result<(String, usize, crate::categorica
         .trim()
         .parse()
         .context("native vector execution requires one fixed dimension")?;
-    ensure!(n > 0 && n <= 16384, "native vector width must be 1..16384");
+    crate::tensor::validate_shape(&[n], crate::tensor::ShapeLimits::VECTOR)
+        .context("native vector width must be 1..16384")?;
     Ok((name.trim().into(), n, kind))
 }
 
