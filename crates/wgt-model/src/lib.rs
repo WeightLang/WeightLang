@@ -2,7 +2,7 @@
 //! Definitions are pure data. Only explicit initialization connects them to service state.
 //! Clients and models use `Rc<RefCell<_>>` and are deliberately neither Send nor Sync.
 use anyhow::{ensure, Context, Result};
-use std::{cell::RefCell, fs::{self, OpenOptions}, path::Path, rc::Rc};
+use std::{cell::RefCell, fs::OpenOptions, path::Path, rc::Rc};
 use wgtime::Request;
 pub use wgt_language::model::{ModelDefinition, ModelInterface, ParameterSchema};
 pub use wgt_model_macros::{model, include_model};
@@ -109,21 +109,10 @@ impl Model {
     }
     /// Atomically publish a new standard safetensors file; never overwrite a target.
     pub fn save_weights(&self,path:&Path)->Result<()> {
-        use std::sync::atomic::{AtomicU64,Ordering};
-        static NEXT:AtomicU64=AtomicU64::new(0);
-        let parent=path.parent().filter(|p|!p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-        struct Temporary(std::path::PathBuf);
-        impl Drop for Temporary { fn drop(&mut self) { let _=fs::remove_file(&self.0); } }
-        let (temporary,file)=loop {
-            let candidate=parent.join(format!(".wgt-weights-{}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));
-            match OpenOptions::new().write(true).create_new(true).open(&candidate) {
-                Ok(file)=>break(Temporary(candidate),file),
-                Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>continue,
-                Err(e)=>return Err(e.into()),
-            }
-        };
-        self.connection.borrow_mut().call_with_file(Request::ExportWeightsFd {handle:self.handle()?},&file)?;
-        file.sync_all()?;fs::hard_link(&temporary.0,path)?;Ok(())
+        wgtime::publication::write(path, wgtime::publication::Mode::CreateNew, |file| {
+            self.connection.borrow_mut().call_with_file(Request::ExportWeightsFd {handle:self.handle()?},file)?;
+            Ok(())
+        })
     }
     pub fn close(mut self)->Result<()> {
         self.connection.borrow_mut().call(Request::Drop {handle:self.handle()?})?;

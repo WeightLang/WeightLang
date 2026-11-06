@@ -12,7 +12,8 @@ fn main() {
     let x = [1, 3];
     assert x.mean == 2, "variable";
     assert values().mean == 4, "call";
-    assert (x).mean == 2, "parentheses";
+    let grouped_mean = (x).mean;
+    assert grouped_mean == 2, "parentheses";
     assert [[1, 3], [4, 8]][1].mean == 6, "index";
     assert -x.mean + 3 * [2, 4].mean == 7, "precedence";
     assert x . mean == 2, "whitespace";
@@ -96,8 +97,8 @@ fn loss(prediction,target) { return square(prediction-target).mean; }
 fn main() { let model=MeanEnergy("sgd"); let before=train model on [[1,3]] against [[2]] {rate:0.01;loss:loss;}; let after=train model on [[1,3]] against [[2]] {rate:0.01;loss:loss;}; return [before,after,model([1,3])]; }
 "#;
     let function_form = source.replace("square(x).mean", "mean(square(x))").replace(
-        "square(prediction - target).mean",
-        "mean(square(prediction - target))",
+        "square(prediction-target).mean",
+        "mean(square(prediction-target))",
     );
     let mut session = AdaptiveSession::prepare(parse(source).unwrap(), 65536).unwrap();
     let mut pass = session.forward(&[1., 3.], 1000, 65536).unwrap();

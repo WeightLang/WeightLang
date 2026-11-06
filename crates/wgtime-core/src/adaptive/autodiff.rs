@@ -1,6 +1,6 @@
 //! Reverse-mode differentiation of the executed program, using immutable value
 //! versions. A write rebinds a parameter to a value node; it never severs an edge.
-use super::{AdaptiveSession, Op};
+use super::{AdaptiveSession, Op, Unary};
 use anyhow::{ensure, Context, Result};
 use std::collections::BTreeMap;
 
@@ -59,7 +59,7 @@ enum Edge {
     },
     Unary {
         x: usize,
-        kind: u8,
+        kind: Unary,
     },
     Slice {
         x: usize,
@@ -169,7 +169,7 @@ impl Tape {
             }),
             Op::SoftmaxAxis(r,x,groups) => (r, Edge::SoftmaxAxis { x:self.reg(x)?,groups }),
             Op::Scale(r,x,factor) => (r, Edge::Scale { x:self.reg(x)?,factor }),
-            Op::Constant(r, _) | Op::Unary(r, _, 5) => (r, Edge::Leaf),
+            Op::Constant(r, _) | Op::Unary(r, _, Unary::Detach) => (r, Edge::Leaf),
             Op::Minimum(r, a, b) => (
                 r,
                 Edge::Minimum {
@@ -523,20 +523,10 @@ impl ForwardPass {
                     for i in 0..m { for j in 0..n { gradients[x][i*n+j] += gradient[j*m+i]; } }
                 },
                 Edge::Permute { x,input_shape,axes,rank } => {
-                    let mut output_shape = [1usize; 8];
-                    for axis in 0..rank { output_shape[axis] = input_shape[axes[axis]]; }
-                    for output_index in 0..gradient.len() {
-                        let mut remainder = output_index;
-                        let mut output_coords = [0usize; 8];
-                        let mut input_coords = [0usize; 8];
-                        for axis in (0..rank).rev() {
-                            output_coords[axis] = remainder % output_shape[axis];
-                            remainder /= output_shape[axis];
-                        }
-                        for axis in 0..rank { input_coords[axes[axis]] = output_coords[axis]; }
-                        let mut input_index = 0usize;
-                        for axis in 0..rank { input_index = input_index * input_shape[axis] + input_coords[axis]; }
-                        gradients[x][input_index] += gradient[output_index];
+                    let view = super::tensor::TensorView::contiguous(x, &input_shape[..rank])
+                        .permuted(&axes[..rank]);
+                    for (index, &value) in gradient.iter().enumerate() {
+                        gradients[x][view.physical_index(index)] += value;
                     }
                 },
                 Edge::LayerNorm { x,gamma,beta,groups,epsilon } => {
@@ -547,7 +537,7 @@ impl ForwardPass {
                             gradients[beta][axis] += dbeta;
                         })?;
                 },
-                Edge::SoftmaxAxis { x,groups } => groups.softmax_vjp(&node.value,&gradient,&mut gradients[x]),
+                Edge::SoftmaxAxis { x,groups } => groups.softmax_vjp(&node.value,gradient,&mut gradients[x]),
                 Edge::Scale { x,factor } => {
                     for (i,g) in gradient.iter().enumerate() { gradients[x][i] += g * factor; }
                 },
@@ -578,46 +568,7 @@ impl ForwardPass {
                     }
                 }
                 Edge::Unary { x, kind } => {
-                    if kind == 8 {
-                        let sum: f32 = gradient.iter().sum();
-                        for (i, &g) in gradient.iter().enumerate() {
-                            gradients[x][i] += g - node.value[i].exp() * sum;
-                        }
-                        continue;
-                    }
-                    if kind == 3 {
-                        let dot: f32 = gradient
-                            .iter()
-                            .zip(&node.value)
-                            .map(|(g, y)| g * y)
-                            .sum();
-                        for (i, &g) in gradient.iter().enumerate() {
-                            gradients[x][i] += node.value[i] * (g - dot);
-                        }
-                        continue;
-                    }
-                    for (i, &g) in gradient.iter().enumerate() {
-                        if g == 0. {
-                            continue;
-                        }
-                        let y = node.value[i];
-                        let derivative = match kind {
-                            0 => 1. - y * y,
-                            1 => y * (1. - y),
-                            4 => -1.,
-                            9 => 1.,
-                            6 => y,
-                            7 => 1. / before[x].value[i],
-                            _ => {
-                                if before[x].value[i] > 0. {
-                                    1.
-                                } else {
-                                    0.
-                                }
-                            }
-                        };
-                        gradients[x][i] += g * derivative;
-                    }
+                    kind.backward(&before[x].value, &node.value, gradient, &mut gradients[x]);
                 }
                 Edge::Blend { p, a, b } => {
                     for (i, &g) in gradient.iter().enumerate() {

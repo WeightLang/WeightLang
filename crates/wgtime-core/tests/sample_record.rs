@@ -10,7 +10,7 @@ fn main() {{
  let net=Policy("adam"); seed(7);
  let scalar=sample from net([1000,999,-1000]); let tail=random();
  seed(7); let {{action:a,log_prob:lp}}=sample from net([1000,999,-1000]);
- assert(a==scalar,"same action"); assert(random()==tail,"single RNG draw");
+ assert a==scalar,"same action"; assert random()==tail,"single RNG draw";
  return [a,lp];
 }}"#);
     let result = script::run(&text, Path::new("."), 10000).unwrap().result;
@@ -26,7 +26,7 @@ fn main() {{
  let net=Policy("adam"); seed(23);
  let x=[random(),random(),random()]; let expected=sample from net(x); let tail=random();
  seed(23); let {{action,log_prob}}=sample from net([random(),random(),random()]);
- assert(action==expected,"input evaluated once"); assert(random()==tail,"RNG tail");
+ assert action==expected,"input evaluated once"; assert random()==tail,"RNG tail";
  return log_prob;
 }}"#);
     assert!(script::run(&text, Path::new("."), 10000).unwrap().result.as_f64().unwrap().is_finite());

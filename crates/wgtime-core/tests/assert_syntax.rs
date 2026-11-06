@@ -5,11 +5,9 @@ use wgtime_core::script::run;
 fn native_assertion_contract() {
     for body in [
         "assert true, missing();",
-        "assert(true);",
-        "assert (1 == 1);",
-        "assert (1) == 1;",
+        "assert true;",
+        "assert 1 == 1;",
         "let assert=0; assert true;",
-        "return assert(true,\"ok\");",
     ] {
         run(&format!("wgt 0.5\nfn main(){{{body}}}"), Path::new("."), 100).unwrap();
     }
@@ -18,7 +16,7 @@ fn native_assertion_contract() {
         ("assert false;", "assertion failed"),
         ("assert false, \"failure\";", "failure"),
         ("assert true, missing(); assert false, 1;", "expected string"),
-        ("assert(true,missing());", "unknown function"),
+        ("assert false, missing();", "unknown function"),
     ] {
         let error = format!("{:#}", run(&format!("wgt 0.5\nfn main(){{{body}}}"), Path::new("."), 100).unwrap_err());
         assert!(error.contains("line 2") && error.contains(expected), "{error}");

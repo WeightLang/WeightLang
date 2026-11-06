@@ -2,7 +2,7 @@
 
 This refactor follows [untangle-codebase](https://github.com/caldoai/skills/blob/main/skills/untangle-codebase/SKILL.md): code that must change together should share an explicit contract, and independent policies should remain separate. The review covers the workspace crates, language catalogs, editor generators, viewer, packages and their tests. Existing language syntax, artifact formats and runtime ownership boundaries remain the compatibility baseline.
 
-The source baseline is `e23488f83b9a4ef91255d6793c8dc94dcf95ce7e`. Discovery was completed before implementation. Comments that merely repeat code and tests that cannot detect behavior regressions are included in the cleanup; meaningful regression coverage is retained.
+The source baseline is `e23488f83b9a4ef91255d6793c8dc94dcf95ce7e`. Discovery was completed before implementation. The observations in the decision inventory describe that baseline. Comments that merely repeat code and tests that cannot detect behavior regressions are included in the cleanup; meaningful regression coverage is retained.
 
 ## Decisions and the problems they resolve
 
@@ -88,7 +88,7 @@ Client-owned staged publication belongs in the common lightweight client crate. 
 - Explicit overwrite remains a separate publication policy; replacing and creating files have different contracts.
 - Client and service independently enumerate the requests requiring a file descriptor.
 
-### 11. Remove surplus host arguments and consolidate service fixtures
+### 11. Consolidate service fixtures and retain public host signatures
 
 Real-service tests should share lifecycle setup and wait for a working handshake. Public host API signatures retain source compatibility.
 
@@ -131,4 +131,31 @@ The local toolchain is Rust/Cargo 1.99.0 and Node 24.22.1. The default Rust 1.87
 | `npm test` in `web/viewer` | 16 tests passed |
 | [CI for the baseline](https://github.com/WeightLang/WeightLang/actions/runs/42060008641) | Failed |
 
-Final validation must cover workspace compilation, adaptive views and gradients, interpreter/compiled numerical agreement, pooling and bounded batches, training and checkpoints, service lifecycle and publication, language/catalog/editor consistency and viewer behavior. Claims about each area require the corresponding executable result.
+## Implementation and verification results
+
+The implementation follows the thirteen boundaries above. Instruction operands and IR versions now come from the language IR; view geometry belongs to `TensorView`; unary forward and backward rules share a typed enum. Tape values remain immutable while gradient contributions accumulate separately, including when LayerNorm operands alias. Checkpoint encoding and clipping each have one implementation. Parameter names follow declaration order, and custom update commits preserve shared parameter storage.
+
+The existing JSON catalog now supplies Rust language metadata, validation and editor generation without loading the retired `std/prelude.wgt`. The model and function extractors share a lexical block scanner with regressions for strings, escapes, comments and nested braces. Viewer checks retain translation behavior while removing assertions about dictionary size, already-parsed key uniqueness and source spelling.
+
+The service uses one session registry for admission, count and memory reservations across Trainer, Adaptive and Operations backends. Failed preparation does not consume a reservation. Request types declare whether they require a persistence descriptor. Model and control clients share staged file publication, and model integration tests share process cleanup and a bounded `Hello` readiness check. Existing public host signatures and the eight explicitly ignored model integration tests are retained; CI explicitly runs those tests against the real service.
+
+Cross-review found two publication details that needed correction. Replacement staging files now receive the existing target's exact permissions before the writer runs. Candidate staging names also avoid the destination basename: otherwise a replacement could rename a file onto itself and its cleanup guard would delete the published result. Regressions check permissions inside the writer, failure cleanup, no-clobber publication and that exact name-collision case.
+
+Numerical tests were strengthened where existing assertions could miss a defect. Permutation tests check every output and an independent gradient oracle. LayerNorm tests compare an independent reference calculation, including constant rows and nonuniform scale and bias. A finite-difference fixture uses an exactly representable step for its linear function. The allocation regression checks both transpose/matmul and permute/batch-matmul over 100 calls, including the first call; both perform zero heap allocations. Tests of unused private RMS kernels were removed with the kernels; live LayerNorm geometry and differentiation checks remain.
+
+### First published checkpoint
+
+Commit [`6136b85`](https://github.com/WeightLang/WeightLang/commit/6136b850f37e31614552bb32a46b7a8c2e32cb6e), `refactor: centralize tensor and intrinsic contracts`, restores workspace compilation and lands the IR, parameter, catalog and numerical-contract corrections.
+
+- [CI run 42157277118](https://github.com/WeightLang/WeightLang/actions/runs/42157277118) passed both the tensor/language and host/runtime jobs. This includes workspace compilation with all targets, parser and runtime suites, compiled numerical tests, catalog/editor/viewer checks, service lifecycle and transport, and all model integration tests against a real service.
+- [Tensor operator run 42157277002](https://github.com/WeightLang/WeightLang/actions/runs/42157277002) passed.
+
+The local container rejects Unix listener creation with `EPERM`. This is recorded as an environment limitation rather than converted into a passing or skipped test. GitHub Actions supplies the actual service-execution evidence. Neither selected CPU tests nor passing workspace compilation constitute acceptance of arbitrary GPU execution, compiled-forward language support or module imports; those architectural acceptance boundaries remain as documented in `AGENTS.md`.
+
+### Second checkpoint: independent local verification
+
+The remaining structural changes were copied to an independent worktree with its own build directory. `cargo +1.99.0 check --workspace --all-targets --locked --offline` passed. The selected executable checks passed **216 Rust tests**: 151 core runtime/source tests, 37 language tests, 24 host-control tests and four file-publication tests. These counts describe the selected suites, not every workspace test.
+
+The runtime suite includes interpreter and compiled numerical checks, aliasing, training, checkpointing, allocation behavior, pooling and workspace limits. The source-compatibility suite preserves sampling probabilities, PPO update counts and RNG-tail comparisons while replacing stale fixture syntax. Catalog validation reports 180 entries and 38 tensor intrinsics; 12 catalog contract cases, the generated-editor consistency check and all 16 viewer tests passed. `git diff --check` passed.
+
+CI now retains the allocation regression and the corrected source-compatibility suite. Remaining CLI-test migration is tracked separately because the current client compiler and CLI do not implement all of the retired host-script architecture.

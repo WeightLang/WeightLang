@@ -1,10 +1,6 @@
-use std::{
-    fs,
-    process::Command,
-    time::{Duration, Instant},
-};
+mod support;
 use wgt::{
-    Client, DifferentiationPolicy, InstanceOptions, Loss, ModelDefinition, Optimizer, Targets,
+    DifferentiationPolicy, InstanceOptions, Loss, ModelDefinition, Optimizer, Targets,
     TrainOptions,
 };
 const SOURCE: &str = r#"wgt 0.5
@@ -36,34 +32,8 @@ fn typed_definition_import_roundtrip() {
 #[test]
 #[ignore = "requires prebuilt WGTIME_TEST_DAEMON; isolated real service"]
 fn native_operations_ipc_search_persistence_and_policy() {
-    use std::os::unix::fs::PermissionsExt;
-    struct Daemon(std::process::Child);
-    impl Drop for Daemon {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-    fs::create_dir_all("/tmp/weightlang").unwrap();
-    let scratch = tempfile::Builder::new()
-        .prefix("operations-")
-        .tempdir_in("/tmp/weightlang")
-        .unwrap();
-    fs::set_permissions(scratch.path(), fs::Permissions::from_mode(0o700)).unwrap();
-    let _daemon = Daemon(
-        Command::new(std::env::var_os("WGTIME_TEST_DAEMON").expect("prebuilt daemon"))
-            .arg("--test-directory")
-            .arg(scratch.path())
-            .spawn()
-            .unwrap(),
-    );
-    let endpoint = scratch.path().join("service.sock");
-    let start = Instant::now();
-    while !endpoint.exists() {
-        assert!(start.elapsed() < Duration::from_secs(10));
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let client = Client::connect_to(&endpoint).unwrap();
+    let scratch = support::Service::start().unwrap();
+    let client = scratch.client().unwrap();
     let definition = ModelDefinition::parse(SOURCE).unwrap();
     let a = client
         .initialize(&definition, InstanceOptions::default())

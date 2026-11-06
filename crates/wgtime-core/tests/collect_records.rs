@@ -10,7 +10,7 @@ fn main(){
  let sizes=[];let seen=[];
  for part in batch size 16 {
   sizes=append(sizes,len(part));
-  for j in range(0,len(part)) { assert(part.observation[j][0]*2==part.target[j][0],"alignment");seen=append(seen,part[j].target[0]); }
+  for j in range(0,len(part)) { assert part.observation[j][0]*2==part.target[j][0],"alignment";seen=append(seen,part[j].target[0]); }
  }
  return [sizes,seen,len(batch)];
 }"#), serde_json::json!([[16.,16.,3.],(0..35).map(|i|(i*2) as f64).collect::<Vec<_>>(),35.]));

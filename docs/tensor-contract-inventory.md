@@ -101,7 +101,7 @@ The IR is versioned. Adaptive IR v3 is required for the listed convolution, pool
 | --- | --- | --- |
 | Convolution | Conv1D/2D/3D paths represented by Conv geometry | Fixed shapes; channel/group/stride/padding/dilation contracts are explicit |
 | Pooling | MaxPool2D, AvgPool2D | 2D native instructions; do not infer general 1D/3D pooling |
-| Normalization | LayerNorm, RMSNorm | Axis-based kernel helpers; affine vectors follow normalized axis width |
+| Normalization | LayerNorm | Axis-based kernel; affine vectors follow normalized axis width |
 | Attention | Fixed-shape attention fixture and related kernels | Does not prove full multi-head Transformer, general masks, FlashAttention or dynamic sequence support |
 
 ### 3.3 Artifact graph primitives

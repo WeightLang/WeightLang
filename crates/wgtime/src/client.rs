@@ -140,7 +140,7 @@ impl Client {
     pub fn call_with_file(&mut self, request: Request, file: &std::fs::File) -> Result<serde_json::Value> {
         use std::os::fd::AsRawFd;
         self.ensure_usable()?;
-        ensure!(file_request(&request), "request does not accept a persistence descriptor");
+        ensure!(request.uses_persistence_descriptor(), "request does not accept a persistence descriptor");
         let reply = self.exchange(|stream, transmitted| {
             *transmitted = transmitted.saturating_add(send(stream, &request)? as u64);
             buffer::send_fd(stream, file.as_raw_fd())?;
@@ -207,7 +207,7 @@ impl Client {
     pub fn call(&mut self, request: Request) -> Result<serde_json::Value> {
         self.ensure_usable()?;
         ensure!(
-            !file_request(&request) && !matches!(
+            !request.uses_persistence_descriptor() && !matches!(
                 &request, Request::RegisterTensor { .. } | Request::PredictBinary { .. }
             ),
             "request requires its descriptor or binary client method"
@@ -224,12 +224,6 @@ fn validate_timeouts(read: Option<Duration>, write: Option<Duration>) -> Result<
     ensure!(read.is_none_or(|value| !value.is_zero()) && write.is_none_or(|value| !value.is_zero()),
         "socket timeouts must be nonzero or None");
     Ok(())
-}
-
-fn file_request(request: &Request) -> bool {
-    matches!(request, Request::PersistFd { .. } | Request::LoadFd { .. }
-        | Request::InspectArtifactFd { .. } | Request::ExportWeightsFd { .. }
-        | Request::BindWeightsFd { .. })
 }
 
 fn receive_reply(stream: &mut UnixStream) -> Result<Reply> {

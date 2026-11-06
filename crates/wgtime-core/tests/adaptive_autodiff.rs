@@ -425,3 +425,50 @@ fn layer_norm_accumulates_aliased_input_scale_and_bias_gradients() {
         session.forward(&input, 1000, bytes).unwrap();
     }
 }
+
+#[test]
+fn tensor_views_preserve_values_across_aliases_and_overwrites() {
+    use serde_json::json;
+    for op in ["transpose", "permute"] {
+        for in_place in [false, true] {
+            let view = if in_place { "matrix" } else { "view" };
+            let mut operation = json!({"op":op,"out":view,"input":"matrix"});
+            if op == "permute" {
+                operation["axes"] = json!([1,0]);
+            }
+            let mut instructions = vec![
+                json!({"op":"reshape","out":"matrix","input":"x"}),
+                json!({"op":"scale","out":"matrix","input":"matrix","factor":1.0}),
+                operation,
+            ];
+            if !in_place {
+                instructions.push(json!({"op":"scale","out":"matrix","input":"matrix","factor":10.0}));
+            }
+            instructions.extend([
+                json!({"op":"reshape","out":"flat","input":view}),
+                json!({"op":"return","value":"flat"}),
+            ]);
+            let program: wgtime_core::adaptive::Program = serde_json::from_value(json!({
+                "version":3,"input":"x","parameters":[],
+                "registers":[
+                    {"name":"x","len":4,"shape":[4]},
+                    {"name":"matrix","len":4,"shape":[2,2]},
+                    {"name":"view","len":4,"shape":[2,2]},
+                    {"name":"flat","len":4,"shape":[4]}
+                ],
+                "instructions":instructions
+            })).unwrap();
+            for compiled in [false, true] {
+                let mut session = AdaptiveSession::prepare(program.clone(), 65536).unwrap();
+                if compiled {
+                    session.enable_compiled().unwrap();
+                }
+                assert_eq!(session.run(&[1.,2.,3.,4.], 1000).unwrap(), [1.,3.,2.,4.]);
+                assert_eq!(session.run(&[5.,6.,7.,8.], 1000).unwrap(), [5.,7.,6.,8.]);
+                let mut pass = session.forward(&[1.,2.,3.,4.], 1000, 4096).unwrap();
+                pass.backward(&[1.,2.,3.,4.], &BTreeMap::new()).unwrap();
+                assert_eq!(pass.input_gradient().unwrap(), [1.,3.,2.,4.]);
+            }
+        }
+    }
+}

@@ -66,6 +66,58 @@ fn source_split_enforces_source_byte_limit_before_scanning() {
 }
 
 #[test]
+fn source_blocks_ignore_quoted_and_commented_braces_and_keep_lines() {
+    let source = r#"wgt 0.5
+model Child {
+    input x: f32[1]
+    output y: f32[1]
+    fn forward(x) {
+        # A closing brace in a comment must not end this model: }
+        let label = "escaped quote: \" } # {";
+        return x;
+    }
+}
+model Root
+fn text() {
+    return "a quoted brace } and comment #";
+}
+fn after() {
+    # Preserve this statement's original source line for diagnostics.
+    return 7;
+}
+"#;
+    let unit = wgt_language::source::split(source).unwrap();
+    assert_eq!(unit.models.len(), 1);
+    assert_eq!(unit.models[0].0, "Child");
+    let child = wgt_language::source::split(&unit.models[0].1).unwrap();
+    let child_functions = parse_functions(&child.functions).unwrap();
+    assert_eq!(child_functions["forward"].body.len(), 2);
+    let functions = parse_functions(&unit.functions).unwrap();
+    assert!(matches!(&functions["text"].body[0].kind,
+        Stmt::Return(Expr::Text(text)) if text == "a quoted brace } and comment #"));
+    let return_line = source.lines().position(|line| line.trim() == "return 7;").unwrap() + 1;
+    assert_eq!(functions["after"].body[0].line, return_line);
+    assert!(unit.declarations.lines().any(|line| line == "model Root"));
+}
+
+#[test]
+fn source_blocks_reject_unbalanced_braces_and_unterminated_strings() {
+    for (source, diagnostic) in [
+        ("wgt 0.5\nfn value() {}}", "unexpected closing brace"),
+        ("wgt 0.5\nfn value() {", "unterminated function"),
+        ("wgt 0.5\nfn value() { return \"open; }", "unterminated string"),
+        ("wgt 0.5\nmodel Child {\n}}", "unexpected model closing brace"),
+        ("wgt 0.5\nmodel Child {\n", "unterminated submodel definition"),
+    ] {
+        let error = match wgt_language::source::split(source) {
+            Ok(_) => panic!("accepted malformed source: {source}"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains(diagnostic), "{error:#}");
+    }
+}
+
+#[test]
 fn matrix_product_uses_native_at_operator() {
     let expression = returned(
         "wgt 0.5\nfn value(q,k) { return q @ k; }"

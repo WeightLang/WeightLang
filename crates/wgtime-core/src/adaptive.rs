@@ -12,6 +12,9 @@ pub mod optimization;
 pub mod transport;
 mod workspace;
 mod tensor;
+mod unary;
+use unary::Unary;
+use tensor::TensorView;
 pub use workspace::ExecutionProgress;
 
 pub use wgt_language::adaptive::{Program, Register, Parameter, Instruction};
@@ -42,7 +45,7 @@ enum Op {
     Write(usize, usize),
     Linear(usize, usize, usize, Option<usize>),
     Binary(usize, usize, usize, bool),
-    Unary(usize, usize, u8),
+    Unary(usize, usize, Unary),
     Mean(usize, usize),
     Blend(usize, usize, usize, Option<usize>),
     InferenceSkip(usize, bool, usize),
@@ -51,24 +54,6 @@ enum Op {
     Branch(usize, usize, usize),
     Jump(usize),
     Return(usize),
-}
-
-#[derive(Clone, Copy)]
-struct TensorView {
-    base: usize,
-    offset: usize,
-    shape: [usize; 8],
-    strides: [usize; 8],
-    rank: usize,
-}
-fn contiguous_strides(shape: &[usize]) -> [usize; 8] {
-    let mut strides = [1usize; 8];
-    let mut stride = 1usize;
-    for axis in (0..shape.len()).rev() {
-        strides[axis] = stride;
-        stride *= shape[axis];
-    }
-    strides
 }
 
 /// CPU-only experimental runtime; owns persistent weights and per-call registers.
@@ -448,16 +433,17 @@ impl AdaptiveSession {
                         let (r, x) = (dest(out)?, reg(input)?);
                         ensure!(len(r) == len(x), "unary length mismatch");
                         let kind = match instruction {
-                            Instruction::Tanh { .. } => 0,
-                            Instruction::Sigmoid { .. } => 1,
-                            Instruction::Softmax { .. } => 3,
-                            Instruction::Neg { .. } => 4,
-                            Instruction::Detach { .. } => 5,
-                            Instruction::Exp { .. } => 6,
-                            Instruction::Log { .. } => 7,
-                            Instruction::LogSoftmax { .. } => 8,
-                            Instruction::ValidateProbabilities { .. } => 9,
-                            _ => 2,
+                            Instruction::Tanh { .. } => Unary::Tanh,
+                            Instruction::Sigmoid { .. } => Unary::Sigmoid,
+                            Instruction::Relu { .. } => Unary::Relu,
+                            Instruction::Softmax { .. } => Unary::Softmax,
+                            Instruction::Neg { .. } => Unary::Neg,
+                            Instruction::Detach { .. } => Unary::Detach,
+                            Instruction::Exp { .. } => Unary::Exp,
+                            Instruction::Log { .. } => Unary::Log,
+                            Instruction::LogSoftmax { .. } => Unary::LogSoftmax,
+                            Instruction::ValidateProbabilities { .. } => Unary::ValidateProbabilities,
+                            _ => unreachable!(),
                         };
                         Op::Unary(r, x, kind)
                     }
@@ -540,7 +526,7 @@ impl AdaptiveSession {
                     Op::Binary(r,a,b,_) | Op::Minimum(r,a,b) => ensure!(shape(r) == shape(a) && shape(a) == shape(b), "elementwise geometry mismatch"),
                     Op::Unary(r,x,k) => {
                         ensure!(shape(r) == shape(x), "unary geometry mismatch");
-                        ensure!(!matches!(k,3|8|9) || shape(x).len() == 1, "vector softmax/validation requires rank 1");
+                        ensure!(!matches!(k, Unary::Softmax | Unary::LogSoftmax | Unary::ValidateProbabilities) || shape(x).len() == 1, "vector softmax/validation requires rank 1");
                     },
                     Op::Clip(r,x,_,_) => ensure!(shape(r) == shape(x), "clip geometry mismatch"),
                     Op::Linear(r,x,_,_) => ensure!(shape(r).len() == 1 && shape(x).len() == 1, "linear requires vectors"),
@@ -686,14 +672,7 @@ impl AdaptiveSession {
     }
     fn read_value(&self, register: usize, logical_index: usize) -> f32 {
         if let Some(view) = self.views[register] {
-            let mut remainder = logical_index;
-            let mut offset = view.offset;
-            for axis in (0..view.rank).rev() {
-                let coordinate = remainder % view.shape[axis];
-                remainder /= view.shape[axis];
-                offset += coordinate * view.strides[axis];
-            }
-            self.registers[view.base][offset]
+            self.registers[view.base][view.physical_index(logical_index)]
         } else {
             self.registers[register][logical_index]
         }
@@ -703,14 +682,7 @@ impl AdaptiveSession {
         let len = self.program.registers[register].len;
         self.registers[register].resize(len, 0.);
         for index in 0..len {
-            let mut remainder = index;
-            let mut offset = view.offset;
-            for axis in (0..view.rank).rev() {
-                let coordinate = remainder % view.shape[axis];
-                remainder /= view.shape[axis];
-                offset += coordinate * view.strides[axis];
-            }
-            let value = self.registers[view.base][offset];
+            let value = self.registers[view.base][view.physical_index(index)];
             self.registers[register][index] = value;
         }
         self.views[register] = None;
@@ -721,98 +693,29 @@ impl AdaptiveSession {
         Ok(())
     }
     fn detach_views_of(&mut self, base: usize) {
-        let dependents = self.views.iter().enumerate()
-            .filter_map(|(register, view)| view.filter(|view| view.base == base).map(|_| register))
-            .collect::<Vec<_>>();
-        for register in dependents {
-            self.materialize_view(register);
+        for register in 0..self.views.len() {
+            if self.views[register].is_some_and(|view| view.base == base) {
+                self.materialize_view(register);
+            }
         }
     }
     fn make_view(&mut self, op: Op, output: usize) -> Result<TensorView> {
-        let output_shape = self.program.registers[output].shape.clone();
-        match op {
-            Op::Reshape(_, input) => {
-                self.ready_view(input)?;
-                let input_shape = self.program.registers[input].shape.clone();
-                let view = if let Some(existing) = self.views[input] {
-                    let contiguous = contiguous_strides(&existing.shape[..existing.rank]);
-                    if existing.strides[..existing.rank] == contiguous[..existing.rank] {
-                        existing
-                    } else {
-                        self.materialize_view(input);
-                        let strides = contiguous_strides(&output_shape);
-                        let mut shape = [1usize; 8];
-                        shape[..output_shape.len()].copy_from_slice(&output_shape);
-                        return Ok(TensorView { base: input, offset: 0, shape, strides, rank: output_shape.len() });
-                    }
-                } else {
-                    let strides = contiguous_strides(&input_shape);
-                    TensorView {
-                        base: input,
-                        offset: 0,
-                        shape: {
-                            let mut shape = [1usize; 8];
-                            shape[..input_shape.len()].copy_from_slice(&input_shape);
-                            shape
-                        },
-                        strides,
-                        rank: input_shape.len(),
-                    }
-                };
-                let mut shape = [1usize; 8];
-                shape[..output_shape.len()].copy_from_slice(&output_shape);
-                Ok(TensorView { base: view.base, offset: view.offset, shape, strides: contiguous_strides(&output_shape), rank: output_shape.len() })
-            }
-            Op::Transpose(_, input, _, _) => {
-                self.ready_view(input)?;
-                let input_shape = &self.program.registers[input].shape;
-                let mut view = if let Some(existing) = self.views[input] {
-                    existing
-                } else {
-                    TensorView {
-                        base: input,
-                        offset: 0,
-                        shape: {
-                            let mut shape = [1usize; 8];
-                            shape[..input_shape.len()].copy_from_slice(input_shape);
-                            shape
-                        },
-                        strides: contiguous_strides(input_shape),
-                        rank: input_shape.len(),
-                    }
-                };
-                view.shape.swap(0, 1);
-                view.strides.swap(0, 1);
-                Ok(view)
-            }
-            Op::Permute(_, input, _, axes, rank) => {
-                self.ready_view(input)?;
-                let input_shape = &self.program.registers[input].shape;
-                let mut view = if let Some(existing) = self.views[input] {
-                    existing
-                } else {
-                    TensorView {
-                        base: input,
-                        offset: 0,
-                        shape: {
-                            let mut shape = [1usize; 8];
-                            shape[..input_shape.len()].copy_from_slice(input_shape);
-                            shape
-                        },
-                        strides: contiguous_strides(input_shape),
-                        rank,
-                    }
-                };
-                let old_shape = view.shape;
-                let old_strides = view.strides;
-                for axis in 0..rank {
-                    view.shape[axis] = old_shape[axes[axis]];
-                    view.strides[axis] = old_strides[axes[axis]];
-                }
-                Ok(view)
-            }
+        let input = match op {
+            Op::Reshape(_, input) | Op::Transpose(_, input, ..) | Op::Permute(_, input, ..) => input,
             _ => bail!("instruction is not a tensor view"),
+        };
+        self.ready_view(input)?;
+        if matches!(op, Op::Reshape(..)) && self.views[input].is_some_and(|view| !view.is_contiguous()) {
+            self.materialize_view(input);
         }
+        let view = self.views[input]
+            .unwrap_or_else(|| TensorView::contiguous(input, &self.program.registers[input].shape));
+        Ok(match op {
+            Op::Reshape(..) => view.reshaped(&self.program.registers[output].shape),
+            Op::Transpose(..) => view.permuted(&[1, 0]),
+            Op::Permute(_, _, _, axes, rank) => view.permuted(&axes[..rank]),
+            _ => unreachable!(),
+        })
     }
 
     /// One forward transaction; state persists between successful calls. Invalid
@@ -1183,39 +1086,7 @@ impl AdaptiveSession {
                 }
                 Op::Unary(r, x, kind) => {
                     self.ready(x)?;
-                    if kind == 9 {
-                        let values: Vec<f64> = self.registers[x].iter().map(|v| *v as f64).collect();
-                        crate::categorical::validate_probabilities(&values)?;
-                    }
-                    let max = if kind == 3 || kind == 8 {
-                        self.registers[x]
-                            .iter()
-                            .copied()
-                            .fold(f32::NEG_INFINITY, f32::max)
-                    } else {
-                        0.
-                    };
-                    let total: f64 = if kind == 3 || kind == 8 {
-                        self.registers[x]
-                            .iter()
-                            .map(|v| (f64::from(*v) - f64::from(max)).exp())
-                            .sum()
-                    } else {
-                        1.
-                    };
-                    for (i, v) in self.registers[x].iter().enumerate() {
-                        self.scratch[i] = match kind {
-                            0 => v.tanh(),
-                            1 => 1. / (1. + (-v).exp()),
-                            3 => ((f64::from(*v) - f64::from(max)).exp() / total) as f32,
-                            4 => -v,
-                            5 | 9 => *v,
-                            6 => v.exp(),
-                            7 => v.ln(),
-                            8 => (f64::from(*v) - f64::from(max) - total.ln()) as f32,
-                            _ => v.max(0.),
-                        };
-                    }
+                    kind.forward(&self.registers[x], &mut self.scratch[..self.program.registers[r].len])?;
                     output = Some(r);
                 }
                 Op::Mean(r, x) => {
@@ -1296,9 +1167,17 @@ impl AdaptiveSession {
             if let Some(r) = output {
                 if matches!(op, Op::Reshape(..) | Op::Transpose(..) | Op::Permute(..)) {
                     self.detach_views_of(r);
-                    self.materialize_view(r);
                     let view = self.make_view(op, r)?;
-                    self.views[r] = Some(view);
+                    if view.base == r {
+                        let n = self.program.registers[r].len;
+                        for index in 0..n {
+                            self.scratch[index] = self.registers[r][view.physical_index(index)];
+                        }
+                        self.registers[r].copy_from_slice(&self.scratch[..n]);
+                        self.views[r] = None;
+                    } else {
+                        self.views[r] = Some(view);
+                    }
                     self.initialized[r] = true;
                     if let Some(tape) = tape.as_deref_mut() {
                         let values = (0..self.program.registers[r].len)
@@ -1316,7 +1195,6 @@ impl AdaptiveSession {
                         tape.record(op, &self.scratch[..n])?;
                     }
                     self.detach_views_of(r);
-                    self.materialize_view(r);
                     self.registers[r].resize(n, 0.);
                     self.registers[r].copy_from_slice(&self.scratch[..n]);
                     self.views[r] = None;

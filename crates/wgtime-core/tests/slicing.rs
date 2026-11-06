@@ -7,17 +7,18 @@ fn list_slices_defaults_runtime_endpoints_and_postfix() {
 fn values() { return [10,20,30,40]; }
 fn main() {
     let x = values(); let start = 1; let end = 3;
-    assert(x[start:end] == [20,30], "runtime bounds");
-    assert(x[:2] == [10,20], "omitted start");
-    assert(x[2:] == [30,40], "omitted end");
-    assert(x[:] == x, "full slice");
-    assert(x[4:4] == [], "empty at boundary");
-    assert([][:] == [], "empty list");
-    assert(values()[1:][0:2][1] == 30, "nested postfix");
-    assert((x)[1:3].mean == 25, "parentheses and reduction");
-    assert(-x[1:2][0] + 2 == -18, "precedence");
+    assert x[start:end] == [20,30], "runtime bounds";
+    assert x[:2] == [10,20], "omitted start";
+    assert x[2:] == [30,40], "omitted end";
+    assert x[:] == x, "full slice";
+    assert x[4:4] == [], "empty at boundary";
+    assert [][:] == [], "empty list";
+    assert values()[1:][0:2][1] == 30, "nested postfix";
+    let grouped_mean = (x)[1:3].mean;
+    assert grouped_mean == 25, "parentheses and reduction";
+    assert -x[1:2][0] + 2 == -18, "precedence";
     seed(9); let expected = [random(),random(),random()];
-    seed(9); assert([random(),random(),random()][:] == expected, "operand once");
+    seed(9); assert [random(),random(),random()][:] == expected, "operand once";
     return true;
 }"#;
     assert_eq!(script::run(source, Path::new("."), 10000).unwrap().result, true);
@@ -31,7 +32,7 @@ fn list_slices_reject_invalid_bounds_and_syntax() {
         ("[1,2][:3]", "out of bounds"),
         ("[1,2][2:1]", "start must not exceed end"),
         ("[1,2][true:]", "expected number"),
-        ("\"text\"[:]", "slice requires list"),
+        ("\"text\"[:]", "expected list"),
         ("[1,2][::]", "steps are unsupported"),
         ("[1,2][0:1:1]", "steps are unsupported"),
         ("[1,2][0:1,0]", "multi-axis"),

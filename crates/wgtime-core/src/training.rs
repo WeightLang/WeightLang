@@ -196,7 +196,7 @@ impl Trainer {
                 name: names[i].to_owned(),
                 shape: p.shape.clone(),
                 values,
-                gradients: gradients.get(i).cloned().unwrap_or_default(),
+                gradients: gradients[i].clone(),
                 frozen: p.frozen,
             }
         }).collect::<Vec<_>>();

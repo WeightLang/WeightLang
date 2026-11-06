@@ -1,19 +1,9 @@
 //! Real daemon coverage for three small compositions, with explicit CPU backend.
 //! Run only with a prebuilt WGTIME_TEST_DAEMON; no runtime build fallback.
-use std::{
-    fs,
-    process::{Child, Command},
-    time::{Duration, Instant},
-};
-use wgt::{Client, InstanceOptions, Loss, ModelDefinition, Optimizer, Targets, TrainOptions};
+mod support;
+use std::fs;
+use wgt::{InstanceOptions, Loss, ModelDefinition, Optimizer, Targets, TrainOptions};
 
-struct Daemon(Child);
-impl Drop for Daemon {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 struct Case {
     name: &'static str,
     definition: ModelDefinition,
@@ -81,34 +71,8 @@ fn mse(predictions: &[Vec<f32>], targets: &[Vec<f32>]) -> f32 {
 #[test]
 #[ignore = "requires prebuilt WGTIME_TEST_DAEMON; isolated real service"]
 fn compositions_native_service_train_roundtrip_and_release() {
-    use std::os::unix::fs::PermissionsExt;
-    let root = std::env::var_os("CLAUDE_JOB_DIR")
-        .map(std::path::PathBuf::from)
-        .map(|p| p.join("tmp"))
-        .unwrap_or_else(|| "/tmp/weightlang".into());
-    fs::create_dir_all(&root).unwrap();
-    let scratch = tempfile::Builder::new()
-        .prefix("architecture-composition-")
-        .tempdir_in(&root)
-        .unwrap();
-    fs::set_permissions(scratch.path(), fs::Permissions::from_mode(0o700)).unwrap();
-    let _daemon = Daemon(
-        Command::new(std::env::var_os("WGTIME_TEST_DAEMON").expect("prebuilt daemon required"))
-            .arg("--test-directory")
-            .arg(scratch.path())
-            .spawn()
-            .unwrap(),
-    );
-    let endpoint = scratch.path().join("service.sock");
-    let started = Instant::now();
-    while !endpoint.exists() {
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "daemon startup timed out"
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let client = Client::connect_to(&endpoint).unwrap();
+    let scratch = support::Service::start().unwrap();
+    let client = scratch.client().unwrap();
     for case in cases() {
         let source_path = scratch.path().join("model.wgt");
         fs::write(&source_path, case.source).unwrap();

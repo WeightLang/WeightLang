@@ -1,11 +1,12 @@
 //! Local IPC only. This crate must never depend on an execution backend.
-use anyhow::{ensure, Context, Result};
+use anyhow::{ensure, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 
 mod client;
 mod errors;
+pub mod publication;
 pub use client::Client;
 pub use errors::{send_binary_error, MAX_ERROR_BYTES};
 
@@ -112,6 +113,21 @@ pub enum Request {
     },
     Stats,
 }
+
+impl Request {
+    /// Persistence requests carry a caller-opened regular file after their JSON frame.
+    pub fn uses_persistence_descriptor(&self) -> bool {
+        matches!(
+            self,
+            Self::PersistFd { .. }
+                | Self::LoadFd { .. }
+                | Self::InspectArtifactFd { .. }
+                | Self::ExportWeightsFd { .. }
+                | Self::BindWeightsFd { .. }
+        )
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Reply {

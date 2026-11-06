@@ -4,6 +4,7 @@ use std::{
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use wgtime_core::{
+    adaptive::{AdaptiveSession, parse},
     execution::{AllocationPolicy, ExecutionSession},
     Model, Session,
 };
@@ -103,6 +104,28 @@ fn contracts_streaming_and_allocation_free_execution() {
         {"name":"w","shape":[1,2],"kind":"packed","storage":"int4","group":2,"data":[169],"scales":[1]}
     ],"layers":[{"op":"linear","weight":"w"}]}"#).unwrap();
     let mut packed = Session::prepare(packed_model, Path::new("."), 100).unwrap();
+    let mut matrix_views = AdaptiveSession::prepare(parse(r#"wgt 0.5
+model MatrixViews
+input x: f32[8]
+output y: f32[1]
+fn forward(x) {
+    # The transpose contracts left rows with right rows without copying the view.
+    let left: f32[rows=2, inner=2] = x[0:4];
+    let right: f32[rows=2, cols=2] = x[4:8];
+    return (left.T @ right).mean;
+}
+"#).unwrap(), 65536).unwrap();
+    let mut batch_views = AdaptiveSession::prepare(parse(r#"wgt 0.5
+model BatchViews
+input x: f32[16]
+output y: f32[1]
+fn forward(x) {
+    # Each batch contracts its own transposed left matrix with the right matrix.
+    let left: f32[batch=2, rows=2, inner=2] = x[0:8];
+    let right: f32[batch=2, rows=2, cols=2] = x[8:16];
+    return batch_matmul(permute(left,[batch,inner,rows]),right).mean;
+}
+"#).unwrap(), 65536).unwrap();
     COUNTING.store(true, Ordering::SeqCst);
     for _ in 0..100 {
         let mut effective = [0.; 4];
@@ -121,6 +144,8 @@ fn contracts_streaming_and_allocation_free_execution() {
         assert_eq!(streamed.run(&[2., 1.]).unwrap(), &[7., 12.5]);
         assert_eq!(strict.run(&[2., 1.]).unwrap(), &[7., 12.5]);
         assert_eq!(packed.run(&[2., 1.]).unwrap(), &[4.]);
+        assert_eq!(matrix_views.run(&[1.,2.,3.,4.,5.,6.,7.,8.], 1000).unwrap(), &[34.5]);
+        assert_eq!(batch_views.run(&[1.,2.,3.,4.,1.,2.,3.,4.,5.,6.,7.,8.,5.,6.,7.,8.], 1000).unwrap(), &[34.5]);
     }
     COUNTING.store(false, Ordering::SeqCst);
     assert_eq!(ALLOCATIONS.load(Ordering::SeqCst), 0);

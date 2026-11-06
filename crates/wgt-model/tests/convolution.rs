@@ -1,53 +1,16 @@
 //! Real-service tests for the existing channel-first CNN fixtures.
 //! Each rank uses the same input, target and convergence threshold as the core
 //! convolution training test. Requires a prebuilt daemon; never builds one.
-use std::{
-    fs,
-    process::{Child, Command},
-    time::{Duration, Instant},
-};
-use wgt::{Client, InstanceOptions, Loss, ModelDefinition, Optimizer, Targets, TrainOptions};
+mod support;
+use std::fs;
+use wgt::{InstanceOptions, Loss, ModelDefinition, Optimizer, Targets, TrainOptions};
 
-struct Daemon(Child);
-impl Drop for Daemon {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 fn check_service(definition: ModelDefinition, source: &str, input_len: usize, output_len: usize) {
-    use std::os::unix::fs::PermissionsExt;
-
     assert_eq!(definition.interface().unwrap().input, input_len);
     assert_eq!(definition.interface().unwrap().output, output_len);
-    let root = std::env::var_os("CLAUDE_JOB_DIR")
-        .map(std::path::PathBuf::from)
-        .map(|p| p.join("tmp"))
-        .unwrap_or_else(|| "/tmp/weightlang".into());
-    fs::create_dir_all(&root).unwrap();
-    let scratch = tempfile::Builder::new()
-        .prefix("convolution-service-")
-        .tempdir_in(&root)
-        .unwrap();
-    fs::set_permissions(scratch.path(), fs::Permissions::from_mode(0o700)).unwrap();
-    let _daemon = Daemon(
-        Command::new(std::env::var_os("WGTIME_TEST_DAEMON").expect("prebuilt daemon required"))
-            .arg("--test-directory")
-            .arg(scratch.path())
-            .spawn()
-            .unwrap(),
-    );
-    let endpoint = scratch.path().join("service.sock");
-    let started = Instant::now();
-    while !endpoint.exists() {
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "daemon startup timed out"
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let client = Client::connect_to(&endpoint).unwrap();
+    let scratch = support::Service::start().unwrap();
+    let client = scratch.client().unwrap();
     let source_path = scratch.path().join("model.wgt");
     fs::write(&source_path, source).unwrap();
     let runtime = ModelDefinition::from_file(&source_path).unwrap();

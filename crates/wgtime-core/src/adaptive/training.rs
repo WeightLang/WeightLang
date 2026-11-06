@@ -33,7 +33,7 @@ struct CustomCheckpoint {
 
 enum LossMode {
     Builtin,
-    Custom { clip: Option<f32> },
+    Custom,
 }
 
 impl AdaptiveSession {
@@ -78,7 +78,6 @@ impl AdaptiveSession {
     }
 
     pub fn train_builtin_clipped(&mut self, inputs: &[Vec<f32>], objective: Objective<'_>, rate: f32, clip: Option<f32>, remaining: &mut u64, tape_budget: usize) -> Result<f32> {
-        ensure!(clip.is_none_or(|v| v.is_finite() && v > 0.), "gradient clip norm must be positive and finite");
         self.train_step_impl(inputs, objective, rate, remaining, tape_budget, LossMode::Builtin, clip)
     }
 
@@ -96,7 +95,7 @@ impl AdaptiveSession {
             rate,
             remaining,
             tape_budget,
-            LossMode::Custom { clip: None },
+            LossMode::Custom,
             None,
         )
     }
@@ -111,18 +110,14 @@ impl AdaptiveSession {
         remaining: &mut u64,
         tape_budget: usize,
     ) -> Result<f32> {
-        ensure!(
-            clip.is_finite() && clip > 0.,
-            "gradient clip norm must be positive and finite"
-        );
         self.train_step_impl(
             inputs,
             Objective::Mse(targets),
             rate,
             remaining,
             tape_budget,
-            LossMode::Custom { clip: Some(clip) },
-            None,
+            LossMode::Custom,
+            Some(clip),
         )
     }
 
@@ -134,11 +129,12 @@ impl AdaptiveSession {
         remaining: &mut u64,
         tape_budget: usize,
         mode: LossMode,
-        builtin_clip: Option<f32>,
+        clip: Option<f32>,
     ) -> Result<f32> {
+        ensure!(clip.is_none_or(|value| value.is_finite() && value > 0.), "gradient clip norm must be positive and finite");
         self.ensure_mutable()?;
         self.ensure_idle()?;
-        let mut loss_session = if matches!(mode, LossMode::Custom { .. }) {
+        let mut loss_session = if matches!(mode, LossMode::Custom) {
             let program = self
                 .program
                 .loss
@@ -250,7 +246,7 @@ impl AdaptiveSession {
             loss.is_finite() && gradients.iter().flatten().all(|v| v.is_finite()),
             "nonfinite loss or gradient"
         );
-        if let Some(limit) = match mode { LossMode::Custom { clip } => clip, LossMode::Builtin => builtin_clip } {
+        if let Some(limit) = clip {
             let norm = gradients
                 .iter()
                 .flatten()
@@ -313,26 +309,22 @@ impl AdaptiveSession {
         crate::training::write_new(path, &self.checkpoint_bytes()?)
     }
 
-    pub(crate) fn checkpoint_bytes(&self) -> Result<Vec<u8>> {
+    fn checkpoint_value(&self) -> Result<serde_json::Value> {
         self.ensure_idle()?;
-        let value = if let Some(state) = &self.custom_optimizer {
+        Ok(if let Some(state) = &self.custom_optimizer {
             super::optimization::validate_state(&state.value)?;
             serde_json::json!({"format":"weightlang.forward-training.v2", "program":self.program, "custom_optimizer":state})
         } else {
             serde_json::json!({"format":"weightlang.forward-training.v1", "program":self.program, "optimizer":self.optimizer})
-        };
-        Ok(serde_json::to_vec(&value)?)
+        })
+    }
+
+    pub(crate) fn checkpoint_bytes(&self) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(&self.checkpoint_value()?)?)
     }
 
     pub fn checkpoint_bytes_bounded(&self, limit: usize) -> Result<Vec<u8>> {
-        self.ensure_idle()?;
-        let value = if let Some(state) = &self.custom_optimizer {
-            super::optimization::validate_state(&state.value)?;
-            serde_json::json!({"format":"weightlang.forward-training.v2", "program":self.program, "custom_optimizer":state})
-        } else {
-            serde_json::json!({"format":"weightlang.forward-training.v1", "program":self.program, "optimizer":self.optimizer})
-        };
-        crate::script::file_io::encode_json(&value, limit)
+        crate::script::file_io::encode_json(&self.checkpoint_value()?, limit)
     }
 
     pub fn restore_checkpoint(value: serde_json::Value, budget: usize) -> Result<Self> {

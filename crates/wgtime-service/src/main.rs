@@ -9,19 +9,33 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use wgtime_core::training::{mlp, Objective, Optimizer, Trainer};
-use wgtime::{receive, send, Reply, Request, PROTOCOL};
+use wgtime::{send, Reply, Request, PROTOCOL};
+#[cfg(test)]
+use wgtime::receive;
 
 mod admission;
 mod metrics;
+mod sessions;
+use sessions::{Session, Sessions, MAX_SESSION_BYTES};
 #[cfg(feature="allocation-metrics")]
 #[global_allocator]
 static ALLOCATOR: metrics::Counting=metrics::Counting;
 const MAX_CONNECTIONS: usize = 64;
-const MAX_SESSION_BYTES: usize = 256 * 1024 * 1024;
-const MAX_CONNECTION_BYTES: usize = 512 * 1024 * 1024;
 struct Shared {
     next: AtomicU64,
     connections: AtomicUsize,
+}
+impl Shared {
+    fn next_handle(&self) -> Result<u64> {
+        let mut current = self.next.load(Ordering::Relaxed);
+        loop {
+            let next = current.checked_add(1).context("handle namespace exhausted")?;
+            match self.next.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+                Ok(handle) => return Ok(handle),
+                Err(actual) => current = actual,
+            }
+        }
+    }
 }
 // The accept loop owns admission; this guard owns exactly one admitted slot.
 // It also runs when a worker unwinds, after its connection-local state is dropped.
@@ -90,14 +104,11 @@ fn listen(directory: &Path) -> Result<(UnixListener, Guard)> {
     ))
 }
 struct Connection {
-    sessions: HashMap<u64, (Trainer, usize)>,
-    reserved: usize,
+    sessions: Sessions,
     ready: bool,
     tensors: HashMap<u64, wgtime::buffer::Mapping>,
     checkpoints: HashMap<u64, Vec<u8>>,
-    adaptive: HashMap<u64, (wgtime_core::adaptive::AdaptiveSession, usize)>,
     strategies: HashMap<u64, wgtime_service::strategy::Strategy>,
-    operations: HashMap<u64, (wgtime_core::operations::OperationSession, usize)>,
 }
 impl Connection {
     fn execute(&mut self, request: Request, shared: &Shared) -> Result<serde_json::Value> {
@@ -118,16 +129,7 @@ impl Connection {
                 optimizer,
                 memory,
             } => {
-                ensure!(self.sessions.len() + self.adaptive.len() + self.operations.len() < 64, "session limit exceeded");
-                ensure!(
-                    memory > 0
-                        && memory <= MAX_SESSION_BYTES
-                        && self
-                            .reserved
-                            .checked_add(memory)
-                            .is_some_and(|n| n <= MAX_CONNECTION_BYTES),
-                    "session memory budget exceeded"
-                );
+                let admission = self.sessions.admit(memory)?;
                 ensure!(
                     (2..=64).contains(&widths.len())
                         && widths.iter().all(|n| (1..=16384).contains(n)),
@@ -153,28 +155,24 @@ impl Connection {
                     memory,
                     optimizer,
                 )?;
-                // A random process prefix makes handles from a previous daemon epoch invalid.
-                let handle = shared.next.fetch_add(1, Ordering::Relaxed);
-                ensure!(handle != u64::MAX, "handle namespace exhausted");
-                self.sessions.insert(handle, (trainer, memory));
-                self.reserved += memory;
+                let handle = shared.next_handle()?;
+                admission.insert(handle, Session::Trainer(trainer));
                 Ok(serde_json::json!({"handle": handle}))
             }
             Request::InitializeDefinition { source, memory, optimizer } => {
                 ensure!(source.len() <= 1024 * 1024, "definition exceeds 1 MiB");
-                ensure!(self.sessions.len()+self.adaptive.len()+self.operations.len()<64 && memory>0 && memory<=MAX_SESSION_BYTES && self.reserved.checked_add(memory).is_some_and(|n| n<=MAX_CONNECTION_BYTES), "definition admission budget exceeded");
+                let admission = self.sessions.admit(memory).context("definition admission budget exceeded")?;
                 ensure!(optimizer.as_deref().is_none_or(|s| matches!(s,"sgd"|"adam")), "unsupported optimizer");
                 // Re-parse untrusted source in the service; macro validation is not authority.
                 let definition = wgt_language::model::ModelDefinition::parse(&source)?;
-                // Reject an impossible parameter budget before materializing any values.
-                // Core preparation still checks activations, workspace and optimizer state.
+                // Core preparation separately accounts for activations, workspace and optimizer state.
                 let required = admission::storage_bytes(
                     definition.parameters().iter().map(|p| p.shape.as_slice())
                         .chain(definition.states().iter().map(|state| state.shape.as_slice())),
                     if definition.operations().is_empty() { 1 } else { 4 },
                 )?;
                 ensure!(required <= memory, "definition storage memory budget exceeded");
-                let handle = shared.next.fetch_add(1, Ordering::Relaxed);
+                let handle = shared.next_handle()?;
                 let program = match definition.instantiate_plan()? {
                     wgt_language::model::ModelPlan::Graph(graph) => {
                         let model = wgtime_core::source::Graph(graph).instantiate_bounded(memory)?;
@@ -184,8 +182,7 @@ impl Connection {
                     wgt_language::model::ModelPlan::Operations(plan) => {
                         ensure!(optimizer.is_none(), "typed operations do not support optimizers or cross-state differentiation");
                         let session = wgtime_core::operations::OperationSession::prepare(plan, memory)?;
-                        self.operations.insert(handle, (session, memory));
-                        self.reserved += memory;
+                        admission.insert(handle, Session::Operations(session));
                         return Ok(serde_json::json!({"handle":handle,"backend":"native-operations"}));
                     },
                 };
@@ -193,69 +190,82 @@ impl Connection {
                 session.enable_compiled()?;
                 if let Some(name)=optimizer { session.set_optimizer(if name=="adam" {Optimizer::Adam} else {Optimizer::Sgd})?; }
                 let backend = session.execution_backend();
-                self.adaptive.insert(handle,(session,memory));
-                self.reserved += memory;
+                admission.insert(handle, Session::Adaptive(session));
                 Ok(serde_json::json!({"handle":handle,"backend":backend}))
             }
             Request::CallOperation { handle, name, inputs } => {
-                let session = &mut self.operations.get_mut(&handle).context("unknown operation model or foreign owner")?.0;
+                let Some(Session::Operations(session)) = self.sessions.get_mut(&handle) else {
+                    bail!("unknown operation model or foreign owner");
+                };
                 let output = session.call(&name, &inputs, 1_000_000)?;
                 Ok(serde_json::json!({"output":output,"revision":session.revision()}))
             }
-            Request::OperationSchemas { handle } => Ok(serde_json::to_value(self.operations.get(&handle).context("unknown operation model or foreign owner")?.0.schemas())?),
-            Request::StateValues { handle } => Ok(serde_json::to_value(self.operations.get(&handle).context("unknown operation model or foreign owner")?.0.state_values())?),
-            Request::ParameterValues { handle } => {
-                if let Some((session,_))=self.operations.get(&handle) { return Ok(serde_json::to_value(session.parameter_values())?); }
-                let session=&self.adaptive.get(&handle).context("unknown model or foreign owner")?.0;
-                Ok(serde_json::to_value(session.program().parameters.iter().map(|p|(p.name.clone(),p.shape.clone(),p.data.clone())).collect::<Vec<_>>())?)
+            Request::OperationSchemas { handle } => {
+                let Some(Session::Operations(session)) = self.sessions.get(&handle) else {
+                    bail!("unknown operation model or foreign owner");
+                };
+                Ok(serde_json::to_value(session.schemas())?)
             }
+            Request::StateValues { handle } => {
+                let Some(Session::Operations(session)) = self.sessions.get(&handle) else {
+                    bail!("unknown operation model or foreign owner");
+                };
+                Ok(serde_json::to_value(session.state_values())?)
+            }
+            Request::ParameterValues { handle } => match self.sessions.get(&handle) {
+                Some(Session::Operations(session)) => Ok(serde_json::to_value(session.parameter_values())?),
+                Some(Session::Adaptive(session)) => Ok(serde_json::to_value(session.program().parameters.iter().map(|p| (p.name.clone(), p.shape.clone(), p.data.clone())).collect::<Vec<_>>())?),
+                _ => bail!("unknown model or foreign owner"),
+            },
             Request::UpdateParameters { handle, candidates } => {
-                if let Some((session,_))=self.operations.get_mut(&handle) {session.update_parameters(&candidates)?;return Ok(serde_json::json!({"revision":session.revision()}));}
-                let session=&mut self.adaptive.get_mut(&handle).context("unknown model or foreign owner")?.0;
-                session.update_candidates(&candidates)?;
-                Ok(serde_json::json!({"revision":session.revision()}))
+                let revision = match self.sessions.get_mut(&handle) {
+                    Some(Session::Operations(session)) => {
+                        session.update_parameters(&candidates)?;
+                        session.revision()
+                    }
+                    Some(Session::Adaptive(session)) => {
+                        session.update_candidates(&candidates)?;
+                        session.revision()
+                    }
+                    _ => bail!("unknown model or foreign owner"),
+                };
+                Ok(serde_json::json!({"revision": revision}))
             }
             Request::TrainStepWithPolicy { handle, inputs, targets, rate, loss, clip, straight_through } => {
-                ensure!(!self.operations.contains_key(&handle),"typed operations do not support differentiation or gradients across state");
-                let session=&self.adaptive.get(&handle).context("unknown model or foreign owner")?.0;
+                ensure!(!matches!(self.sessions.get(&handle), Some(Session::Operations(_))), "typed operations do not support differentiation or gradients across state");
+                let Some(Session::Adaptive(session)) = self.sessions.get(&handle) else {
+                    bail!("unknown model or foreign owner");
+                };
                 ensure!(straight_through || !session.program().parameters.iter().any(|p| matches!(p.learn,Some(wgt_language::adaptive::LearnDomain::Bool | wgt_language::adaptive::LearnDomain::Int{..}))), "ContinuousOnly rejects models containing bool/int parameters; explicitly select StraightThrough");
                 self.execute(Request::TrainStep {handle,inputs,targets,rate,loss,clip},shared)
             }
-            Request::Predict { handle, input } => {
-                if let Some((session, _)) = self.adaptive.get_mut(&handle) {
-                    return Ok(
-                        serde_json::json!({"output": session.evaluate(&input, 1_000_000)?, "revision": session.revision()}),
-                    );
-                }
-                let trainer = &mut self
-                    .sessions
-                    .get_mut(&handle)
-                    .context("unknown session or foreign owner")?
-                    .0;
-                Ok(
-                    serde_json::json!({"output": trainer.predict(&input)?, "steps": trainer.steps()}),
-                )
-            }
+            Request::Predict { handle, input } => match self.sessions.get_mut(&handle) {
+                Some(Session::Adaptive(session)) => Ok(serde_json::json!({"output": session.evaluate(&input, 1_000_000)?, "revision": session.revision()})),
+                Some(Session::Trainer(trainer)) => Ok(serde_json::json!({"output": trainer.predict(&input)?, "steps": trainer.steps()})),
+                _ => bail!("unknown session or foreign owner"),
+            },
             Request::CreateTrainingProgram { program, memory, optimizer } => {
-                ensure!(self.adaptive.len()+self.sessions.len()+self.operations.len()<64 && memory>0 && memory<=MAX_SESSION_BYTES && self.reserved.checked_add(memory).is_some_and(|n| n<=MAX_CONNECTION_BYTES), "program admission budget exceeded");
+                let admission = self.sessions.admit(memory).context("program admission budget exceeded")?;
                 ensure!(matches!(optimizer.as_str(), "none"|"sgd"|"adam"), "unknown optimizer");
                 let mut session = wgtime_core::adaptive::AdaptiveSession::prepare(serde_json::from_value(program)?, memory)?;
                 match optimizer.as_str() { "sgd"=>session.set_optimizer(Optimizer::Sgd)?, "adam"=>session.set_optimizer(Optimizer::Adam)?, _=>{} }
-                let handle = shared.next.fetch_add(1, Ordering::Relaxed);
-                self.adaptive.insert(handle,(session,memory));
-                self.reserved += memory;
+                let handle = shared.next_handle()?;
+                admission.insert(handle, Session::Adaptive(session));
                 Ok(serde_json::json!({"handle":handle}))
             }
             Request::TrainStep { handle, inputs, targets, rate, loss, clip } => {
-                ensure!(!self.operations.contains_key(&handle), "typed operations do not support differentiation or gradients across state");
+                ensure!(!matches!(self.sessions.get(&handle), Some(Session::Operations(_))), "typed operations do not support differentiation or gradients across state");
                 ensure!(!inputs.is_empty() && inputs.len() <= 65536, "invalid batch size");
                 ensure!(rate.is_finite() && rate > 0., "learning rate must be positive and finite");
                 ensure!(clip.is_none_or(|v| v.is_finite() && v > 0.), "gradient clip norm must be positive and finite");
                 ensure!(matches!(loss.as_str(), "mse" | "cross_entropy" | "loss"), "unknown training loss");
                 let matrix: Vec<Vec<f32>> = if loss == "cross_entropy" { Vec::new() } else { serde_json::from_value(targets.clone())? };
                 let actions: Vec<usize> = if loss == "cross_entropy" {
-                    let classes = if let Some((session,_)) = self.adaptive.get(&handle) {session.output_len()}
-                        else {self.sessions.get(&handle).context("unknown session or foreign owner")?.0.session.report().output};
+                    let classes = match self.sessions.get(&handle) {
+                        Some(Session::Adaptive(session)) => session.output_len(),
+                        Some(Session::Trainer(trainer)) => trainer.session.report().output,
+                        _ => bail!("unknown session or foreign owner"),
+                    };
                     targets.as_array().context("class targets must be a list")?.iter().map(|value| {
                         if let Some(index)=value.as_u64() {
                             let index=usize::try_from(index).context("class index out of range")?;
@@ -269,30 +279,24 @@ impl Connection {
                 } else { Vec::new() };
                 let advantages = vec![1.; inputs.len()];
                 let objective = || if loss == "cross_entropy" { Objective::Policy { actions: &actions, advantages: &advantages } } else { Objective::Mse(&matrix) };
-                let value = if let Some((session, _)) = self.adaptive.get_mut(&handle) {
-                    let mut remaining = 10_000_000;
-                    if loss == "loss" {
-                        if let Some(limit) = clip { session.train_clipped(&inputs, &matrix, rate, limit, &mut remaining, 64*1024*1024)? }
-                        else { session.train_custom(&inputs, &matrix, rate, &mut remaining, 64*1024*1024)? }
-                    } else { session.train_builtin_clipped(&inputs, objective(), rate, clip, &mut remaining, 64*1024*1024)? }
-                } else {
-                    ensure!(loss != "loss", "custom loss requires a forward model with fn loss");
-                    self.sessions.get_mut(&handle).context("unknown session or foreign owner")?.0.step_clipped(&inputs, objective(), rate, clip)?
+                ensure!(loss != "loss" || matches!(self.sessions.get(&handle), Some(Session::Adaptive(_))), "custom loss requires a forward model with fn loss");
+                let value = match self.sessions.get_mut(&handle) {
+                    Some(Session::Adaptive(session)) => {
+                        let mut remaining = 10_000_000;
+                        if loss == "loss" {
+                            if let Some(limit) = clip { session.train_clipped(&inputs, &matrix, rate, limit, &mut remaining, 64*1024*1024)? }
+                            else { session.train_custom(&inputs, &matrix, rate, &mut remaining, 64*1024*1024)? }
+                        } else { session.train_builtin_clipped(&inputs, objective(), rate, clip, &mut remaining, 64*1024*1024)? }
+                    }
+                    Some(Session::Trainer(trainer)) => {
+                        trainer.step_clipped(&inputs, objective(), rate, clip)?
+                    }
+                    _ => bail!("unknown session or foreign owner"),
                 };
                 Ok(serde_json::json!({"loss":value}))
             }
             Request::Drop { handle } => {
-                let bytes = if let Some((_, bytes)) = self.operations.remove(&handle) {
-                    bytes
-                } else if let Some((_, bytes)) = self.sessions.remove(&handle) {
-                    bytes
-                } else {
-                    self.adaptive
-                        .remove(&handle)
-                        .context("unknown session or foreign owner")?
-                        .1
-                };
-                self.reserved -= bytes;
+                self.sessions.remove(&handle)?;
                 Ok(serde_json::json!({"released": true}))
             }
             Request::PersistFd { .. } | Request::LoadFd { .. } | Request::InspectArtifactFd { .. } | Request::ExportWeightsFd { .. } | Request::BindWeightsFd { .. } => {
@@ -303,16 +307,7 @@ impl Connection {
                 optimizer,
                 memory,
             } => {
-                ensure!(
-                    self.sessions.len() + self.adaptive.len() + self.operations.len() < 64
-                        && memory > 0
-                        && memory <= MAX_SESSION_BYTES
-                        && self
-                            .reserved
-                            .checked_add(memory)
-                            .is_some_and(|n| n <= MAX_CONNECTION_BYTES),
-                    "graph admission budget exceeded"
-                );
+                let admission = self.sessions.admit(memory).context("graph admission budget exceeded")?;
                 let graph: wgtime_core::source::Graph = serde_json::from_value(graph)?;
                 let optimizer = match optimizer.as_str() {
                     "adam" => Optimizer::Adam,
@@ -321,15 +316,14 @@ impl Connection {
                 };
                 let trainer =
                     Trainer::new_self_contained(graph.instantiate_bounded(memory)?, memory, optimizer)?;
-                let handle = shared.next.fetch_add(1, Ordering::Relaxed);
-                self.sessions.insert(handle, (trainer, memory));
-                self.reserved += memory;
+                let handle = shared.next_handle()?;
+                admission.insert(handle, Session::Trainer(trainer));
                 Ok(serde_json::json!({"handle":handle}))
             }
             Request::RegisterStrategy { source, entry } => {
                 ensure!(self.strategies.len() < 64, "strategy limit exceeded");
                 let strategy = wgtime_service::strategy::Strategy::compile_entry(&source, &entry)?;
-                let handle = shared.next.fetch_add(1, Ordering::Relaxed);
+                let handle = shared.next_handle()?;
                 self.strategies.insert(handle, strategy);
                 Ok(serde_json::json!({"strategy": handle}))
             }
@@ -352,44 +346,31 @@ impl Connection {
                     .strategies
                     .get(&strategy)
                     .context("unknown strategy or foreign owner")?;
-                let (session, _) = self
-                    .adaptive
-                    .get_mut(&handle)
-                    .context("unknown adaptive session or foreign owner")?;
+                let Some(Session::Adaptive(session)) = self.sessions.get_mut(&handle) else {
+                    bail!("unknown adaptive session or foreign owner");
+                };
                 let mut remaining = operations;
                 strategy.execute(session, &inputs, &targets, &mut remaining, memory)
             }
             Request::Checkpoint { handle } => {
                 ensure!(self.checkpoints.len() < 4, "checkpoint slot limit exceeded");
-                let trainer = &mut self
-                    .sessions
-                    .get_mut(&handle)
-                    .context("unknown session or foreign owner")?
-                    .0;
+                let Some(Session::Trainer(trainer)) = self.sessions.get_mut(&handle) else {
+                    bail!("unknown session or foreign owner");
+                };
                 let bytes = trainer.checkpoint_bytes_bounded(16 * 1024 * 1024)?;
-                let checkpoint = shared.next.fetch_add(1, Ordering::Relaxed);
+                let checkpoint = shared.next_handle()?;
                 self.checkpoints.insert(checkpoint, bytes);
                 Ok(serde_json::json!({"checkpoint": checkpoint}))
             }
             Request::Restore { checkpoint, memory } => {
-                ensure!(
-                    self.sessions.len() + self.adaptive.len() + self.operations.len() < 64
-                        && memory > 0
-                        && memory <= MAX_SESSION_BYTES
-                        && self
-                            .reserved
-                            .checked_add(memory)
-                            .is_some_and(|n| n <= MAX_CONNECTION_BYTES),
-                    "restore budget exceeded"
-                );
+                let admission = self.sessions.admit(memory).context("restore budget exceeded")?;
                 let bytes = self
                     .checkpoints
                     .get(&checkpoint)
                     .context("unknown checkpoint or foreign owner")?;
                 let trainer = Trainer::restore_self_contained_value(serde_json::from_slice(bytes)?, memory)?;
-                let handle = shared.next.fetch_add(1, Ordering::Relaxed);
-                self.sessions.insert(handle, (trainer, memory));
-                self.reserved += memory;
+                let handle = shared.next_handle()?;
+                admission.insert(handle, Session::Trainer(trainer));
                 Ok(serde_json::json!({"handle": handle}))
             }
             Request::RegisterTensor { .. } => {
@@ -411,11 +392,9 @@ impl Connection {
                     .values()
                     .get(start..end)
                     .context("tensor range out of bounds")?;
-                let trainer = &mut self
-                    .sessions
-                    .get_mut(&handle)
-                    .context("unknown session or foreign owner")?
-                    .0;
+                let Some(Session::Trainer(trainer)) = self.sessions.get_mut(&handle) else {
+                    bail!("unknown session or foreign owner");
+                };
                 Ok(serde_json::json!({"output": trainer.predict(input)?, "steps": trainer.steps()}))
             }
             Request::ReleaseTensor { tensor } => {
@@ -425,7 +404,11 @@ impl Connection {
                 Ok(serde_json::json!({"released": true}))
             }
             Request::Stats => Ok(
-                serde_json::json!({"sessions": self.sessions.len() + self.adaptive.len() + self.operations.len(), "reserved": self.reserved, "connections": shared.connections.load(Ordering::Relaxed),"allocator":metrics::snapshot(),"execution":self.adaptive.iter().map(|(handle,(session,_))| {let (forward,tape)=session.compiled_forward_counts(); serde_json::json!({"handle":handle,"backend":session.execution_backend(),"native_forwards":forward,"native_tape_forwards":tape})}).collect::<Vec<_>>()}),
+                serde_json::json!({"sessions": self.sessions.len(), "reserved": self.sessions.reserved(), "connections": shared.connections.load(Ordering::Relaxed),"allocator":metrics::snapshot(),"execution":self.sessions.iter().filter_map(|(handle, session)| {
+                    let Session::Adaptive(session) = session else { return None; };
+                    let (forward,tape)=session.compiled_forward_counts();
+                    Some(serde_json::json!({"handle":handle,"backend":session.execution_backend(),"native_forwards":forward,"native_tape_forwards":tape}))
+                }).collect::<Vec<_>>()}),
             ),
             Request::Hello { .. } => unreachable!(),
         }
@@ -441,14 +424,11 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
         stream.set_read_timeout(Some(Duration::from_secs(30)))?;
         stream.set_write_timeout(Some(Duration::from_secs(30)))?;
         let mut state = Connection {
-            sessions: HashMap::new(),
-            reserved: 0,
+            sessions: Sessions::default(),
             ready: false,
             tensors: HashMap::new(),
             checkpoints: HashMap::new(),
-            adaptive: HashMap::new(),
             strategies: HashMap::new(),
-            operations: HashMap::new(),
         };
         let mut response_bytes=Vec::new();
         #[cfg(feature = "latency-probe")]
@@ -458,7 +438,7 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                 Ok(request) => request,
                 Err(_) => break,
             };
-            if matches!(request, Request::PersistFd { .. } | Request::LoadFd { .. } | Request::InspectArtifactFd { .. } | Request::ExportWeightsFd { .. } | Request::BindWeightsFd { .. }) {
+            if request.uses_persistence_descriptor() {
                 use std::io::{Read, Seek, Write};
                 let mut file = wgtime::buffer::receive_file(&stream)?;
                 let result = (|| -> Result<serde_json::Value> {
@@ -469,12 +449,11 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                     match request {
                         Request::ExportWeightsFd { handle } => {
                             ensure!(file.metadata()?.len() == 0, "destination must be empty staging file");
-                            let bytes = if let Some((session, _)) = state.operations.get(&handle) {
-                                session.weights_bytes(64 * 1024 * 1024)?
-                            } else if let Some((session, _)) = state.adaptive.get(&handle) {
-                                session.weights_bytes(64 * 1024 * 1024)?
-                            } else {
-                                state.sessions.get_mut(&handle).context("unknown session or foreign owner")?.0.weights_bytes(64 * 1024 * 1024)?
+                            let bytes = match state.sessions.get_mut(&handle) {
+                                Some(Session::Operations(session)) => session.weights_bytes(64 * 1024 * 1024)?,
+                                Some(Session::Adaptive(session)) => session.weights_bytes(64 * 1024 * 1024)?,
+                                Some(Session::Trainer(trainer)) => trainer.weights_bytes(64 * 1024 * 1024)?,
+                                _ => bail!("unknown session or foreign owner"),
                             };
                             file.write_all(&bytes)?;
                             file.sync_all()?;
@@ -486,12 +465,11 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                             let mut bytes = Vec::new();
                             file.take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
                             ensure!(bytes.len() <= 64 * 1024 * 1024, "weights byte limit exceeded");
-                            if let Some((session, _)) = state.operations.get_mut(&handle) {
-                                session.bind_weights(&bytes, &optimizer)?;
-                            } else if let Some((session, _)) = state.adaptive.get_mut(&handle) {
-                                session.bind_weights(&bytes, &optimizer)?;
-                            } else {
-                                state.sessions.get_mut(&handle).context("unknown session or foreign owner")?.0.bind_weights(&bytes, &optimizer)?;
+                            match state.sessions.get_mut(&handle) {
+                                Some(Session::Operations(session)) => session.bind_weights(&bytes, &optimizer)?,
+                                Some(Session::Adaptive(session)) => session.bind_weights(&bytes, &optimizer)?,
+                                Some(Session::Trainer(trainer)) => trainer.bind_weights(&bytes, &optimizer)?,
+                                _ => bail!("unknown session or foreign owner"),
                             }
                             Ok(serde_json::json!({}))
                         }
@@ -500,23 +478,16 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                                 file.metadata()?.len() == 0,
                                 "destination must be empty staging file"
                             );
-                            let bytes = if let Some((session, _)) = state.adaptive.get(&handle) {
-                                if checkpoint {
-                                    session.checkpoint_bytes_bounded(64 * 1024 * 1024)?
-                                } else {
-                                    serde_json::to_vec(session.program())?
+                            let bytes = match state.sessions.get_mut(&handle) {
+                                Some(Session::Adaptive(session)) => {
+                                    if checkpoint { session.checkpoint_bytes_bounded(64 * 1024 * 1024)? }
+                                    else { serde_json::to_vec(session.program())? }
                                 }
-                            } else {
-                                let trainer = &mut state
-                                    .sessions
-                                    .get_mut(&handle)
-                                    .context("unknown session or foreign owner")?
-                                    .0;
-                                if checkpoint {
-                                    trainer.checkpoint_bytes_bounded(64 * 1024 * 1024)?
-                                } else {
-                                    serde_json::to_vec(&trainer.snapshot()?)?
+                                Some(Session::Trainer(trainer)) => {
+                                    if checkpoint { trainer.checkpoint_bytes_bounded(64 * 1024 * 1024)? }
+                                    else { serde_json::to_vec(&trainer.snapshot()?)? }
                                 }
+                                _ => bail!("unknown session or foreign owner"),
                             };
                             ensure!(
                                 bytes.len() <= 64 * 1024 * 1024,
@@ -547,16 +518,7 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                             optimizer,
                             memory,
                         } => {
-                            ensure!(
-                                state.sessions.len() + state.adaptive.len() + state.operations.len() < 64
-                                    && memory > 0
-                                    && memory <= MAX_SESSION_BYTES
-                                    && state
-                                        .reserved
-                                        .checked_add(memory)
-                                        .is_some_and(|n| n <= MAX_CONNECTION_BYTES),
-                                "load admission budget exceeded"
-                            );
+                            let admission = state.sessions.admit(memory).context("load admission budget exceeded")?;
                             ensure!(
                                 file.metadata()?.len() <= 64 * 1024 * 1024,
                                 "checkpoint byte limit exceeded"
@@ -582,7 +544,7 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                                 checkpoint == artifact_checkpoint,
                                 "load format does not match model/checkpoint kind"
                             );
-                            let handle = shared.next.fetch_add(1, Ordering::Relaxed);
+                            let handle = shared.next_handle()?;
                             if value
                                 .get("format")
                                 .and_then(|n| n.as_str())
@@ -605,7 +567,7 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                                         _ => bail!("unsupported optimizer"),
                                     }
                                 }
-                                state.adaptive.insert(handle, (session, memory));
+                                admission.insert(handle, Session::Adaptive(session));
                             } else {
                                 let trainer = if checkpoint {
                                     Trainer::restore_self_contained_value(value, memory)?
@@ -621,9 +583,8 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                                         optimizer,
                                     )?
                                 };
-                                state.sessions.insert(handle, (trainer, memory));
+                                admission.insert(handle, Session::Trainer(trainer));
                             }
-                            state.reserved += memory;
                             Ok(serde_json::json!({"handle":handle}))
                         }
                         _ => unreachable!(),
@@ -659,11 +620,9 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                         .values()
                         .get(start..end)
                         .context("tensor range out of bounds")?;
-                    let trainer = &mut state
-                        .sessions
-                        .get_mut(&handle)
-                        .context("unknown session or foreign owner")?
-                        .0;
+                    let Some(Session::Trainer(trainer)) = state.sessions.get_mut(&handle) else {
+                        bail!("unknown session or foreign owner");
+                    };
                     #[cfg(feature = "latency-probe")]
                     ensure!(input.len() == trainer.session.report().input, "input length mismatch");
                     #[cfg(feature = "latency-probe")]
@@ -744,7 +703,7 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
                         .context("shape overflow")?;
                     ensure!(elements == count, "shape extent mismatch");
                     let mapping = wgtime::buffer::Mapping::open(file, count)?;
-                    let tensor = shared.next.fetch_add(1, Ordering::Relaxed);
+                    let tensor = shared.next_handle()?;
                     state.tensors.insert(tensor, mapping);
                     Ok(serde_json::json!({"tensor": tensor}))
                 })()
@@ -813,14 +772,11 @@ mod lifecycle_tests {
 
     fn state() -> Connection {
         Connection {
-            sessions: HashMap::new(),
-            reserved: 0,
+            sessions: Sessions::default(),
             ready: true,
             tensors: HashMap::new(),
             checkpoints: HashMap::new(),
-            adaptive: HashMap::new(),
             strategies: HashMap::new(),
-            operations: HashMap::new(),
         }
     }
 
@@ -846,6 +802,14 @@ mod lifecycle_tests {
         }
     }
 
+    fn operation() -> Request {
+        Request::InitializeDefinition {
+            source: "wgt 0.5\nmodel Cell\nstate activity:f32[1]=[0];\nfn observe(x:f32[1])->f32[1]{return activity+x;}\n".into(),
+            memory: 1024 * 1024,
+            optimizer: None,
+        }
+    }
+
     #[test]
     fn adaptive_drop_returns_reservation_and_rejects_stale_or_foreign_handles() -> Result<()> {
         let shared = shared();
@@ -854,9 +818,9 @@ mod lifecycle_tests {
             .as_u64()
             .unwrap();
         assert!(state().execute(Request::Drop { handle }, &shared).is_err());
-        assert_eq!(owner.reserved, MAX_SESSION_BYTES);
+        assert_eq!(owner.execute(Request::Stats, &shared)?["reserved"], MAX_SESSION_BYTES);
         owner.execute(Request::Drop { handle }, &shared)?;
-        assert_eq!(owner.reserved, 0);
+        assert_eq!(owner.execute(Request::Stats, &shared)?["reserved"], 0);
         assert!(owner.execute(Request::Drop { handle }, &shared).is_err());
         assert!(owner
             .execute(
@@ -888,14 +852,16 @@ mod lifecycle_tests {
             ["checkpoint"]
             .as_u64()
             .unwrap();
+        let named = owner.execute(operation(), &shared)?["handle"].as_u64().unwrap();
         let mut adaptive = 0;
-        for _ in 0..63 {
+        for _ in 0..62 {
             adaptive = owner.execute(program(1024), &shared)?["handle"]
                 .as_u64()
                 .unwrap();
         }
-        let reserved = owner.reserved;
+        let reserved = owner.execute(Request::Stats, &shared)?["reserved"].as_u64().unwrap();
         assert!(owner.execute(create(), &shared).is_err());
+        assert!(owner.execute(operation(), &shared).is_err());
         assert!(owner
             .execute(
                 Request::Restore {
@@ -905,7 +871,7 @@ mod lifecycle_tests {
                 &shared
             )
             .is_err());
-        assert_eq!(owner.reserved, reserved);
+        assert_eq!(owner.execute(Request::Stats, &shared)?["reserved"], reserved);
         assert_eq!(owner.execute(Request::Stats, &shared)?["sessions"], 64);
         owner.execute(Request::Drop { handle: adaptive }, &shared)?;
         owner.execute(
@@ -915,11 +881,14 @@ mod lifecycle_tests {
             },
             &shared,
         )?;
-        let reserved = owner.reserved;
+        let reserved = owner.execute(Request::Stats, &shared)?["reserved"].as_u64().unwrap();
         assert!(owner
             .execute(Request::Drop { handle: u64::MAX }, &shared)
             .is_err());
-        assert_eq!(owner.reserved, reserved);
+        assert_eq!(owner.execute(Request::Stats, &shared)?["reserved"], reserved);
+        owner.execute(Request::Drop { handle: named }, &shared)?;
+        assert_eq!(owner.execute(Request::Stats, &shared)?["sessions"], 63);
+        assert_eq!(owner.execute(Request::Stats, &shared)?["reserved"], reserved - 1024 * 1024);
         Ok(())
     }
 

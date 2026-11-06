@@ -139,11 +139,11 @@ fn compiled_entry_supports_general_tensor_permutation() {
     let source = r#"wgt 0.5
 model Permute
 input x: f32[24]
-output y: f32[1]
+output y: f32[24]
 fn forward(x) {
     let tensor: f32[sequence=2, heads=3, dim=4] = reshape(x,[2,3,4]);
     let reordered = permute(tensor,[dim,sequence,heads]);
-    return reordered.mean;
+    return reshape(reordered,[24]);
 }
 "#;
     let ModelPlan::Forward(program) = ModelDefinition::parse(source)
@@ -156,8 +156,10 @@ fn forward(x) {
     let mut compiled = CompiledForward::compile(&program, 1024 * 1024).unwrap();
     let input = (0..24).map(|n| n as f32).collect::<Vec<_>>();
     let output = compiled.run(&input, &[]).unwrap();
-    let expected = input.iter().sum::<f32>() / 24.;
-    assert!((output[0] - expected).abs() < 1e-6);
+    assert_eq!(output, [
+        0., 4., 8., 12., 16., 20., 1., 5., 9., 13., 17., 21.,
+        2., 6., 10., 14., 18., 22., 3., 7., 11., 15., 19., 23.,
+    ]);
 }
 
 #[test]
@@ -184,7 +186,7 @@ fn forward(x) {
     let input = (0..24).map(|n| n as f32 * 0.1).collect::<Vec<_>>();
     let output = compiled.run(&input, &[]).unwrap();
     assert_eq!(output.len(), 1);
-    assert!(output[0].is_finite());
+    assert!((output[0] - 3.1975).abs() < 1e-6, "{output:?}");
 }
 
 #[test]
@@ -212,7 +214,7 @@ fn forward(x) {
     let input = (0..20).map(|n| (n as f32 + 1.) * 0.025).collect::<Vec<_>>();
     let output = compiled.run(&input, &[]).unwrap();
     assert_eq!(output.len(), 1);
-    assert!(output[0].is_finite());
+    assert!((output[0] - 0.1434375).abs() < 1e-6, "{output:?}");
 }
 
 #[test]
@@ -221,8 +223,8 @@ fn compiled_entry_supports_named_axis_layer_norm() {
 model LayerNorm
 input x: f32[6]
 output y: f32[6]
-parameter gamma: f32[3] = [1,1,1]
-parameter beta: f32[3] = [0,0,0]
+parameter gamma: f32[3] = [0.5,1.5,-2]
+parameter beta: f32[3] = [0.1,-0.2,0.3]
 fn forward(x) {
     let tokens: f32[sequence=2, hidden=3] = x;
     let normalized = layer_norm(tokens,gamma,beta,"hidden",0.0001);
@@ -239,10 +241,14 @@ fn forward(x) {
         panic!("forward");
     };
     let mut compiled = CompiledForward::compile(&program, 1024 * 1024).unwrap();
-    let input = [0.2, -0.1, 0.7, 0.4, -0.3, 0.9];
-    let output = compiled.run(&input, &[&[1.,1.,1.], &[0.,0.,0.]]).unwrap();
-    assert_eq!(output.len(), 6);
-    assert!(output.iter().all(|value| value.is_finite()));
+    let input = [-1., 0., 1., 2., 2., 2.];
+    let output = compiled.run(&input, &[&[0.5,1.5,-2.], &[0.1,-0.2,0.3]]).unwrap();
+    let normalized = (2. / 3. + 0.0001_f64).sqrt().recip() as f32;
+    let expected = [0.1 - 0.5 * normalized, -0.2, 0.3 - 2. * normalized, 0.1, -0.2, 0.3];
+    assert_eq!(output.len(), expected.len());
+    for (actual, expected) in output.iter().zip(expected) {
+        assert!((actual - expected).abs() < 1e-6, "{output:?}");
+    }
 }
 
 #[test]

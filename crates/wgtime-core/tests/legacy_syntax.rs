@@ -3,7 +3,7 @@ use wgtime_core::script;
 #[test]
 fn retired_calls_are_reserved_and_rejected_before_execution() {
     for (name, args) in [
-        ("predict", "net, [1]"), ("model", "\"model.json\", \"sgd\""),
+        ("predict", "net, [1]"),
         ("load_model", "\"model.json\", \"sgd\""), ("save_model", "net, \"model.json\""),
         ("save_checkpoint", "net, \"checkpoint.json\""), ("load_checkpoint", "\"checkpoint.json\""),
         ("save", "net, \"checkpoint.json\""), ("restore", "\"checkpoint.json\""),
@@ -12,10 +12,22 @@ fn retired_calls_are_reserved_and_rejected_before_execution() {
     ] {
         let source = format!("wgt 0.5\nfn main() {{ let ignored = {name}({args}); }}");
         let error = script::parse(&source).unwrap_err().to_string();
-        assert!(error.contains("removed") || error.contains("expected load"), "{name}: {error}");
+        let expected = if name == "train" { "expected )" } else { "removed" };
+        assert!(error.contains(expected), "{name}: {error}");
         let source = format!("wgt 0.5\nfn {name}() {{ return 1; }}\nfn main() {{}}");
         assert!(script::parse(&source).unwrap_err().to_string().contains("reserved"), "{name}");
     }
+}
+
+#[test]
+fn model_name_resolves_user_functions_but_rejects_retired_loader() {
+    let source = "wgt 0.5\nfn model(x) { return x+1; }\nfn main() { return model(2); }";
+    assert_eq!(script::run(source, std::path::Path::new("."), 100).unwrap().result, 3.0);
+
+    let source = "wgt 0.5\nfn main() { return model(\"model.json\", \"sgd\"); }";
+    script::parse(source).unwrap();
+    let error = script::run(source, std::path::Path::new("."), 100).unwrap_err();
+    assert!(format!("{error:#}").contains("model(...) loading was removed"));
 }
 
 #[test]
@@ -25,9 +37,10 @@ model Demo
 input x: f32[1]
 output y: f32[1]
 layer result: identity
+init seed=1
 fn main() {
-    let net = Demo("sgd");
-    assert net([2])[0] == 2, "direct invocation";
+    let model = Demo("sgd");
+    assert model([2])[0] == 2, "direct invocation";
     assert softmax([0, 0])[0] == 0.5;
 }
 "#;

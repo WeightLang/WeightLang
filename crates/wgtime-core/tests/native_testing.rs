@@ -3,7 +3,7 @@ use wgtime_core::script::{self, testing::Suite};
 
 #[test]
 fn tests_are_sorted_and_run_independently_without_main() {
-    let suite = Suite::parse("wgt 0.5\nfn test_z() { assert(false, \"broken\"); }\nfn test_a() { return random(); }\nfn test_bad(x) {}\nfn helper() {}\nfn main() { assert(false, \"must not run\"); }").unwrap();
+    let suite = Suite::parse("wgt 0.5\nfn test_z() { assert false, \"broken\"; }\nfn test_a() { return random(); }\nfn test_bad(x) {}\nfn helper() {}\nfn main() { assert false, \"must not run\"; }").unwrap();
     assert_eq!(suite.names(), &["test_a", "test_bad", "test_z"]);
     let run = |name| suite.run(name, Path::new("."), 1000, BTreeMap::new());
     let first = run("test_a").unwrap();
@@ -17,7 +17,7 @@ fn tests_are_sorted_and_run_independently_without_main() {
 
 #[test]
 fn test_only_program_checks_but_cannot_run_or_compile_implicitly() {
-    let source = "wgt 0.5\nfn test_only() { assert(true, \"ok\"); }";
+    let source = "wgt 0.5\nfn test_only() { assert true, \"ok\"; }";
     assert!(script::parse(source).is_ok());
     assert!(script::run(source, Path::new("."), 100).is_err());
     assert!(script::codegen::rust_source(source, ".").is_err());
@@ -57,7 +57,7 @@ fn model_constructor_is_not_discovered_as_a_test() {
 #[test]
 fn operation_budget_failure_does_not_starve_the_next_test() {
     let suite = Suite::parse(
-        "wgt 0.5\nfn test_loop() { while true {} }\nfn test_ok() { assert(true, \"ok\"); }",
+        "wgt 0.5\nfn test_loop() { while true {} }\nfn test_ok() { assert true, \"ok\"; }",
     )
     .unwrap();
     let error = suite

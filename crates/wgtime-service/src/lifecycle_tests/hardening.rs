@@ -103,7 +103,7 @@ fn json_graph_budget_is_checked_before_parameter_allocation() -> Result<()> {
         optimizer: "sgd".into(), memory: 1024,
     };
     assert!(owner.execute(request, &shared).is_err());
-    assert_eq!(owner.reserved, 0);
-    assert!(owner.sessions.is_empty());
+    assert_eq!(owner.execute(Request::Stats, &shared)?["reserved"], 0);
+    assert_eq!(owner.execute(Request::Stats, &shared)?["sessions"], 0);
     Ok(())
 }

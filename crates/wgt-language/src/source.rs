@@ -8,6 +8,39 @@ pub struct Unit {
     pub models: Vec<(String, String)>,
 }
 
+struct BlockLine {
+    opened: bool,
+    in_string: bool,
+}
+
+fn scan_block_line(line: &str, depth: &mut usize) -> Option<BlockLine> {
+    let mut scan = BlockLine { opened: false, in_string: false };
+    let mut escape = false;
+    for c in line.chars() {
+        if scan.in_string {
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                scan.in_string = false;
+            }
+        } else {
+            match c {
+                '#' => break,
+                '"' => scan.in_string = true,
+                '{' => {
+                    *depth += 1;
+                    scan.opened = true;
+                }
+                '}' => *depth = depth.checked_sub(1)?,
+                _ => {}
+            }
+        }
+    }
+    Some(scan)
+}
+
 pub fn split(source: &str) -> Result<Unit> {
     ensure!(
         source.len() <= 4 * 1024 * 1024,
@@ -24,31 +57,7 @@ pub fn split(source: &str) -> Result<Unit> {
     for (i, line) in source.lines().enumerate() {
         let trimmed = line.trim();
         if let Some((name, body, level)) = &mut model_block {
-            let mut quote = false;
-            let mut escape = false;
-            for c in line.chars() {
-                if quote {
-                    if escape {
-                        escape = false;
-                    } else if c == '\\' {
-                        escape = true;
-                    } else if c == '"' {
-                        quote = false;
-                    }
-                } else {
-                    match c {
-                        '#' => break,
-                        '"' => quote = true,
-                        '{' => *level += 1,
-                        '}' => {
-                            *level = level
-                                .checked_sub(1)
-                                .context("unexpected model closing brace")?
-                        }
-                        _ => {}
-                    }
-                }
-            }
+            scan_block_line(line, level).context("unexpected model closing brace")?;
             if *level == 0 {
                 ensure!(
                     trimmed == "}",
@@ -112,32 +121,9 @@ pub fn split(source: &str) -> Result<Unit> {
         if in_function {
             functions.push(line);
             declarations.push("");
-            let (mut quote, mut escape) = (false, false);
-            for c in line.chars() {
-                if quote {
-                    if escape {
-                        escape = false;
-                    } else if c == '\\' {
-                        escape = true;
-                    } else if c == '"' {
-                        quote = false;
-                    }
-                } else {
-                    match c {
-                        '#' => break,
-                        '"' => quote = true,
-                        '{' => {
-                            depth += 1;
-                            opened = true;
-                        }
-                        '}' => {
-                            depth = depth.checked_sub(1).context("unexpected closing brace")?;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            ensure!(!quote, "line {}: unterminated string", i + 1);
+            let scan = scan_block_line(line, &mut depth).context("unexpected closing brace")?;
+            opened |= scan.opened;
+            ensure!(!scan.in_string, "line {}: unterminated string", i + 1);
             if opened && depth == 0 {
                 in_function = false;
             }

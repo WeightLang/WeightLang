@@ -23,10 +23,6 @@ pub fn check_file(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-}
-
 fn excluded(name: &str) -> bool {
     name.starts_with('.') || matches!(name, "weights" | "target" | "node_modules" | "vendor" | "dist" | "build")
 }

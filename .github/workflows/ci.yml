@@ -26,7 +26,7 @@ jobs:
       - name: Check tensor runtime autodiff
         run: >-
           cargo test --locked --no-default-features -p wgtime-core
-          --lib --test adaptive --test adaptive_autodiff --test workspace
+          --lib --test adaptive --test adaptive_autodiff --test workspace --test runtime
           --test pooling --test lazy_routing --test parameter_ops
           --test custom_update_strategy --test training
       - name: Check compiled tensor backend
@@ -34,6 +34,10 @@ jobs:
           cargo test --locked --no-default-features -p wgtime-core
           --test compiled_forward --test compiled_training --test compiled_control_flow
           --test unified_training --test custom_optimization
+      - name: Check source execution regressions
+        run: |
+          cargo build --locked --no-default-features -p wgtime-core --example core-transport-test
+          cargo test --locked --no-default-features -p wgtime-core --test accelerator --test assert_syntax --test collect_records --test compute --test file_syntax --test legacy_syntax --test native_testing --test postfix_mean --test ppo_records --test sample_record --test slicing
       - name: Check generated editor support
         run: node scripts/generate_editor_support.cjs --check
       - name: Check prelude catalog

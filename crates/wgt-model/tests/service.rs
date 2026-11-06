@@ -1,5 +1,6 @@
-use std::{fs,process::Command,time::{Duration,Instant}};
-use wgt::{Client,InstanceOptions,ModelDefinition,Optimizer,Loss,Targets,TrainOptions};
+mod support;
+use std::{fs,process::Command};
+use wgt::{InstanceOptions,ModelDefinition,Optimizer,Loss,Targets,TrainOptions};
 const SOURCE:&str=include_str!("fixtures/model.wgt");
 
 #[test]
@@ -19,16 +20,9 @@ fn forward(x){return x+x;}
 #[test]
 #[ignore="requires prebuilt WGTIME_TEST_DAEMON; isolated real service"]
 fn three_definition_entries_execute_and_resources_release() {
-    use std::os::unix::fs::PermissionsExt;
-    struct Daemon(std::process::Child);
-    impl Drop for Daemon {fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
-    let scratch_root=std::env::var_os("CLAUDE_JOB_DIR").map(std::path::PathBuf::from).map(|p|p.join("tmp")).unwrap_or_else(||"/tmp/weightlang".into());
-    fs::create_dir_all(&scratch_root).unwrap();
-    let socket=tempfile::Builder::new().prefix("wm-").tempdir_in(&scratch_root).unwrap();
-    fs::set_permissions(socket.path(),fs::Permissions::from_mode(0o700)).unwrap();
-    let _daemon=Daemon(Command::new(std::env::var_os("WGTIME_TEST_DAEMON").expect("prebuilt daemon required")).arg("--test-directory").arg(socket.path()).spawn().unwrap());
-    let endpoint=socket.path().join("service.sock");let start=Instant::now();while !endpoint.exists(){assert!(start.elapsed()<Duration::from_secs(10));std::thread::sleep(Duration::from_millis(5));}
-    let client=Client::connect_to(&endpoint).unwrap();
+    let service=support::Service::start().unwrap();
+    let endpoint=service.endpoint();
+    let client=service.client().unwrap();
     let inline=wgt::model!(r#"wgt 0.5
 model Double
 input x:f32[1]
@@ -36,7 +30,7 @@ output y:f32[1]
 fn forward(x){return x+x;}
 "#);
     let compiled_file=wgt::include_model!("tests/fixtures/model.wgt");
-    let scratch=tempfile::tempdir_in(&scratch_root).unwrap();let path=scratch.path().join("model.wgt");fs::write(&path,SOURCE).unwrap();
+    let scratch=support::scratch().unwrap();let path=scratch.path().join("model.wgt");fs::write(&path,SOURCE).unwrap();
     let runtime=ModelDefinition::from_file(&path).unwrap();fs::remove_file(&path).unwrap();
     // Resolve a local operator module on the host, then remove both files before
     // service initialization: the service must use the embedded dependency closure.

@@ -197,11 +197,11 @@ fn main() {
     compute_budget(100,4096,4,10000);
     let model=mlp([2,1],"tanh",42,"sgd");
     let job=device_submit(model,[2,4],"accelerator");
-    assert(job["ok"],"submit");
+    assert job["ok"],"submit";
     let remaining=compute_status();
-    assert(remaining["work_remaining"]==95,"device work must debit script budget");
+    assert remaining["work_remaining"]==95,"device work must debit script budget";
     let result=device_wait("accelerator",job["job"],1000);
-    assert(result["ok"] && result["output"]==[6],"registered provider result");
+    assert result["ok"] && result["output"]==[6],"registered provider result";
     return device_status("accelerator");
 }"#;
         let report =

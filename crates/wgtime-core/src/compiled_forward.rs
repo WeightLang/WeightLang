@@ -533,7 +533,7 @@ impl<'a> Generator<'a> {
                     body += &format!("for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++)t[j*{m}+i]=r[{a}+i*{n}+j];");
                 },
                 I::Permute { out:o,input:x,axes } => {
-                    let (a,n,xi) = self.reg(x)?;
+                    let (a,_,xi) = self.reg(x)?;
                     let input_shape = &self.program.registers[xi].shape;
                     let rank = input_shape.len();
                     ensure!((1..=8).contains(&rank) && axes.len() == rank,
@@ -544,7 +544,7 @@ impl<'a> Generator<'a> {
                         seen[axis] = true;
                         Ok(input_shape[axis])
                     }).collect::<Result<Vec<_>>>()?;
-                    let (out_offset,out_len,out_id) = self.reg(o)?;
+                    let (_,out_len,out_id) = self.reg(o)?;
                     ensure!(self.program.registers[out_id].shape == output_shape,
                         "compiled permute output geometry mismatch");
                     let mut body_code = format!("if(budget-*used<{out_len})return 2;*used+={out_len};for(size_t z=0;z<{out_len};z++){{size_t rem=z,oc[{rank}]={{0}},ic[{rank}]={{0}};");
@@ -578,7 +578,7 @@ impl<'a> Generator<'a> {
                     ensure!(sa.len()==3 && sb.len()==3 && sa[0]==sb[0] && sa[2]==sb[1],
                         "compiled batch_matmul geometry mismatch");
                     let (batch,m,k,n)=(sa[0],sa[1],sa[2],sb[2]);
-                    let (_,out_len,out_id)=self.reg(o)?;
+                    let (_,_,out_id)=self.reg(o)?;
                     ensure!(self.program.registers[out_id].shape == [batch,m,n],
                         "compiled batch_matmul output geometry mismatch");
                     let work=batch.checked_mul(m).and_then(|v|v.checked_mul(k))
