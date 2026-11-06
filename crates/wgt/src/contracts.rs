@@ -53,29 +53,30 @@ impl TensorType {
         } else {
             vec![None; shape.len()]
         };
-        Ok(Self { dtype, shape, axes })
+        let value = Self { dtype, shape, axes };
+        value.semantic_type()?;
+        Ok(value)
+    }
+    /// Adapt legacy JSON metadata without changing its fields, accepted dtype
+    /// set, or scalar/empty-axis contract. Native limits are a separate profile.
+    pub fn semantic_type(&self) -> Result<wgt_language::tensor::TensorType> {
+        use wgt_language::tensor::{DType, ShapeLimits, TensorType};
+        ensure!(["f32", "i64", "bool"].contains(&self.dtype.as_str()), "unsupported interface dtype");
+        let shape = self.shape.iter().map(|&extent| usize::try_from(extent)
+            .context("artifact dimension exceeds native index width")).collect::<Result<Vec<_>>>()?;
+        Ok(TensorType::new(DType::parse(&self.dtype)?, shape, self.axes.clone(), ShapeLimits::ARTIFACT)?)
     }
     pub fn compatible(&self, other: &Self) -> bool {
-        self.dtype == other.dtype
-            && self.shape == other.shape
-            && self.axes.len() == self.shape.len()
-            && other.axes.len() == other.shape.len()
-            && self
-                .axes
-                .iter()
-                .zip(&other.axes)
-                .all(|(a, b)| a.is_none() || b.is_none() || a == b)
+        match (self.semantic_type(), other.semantic_type()) {
+            (Ok(left), Ok(right)) => left.compatible(&right),
+            _ => false,
+        }
     }
     fn refine(&mut self, other: &Self) -> Result<()> {
-        ensure!(self.compatible(other), "shape/dtype/axis mismatch");
-        for (a, b) in self.axes.iter_mut().zip(&other.axes) {
-            if a.is_none() {
-                *a = b.clone();
-            }
-        }
-        let names: Vec<_> = self.axes.iter().flatten().collect();
-        let unique: std::collections::BTreeSet<_> = names.iter().collect();
-        ensure!(unique.len() == names.len(), "duplicate inferred axis name");
+        let merged = self.semantic_type()?.elementwise(&other.semantic_type()?,
+            wgt_language::tensor::ShapeLimits::ARTIFACT).context("shape/dtype/axis mismatch")?;
+        // Validate all merged names before changing the existing contract.
+        self.axes = merged.axes().to_vec();
         Ok(())
     }
     pub fn label(&self) -> String {

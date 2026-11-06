@@ -145,13 +145,8 @@ impl ModelDefinition {
 }
 
 pub(crate) fn validate_shape(shape: &[usize]) -> Result<usize> {
-    ensure!(!shape.is_empty() && shape.len() <= 8, "parameter shape requires 1..8 axes");
-    let count=shape.iter().try_fold(1usize,|count,width| {
-        ensure!(*width > 0, "parameter axes must be positive");
-        count.checked_mul(*width).context("parameter shape overflow")
-    })?;
-    ensure!(count <= MAX_PARAMETER_ELEMENTS, "parameter element limit exceeded");
-    Ok(count)
+    crate::tensor::validate_shape(shape, crate::tensor::ShapeLimits::PARAMETER)
+        .context("invalid parameter shape")
 }
 
 #[cfg(test)]

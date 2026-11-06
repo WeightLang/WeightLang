@@ -1,5 +1,7 @@
 # WeightLang 0.5 语言参考
 
+固定形状的公共元数据校验层见 [Tensor Contract](tensor-contract.md)。源码 lowering、Adaptive IR 和 CPU view 校验复用该层；旧制品通过显式适配保留标量与空轴边界。类型枚举中的 f16/bf16/i8 不代表新增可执行 dtype；当前 native 计算仍为 f32，不增加隐式广播、动态 Shape 或参数别名语义。
+
 当前源码只接受 **`wgt 0.5`**。这是破坏性语言更新，未发布；
 `wgt 0.1/0.2/0.3`、`wgt script 0.1`、`wgt adaptive 0.1` 全部拒绝。
 模型声明、训练函数和自更新前向函数属于同一个编译单元，不能通过选择命令改变语法版本。

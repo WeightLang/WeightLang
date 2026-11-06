@@ -1,6 +1,8 @@
 use serde::{Serialize, Deserialize};
 mod source;
 mod conv;
+mod contracts;
+pub use contracts::{OperatorContract, OPERATOR_CONTRACTS};
 pub use conv::{ConvGeometry, Pool2dGeometry};
 pub use source::{parse, parse_with_functions};
 pub(crate) use source::{validate_definition, lower_operation};

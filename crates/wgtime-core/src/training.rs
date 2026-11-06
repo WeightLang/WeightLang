@@ -183,6 +183,8 @@ impl Trainer {
             "select optimizer none when using a user-defined update strategy"
         );
         self.session.ensure_mutable()?;
+        ensure!(self.session.parameters.iter().all(|p| matches!(&p.storage, Storage::Resident(_))),
+            "custom strategy requires resident parameter storage");
         let next_step = self.steps.checked_add(1).context("strategy step overflow")?;
         let next_revision = self.session.revision.checked_add(1).context("revision overflow")?;
         let (loss, gradients) = self.gradients(inputs, objective)?;
