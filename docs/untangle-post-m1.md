@@ -100,7 +100,7 @@ The clean source baseline passed `cargo +1.99.0 check --workspace --all-targets 
 | Viewer behavior | 16 passed |
 | Complete modified-topic examples | `NamedGeometry`, `TinyAttention` and `Annotated` pass the actual `wgt --offline check` entry |
 
-After integrating the concurrent service refactor at `584f72c`, the local service binary tests passed 13 cases, including request-level commit/rollback, admission accounting and descriptor persistence. The remaining listener-lifecycle case returned `Operation not permitted (os error 1)` locally. No assertion or test was disabled. The maintained GitHub Actions service/model/client gates are configured to run real-listener checks; acceptance of the final combined code awaits their result.
+After integrating the concurrent service refactor at `584f72c`, the local service binary tests passed 13 cases, including request-level commit/rollback, admission accounting and descriptor persistence. The remaining listener-lifecycle case returned `Operation not permitted (os error 1)` locally. No assertion or test was disabled. The same named listener-lifecycle case passes in the [remote host-runtime job](https://github.com/WeightLang/WeightLang/actions/runs/42178114777/job/127761236956). That job also passes service transport, model APIs against the real service, actual macro consumers, client compilation and artifact lifecycle. The local EPERM result remains recorded separately from the successful remote execution.
 
 The 180-case core run includes `permuted_batch_view_feeds_batched_matmul_without_materialization`, independent LayerNorm/attention finite differences, the rank-eight permutation value/VJP regression, and the forged-IR test covering interpreter, ordinary native and transaction compilation. The 56-case final routing run is additional overlapping verification and must not be added to the first count as unique coverage.
 
@@ -134,9 +134,14 @@ node scripts/generate_editor_support.cjs --check
 node --test web/viewer/test/*.test.js
 ```
 
-### Published checkpoint
+### Published checkpoints
 
-[`21b76f9`](https://github.com/WeightLang/WeightLang/commit/21b76f9b112d97baaa81bfca3b83849d317a7ec7) publishes the native payload and publication boundary with its three regression cases and CI gate. Its [CI run](https://github.com/WeightLang/WeightLang/actions/runs/42176842056) was cancelled by a newer `main` push, so it is not recorded as passed. Further tensor/package changes are recorded with this document; their remote CI result will be recorded separately. Concurrent commits on `main` are retained rather than overwritten.
+| Commit | Scope |
+| --- | --- |
+| [`21b76f9`](https://github.com/WeightLang/WeightLang/commit/21b76f9b112d97baaa81bfca3b83849d317a7ec7) | Native payload ownership, no-clobber manifest-last publication, three behavior regressions and its CI gate. |
+| [`2f32461`](https://github.com/WeightLang/WeightLang/commit/2f32461ba27c4024faf793a63ba5034ecf1186c6) | Tensor source/backend admission, named-axis propagation, package invariants, shared build filenames, regressions and synchronized documentation. |
+
+The first checkpoint's [CI run](https://github.com/WeightLang/WeightLang/actions/runs/42176842056) was cancelled by a newer `main` push and is not recorded as passed. The combined code at `2f32461` passes both [Tensor operator tests](https://github.com/WeightLang/WeightLang/actions/runs/42178114546) and [complete CI](https://github.com/WeightLang/WeightLang/actions/runs/42178114777). Both `tensor-language` and `host-runtime` jobs completed successfully. The remote logs confirm that the new incompatible-geometry rejection, the existing zero-allocation matrix-view regression and the listener-lifecycle case actually ran and passed. Concurrent commits on `main` are retained rather than overwritten.
 
 ## Independent review and claim checks
 
