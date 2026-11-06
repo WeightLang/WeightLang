@@ -322,7 +322,7 @@ fn artifact_validation_and_graph_rendering_use_inferred_named_shapes() {
 
 #[cfg(unix)]
 #[test]
-fn check_shapes_reports_removed_python_cli() {
+fn native_check_rejects_obsolete_shape_flags_without_calling_external_compiler() {
     use std::{os::unix::fs::PermissionsExt, process::Command};
     let scratch = std::env::temp_dir().join("weightlang");
     fs::create_dir_all(&scratch).unwrap();
@@ -330,20 +330,35 @@ fn check_shapes_reports_removed_python_cli() {
     fs::write(
         temp.path().join("wgt.mod"),
         "module local/shapes\nwgt 0.5\n",
-    )
-    .unwrap();
-    fs::write(temp.path().join("model.wgt"), "wgt 0.5\nmodel demo\n").unwrap();
+    ).unwrap();
+    fs::write(
+        temp.path().join("model.wgt"),
+        "wgt 0.5\nmodel Scale\ninput x: f32[1]\noutput y: f32[1]\nparameter gain: f32[1] = [2]\nfn forward(x) { return x * gain; }\n",
+    ).unwrap();
+    // The native checker must never delegate validation to an external compiler.
     let compiler = temp.path().join("compiler");
-    fs::write(&compiler, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+    fs::write(&compiler, "#!/bin/sh\nprintf '%s\\n' \"$@\" > args.txt\nexit 77\n").unwrap();
     fs::set_permissions(&compiler, fs::Permissions::from_mode(0o755)).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_wgt"))
+
+    let checked = Command::new(env!("CARGO_BIN_EXE_wgt"))
+        .current_dir(temp.path())
+        .env("WEIGHTC", &compiler)
+        .env("WEIGHTLANG_CACHE", temp.path().join("cache"))
+        .args(["check", "model.wgt", "--offline"])
+        .output()
+        .unwrap();
+    assert!(checked.status.success(), "{}", String::from_utf8_lossy(&checked.stderr));
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("ok: WGT model definition"));
+
+    let unsupported = Command::new(env!("CARGO_BIN_EXE_wgt"))
         .current_dir(temp.path())
         .env("WEIGHTC", &compiler)
         .env("WEIGHTLANG_CACHE", temp.path().join("cache"))
         .args(["check", "model.wgt", "--shapes", "--offline"])
         .output()
         .unwrap();
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Python weightc CLI has been removed"));
-    assert!(!temp.path().join("args.txt").exists());
+    assert!(!unsupported.status.success());
+    let stderr = String::from_utf8_lossy(&unsupported.stderr);
+    assert!(stderr.contains("--shapes"), "{stderr}");
+    assert!(!temp.path().join("args.txt").exists(), "native check launched external compiler");
 }
