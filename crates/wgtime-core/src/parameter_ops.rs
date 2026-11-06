@@ -1,6 +1,6 @@
 //! Explicit storage access; update algorithms remain ordinary caller computations.
-use crate::{accumulate, Session, Storage};
-use anyhow::{ensure, Context, Result};
+use crate::{Session, Storage, accumulate};
+use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -19,12 +19,19 @@ pub struct ParameterWrite<'a> {
 }
 
 impl Session {
-    pub fn parameter_info(&self) -> Vec<ParameterInfo<'_>> {
-        let mut names: Vec<_> = self.names.iter().collect();
-        names.sort_by_key(|(_, index)| **index);
+    pub(crate) fn parameter_names(&self) -> Vec<&str> {
+        let mut names = vec![""; self.parameters.len()];
+        for (name, &index) in &self.names {
+            names[index] = name;
+        }
         names
+    }
+
+    pub fn parameter_info(&self) -> Vec<ParameterInfo<'_>> {
+        self.parameter_names()
             .into_iter()
-            .map(|(name, &index)| ParameterInfo {
+            .enumerate()
+            .map(|(index, name)| ParameterInfo {
                 name,
                 shape: &self.parameters[index].shape,
                 writable: self.write_target(name, 0, 0).is_ok(),

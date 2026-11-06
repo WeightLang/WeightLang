@@ -13,7 +13,7 @@ The word “Tensor” currently refers to several related but non-identical repr
 | Adaptive runtime value | `crates/wgtime-core/src/adaptive.rs` and `adaptive/tensor.rs` | Flat f32 buffers plus transient `TensorView` geometry | CPU experimental runtime; views carry base, offset, shape, strides and rank |
 | Artifact graph contract | `crates/wgt/src/contracts.rs` | Graph input/output metadata: dtype, shape and optional axes | Used by artifact graph inference/validation; not the adaptive runtime Tensor ABI |
 | Primitive registry | `language/primitive_specs.json` and `crates/wgt/src/primitives.rs` | Primitive names and argument metadata for artifact graph operators | Not the complete WGT source-language intrinsic registry |
-| Source intrinsic metadata | `language/prelude_metadata.json` and generated `language/prelude.json` | Context-specific source functions, syntax, types and lowering metadata | Context-specific; not all entries are Tensor operations |
+| Source intrinsic metadata | `language/prelude.json` | Context-specific source functions, pure-helper arities, syntax, types and lowering metadata | Context-specific; not all entries are Tensor operations |
 
 A key finding: **WeightLang does not yet have one universal Tensor type shared by source analysis, adaptive IR, artifact graph contracts and all execution backends.** The similarly named structures solve different jobs and have different supported dtypes and shapes.
 
@@ -122,7 +122,7 @@ The WGT source path currently documents:
 - `softmax(x,axis)`: axis reduction; one-argument softmax/log_softmax remain vector forms;
 - `scale(x,literal)`: finite scalar literal, no broadcasting.
 
-The exact callable source surface is context-dependent. Check `prelude_metadata.json` and the lowering/parser implementation; do not infer source availability from `primitive_specs.json`.
+The exact callable source surface is context-dependent. Check `language/prelude.json` and the lowering/parser implementation; do not infer source availability from `primitive_specs.json`.
 
 ## 4. Automatic differentiation boundary
 
@@ -183,7 +183,7 @@ Repository sources inspected for this inventory:
 - `crates/wgt-language/src/adaptive.rs` and `adaptive/source.rs`
 - `crates/wgtime-core/src/adaptive.rs`, `adaptive/tensor.rs`, `adaptive/autodiff.rs`, `adaptive/workspace.rs`
 - `crates/wgt/src/contracts.rs`, `primitives.rs`, `precision.rs`, `weight_types.rs`
-- `language/primitive_specs.json`, `language/prelude_metadata.json`
+- `language/primitive_specs.json`, `language/prelude.json`
 - `docs/tensor-geometry.md`, `docs/native-backend.md`, `docs/reference.zh-CN.md`
 - focused tests: `crates/wgt/tests/dimensions.rs`, `tensor_subgraphs.rs`, `primitives.rs`, `precision.rs`, `crates/wgtime-core/tests/adaptive.rs`, `adaptive_autodiff.rs`, `attention.rs`, `convolution.rs`
 

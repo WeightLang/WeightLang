@@ -69,10 +69,10 @@ impl AxisGroups {
         Ok(())
     }
     pub fn layer_norm_vjp(self, input: &[f32], gamma: &[f32], gradient: &[f32], epsilon: f32,
-        input_gradient: &mut [f32], gamma_gradient: &mut [f32], beta_gradient: &mut [f32]) -> Result<()> {
-        ensure!(input.len() == self.len() && gradient.len() == self.len() && input_gradient.len() == self.len(),
+        mut accumulate: impl FnMut(usize, usize, f32, f32, f32)) -> Result<()> {
+        ensure!(input.len() == self.len() && gradient.len() == self.len(),
             "layer_norm gradient tensor storage/shape mismatch");
-        ensure!(gamma.len() == self.width && gamma_gradient.len() == self.width && beta_gradient.len() == self.width,
+        ensure!(gamma.len() == self.width,
             "layer_norm gradient scale/bias width mismatch");
         ensure!(epsilon.is_finite() && epsilon > 0., "normalization epsilon must be positive and finite");
         for outer in 0..self.outer {
@@ -91,8 +91,6 @@ impl AxisGroups {
                     let scaled_gradient = f64::from(gradient[index]) * f64::from(gamma[axis]);
                     sum_gradient += scaled_gradient;
                     sum_gradient_normalized += scaled_gradient * normalized;
-                    gamma_gradient[axis] += (f64::from(gradient[index]) * normalized) as f32;
-                    beta_gradient[axis] += gradient[index];
                 }
                 for axis in 0..self.width {
                     let index = self.index(outer, axis, inner);
@@ -101,7 +99,8 @@ impl AxisGroups {
                     let dx = inverse * (scaled_gradient
                         - sum_gradient / self.width as f64
                         - normalized * sum_gradient_normalized / self.width as f64);
-                    input_gradient[index] += dx as f32;
+                    accumulate(index, axis, dx as f32,
+                        (f64::from(gradient[index]) * normalized) as f32, gradient[index]);
                 }
             }
         }
@@ -200,7 +199,11 @@ mod tests {
         let mut dx = [0.; 12];
         let mut dgamma = [0.; 3];
         let mut dbeta = [0.; 3];
-        groups.layer_norm_vjp(&input, &gamma, &gradient, epsilon, &mut dx, &mut dgamma, &mut dbeta).unwrap();
+        groups.layer_norm_vjp(&input, &gamma, &gradient, epsilon, |index, axis, x, g, b| {
+            dx[index] += x;
+            dgamma[axis] += g;
+            dbeta[axis] += b;
+        }).unwrap();
         let loss = |x: &[f32; 12], g: &[f32; 3], b: &[f32; 3]| {
             let mut y = [0.; 12];
             groups.layer_norm(x, g, b, epsilon, &mut y).unwrap();

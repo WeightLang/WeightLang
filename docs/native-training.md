@@ -219,6 +219,8 @@ train net on inputs against targets using momentum;
 
 `wgtime_core::training::UpdateStrategy` 为 Rust 使用者提供算法无关的单步更新入口。策略实现 `Clone`，并通过 `propose(&self, parameters, step)` 返回**候选参数和下一份策略状态**；Trainer 先验证所有候选的数量、shape、有限值及冻结参数不变，再一次性提交模型参数、revision、step 和策略状态。若求导、策略计算或候选校验失败，模型和调用者持有的策略状态都不改变。
 
+参数名称、形状和梯度采用同一声明顺序。更新写入已有的 resident 参数，共享视图和参数表达式保留引用关系。非 resident 项的 `values` 与候选数组为空；策略应按提供的 `values` 迭代，保持这些项目为空，使共享参数继续从存储所有者读取更新后的值。
+
 ```rust,ignore
 use wgtime_core::training::{
     mlp, Objective, ParameterGradient, Trainer, UpdateStrategy,

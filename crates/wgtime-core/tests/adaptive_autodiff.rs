@@ -271,7 +271,15 @@ fn forward(x) {
     let output = pass.output()[0];
     pass.backward(&[1.], &BTreeMap::new()).unwrap();
     let gradient = pass.input_gradient().unwrap().to_vec();
-    let epsilon = 0.001;
+    let coefficients = [
+        1., 7., 13., 19., 2., 8., 14., 20., 3., 9., 15., 21.,
+        4., 10., 16., 22., 5., 11., 17., 23., 6., 12., 18., 24.,
+    ];
+    let expected: Vec<f32> = coefficients.iter().map(|weight| weight / 24.).collect();
+    close(&gradient, &expected);
+    close(&[output], &[input.iter().zip(&expected).map(|(x, weight)| x * weight).sum()]);
+    // The graph is linear; a binary-exact step avoids f32 output cancellation.
+    let epsilon = 0.125;
     for index in 0..24 {
         let mut plus = input.clone();
         plus[index] += epsilon;
@@ -281,7 +289,6 @@ fn forward(x) {
         let ym = session.forward(&minus, 1000, 32_768).unwrap().output()[0];
         close(&[gradient[index]], &[(yp - ym) / (2. * epsilon)]);
     }
-    assert!(output.is_finite());
 }
 
 #[test]
@@ -325,7 +332,7 @@ output y: f32[1]
 fn forward(x) {
     let left: f32[batch=2, rows=2, inner=3] = x[0:12];
     let transposed = permute(left,[batch,inner,rows]);
-    let right: f32[batch=2, inner=2, cols=2] = x[12:20];
+    let right: f32[batch=2, rows=2, cols=2] = x[12:20];
     let product = batch_matmul(transposed,right);
     return product.mean;
 }
@@ -383,4 +390,38 @@ fn forward(x) {
         close(&[gradient[index]], &[(yp - ym) / (2. * epsilon)]);
     }
     assert!(output.is_finite());
+}
+
+#[test]
+fn layer_norm_accumulates_aliased_input_scale_and_bias_gradients() {
+    let source = "wgt 0.5\nmodel AliasedNormalization\ninput x: f32[3]\noutput y: f32[3]\nfn forward(x) { return layer_norm(x,x,x,0,0.0001); }\n";
+    let input = [0.2, -0.4, 0.9];
+    let seed = [0.3, -0.5, 0.7];
+    for compiled in [false, true] {
+        let mut session = model(source);
+        if compiled {
+            session.enable_compiled().unwrap();
+        }
+        let mut pass = session.forward(&input, 1000, 4096).unwrap();
+        let bytes = pass.tape_bytes();
+        pass.backward(&seed, &BTreeMap::new()).unwrap();
+        let gradient = pass.input_gradient().unwrap().to_vec();
+        let loss = |session: &mut AdaptiveSession, input: &[f32]| {
+            session.evaluate(input, 1000).unwrap().iter().zip(seed)
+                .map(|(value, seed)| value * seed).sum::<f32>()
+        };
+        for index in 0..input.len() {
+            let mut plus = input;
+            let mut minus = input;
+            plus[index] += 0.001;
+            minus[index] -= 0.001;
+            let numerical = (loss(&mut session, &plus) - loss(&mut session, &minus)) / 0.002;
+            close(&[gradient[index]], &[numerical]);
+        }
+        pass.backward(&seed, &BTreeMap::new()).unwrap();
+        close(pass.input_gradient().unwrap(), &gradient);
+        assert_eq!(pass.tape_bytes(), bytes);
+        assert!(session.forward(&input, 1000, bytes - 1).is_err());
+        session.forward(&input, 1000, bytes).unwrap();
+    }
 }

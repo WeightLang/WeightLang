@@ -9,25 +9,32 @@ const parent = process.env.CLAUDE_JOB_DIR ? path.join(process.env.CLAUDE_JOB_DIR
 fs.mkdirSync(parent, {recursive: true});
 const dir = fs.mkdtempSync(path.join(parent, 'prelude-check-'));
 try {
-  for (const mode of ['valid', 'missing', 'extra', 'arity', 'context', 'default']) {
+  const entry = (catalog, name, kind = 'function') => catalog.entries.find(e => e.name === name && e.kind === kind);
+  const cases = [
+    ['valid', () => {}, null],
+    ['missing', c => { c.entries = c.entries.filter(e => e.name !== 'len'); }, /ordinary builtin catalog drift/],
+    ['extra', c => c.entries.push({...entry(c, 'len'), name: 'invented_builtin', signature: 'invented_builtin(x)'}), /unimplemented builtin/],
+    ['duplicate', c => c.entries.push({...entry(c, 'len')}), /duplicate kind\/name/],
+    ['arity', c => { entry(c, 'len').arity.min = 0; }, /signature arity/],
+    ['context', c => { entry(c, 'len').contexts = ['tensor_forward']; }, /len: arity/],
+    ['default', c => { entry(c, 'benchmark').defaults.mode = 'gpu'; }, /signature defaults/],
+    ['missing-tensor', c => { c.entries = c.entries.filter(e => e.name !== 'max_pool2d'); }, /tensor intrinsic catalog drift/],
+    ['extra-tensor', c => c.entries.push({...entry(c, 'reshape', 'intrinsic'), name: 'invented_tensor'}), /tensor intrinsic catalog drift/],
+    ['tensor-context', c => { entry(c, 'reshape', 'intrinsic').contexts = ['ordinary_function']; }, /tensor context/],
+    ['operator-arity', c => { entry(c, 'layer_norm', 'intrinsic').operator_arity = {min: 5, max: 1}; }, /operator arity/],
+    ['reserved', c => { entry(c, 'permute', 'intrinsic').reserved = 'yes'; }, /reserved/],
+  ];
+  for (const [mode, mutate, diagnostic] of cases) {
     const catalog = structuredClone(original);
-    if (mode === 'missing') catalog.entries = catalog.entries.filter(e => e.name !== 'len');
-    if (mode === 'extra') catalog.entries.push({...catalog.entries.find(e => e.name === 'len'), name: 'invented_builtin', signature: 'invented_builtin(x)'});
-    if (mode === 'arity') catalog.entries.find(e => e.name === 'len').arity.min = 0;
-    if (mode === 'context') catalog.entries.find(e => e.name === 'len').contexts = ['tensor_forward'];
-    if (mode === 'default') catalog.entries.find(e => e.name === 'benchmark').defaults.mode = 'gpu';
+    mutate(catalog);
     const file = path.join(dir, `${mode}.json`);
     fs.writeFileSync(file, JSON.stringify(catalog));
     const result = spawnSync(process.execPath, [path.join(__dirname, 'check_prelude.cjs'), file], {encoding: 'utf8'});
+    if (result.error) throw result.error;
     assert.equal(result.status === 0, mode === 'valid', `${mode}: ${result.stderr}`);
+    if (diagnostic) assert.match(result.stderr, diagnostic, mode);
   }
-  const {parseDeclarations} = require('./prelude_declarations.cjs');
-  const source = fs.readFileSync(path.join(root, 'std/prelude.wgt'), 'utf8');
-  parseDeclarations(source);
-  for (const changed of [source.replace('native fn responses_scope', 'native fn __responses_scope'), source.replace('tools);', 'tools) {}'), source + '\n# @purpose "dangling"']) {
-    assert.throws(() => parseDeclarations(changed));
-  }
-  console.log('Prelude positive and missing/extra/arity/context/default/declaration negative checks passed');
+  console.log(`Prelude contract checks passed: ${cases.length} positive/negative cases`);
 } finally {
   fs.rmSync(dir, {recursive: true});
 }

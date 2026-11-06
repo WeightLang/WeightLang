@@ -7,50 +7,8 @@ use std::{
     path::Path,
 };
 
-const OPS: &[&str] = &[
-    "reshape",
-    "transpose",
-    "permute",
-    "matmul",
-    "batch_matmul",
-    "layer_norm",
-    "scale",
-    "conv",
-    "add",
-    "mul",
-    "relu",
-    "tanh",
-    "sigmoid",
-    "softmax",
-    "gate",
-    "route",
-    "slice",
-    "square",
-    "mean",
-    "sum",
-    "detach",
-    "exp",
-    "log",
-    "log_softmax",
-    "minimum",
-    "clip",
-];
-
 pub(crate) fn intrinsic(name: &str) -> bool {
-    OPS.contains(&name)
-        || [
-            "read",
-            "write",
-            "linear",
-            "positive",
-            "depth_gate",
-            "resource_state",
-            "memory_alloc",
-            "memory_read",
-            "memory_write",
-            "memory_free",
-        ]
-        .contains(&name)
+    super::prelude::tensor(name).is_some()
 }
 
 pub fn identifier(s: &str) -> bool {
@@ -245,25 +203,22 @@ fn check_expr(
         }
         Expr::Call(n, args) | Expr::BuiltinCall(n, args) => {
             let probability_suffix = matches!(e, Expr::BuiltinCall(_, _)) && n == "__probabilities";
-            if !OPS.contains(&n.as_str()) && !probability_suffix {
+            if probability_suffix {
+                ensure!(args.len() == 1, "tensor primitive arity mismatch: {n}");
+            } else if let Some(contract) = super::prelude::tensor(n) {
+                let arity = contract.operator_arity.as_ref().with_context(|| {
+                    format!("state/parameter primitive is not a pure operator: {n}")
+                })?;
                 ensure!(
-                    !intrinsic(n),
-                    "state/parameter primitive is not a pure operator: {n}"
+                    (arity.min..=arity.max).contains(&args.len()),
+                    "tensor primitive arity mismatch: {n}"
                 );
+            } else {
                 validate_inner(n, functions, stack, checked)?;
                 ensure!(
                     functions[n].args.len() == args.len(),
                     "operator arity mismatch: {n}"
                 );
-            } else {
-                let arity = match n.as_str() {
-                    "conv" => 7,
-                    "add" | "mul" | "gate" | "minimum" | "reshape" | "matmul" | "scale" => 2,
-                    "route" | "slice" | "clip" => 3,
-                    "softmax" if args.len() == 2 => 2,
-                    _ => 1,
-                };
-                ensure!(args.len() == arity, "tensor primitive arity mismatch: {n}");
             }
             for e in args {
                 check_expr(e, names, functions, stack, checked)?;

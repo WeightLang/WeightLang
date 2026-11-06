@@ -1,6 +1,6 @@
 //! Bounded, stateful forward programs. Writes are visible immediately inside a
 //! call, and committed only when that call returns successfully.
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use std::collections::HashMap;
 
 pub use wgt_language::adaptive::{parse, parse_with_functions};
@@ -121,11 +121,10 @@ impl AdaptiveSession {
     pub fn prepare(program: Program, budget_bytes: usize) -> Result<Self> {
         ensure!(matches!(program.version, 1 | 2 | 3), "unsupported adaptive IR version");
         ensure!(program.version >= 2 || (program.output_type.is_plain()
-            && !program.instructions.iter().any(|i| matches!(i, Instruction::ValidateProbabilities { .. }))),
+            && !program.instructions.iter().any(|i| i.metadata().minimum_version == 2)),
             "categorical output metadata and validation require adaptive IR version 2");
-        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,
-            Instruction::Conv { .. } | Instruction::MaxPool2d { .. } | Instruction::AvgPool2d { .. } | Instruction::Reshape { .. } | Instruction::Transpose { .. } | Instruction::Permute { .. } | Instruction::Matmul { .. } | Instruction::BatchMatmul { .. } | Instruction::LayerNorm { .. }
-            | Instruction::SoftmaxAxis { .. } | Instruction::Scale { .. })), "tensor operations require adaptive IR version 3");
+        ensure!(program.instructions.iter().all(|i| i.metadata().minimum_version <= program.version),
+            "tensor operations require adaptive IR version 3");
         ensure!(!program.instructions.is_empty(), "empty adaptive program");
         if let Some(loss) = &program.loss {
             ensure!(
@@ -555,7 +554,7 @@ impl AdaptiveSession {
         }
         let output_len = output_len.context("program requires a return")?;
         let view_registers = ops.iter().filter_map(|op| match op {
-            Op::Reshape(register, _) | Op::Transpose(register, _, _, _) | Op::Permute(register, _, _, _) => Some(*register),
+            Op::Reshape(register, _) | Op::Transpose(register, _, _, _) | Op::Permute(register, ..) => Some(*register),
             _ => None,
         }).collect::<std::collections::HashSet<_>>();
         let registers = program
@@ -786,7 +785,7 @@ impl AdaptiveSession {
                 view.strides.swap(0, 1);
                 Ok(view)
             }
-            Op::Permute(_, input, axes, rank) => {
+            Op::Permute(_, input, _, axes, rank) => {
                 self.ready_view(input)?;
                 let input_shape = &self.program.registers[input].shape;
                 let mut view = if let Some(existing) = self.views[input] {
@@ -970,7 +969,7 @@ impl AdaptiveSession {
             let cost = match op {
                 Op::Conv(_,_,_,_,g) => g.work()? as u64,
                 Op::MaxPool2d(_,_,g) | Op::AvgPool2d(_,_,g) => g.work()? as u64,
-                Op::Reshape(r,_) | Op::Permute(r,_,_,_) => (self.program.registers[r].len as u64).saturating_add(1),
+                Op::Reshape(r,_) | Op::Permute(r,..) => (self.program.registers[r].len as u64).saturating_add(1),
                 Op::Transpose(_,_,m,n) => m.checked_mul(n).and_then(|v|v.checked_add(1)).context("transpose work overflow")? as u64,
                 Op::Matmul(_,_,_,m,k,n) => m.checked_mul(k).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("matmul work overflow")? as u64,
                 Op::BatchMatmul(_,_,_,batch,m,k,n) => batch.checked_mul(m).and_then(|v|v.checked_mul(k)).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("batch_matmul work overflow")? as u64,

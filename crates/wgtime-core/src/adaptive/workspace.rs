@@ -26,80 +26,14 @@ pub(super) fn validate(
         }
     }
     for instruction in &program.instructions {
-        let tensor_names: Vec<&String> = match instruction {
-            I::MemoryAlloc { .. } | I::Label { .. } | I::Jump { .. } => vec![],
-            I::Constant { out, .. } => vec![out],
-            I::MemoryRead {
-                out,
-                memory,
-                address,
-            } => {
-                ensure!(
-                    regs.get(memory).is_some_and(|r| memories.contains_key(r)),
-                    "unknown memory handle"
-                );
-                vec![out, address]
-            }
-            I::MemoryWrite {
-                memory,
-                address,
-                value,
-            } => {
-                ensure!(
-                    regs.get(memory).is_some_and(|r| memories.contains_key(r)),
-                    "unknown memory handle"
-                );
-                vec![address, value]
-            }
-            I::MemoryFree { memory } => {
-                ensure!(
-                    regs.get(memory).is_some_and(|r| memories.contains_key(r)),
-                    "unknown memory handle"
-                );
-                vec![]
-            }
-            I::Conv { out,input,kernel,bias,.. } => vec![out,input,kernel,bias],
-            I::Read { out, .. } | I::ResourceState { out } => vec![out],
-            I::Write { value, .. } | I::Return { value } => vec![value],
-            I::LayerNorm { out, input, gamma, beta, .. } => {
-                self.read(input)?;
-                self.read(gamma)?;
-                self.read(beta)?;
-                self.write(out);
-            }
-            I::Reshape { out, input } | I::Transpose { out, input } | I::Permute { out, input, .. } | I::SoftmaxAxis { out, input, .. } | I::Scale { out, input, .. } | I::Linear { out, input, .. }
-            | I::Tanh { out, input }
-            | I::Sigmoid { out, input }
-            | I::Relu { out, input }
-            | I::Softmax { out, input }
-            | I::ValidateProbabilities { out, input }
-            | I::Detach { out, input }
-            | I::Exp { out, input }
-            | I::Log { out, input }
-            | I::LogSoftmax { out, input }
-            | I::Clip { out, input, .. }
-            | I::Sum { out, input }
-            | I::Neg { out, input }
-            | I::Mean { out, input }
-            | I::Slice { out, input, .. } => vec![out, input],
-            I::Matmul { out, left, right } | I::BatchMatmul { out, left, right } | I::Add { out, left, right }
-            | I::Mul { out, left, right }
-            | I::Minimum { out, left, right } => vec![out, left, right],
-            I::Gate {
-                out,
-                probability,
-                input,
-            } => vec![out, probability, input],
-            I::Route {
-                out,
-                probability,
-                yes,
-                no,
-            } => vec![out, probability, yes, no],
-            I::InferenceSkip { probability, .. } => vec![probability],
-            I::Branch { condition, .. } => vec![condition],
-        };
-        for name in tensor_names {
+        let metadata = instruction.metadata();
+        if let Some(memory) = metadata.memory {
+            ensure!(
+                regs.get(memory).is_some_and(|r| memories.contains_key(r)),
+                "unknown memory handle"
+            );
+        }
+        for name in metadata.inputs.into_iter().flatten().chain(metadata.output) {
             ensure!(
                 !regs.get(name).is_some_and(|r| memories.contains_key(r)),
                 "memory handle cannot be used as a tensor: {name}"

@@ -675,8 +675,8 @@ impl Lower {
                 let [Expr::List(dimensions), value] = args.as_slice() else {
                     bail!("invalid internal tensor annotation");
                 };
-                self.assign(out, value)?;
-                let actual_shape = self.shape(out)?;
+                let input = self.value(value)?;
+                let actual_shape = self.shape(&input)?;
                 let mut expected_shape = Vec::with_capacity(dimensions.len());
                 let mut axes = Vec::with_capacity(dimensions.len());
                 let mut seen = std::collections::HashSet::new();
@@ -694,16 +694,17 @@ impl Lower {
                     axes.push(axis);
                 }
                 let expected_len = crate::model::validate_shape(&expected_shape)?;
-                if actual_shape != expected_shape {
-                    let actual_len = crate::model::validate_shape(&actual_shape)?;
-                    ensure!(actual_len == expected_len,
-                        "tensor annotation element count mismatch: actual {actual_shape:?}, declared {expected_shape:?}");
-                    let register = self.program.registers.iter_mut()
-                        .find(|register| register.name == out)
-                        .context("missing annotated tensor register")?;
-                    register.shape = expected_shape;
-                    self.program.version = 3;
+                ensure!(self.size(&input)? == expected_len,
+                    "tensor annotation element count mismatch: actual {actual_shape:?}, declared {expected_shape:?}");
+                self.register_shape(out, expected_shape)?;
+                if input != out {
+                    self.program.instructions.push(I::Reshape {
+                        out: out.into(),
+                        input: input.clone(),
+                    });
                 }
+                self.program.version = 3;
+                self.types.insert(out.into(), self.types.get(&input).copied().unwrap_or_default());
                 self.axes.insert(out.into(), axes);
                 return Ok(());
             }

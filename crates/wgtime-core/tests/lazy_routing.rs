@@ -110,7 +110,7 @@ fn lazy_sample_does_not_commit_writes_and_example_executes() {
 fn forward(x) {{ let selected=route(p,x,linear(x,large)); write(p,x); return selected; }}
 fn main() {{
     let model=Lazy(\"none\");
-    assert(sample from model([1e20])==0,\"invalid action\");
+    assert sample from model([1e20])==0,\"invalid action\";
     return model([1e20]);
 }}"
     );

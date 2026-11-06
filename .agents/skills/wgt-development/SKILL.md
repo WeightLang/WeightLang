@@ -45,9 +45,9 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 连续声明 `let a=expr, b=expr;` 在共用 parser 展开为原有 Stmt::Let 序列；从左到右各求值一次，后项可引用前项，无整组回滚。host/async/forward/loss 继承原有作用域和重名规则；纯 operator 在支持它的工作区同样展开。嵌套调用/列表/record 的逗号不分隔声明；无元组/新赋值语法或尾逗号，sample 解构及 collect/learn 须独立声明。完整例子 examples/native_training/continuous_let/model.wgt；验证 tests/continuous_let.rs 与真实 AOT。
 函数共用 parser 不表示普通 fn 与 tensor forward/loss 语义相同；模型声明独立解析。
 language/primitive_specs.json 是制品 graph 原语域，不是源码内置表。编辑器容错不证明源码有效。
-公开原生函数与张量 intrinsic 的权威声明在 std/prelude.wgt；语法、类型、常量与内部接口在 language/prelude_metadata.json。
-修改后运行 node scripts/generate_prelude.cjs 和 node scripts/generate_editor_support.cjs，生成 language/prelude.json 供运行时和编辑器消费。
-构建和 wgt check std/prelude.wgt 校验完整契约；native 声明没有 WGT 实现体，不能写在普通源码中。完整契约见 docs/prelude.md。
+在 language/prelude.json 维护原生函数、张量 intrinsic、语法、类型、常量与内部接口的统一内部目录；同步纯 helper 的 operator_arity 和需要保留的名称标记，不在 parser 或生成器另写名单。
+修改后运行 node scripts/check_prelude.cjs、node scripts/test_prelude.cjs 和 node scripts/generate_editor_support.cjs，再用 --check 验证编辑器资产同步。
+构建检查目录结构，Node 检查实现集合、签名及默认值；原生声明不能写在普通源码中。旧 std/prelude.wgt 已移除，不恢复其生成链。完整契约见 docs/prelude.md。
 普通函数与 tensor 上下文分开登记，不自动引入 std 模块。
 原生异步第一阶段见 docs/async-tasks.md 与 examples/native_training/async_tasks/model.wgt：async fn调用冷future，tasks作用域spawn、await只等目标并轮询兄弟任务，作用域join/取消并等待在途IO清理。
 仅纯数据参数/返回值，嵌套async await可用；拒绝嵌套tasks、async内spawn/tasks、模型等资源参数/返回、host/compute活跃上下文。await net(x)没有异步模型执行路径，不能宣称支持。
@@ -119,7 +119,7 @@ one_hot(index,classes)、concat(x,y)、vector_slice(x,start,end)、gather(x,indi
 compress(x,mask)、reverse(x)。参数全部必填；有限 f64 一维列表，允许空列表；
 mask 必须 bool，索引为合法零起始整数，切片左闭右开；输出上限 100 万项。
 linspace 含端点，count=1 只给起点；独热 classes>=1。预算在输出分配前检查。
-这些是普通脚本原生函数；完整签名以 std/prelude.wgt 和 docs/reference.zh-CN.md 为准，std/data 下旧演示已删除。
+这些是普通脚本原生函数；完整签名以 language/prelude.json 和 docs/reference.zh-CN.md 为准，std/data 下旧演示已删除。
 
 独热编码使用 `onehot[N] index`（N 为 1..1000000 字面量），例如 `onehot[4] 2`。
 复杂索引用括号；等价 `one_hot(index,classes)` 支持动态类别数。只限普通函数，不对索引求导。
@@ -130,7 +130,7 @@ js_divergence(p,q)、cross_entropy_probs(p,q)、temperature_softmax(logits,tempe
 全部参数必填，非空有限 f64 一维列表，双分布等长；分布项 [0,1]、总和绝对误差<=1e-9，
 通过后修正总和；权重归一化要求非负且有正质量，温度有限且>0。单位 nat。
 KL/交叉熵 p>0 且 q=0 报错，JS 支持不相交分布。无张量梯度或新增 fit 目标。
-这些是无需导入的普通原生函数；旧 std/probability 演示已删除，完整签名与限制见 std/prelude.wgt 和 docs/reference.zh-CN.md。
+这些是无需导入的普通原生函数；旧 std/probability 演示已删除，完整签名与限制见 language/prelude.json 和 docs/reference.zh-CN.md。
 
 更新既有代码时，route 可等价改写为 mix；独立标量 logit=0 的门可用 prob=0.5 并去掉读取处的 sigmoid。输入相关的 sigmoid(linear(...)) 保留。固定类别独热使用 onehot[N]；模型类别采样目标语法为 decode，待实现后迁移示例。
 

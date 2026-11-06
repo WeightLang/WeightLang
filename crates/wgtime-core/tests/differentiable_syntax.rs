@@ -175,7 +175,8 @@ fn main() {
  assert onehot[4] action == [0,0,1,0], "encoding";
  assert onehot[4] (action+1) == [0,0,0,1], "index expression";
  assert onehot[1] 0 == [1], "single class";
- assert (onehot[4] 2)[2] == 1, "result indexing";
+ let indexed = (onehot[4] 2)[2];
+ assert indexed == 1, "result indexing";
  assert onehot[4] [2,0][0] == one_hot(2,4), "operand indexing";
  return true;
 }"#;

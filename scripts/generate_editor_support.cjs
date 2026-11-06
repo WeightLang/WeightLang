@@ -1,11 +1,9 @@
 // Offline editor assets: runtime builtins plus the explicitly supported 0.5 vocabulary.
 const fs = require('node:fs');
 const path = require('node:path');
-process.chdir(path.resolve(__dirname, '..'));
-const read = file => fs.readFileSync(file, 'utf8');
+const root = path.resolve(__dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const prelude = JSON.parse(read('language/prelude.json')).entries;
-// The snapshot is generated, never a second handwritten builtin registry.
-const nativeBuiltins = prelude.filter(e => e.kind === 'function' && e.contexts.includes('ordinary_function')).map(e => e.name).sort();
 const vocabulary = {
   keywords: 'blend repeat indexed carrying agent environment state learn assert async await spawn tasks sleep break checkpoint collect continue else fn for from frozen if import in init input json layer let load mix model onehot operators output overwrite parameter reload return sample save size text then to train on against rate clip target using wgt while yield native intrinsic'.split(' '),
   builtins: [...new Set(prelude.filter(e => e.kind === 'function' && e.contexts.includes('ordinary_function')).map(e => e.name))].sort(),
@@ -17,12 +15,11 @@ const vocabulary = {
 let stale = false;
 function write(file, text) {
   if (process.argv.includes('--check')) {
-    if (!fs.existsSync(file) || read(file) !== text) { console.error(`Out of date: ${file}`); stale = true; }
-  } else fs.writeFileSync(file, text);
+    if (!fs.existsSync(path.join(root, file)) || read(file) !== text) { console.error(`Out of date: ${file}`); stale = true; }
+  } else fs.writeFileSync(path.join(root, file), text);
 }
-write('scripts/editor-templates/native-builtins.json', JSON.stringify(nativeBuiltins, null, 2)+'\n');
 const words = key => `\\b(?:${vocabulary[key].join('|')})\\b`;
-const captureNames = [...vocabulary.builtins, ...vocabulary.intrinsics, ...vocabulary.layers];
+const captureNames = [...new Set([...vocabulary.builtins, ...vocabulary.intrinsics, ...vocabulary.layers])];
 const grammar = {
   name: 'WeightLang', scopeName: 'source.wgt', fileTypes: ['wgt'],
   patterns: [

@@ -6,7 +6,7 @@
 ## 定义与调用
 
 同文件中的 `fn name(arg, ...)` 可以在 `forward` 和 `loss` 中作为算子调用。
-参数全部必填、按位置传递，无默认值，输入和返回值均为非空、定长的一维 f32 张量。
+参数全部必填、按位置传递，无默认值，输入和返回值均为非空、定长、显式 shape 的 f32 张量；可用秩由所调用原语限定。
 一个返回值；长度由实参及原生运算推导，每次调用单独检查。数值不隐式广播。
 函数体只允许不可重复绑定的 `let`，最后必须有且只有一个 `return expression;`。
 可以调用其他纯算子；不允许递归、赋值、循环、条件语句、I/O、随机采样或参数/工作内存读写。
@@ -18,6 +18,17 @@
 这些原语的完整签名、形状、字面量参数及梯度与[语言参考](reference.zh-CN.md)和
 [强化学习原语](reinforcement-learning.md)相同。特别是 slice 的起点/长度和 clip 的边界
 仍须在算子函数体中写成字面量，不能使用张量参数代替；linear 的参数身份不作为普通张量传递。
+
+纯 helper 也可组合多轴几何原语：`reshape(x,shape)`、`transpose(x)` / `x.T`、
+`matmul(a,b)` / `a @ b`、`permute(x,axes)`、`batch_matmul(a,b)`、
+`layer_norm(x,gamma,beta,axis,epsilon)` 及 `softmax(x,axis)`。
+`permute` 与 `batch_matmul` 各有两个必填参数，`layer_norm` 有五个；
+`softmax(x)` 保留单参数形式。轴、epsilon 和形状选项应直接写成合法常量，
+张量值与 gamma/beta 则显式传入 helper。完整形状、轴及梯度约束见[张量几何](tensor-geometry.md)。
+`conv` 的七个必填参数及 `max_pool2d(x,kernel,stride)` / `avg_pool2d(x,kernel,stride)`
+也可用于纯 helper，窗口与步幅为常量列表；限制与直接调用一致，见[卷积与池化](convolution.md)。
+这些函数的纯调用资格和 arity 来自统一[内部目录](prelude.md)；参数读写、工作内存和
+`linear` 的参数身份访问继续在模型作用域处理。
 
 调用按从左到右先求值各实参一次，再进入算子；每个调用有独立局部变量。
 因此 `gate(p, custom(x))` 可在推理时跳过整个 custom 调用，

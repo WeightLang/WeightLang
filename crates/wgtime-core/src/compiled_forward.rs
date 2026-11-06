@@ -379,7 +379,7 @@ impl<'a> Generator<'a> {
         let mut registers = HashMap::new();
         let mut workspace = 0usize;
         let mut max = 0;
-        ensure!(program.version >= 3 || !program.instructions.iter().any(|i| matches!(i,I::Conv { .. } | I::MaxPool2d { .. } | I::AvgPool2d { .. } | I::Reshape { .. } | I::Transpose { .. } | I::Permute { .. } | I::Matmul { .. } | I::BatchMatmul { .. } | I::LayerNorm { .. } | I::Scale { .. } | I::SoftmaxAxis { .. })), "tensor operations require compiled IR version 3");
+        ensure!(program.instructions.iter().all(|i| i.metadata().minimum_version <= program.version), "tensor operations require compiled IR version 3");
         for (i, r) in program.registers.iter().enumerate() {
             ensure!(r.shape.len() <= 8 && r.shape.iter().all(|d| *d <= 16384) && crate::elements(&r.shape)? == r.len, "compiled register geometry/storage mismatch");
             ensure!(program.version >= 3 || r.shape == [r.len], "multiaxis registers require compiled IR version 3");
@@ -481,8 +481,8 @@ impl<'a> Generator<'a> {
         let mut output_width = None;
         for (index, instruction) in self.program.instructions.iter().enumerate() {
             code += &format!("L{index}:;if(*used>=budget)return 2;++*used;{{\n");
-            let mut out: Option<&str> = None;
-            let mut reads: Vec<&str> = Vec::new();
+            let metadata = instruction.metadata();
+            let mut reads = metadata.inputs;
             let mut body = String::new();
             match instruction {
                 I::Conv { out:o,input:x,kernel,bias,stride,padding,dilation,groups } => {
@@ -496,7 +496,6 @@ impl<'a> Generator<'a> {
                     for d in (0..g.rank).rev(){body+=&format!("kc[{d}]=rem%{};rem/={};",g.kernel[d],g.kernel[d]);}
                     for d in 0..g.rank {body+=&format!("{{long p=(long)(coords[{d}]*{}+kc[{d}]*{})-{};if(p<0||p>={})valid=0;else ix=ix*{}+(size_t)p;}}",g.stride[d],g.dilation[d],g.padding[d],g.input[d],g.input[d]);}
                     body+=&format!("if(valid)sum+=(double)r[{a}+(oc/{og}*{cg}+c)*{iv}+ix]*(double)r[{k}+(oc*{cg}+c)*{kv}+q];}}t[z]=(float)sum;}}");
-                    reads.extend([x.as_str(),kernel.as_str(),bias.as_str()]);out=Some(o);
                 },
                 I::MaxPool2d { out:o,input:x,kernel,stride }
                 | I::AvgPool2d { out:o,input:x,kernel,stride } => {
@@ -518,14 +517,12 @@ impl<'a> Generator<'a> {
                         body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{out_len};z++){{size_t c=z/{spatial},p=z%{spatial},oy=p/{},ox=p%{};double v=0.;for(size_t ky=0;ky<{};ky++)for(size_t kx=0;kx<{};kx++){{size_t ix=(c*{}+oy*{}+ky)*{}+ox*{}+kx;v+=(double)r[{a}+ix];}}t[z]=(float)(v/{window}.0);}}",
                             g.output_w,g.output_w,g.kernel_h,g.kernel_w,g.input_h,g.stride_h,g.input_w,g.stride_w);
                     }
-                    reads.push(x); out=Some(o);
                 },
                 I::Reshape { out:o,input:x } => {
 
                     let (a,n,_) = self.reg(x)?;
                     ensure!(n == self.reg(o)?.1, "compiled reshape count mismatch");
                     body += &format!("memcpy(t,r+{a},{n}*sizeof(float));");
-                    reads.push(x); out=Some(o);
                 },
                 I::Transpose { out:o,input:x } => {
                     let (a,_,_) = self.reg(x)?;
@@ -534,7 +531,6 @@ impl<'a> Generator<'a> {
                     let (m,n) = (shape[0],shape[1]);
                     ensure!(self.program.registers[self.reg(o)?.2].shape == [n,m], "compiled transpose output geometry mismatch");
                     body += &format!("for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++)t[j*{m}+i]=r[{a}+i*{n}+j];");
-                    reads.push(x); out=Some(o);
                 },
                 I::Permute { out:o,input:x,axes } => {
                     let (a,n,xi) = self.reg(x)?;
@@ -564,7 +560,6 @@ impl<'a> Generator<'a> {
                     }
                     body_code += &format!("t[z]=r[{a}+src];}}");
                     body += &body_code;
-                    reads.push(x); out=Some(o);
                 },
                 I::Matmul { out:o,left,right } => {
                     let (a,_,ai) = self.reg(left)?; let (b,_,bi) = self.reg(right)?;
@@ -574,7 +569,6 @@ impl<'a> Generator<'a> {
                     ensure!(self.program.registers[self.reg(o)?.2].shape == [m,n], "compiled matmul output geometry mismatch");
                     let work=m.checked_mul(k).and_then(|v|v.checked_mul(n)).context("matmul work overflow")?;
                     body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+i*{k}+q]*(double)r[{b}+q*{n}+j];t[i*{n}+j]=(float)sum;}}");
-                    reads.extend([left.as_str(),right.as_str()]); out=Some(o);
                 },
                 I::BatchMatmul { out:o,left,right } => {
                     let (a,_,ai) = self.reg(left)?;
@@ -590,7 +584,6 @@ impl<'a> Generator<'a> {
                     let work=batch.checked_mul(m).and_then(|v|v.checked_mul(k))
                         .and_then(|v|v.checked_mul(n)).context("batch_matmul work overflow")?;
                     body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{batch};z++)for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+z*{m}*{k}+i*{k}+q]*(double)r[{b}+z*{k}*{n}+q*{n}+j];t[z*{m}*{n}+i*{n}+j]=(float)sum;}}");
-                    reads.extend([left.as_str(),right.as_str()]); out=Some(o);
                 },
                 I::LayerNorm { out:o,input:x,gamma,beta,axis,epsilon } => {
                     let (a,_,ai) = self.reg(x)?;
@@ -611,13 +604,11 @@ impl<'a> Generator<'a> {
                         "compiled LayerNorm output geometry or epsilon mismatch");
                     let work=out_len.checked_mul(3).and_then(|v|v.checked_add(1)).context("LayerNorm work overflow")?;
                     body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t o=0;o<{outer};o++)for(size_t i=0;i<{inner};i++){{double mean=0.;for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;mean+=(double)r[{a}+idx];}}mean/={width};double variance=0.;for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;double delta=(double)r[{a}+idx]-mean;variance+=delta*delta;}}variance/={width};double inv=1.0/sqrt(variance+{epsilon:.17});for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;t[idx]=(float)(((double)r[{a}+idx]-mean)*inv*(double)r[{g}+a]+(double)r[{b}+a]);}}}}");
-                    reads.extend([x.as_str(),gamma.as_str(),beta.as_str()]); out=Some(o);
                 },
                 I::Scale { out:o,input:x,factor } => {
                     let (a,n,id) = self.reg(x)?;
                     ensure!(self.program.registers[id].shape == self.program.registers[self.reg(o)?.2].shape, "compiled scale geometry mismatch");
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]=r[{a}+i]*{};",Self::literal(*factor)?);
-                    reads.push(x); out=Some(o);
                 },
                 I::SoftmaxAxis { out:o,input:x,axis } => {
                     let (a,_,id)=self.reg(x)?;
@@ -627,7 +618,6 @@ impl<'a> Generator<'a> {
                     let outer:usize=shape[..*axis].iter().product();
                     let width=shape[*axis]; let inner:usize=shape[*axis+1..].iter().product();
                     body += &format!("for(size_t o=0;o<{outer};o++)for(size_t j=0;j<{inner};j++){{float maximum=-INFINITY;for(size_t q=0;q<{width};q++)maximum=fmaxf(maximum,r[{a}+(o*{width}+q)*{inner}+j]);double sum=0.;for(size_t q=0;q<{width};q++)sum+=exp((double)r[{a}+(o*{width}+q)*{inner}+j]-(double)maximum);for(size_t q=0;q<{width};q++){{size_t z=(o*{width}+q)*{inner}+j;t[z]=(float)(exp((double)r[{a}+z]-(double)maximum)/sum);}}}}");
-                    reads.push(x); out=Some(o);
                 },
                 I::Constant { out: o, data } => {
                     let (_, n, _) = self.reg(o)?;
@@ -635,7 +625,6 @@ impl<'a> Generator<'a> {
                     for (i, v) in data.iter().enumerate() {
                         body += &format!("t[{i}]={};", Self::literal(*v)?);
                     }
-                    out = Some(o.as_str());
                 }
                 I::Read { out: o, parameter } => {
                     let (p, n) = self.par(parameter)?;
@@ -646,7 +635,6 @@ impl<'a> Generator<'a> {
                         Some(wgt_language::adaptive::LearnDomain::Bool) => body += &format!("for(size_t j=0;j<{n};j++)t[j]=t[j]>=0.5f?1.0f:0.0f;"),
                         _ => {},
                     }
-                    out = Some(o);
                 }
                 I::Linear {
                     out: o,
@@ -671,8 +659,6 @@ impl<'a> Generator<'a> {
                     body += &format!(
                         "for(size_t i=0;i<{m};i++){{float v={b};for(size_t j=0;j<{n};j++)v+=r[{a}+j]*p[{w}][i*{n}+j];t[i]=v;}}"
                     );
-                    reads.push(x);
-                    out = Some(o);
                 }
                 I::Add {
                     out: o,
@@ -701,8 +687,6 @@ impl<'a> Generator<'a> {
                         _ => format!("fminf(r[{a}+i],r[{b}+i])"),
                     };
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]={value};");
-                    reads.extend([left.as_str(), right.as_str()]);
-                    out = Some(o);
                 }
                 I::Tanh { out: o, input: x }
                 | I::Sigmoid { out: o, input: x }
@@ -729,8 +713,6 @@ impl<'a> Generator<'a> {
                         );
                     }
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]={value};");
-                    reads.push(x);
-                    out = Some(o);
                 }
                 I::Softmax { out: o, input: x } | I::LogSoftmax { out: o, input: x } => {
                     let (a, n, _) = self.reg(x)?;
@@ -744,8 +726,6 @@ impl<'a> Generator<'a> {
                         format!("(double)r[{a}+i]-maximum-log(sum)")
                     };
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]=(float)({value});");
-                    reads.push(x);
-                    out = Some(o);
                 }
                 I::Sum { out: o, input: x } | I::Mean { out: o, input: x } => {
                     let (a, n, _) = self.reg(x)?;
@@ -758,8 +738,6 @@ impl<'a> Generator<'a> {
                             1
                         }
                     );
-                    reads.push(x);
-                    out = Some(o);
                 }
                 I::Clip {
                     out: o,
@@ -777,8 +755,6 @@ impl<'a> Generator<'a> {
                         Self::literal(*min)?,
                         Self::literal(*max)?
                     );
-                    reads.push(x);
-                    out = Some(o);
                 }
                 I::Slice {
                     out: o,
@@ -792,8 +768,6 @@ impl<'a> Generator<'a> {
                         "compiled slice out of bounds"
                     );
                     body += &format!("memcpy(t,r+{},{}*sizeof(float));", a + start, m);
-                    reads.push(x);
-                    out = Some(o);
                 }
                 I::Label { .. } => {}
                 I::Jump { target: name } => body += &format!("goto L{};", target(name)?),
@@ -804,7 +778,6 @@ impl<'a> Generator<'a> {
                 } => {
                     let (a, n, _) = self.reg(condition)?;
                     ensure!(n == 1, "compiled branch condition must be scalar");
-                    reads.push(condition);
                     body += &format!(
                         "if(r[{a}]>0.f)goto L{};else goto L{};",
                         target(positive)?,
@@ -818,7 +791,6 @@ impl<'a> Generator<'a> {
                         "compiled return shape mismatch"
                     );
                     output_width = Some(n);
-                    reads.push(value);
                     if self.program.output_type == crate::categorical::VectorType::Probabilities {
                         body += &format!(
                             "double sum=0.;for(size_t i=0;i<{n};i++){{if(r[{a}+i]<0.f||r[{a}+i]>1.f)return 4;sum+=r[{a}+i];}}if(fabs(sum-1.)>1e-5)return 4;"
@@ -839,6 +811,8 @@ impl<'a> Generator<'a> {
                     yes: x,
                     no: _,
                 } => {
+                    // Endpoint inference only reads the selected branch; traced calls read both.
+                    reads = [Some(probability.as_str()), None, None];
                     let (a, n, aid) = self.reg(x)?;
                     let (p, pn, _) = self.reg(probability)?;
                     ensure!(
@@ -852,7 +826,6 @@ impl<'a> Generator<'a> {
                     } else {
                         None
                     };
-                    reads.push(probability);
                     body += &format!(
                         "int zero=1,one=1;for(size_t i=0;i<{pn};i++){{float v=r[{p}+i];if(v<0.f||v>1.f)return 4;zero&=v==0.f;one&=v==1.f;}}"
                     );
@@ -864,7 +837,6 @@ impl<'a> Generator<'a> {
                         "if(!traced&&zero){{{bready}for(size_t i=0;i<{n};i++)t[i]={bvalue};}}else if(!traced&&one){{if(!ready[{aid}])return 3;memcpy(t,r+{a},{n}*sizeof(float));}}else{{if(!ready[{aid}])return 3;{bready}for(size_t i=0;i<{n};i++){{float v=r[{p}+{}];t[i]=v*r[{a}+i]+(1.f-v)*({bvalue});}}}}",
                         if pn == 1 { "0" } else { "i" }
                     );
-                    out = Some(o);
                 }
                 I::InferenceSkip {
                     probability,
@@ -872,7 +844,6 @@ impl<'a> Generator<'a> {
                     target: name,
                 } => {
                     let (p, n, _) = self.reg(probability)?;
-                    reads.push(probability);
                     body += &format!(
                         "if(!traced){{int skip=1;for(size_t i=0;i<{n};i++){{float v=r[{p}+i];if(v<0.f||v>1.f)return 4;skip&=v=={}.f;}}if(skip)goto L{};}}",
                         if *when_one { 1 } else { 0 },
@@ -884,7 +855,6 @@ impl<'a> Generator<'a> {
                     let (p, n) = self.par(parameter)?;
                     let (a, m, _) = self.reg(value)?;
                     ensure!(n == m && !self.program.parameters[p].frozen, "invalid transactional write");
-                    reads.push(value);
                     body += &format!("for(size_t i=0;i<{n};i++)if(!isfinite(r[{a}+i]))return 1;memcpy(candidate[{p}],r+{a},{n}*sizeof(float));if(trace&&trace(context,{index},r+{a},{n}))return 5;");
                 }
                 I::MemoryAlloc { .. }
@@ -895,12 +865,12 @@ impl<'a> Generator<'a> {
                     bail!("compiled forward does not support state writes or working memory")
                 }
             }
-            for name in reads {
+            for name in reads.into_iter().flatten() {
                 let (_, _, id) = self.reg(name)?;
                 code += &format!("if(!ready[{id}])return 3;");
             }
             code += &body;
-            if let Some(out) = out {
+            if let Some(out) = metadata.output {
                 let (a, n, id) = self.reg(out)?;
                 code += &format!(
                     "for(size_t i=0;i<{n};i++)if(!isfinite(t[i]))return 1;memcpy(r+{a},t,{n}*sizeof(float));ready[{id}]=1;if(trace&&trace(context,{index},r+{a},{n}))return 5;"

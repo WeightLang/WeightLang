@@ -19,13 +19,44 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Check the complete workspace
+        run: cargo check --locked --workspace --all-targets
       - name: Check WGT parser and language tests
         run: cargo test --locked -p wgt-language
       - name: Check tensor runtime autodiff
-        run: cargo test --locked --no-default-features -p wgtime-core --test adaptive_autodiff
+        run: >-
+          cargo test --locked --no-default-features -p wgtime-core
+          --lib --test adaptive --test adaptive_autodiff --test workspace
+          --test pooling --test lazy_routing --test parameter_ops
+          --test custom_update_strategy --test training
       - name: Check compiled tensor backend
-        run: cargo test --locked --no-default-features -p wgtime-core --test compiled_forward
+        run: >-
+          cargo test --locked --no-default-features -p wgtime-core
+          --test compiled_forward --test compiled_training --test compiled_control_flow
+          --test unified_training --test custom_optimization
       - name: Check generated editor support
         run: node scripts/generate_editor_support.cjs --check
       - name: Check prelude catalog
-        run: node scripts/check_prelude.cjs
+        run: |
+          node scripts/check_prelude.cjs
+          node scripts/test_prelude.cjs
+      - name: Check graph viewer behavior
+        run: node --test web/viewer/test/*.test.js
+
+  host-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check client and host control
+        run: cargo test --locked -p wgtime -p wgtime-control
+      - name: Check service lifecycle and transport
+        run: cargo test --locked -p wgtime-service --bin wgtime --test service --test startup
+      - name: Build the model service
+        run: cargo build --locked -p wgtime-service --bin wgtime
+      - name: Check model APIs against the real service
+        env:
+          WGTIME_TEST_DAEMON: ${{ github.workspace }}/target/debug/wgtime
+        run: cargo test --locked -p wgt-model --tests -- --include-ignored

@@ -1754,7 +1754,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "detach(x)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
     },
     {
       "name": "exp",
@@ -1768,7 +1772,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "exp(x)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
     },
     {
       "name": "log",
@@ -1782,7 +1790,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "log(x)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
     },
     {
       "name": "log_softmax",
@@ -1796,7 +1808,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "log_softmax(x)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
     },
     {
       "name": "minimum",
@@ -1810,7 +1826,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "minimum(a,b)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 2,
+        "max": 2
+      }
     },
     {
       "name": "clip",
@@ -1824,7 +1844,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "clip(x,low,high)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 3,
+        "max": 3
+      }
     },
     {
       "name": "sum",
@@ -1838,7 +1862,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "sum(x)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
     },
     {
       "name": "depth_gate",
@@ -1923,7 +1951,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "add(a,b)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 2,
+        "max": 2
+      }
     },
     {
       "name": "mul",
@@ -1937,7 +1969,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "mul(a,b)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 2,
+        "max": 2
+      }
     },
     {
       "name": "mean",
@@ -1951,7 +1987,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "mean(x)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
     },
     {
       "name": "square",
@@ -1965,7 +2005,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "square(x)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
     },
     {
       "name": "gate",
@@ -1979,7 +2023,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "gate(p,x)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 2,
+        "max": 2
+      }
     },
     {
       "name": "route",
@@ -1993,7 +2041,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "route(p,a,b)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 3,
+        "max": 3
+      }
     },
     {
       "name": "relu",
@@ -2007,7 +2059,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "relu(x)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
     },
     {
       "name": "tanh",
@@ -2021,7 +2077,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "tanh(x)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
     },
     {
       "name": "sigmoid",
@@ -2035,7 +2095,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "sigmoid(x)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
     },
     {
       "name": "softmax",
@@ -2051,6 +2115,10 @@
       "signature": "softmax(x) / softmax(x,axis)",
       "defaults": {},
       "arity": {
+        "min": 1,
+        "max": 2
+      },
+      "operator_arity": {
         "min": 1,
         "max": 2
       }
@@ -2071,6 +2139,10 @@
       "arity": {
         "min": 2,
         "max": 2
+      },
+      "operator_arity": {
+        "min": 2,
+        "max": 2
       }
     },
     {
@@ -2087,6 +2159,10 @@
       "signature": "transpose(x)",
       "defaults": {},
       "arity": {
+        "min": 1,
+        "max": 1
+      },
+      "operator_arity": {
         "min": 1,
         "max": 1
       }
@@ -2107,6 +2183,10 @@
       "arity": {
         "min": 2,
         "max": 2
+      },
+      "operator_arity": {
+        "min": 2,
+        "max": 2
       }
     },
     {
@@ -2125,6 +2205,46 @@
       "arity": {
         "min": 7,
         "max": 7
+      },
+      "operator_arity": {
+        "min": 7,
+        "max": 7
+      }
+    },
+    {
+      "name": "max_pool2d",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Channel-first [C,H,W] 2D maximum pooling with explicit kernel and stride, valid windows, and no batch or padding.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/convolution.md",
+      "position": "expression",
+      "signature": "max_pool2d(x,[kernel_height,kernel_width],[stride_height,stride_width])",
+      "defaults": {},
+      "operator_arity": {
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "name": "avg_pool2d",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Channel-first [C,H,W] 2D average pooling with explicit kernel and stride, valid windows, and no batch or padding.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/convolution.md",
+      "position": "expression",
+      "signature": "avg_pool2d(x,[kernel_height,kernel_width],[stride_height,stride_width])",
+      "defaults": {},
+      "operator_arity": {
+        "min": 3,
+        "max": 3
       }
     },
     {
@@ -2143,6 +2263,10 @@
       "arity": {
         "min": 2,
         "max": 2
+      },
+      "operator_arity": {
+        "min": 2,
+        "max": 2
       }
     },
     {
@@ -2157,7 +2281,11 @@
       "documentation": "docs/reference.zh-CN.md",
       "position": "expression",
       "signature": "slice(x,start,length)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 3,
+        "max": 3
+      }
     },
     {
       "name": "positive",
@@ -2241,7 +2369,12 @@
       "documentation": "docs/tensor-geometry.md",
       "position": "expression",
       "signature": "permute(x,[axes])",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 2,
+        "max": 2
+      },
+      "reserved": true
     },
     {
       "name": "batch_matmul",
@@ -2255,7 +2388,12 @@
       "documentation": "docs/tensor-geometry.md",
       "position": "expression",
       "signature": "batch_matmul(a,b)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 2,
+        "max": 2
+      },
+      "reserved": true
     },
     {
       "name": "layer_norm",
@@ -2269,7 +2407,12 @@
       "documentation": "docs/tensor-geometry.md",
       "position": "expression",
       "signature": "layer_norm(x,gamma,beta,axis,epsilon)",
-      "defaults": {}
+      "defaults": {},
+      "operator_arity": {
+        "min": 5,
+        "max": 5
+      },
+      "reserved": true
     },
     {
       "name": "agent",
@@ -2579,7 +2722,7 @@
       "signature": "output scores: logits[N]",
       "purpose": "Finite, nonempty mutually exclusive category scores. Explicit output metadata survives model persistence and function values. .probabilities applies stable softmax along the category axis. Output declarations only; no binary logit type.",
       "defaults": {},
-      "implementation": "crates/wgt-language/src/categorical.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "probabilities",
@@ -2590,7 +2733,7 @@
       "signature": "output choices: probabilities[N] / value.probabilities",
       "purpose": "Finite mutually exclusive category vector, each value strictly in [0,1], sum within absolute 1e-5 of 1. Conversion validates and preserves values; no renormalization. Sampling scales by actual total mass and skips zero-mass entries. CPU native implementation; GPU categorical path not verified.",
       "defaults": {},
-      "implementation": "crates/wgt-language/src/categorical.rs"
+      "implementation": "crates/wgt-language/src/source.rs"
     },
     {
       "name": "prob",

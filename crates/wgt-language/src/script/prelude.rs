@@ -1,8 +1,9 @@
 //! Source prelude registry. Domain implementations remain in their own modules.
-//! Public callables originate in `std/prelude.wgt`; the generated JSON also serves editors.
+//! The internal catalog also supplies tensor-operator contracts and editor vocabulary.
 #[path = "prelude_declarations.rs"]
 pub mod declarations;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 #[derive(Debug, Deserialize)]
@@ -21,16 +22,53 @@ pub struct Entry {
 }
 
 #[derive(Deserialize)]
-struct Catalog {
+pub(crate) struct TensorContract {
+    pub operator_arity: Option<Arity>,
+    #[serde(default)]
+    reserved: bool,
+}
+
+struct Registry {
     entries: Vec<Entry>,
+    tensors: HashMap<String, TensorContract>,
+}
+
+fn registry() -> &'static Registry {
+    static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
+        #[derive(Deserialize)]
+        struct RegisteredEntry {
+            #[serde(flatten)]
+            entry: Entry,
+            #[serde(flatten)]
+            tensor: TensorContract,
+        }
+        #[derive(Deserialize)]
+        struct Catalog {
+            entries: Vec<RegisteredEntry>,
+        }
+        let catalog: Catalog = serde_json::from_str(include_str!("../../../../language/prelude.json"))
+            .expect("validated source prelude catalog");
+        let mut registry = Registry {
+            entries: Vec::with_capacity(catalog.entries.len()),
+            tensors: HashMap::new(),
+        };
+        for registered in catalog.entries {
+            if registered.entry.kind == "intrinsic" {
+                registry.tensors.insert(registered.entry.name.clone(), registered.tensor);
+            }
+            registry.entries.push(registered.entry);
+        }
+        registry
+    });
+    &REGISTRY
 }
 
 pub fn entries() -> &'static [Entry] {
-    static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
-        serde_json::from_str(include_str!("../../../../language/prelude.json"))
-            .expect("validated source prelude catalog")
-    });
-    &CATALOG.entries
+    &registry().entries
+}
+
+pub(crate) fn tensor(name: &str) -> Option<&'static TensorContract> {
+    registry().tensors.get(name)
 }
 
 pub fn builtin(name: &str) -> Option<&'static Entry> {
@@ -58,5 +96,5 @@ pub fn migration(name: &str) -> Option<&'static str> {
 }
 
 pub fn is_builtin(name: &str) -> bool {
-    builtin(name).is_some() || matches!(name, "permute" | "batch_matmul" | "layer_norm")
+    builtin(name).is_some() || tensor(name).is_some_and(|contract| contract.reserved)
 }

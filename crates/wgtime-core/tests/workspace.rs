@@ -181,6 +181,40 @@ fn memory_lifetime_shape_limits_and_serialized_ir_are_checked() {
 }
 
 #[test]
+fn tensor_instructions_reject_memory_handles_in_every_operand() {
+    use serde_json::json;
+    let cases = [
+        (json!({"op":"layer_norm","out":"y","input":"x","gamma":"x","beta":"x","axis":0,"epsilon":0.0001}),
+            vec!["out", "input", "gamma", "beta"]),
+        (json!({"op":"max_pool2d","out":"y","input":"x","kernel":[1,1],"stride":[1,1]}),
+            vec!["out", "input"]),
+        (json!({"op":"avg_pool2d","out":"y","input":"x","kernel":[1,1],"stride":[1,1]}),
+            vec!["out", "input"]),
+    ];
+    for (instruction, operands) in cases {
+        for operand in operands {
+            let mut instruction = instruction.clone();
+            instruction[operand] = json!("bank");
+            let program = serde_json::from_value(json!({
+                "version":3,"input":"x","parameters":[],
+                "registers":[
+                    {"name":"x","len":1,"shape":[1]},
+                    {"name":"y","len":1,"shape":[1]},
+                    {"name":"bank","len":1,"shape":[1]}
+                ],
+                "instructions":[
+                    {"op":"memory_alloc","out":"bank","slots":1,"width":1},
+                    instruction,
+                    {"op":"return","value":"y"}
+                ]
+            })).unwrap();
+            let error = AdaptiveSession::prepare(program, 65536).err().unwrap();
+            assert!(error.to_string().contains("memory handle cannot be used as a tensor: bank"), "{operand}: {error:#}");
+        }
+    }
+}
+
+#[test]
 fn training_export_and_adam_resume_preserve_memory_semantics() {
     let mut s = session(MODEL);
     s.set_optimizer(Optimizer::Adam).unwrap();
@@ -245,8 +279,8 @@ fn script_execution_charges_shared_budget_and_reports_resources() {
         let p=execution_resume(m,1);
         while !p[\"done\"] {{p=execution_resume(m,1);}}
         let after=compute_status();
-        assert(before[\"work_remaining\"]-after[\"work_remaining\"]==p[\"work\"],\"work not charged\");
-        assert(p[\"output\"]==m([1,2]),\"resume mismatch\");
+        assert before[\"work_remaining\"]-after[\"work_remaining\"]==p[\"work\"],\"work not charged\";
+        assert p[\"output\"]==m([1,2]),\"resume mismatch\";
         return p[\"peak_memory_bytes\"];
     }}");
     assert_eq!(
@@ -333,11 +367,11 @@ fn main() {{
     let m=Memory(\"none\");
     let before=compute_status();
     let result=compute_scope(\"limited\",[m],[1000,65536,5,60000,0,0,0,0,0]);
-    assert(!result[\"ok\"],\"budget exhaustion should fail\");
-    assert(result[\"work\"]>=5,\"failed work must be charged\");
+    assert !result[\"ok\"],\"budget exhaustion should fail\";
+    assert result[\"work\"]>=5,\"failed work must be charged\";
     let after=compute_status();
-    assert(after[\"work_remaining\"]<before[\"work_remaining\"],\"scope refunded work\");
-    assert(!execution_cancel(m),\"failed execution still active\");
+    assert after[\"work_remaining\"]<before[\"work_remaining\"],\"scope refunded work\";
+    assert !execution_cancel(m),\"failed execution still active\";
     execution_start(m,[1,2],1000,65536);
     let progress=execution_resume(m,100);
     return progress[\"done\"];

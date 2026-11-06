@@ -173,6 +173,7 @@
   ],
   "intrinsics": [
     "add",
+    "avg_pool2d",
     "batch_matmul",
     "clip",
     "conv",
@@ -185,6 +186,7 @@
     "log",
     "log_softmax",
     "matmul",
+    "max_pool2d",
     "mean",
     "memory_alloc",
     "memory_free",

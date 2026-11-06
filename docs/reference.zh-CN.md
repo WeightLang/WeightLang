@@ -52,7 +52,7 @@ Rust facade 通过 IPC 连接机器级 `wgtime` 服务，由服务持有模型�
 
 ## 无需 import 的内置入口
 
-旧 `std/prelude.wgt` 用户声明源已移除。当前 [language/prelude.json](../language/prelude.json) 是运行时 registry 与编辑器使用的过渡内部目录；不要将其视为新的用户声明入口或稳定公开 API。`language/prelude_metadata.json` 保留语法、类型、常量及内部 lowering 元数据。模型纯张量模块包括 `std/activation`、`std/loss`、`std/attention` 和 `std/numerics`；详细边界见[模型内部标准库](standard-library.md)。
+旧 `std/prelude.wgt` 用户声明源已移除。当前 [language/prelude.json](../language/prelude.json) 统一保存运行时注册、纯算子校验和编辑器使用的内部目录，包含语法、类型、常量及内部 lowering 元数据；它不提供新的用户声明入口或稳定公开 API。纯张量函数的 `operator_arity` 和名称保留标记由同一目录提供，普通函数的参数数量与默认值独立登记；维护与校验方式见[内部内置目录](prelude.md)。模型纯张量模块包括 `std/activation`、`std/loss`、`std/attention` 和 `std/numerics`；详细边界见[模型内部标准库](standard-library.md)。
 `ordinary_function` 供解释与 AOT 共用；`tensor_forward` / `tensor_loss` 是独立张量转换契约，
 不能因名字出现在目录中就用于普通函数。`write` 等标注为语句，`positive` 只用于张量条件。
 目录也列出 `true`、`false`、`null` 常量及 `f32`、`prob`、`logits`、`probabilities` 声明类型；这些不是可调用函数。
@@ -511,7 +511,7 @@ WGT 0.5 提供 `device_submit(model,input,alias)`、`device_wait(alias,job,timeo
 WGT 0.5 新增 `rsqrt(x)`、`fma(x,y,z)`、`hypot(x,y)`、`expm1(x)`、
 `log1p(x)`、`sigmoid(x)`、`softplus(x)`、`silu(x)`，全部参数必填且为有限 f64。
 原生直接调用、解释/AOT 共用实现；不表示同名图算子或张量自动微分已支持。
-完整签名与上下文以 [std/prelude.wgt](../std/prelude.wgt) 为准；这些普通函数无需导入，不表示 forward/loss 支持同名张量计算。模块边界见[标准库](standard-library.md)。
+完整签名与上下文以 [language/prelude.json](../language/prelude.json) 和对应原生实现为准；这些普通函数无需导入，不表示 forward/loss 支持同名张量计算。模块边界见[标准库](standard-library.md)。
 
 向量标准库新增 `dot(x,y)`、`norm(x)`、`mean(x)`、`softmax(x)`、
 `log_softmax(x)`、`logsumexp(x)`、`l2_normalize(x,eps)`、`mse(x,y)`、

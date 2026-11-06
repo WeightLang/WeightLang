@@ -196,7 +196,7 @@ output y: f32[1]
 fn forward(x) {
     let left: f32[batch=2, rows=2, inner=3] = x[0:12];
     let transposed = permute(left,[batch,inner,rows]);
-    let right: f32[batch=2, inner=2, cols=2] = x[12:20];
+    let right: f32[batch=2, rows=2, cols=2] = x[12:20];
     let product = batch_matmul(transposed,right);
     return product.mean;
 }
@@ -229,6 +229,7 @@ fn forward(x) {
     let flat: f32[6] = normalized;
     return flat;
 }
+
 "#;
     let ModelPlan::Forward(program) = ModelDefinition::parse(source)
         .unwrap()
@@ -242,4 +243,22 @@ fn forward(x) {
     let output = compiled.run(&input, &[&[1.,1.,1.], &[0.,0.,0.]]).unwrap();
     assert_eq!(output.len(), 6);
     assert!(output.iter().all(|value| value.is_finite()));
+}
+
+#[test]
+fn tensor_instruction_versions_are_checked_by_both_backends() {
+    let source = "wgt 0.5\nmodel VersionedPool\ninput x: f32[4]\noutput y: f32[1]\nfn forward(x) { let image=reshape(x,[1,2,2]); let pooled=max_pool2d(image,[2,2],[1,1]); return reshape(pooled,[1]); }\n";
+    let program = wgt_language::adaptive::parse(source).unwrap();
+    for version in [1, 2] {
+        let mut old = program.clone();
+        old.version = version;
+        let interpreter = wgtime_core::adaptive::AdaptiveSession::prepare(old.clone(), 65536).err().unwrap();
+        let compiled = CompiledForward::compile(&old, 65536).err().unwrap();
+        assert!(interpreter.to_string().contains("IR version 3"));
+        assert!(compiled.to_string().contains("IR version 3"));
+    }
+    let mut interpreter = wgtime_core::adaptive::AdaptiveSession::prepare(program.clone(), 65536).unwrap();
+    let mut compiled = CompiledForward::compile(&program, 65536).unwrap();
+    assert_eq!(interpreter.evaluate(&[1., 3., 4., 2.], 1000).unwrap(), [4.]);
+    assert_eq!(compiled.run(&[1., 3., 4., 2.], &[]).unwrap(), [4.]);
 }

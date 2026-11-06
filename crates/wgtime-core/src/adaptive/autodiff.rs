@@ -69,12 +69,12 @@ enum Edge {
 
 struct Node {
     value: Vec<f32>,
-    gradient: Vec<f32>,
     edge: Edge,
 }
 
 pub(super) struct Tape {
     nodes: Vec<Node>,
+    gradients: Vec<Vec<f32>>,
     registers: Vec<Option<usize>>,
     parameters: Vec<usize>,
     memories: Vec<Option<usize>>,
@@ -86,6 +86,7 @@ impl Tape {
     fn new(session: &AdaptiveSession, input: &[f32], budget: usize) -> Result<Self> {
         let mut tape = Self {
             nodes: Vec::new(),
+            gradients: Vec::new(),
             registers: vec![None; session.registers.len()],
             parameters: Vec::new(),
             memories: vec![None; session.registers.len()],
@@ -118,11 +119,8 @@ impl Tape {
         copy.copy_from_slice(value);
         let gradient = crate::zero_buffer(value.len())?;
         let id = self.nodes.len();
-        self.nodes.push(Node {
-            value: copy,
-            gradient,
-            edge,
-        });
+        self.nodes.push(Node { value: copy, edge });
+        self.gradients.push(gradient);
         self.bytes = bytes;
         Ok(id)
     }
@@ -349,12 +347,12 @@ impl ForwardPass {
     }
     pub fn input_gradient(&self) -> Result<&[f32]> {
         ensure!(self.differentiated, "backward has not succeeded");
-        Ok(&self.tape.nodes[0].gradient)
+        Ok(&self.tape.gradients[0])
     }
     pub fn parameter_gradient(&self, name: &str) -> Result<&[f32]> {
         ensure!(self.differentiated, "backward has not succeeded");
         let id = *self.initial.get(name).context("unknown parameter")?;
-        Ok(&self.tape.nodes[id].gradient)
+        Ok(&self.tape.gradients[id])
     }
 
     /// Differentiate output and optional final-state cotangents with respect to
@@ -383,23 +381,23 @@ impl ForwardPass {
                 "invalid state gradient: {name}"
             );
         }
-        for node in &mut self.tape.nodes {
-            node.gradient.fill(0.);
+        for gradient in &mut self.tape.gradients {
+            gradient.fill(0.);
         }
-        self.tape.nodes[self.output]
-            .gradient
-            .copy_from_slice(output_gradient);
+        self.tape.gradients[self.output].copy_from_slice(output_gradient);
         for (name, seed) in state_gradients {
             let id = self.final_state[name];
-            for (dst, src) in self.tape.nodes[id].gradient.iter_mut().zip(seed) {
+            for (dst, src) in self.tape.gradients[id].iter_mut().zip(seed) {
                 *dst += src;
             }
         }
         for index in (0..self.tape.nodes.len()).rev() {
-            let (before, rest) = self.tape.nodes.split_at_mut(index);
+            let (before, rest) = self.tape.nodes.split_at(index);
             let node = &rest[0];
+            let (gradients, rest_gradients) = self.tape.gradients.split_at_mut(index);
+            let gradient = &rest_gradients[0];
             // Dead paths must not evaluate 0 * overflow in a derivative formula.
-            if node.gradient.iter().all(|g| *g == 0.) {
+            if gradient.iter().all(|g| *g == 0.) {
                 continue;
             }
             match node.edge {
@@ -407,12 +405,12 @@ impl ForwardPass {
                 Edge::MemoryRead { memory, address } => {
                     let width = node.value.len();
                     for i in 0..before[address].value.len() {
-                        for (j, g) in node.gradient.iter().enumerate() {
+                        for (j, g) in gradient.iter().enumerate() {
                             let index = i * width + j;
                             let a = before[address].value[i];
                             let m = before[memory].value[index];
-                            before[address].gradient[i] += g * m;
-                            before[memory].gradient[index] += g * a;
+                            gradients[address][i] += g * m;
+                            gradients[memory][index] += g * a;
                         }
                     }
                 }
@@ -422,42 +420,42 @@ impl ForwardPass {
                     value,
                 } => {
                     let width = before[value].value.len();
-                    for (index, g) in node.gradient.iter().enumerate() {
+                    for (index, g) in gradient.iter().enumerate() {
                         let i = index / width;
                         let j = index % width;
                         let a = before[address].value[i];
                         let m = before[memory].value[index];
                         let v = before[value].value[j];
-                        before[memory].gradient[index] += g * (1. - a);
-                        before[address].gradient[i] += g * (v - m);
-                        before[value].gradient[j] += g * a;
+                        gradients[memory][index] += g * (1. - a);
+                        gradients[address][i] += g * (v - m);
+                        gradients[value][j] += g * a;
                     }
                 }
                 Edge::Mean { x } => {
-                    let g = node.gradient[0] / before[x].value.len() as f32;
-                    for v in &mut before[x].gradient {
+                    let g = gradient[0] / before[x].value.len() as f32;
+                    for v in &mut gradients[x] {
                         *v += g;
                     }
                 }
                 Edge::Linear { x, w, b } => {
                     let width = before[x].value.len();
-                    for (row, &g) in node.gradient.iter().enumerate() {
+                    for (row, &g) in gradient.iter().enumerate() {
                         if g == 0. {
                             continue;
                         }
                         for col in 0..width {
                             let xv = before[x].value[col];
                             let wv = before[w].value[row * width + col];
-                            before[x].gradient[col] += g * wv;
-                            before[w].gradient[row * width + col] += g * xv;
+                            gradients[x][col] += g * wv;
+                            gradients[w][row * width + col] += g * xv;
                         }
                         if let Some(b) = b {
-                            before[b].gradient[row] += g;
+                            gradients[b][row] += g;
                         }
                     }
                 }
                 Edge::Binary { a, b, mul } => {
-                    for (i, &g) in node.gradient.iter().enumerate() {
+                    for (i, &g) in gradient.iter().enumerate() {
                         if g == 0. {
                             continue;
                         }
@@ -466,22 +464,22 @@ impl ForwardPass {
                         } else {
                             (1., 1.)
                         };
-                        before[a].gradient[i] += g * da;
-                        before[b].gradient[i] += g * db;
+                        gradients[a][i] += g * da;
+                        gradients[b][i] += g * db;
                     }
                 }
                 Edge::Conv { x,k,b,g } => {
-                    for (i,&dy) in node.gradient.iter().enumerate() {
-                        before[b].gradient[i/g.output_volume()]+=dy;
+                    for (i,&dy) in gradient.iter().enumerate() {
+                        gradients[b][i/g.output_volume()]+=dy;
                         g.pairs(i,|xi,ki| {
                             let xv=before[x].value[xi];let kv=before[k].value[ki];
-                            before[x].gradient[xi]+=dy*kv;
-                            before[k].gradient[ki]+=dy*xv;
+                            gradients[x][xi]+=dy*kv;
+                            gradients[k][ki]+=dy*xv;
                         });
                     }
                 },
                 Edge::MaxPool2d { x, g } => {
-                    for (i, &dy) in node.gradient.iter().enumerate() {
+                    for (i, &dy) in gradient.iter().enumerate() {
                         let mut maximum = f32::NEG_INFINITY;
                         let mut selected = None;
                         g.visit(i, |index| {
@@ -492,21 +490,21 @@ impl ForwardPass {
                             }
                         });
                         if let Some(index) = selected {
-                            before[x].gradient[index] += dy;
+                            gradients[x][index] += dy;
                         }
                     }
                 },
                 Edge::AvgPool2d { x, g } => {
                     let share = 1.0 / g.window_len() as f32;
-                    for (i, &dy) in node.gradient.iter().enumerate() {
-                        g.visit(i, |index| before[x].gradient[index] += dy * share);
+                    for (i, &dy) in gradient.iter().enumerate() {
+                        g.visit(i, |index| gradients[x][index] += dy * share);
                     }
                 },
                 Edge::Matmul { a,b,m,k,n } => {
                     for i in 0..m { for j in 0..n { for q in 0..k {
-                        let g = node.gradient[i*n+j];
-                        before[a].gradient[i*k+q] += g * before[b].value[q*n+j];
-                        before[b].gradient[q*n+j] += g * before[a].value[i*k+q];
+                        let g = gradient[i*n+j];
+                        gradients[a][i*k+q] += g * before[b].value[q*n+j];
+                        gradients[b][q*n+j] += g * before[a].value[i*k+q];
                     } } }
                 },
                 Edge::BatchMatmul { a,b,batch,m,k,n } => {
@@ -515,19 +513,19 @@ impl ForwardPass {
                         let b_base = batch_index * k * n;
                         let out_base = batch_index * m * n;
                         for i in 0..m { for j in 0..n { for q in 0..k {
-                            let g = node.gradient[out_base+i*n+j];
-                            before[a].gradient[a_base+i*k+q] += g * before[b].value[b_base+q*n+j];
-                            before[b].gradient[b_base+q*n+j] += g * before[a].value[a_base+i*k+q];
+                            let g = gradient[out_base+i*n+j];
+                            gradients[a][a_base+i*k+q] += g * before[b].value[b_base+q*n+j];
+                            gradients[b][b_base+q*n+j] += g * before[a].value[a_base+i*k+q];
                         } } }
                     }
                 },
                 Edge::Transpose { x,m,n } => {
-                    for i in 0..m { for j in 0..n { before[x].gradient[i*n+j] += node.gradient[j*m+i]; } }
+                    for i in 0..m { for j in 0..n { gradients[x][i*n+j] += gradient[j*m+i]; } }
                 },
                 Edge::Permute { x,input_shape,axes,rank } => {
                     let mut output_shape = [1usize; 8];
                     for axis in 0..rank { output_shape[axis] = input_shape[axes[axis]]; }
-                    for output_index in 0..node.gradient.len() {
+                    for output_index in 0..gradient.len() {
                         let mut remainder = output_index;
                         let mut output_coords = [0usize; 8];
                         let mut input_coords = [0usize; 8];
@@ -538,19 +536,23 @@ impl ForwardPass {
                         for axis in 0..rank { input_coords[axes[axis]] = output_coords[axis]; }
                         let mut input_index = 0usize;
                         for axis in 0..rank { input_index = input_index * input_shape[axis] + input_coords[axis]; }
-                        before[x].gradient[input_index] += node.gradient[output_index];
+                        gradients[x][input_index] += gradient[output_index];
                     }
                 },
                 Edge::LayerNorm { x,gamma,beta,groups,epsilon } => {
-                    groups.layer_norm_vjp(&before[x].value,&before[gamma].value,&node.gradient,epsilon,
-                        &mut before[x].gradient,&mut before[gamma].gradient,&mut before[beta].gradient)?;
+                    groups.layer_norm_vjp(&before[x].value, &before[gamma].value, gradient, epsilon,
+                        |index, axis, dx, dgamma, dbeta| {
+                            gradients[x][index] += dx;
+                            gradients[gamma][axis] += dgamma;
+                            gradients[beta][axis] += dbeta;
+                        })?;
                 },
-                Edge::SoftmaxAxis { x,groups } => groups.softmax_vjp(&node.value,&node.gradient,&mut before[x].gradient),
+                Edge::SoftmaxAxis { x,groups } => groups.softmax_vjp(&node.value,&gradient,&mut gradients[x]),
                 Edge::Scale { x,factor } => {
-                    for (i,g) in node.gradient.iter().enumerate() { before[x].gradient[i] += g * factor; }
+                    for (i,g) in gradient.iter().enumerate() { gradients[x][i] += g * factor; }
                 },
                 Edge::Minimum { a, b } => {
-                    for (i, &g) in node.gradient.iter().enumerate() {
+                    for (i, &g) in gradient.iter().enumerate() {
                         let (av, bv) = (before[a].value[i], before[b].value[i]);
                         let da = if av < bv {
                             1.
@@ -559,43 +561,42 @@ impl ForwardPass {
                         } else {
                             0.5
                         };
-                        before[a].gradient[i] += g * da;
-                        before[b].gradient[i] += g * (1. - da);
+                        gradients[a][i] += g * da;
+                        gradients[b][i] += g * (1. - da);
                     }
                 }
                 Edge::Clip { x, low, high } => {
-                    for (i, &g) in node.gradient.iter().enumerate() {
+                    for (i, &g) in gradient.iter().enumerate() {
                         if before[x].value[i] > low && before[x].value[i] < high {
-                            before[x].gradient[i] += g;
+                            gradients[x][i] += g;
                         }
                     }
                 }
                 Edge::Sum { x } => {
-                    for g in &mut before[x].gradient {
-                        *g += node.gradient[0];
+                    for g in &mut gradients[x] {
+                        *g += gradient[0];
                     }
                 }
                 Edge::Unary { x, kind } => {
                     if kind == 8 {
-                        let sum: f32 = node.gradient.iter().sum();
-                        for (i, &g) in node.gradient.iter().enumerate() {
-                            before[x].gradient[i] += g - node.value[i].exp() * sum;
+                        let sum: f32 = gradient.iter().sum();
+                        for (i, &g) in gradient.iter().enumerate() {
+                            gradients[x][i] += g - node.value[i].exp() * sum;
                         }
                         continue;
                     }
                     if kind == 3 {
-                        let dot: f32 = node
-                            .gradient
+                        let dot: f32 = gradient
                             .iter()
                             .zip(&node.value)
                             .map(|(g, y)| g * y)
                             .sum();
-                        for (i, &g) in node.gradient.iter().enumerate() {
-                            before[x].gradient[i] += node.value[i] * (g - dot);
+                        for (i, &g) in gradient.iter().enumerate() {
+                            gradients[x][i] += node.value[i] * (g - dot);
                         }
                         continue;
                     }
-                    for (i, &g) in node.gradient.iter().enumerate() {
+                    for (i, &g) in gradient.iter().enumerate() {
                         if g == 0. {
                             continue;
                         }
@@ -615,36 +616,33 @@ impl ForwardPass {
                                 }
                             }
                         };
-                        before[x].gradient[i] += g * derivative;
+                        gradients[x][i] += g * derivative;
                     }
                 }
                 Edge::Blend { p, a, b } => {
-                    for (i, &g) in node.gradient.iter().enumerate() {
+                    for (i, &g) in gradient.iter().enumerate() {
                         if g == 0. {
                             continue;
                         }
                         let j = if before[p].value.len() == 1 { 0 } else { i };
                         let probability = before[p].value[j];
                         let other = b.map_or(0., |b| before[b].value[i]);
-                        before[p].gradient[j] += g * (before[a].value[i] - other);
-                        before[a].gradient[i] += g * probability;
+                        gradients[p][j] += g * (before[a].value[i] - other);
+                        gradients[a][i] += g * probability;
                         if let Some(b) = b {
-                            before[b].gradient[i] += g * (1. - probability);
+                            gradients[b][i] += g * (1. - probability);
                         }
                     }
                 }
                 Edge::Slice { x, start } => {
-                    for (i, &g) in node.gradient.iter().enumerate() {
-                        before[x].gradient[start + i] += g;
+                    for (i, &g) in gradient.iter().enumerate() {
+                        gradients[x][start + i] += g;
                     }
                 }
             }
         }
         ensure!(
-            self.tape
-                .nodes
-                .iter()
-                .all(|n| n.gradient.iter().all(|g| g.is_finite())),
+            self.tape.gradients.iter().flatten().all(|g| g.is_finite()),
             "nonfinite gradient"
         );
         self.differentiated = true;

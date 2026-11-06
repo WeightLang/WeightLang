@@ -186,13 +186,14 @@ impl Trainer {
         let next_step = self.steps.checked_add(1).context("strategy step overflow")?;
         let next_revision = self.session.revision.checked_add(1).context("revision overflow")?;
         let (loss, gradients) = self.gradients(inputs, objective)?;
+        let names = self.session.parameter_names();
         let parameters = self.session.parameters.iter().enumerate().map(|(i, p)| {
             let values = match &p.storage {
                 Storage::Resident(values) => values.to_vec(),
                 _ => Vec::new(),
             };
             ParameterGradient {
-                name: p.name.clone(),
+                name: names[i].to_owned(),
                 shape: p.shape.clone(),
                 values,
                 gradients: gradients.get(i).cloned().unwrap_or_default(),
@@ -220,10 +221,11 @@ impl Trainer {
                 );
             }
         }
-        // All fallible validation has completed. Commit the full candidate set.
         for (parameter, candidate) in self.session.parameters.iter_mut().zip(candidates) {
             if !parameter.frozen {
-                parameter.storage = Storage::Resident(candidate.into_boxed_slice());
+                if let Storage::Resident(values) = &mut parameter.storage {
+                    values.copy_from_slice(&candidate);
+                }
             }
         }
         self.steps = next_step;
@@ -361,10 +363,7 @@ impl Trainer {
     }
 
     pub fn snapshot(&mut self) -> Result<Model> {
-        let mut names = vec![String::new(); self.session.parameters.len()];
-        for (name, &index) in &self.session.names {
-            names[index] = name.clone();
-        }
+        let names: Vec<_> = self.session.parameter_names().into_iter().map(str::to_owned).collect();
         let mut parameters = Vec::new();
         for i in 0..names.len() {
             let p = &self.session.parameters[i];

@@ -291,3 +291,83 @@ fn forward(x) {
     assert!(program.instructions.iter().any(|instruction|
         matches!(instruction, wgt_language::adaptive::Instruction::LayerNorm { axis: 1, .. })));
 }
+
+#[test]
+fn pure_helpers_compose_batched_geometry_and_layer_norm() {
+    let source = r#"wgt 0.5
+model GeometryHelper
+input x: f32[8]
+output y: f32[2]
+parameter gamma: f32[2] = [1,1]
+parameter beta: f32[2] = [0,0]
+fn transform(left,right,gamma,beta) {
+    let product = batch_matmul(left,right);
+    let reordered = permute(product,[1,0,2]);
+    return layer_norm(reordered,gamma,beta,1,0.0001);
+}
+fn forward(x) {
+    # Two independent batches each contract two features into one value.
+    let left: f32[batch=2, row=1, feature=2] = x[0:4];
+    let right: f32[batch=2, feature=2, column=1] = x[4:8];
+    return reshape(transform(left,right,gamma,beta),[2]);
+}
+"#;
+    let definition = wgt_language::model::ModelDefinition::parse(source).unwrap();
+    let wgt_language::model::ModelPlan::Forward(program) = definition.instantiate_plan().unwrap() else {
+        panic!("expected tensor forward");
+    };
+    use wgt_language::adaptive::Instruction;
+    assert!(program.instructions.iter().any(|i| matches!(i, Instruction::BatchMatmul { .. })));
+    assert!(program.instructions.iter().any(|i| matches!(i, Instruction::Permute { axes, .. } if axes == &[1,0,2])));
+    assert!(program.instructions.iter().any(|i| matches!(i, Instruction::LayerNorm { axis: 1, .. })));
+}
+
+#[test]
+fn pure_helpers_lower_pooling_and_softmax_overloads() {
+    let source = r#"wgt 0.5
+model PoolHelper
+input x: f32[4]
+output y: f32[1]
+fn pool(image) {
+    let maximum = max_pool2d(image,[2,2],[1,1]);
+    let average = avg_pool2d(image,[2,2],[1,1]);
+    return maximum + average;
+}
+fn normalize(x) {
+    return softmax(softmax(x),0);
+}
+fn forward(x) {
+    # Pool one channel over its entire 2 x 2 spatial extent.
+    let image: f32[channel=1, height=2, width=2] = x;
+    return normalize(reshape(pool(image),[1]));
+}
+"#;
+    let definition = wgt_language::model::ModelDefinition::parse(source).unwrap();
+    let wgt_language::model::ModelPlan::Forward(program) = definition.instantiate_plan().unwrap() else {
+        panic!("expected tensor forward");
+    };
+    use wgt_language::adaptive::Instruction;
+    assert!(program.instructions.iter().any(|i| matches!(i, Instruction::MaxPool2d { .. })));
+    assert!(program.instructions.iter().any(|i| matches!(i, Instruction::AvgPool2d { .. })));
+}
+
+#[test]
+fn pure_helper_contracts_reject_wrong_arity_and_stateful_calls() {
+    for call in [
+        "permute(x)",
+        "batch_matmul(x)",
+        "layer_norm(x,x,x,0)",
+        "max_pool2d(x,[2,2])",
+        "avg_pool2d(x,[2,2],[1,1],0)",
+        "softmax(x,0,0)",
+    ] {
+        let source = format!("wgt 0.5\noperators Contract\nfn helper(x) {{ return {call}; }}");
+        let error = wgt_language::script::operators::library(&source).unwrap_err();
+        assert!(error.to_string().contains("tensor primitive arity mismatch"), "{call}: {error:#}");
+    }
+    for call in ["read(x)", "linear(x,x)", "memory_read(x,x)", "write(x,x)"] {
+        let source = format!("wgt 0.5\noperators Contract\nfn helper(x) {{ return {call}; }}");
+        let error = wgt_language::script::operators::library(&source).unwrap_err();
+        assert!(error.to_string().contains("not a pure operator"), "{call}: {error:#}");
+    }
+}

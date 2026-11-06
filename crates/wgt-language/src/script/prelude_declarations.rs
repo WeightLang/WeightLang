@@ -1,4 +1,4 @@
-//! Restricted, inert native declaration frontend, shared by build and `wgt check`.
+//! Restricted, inert reader retained for explicitly supplied native declaration contracts.
 use serde_json::{json, Map, Value};
 
 pub fn parse(source: &str) -> Result<Vec<Value>, String> {
@@ -141,7 +141,7 @@ pub fn validate(source: &str, catalog: &str) -> Result<(), String> {
         .cloned()
         .collect();
     if declarations != public {
-        return Err("stale prelude catalog; run node scripts/generate_prelude.cjs".into());
+        return Err("native declarations do not match the supplied catalog".into());
     }
     Ok(())
 }
