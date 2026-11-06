@@ -1,5 +1,5 @@
 //! Native directory packages and inference-only export. Never executes WGT source.
-use crate::package_artifact::{Info, NATIVE_FORMAT};
+use crate::package_artifact::{publish_native_payloads, Info, NATIVE_FORMAT};
 use anyhow::{ensure, Context, Result};
 use std::{fs, path::Path};
 
@@ -90,17 +90,7 @@ pub fn package(input: &Path, output: &Path) -> Result<()> {
     verified(stage.path())?;
     // Reserve without overwriting even if another writer won after destination().
     fs::create_dir(output).context("reserve package output without overwriting")?;
-    let publish = (|| -> Result<()> {
-        for name in info.files().iter().filter(|name| **name != "manifest.json") {
-            fs::hard_link(stage.path().join(name), output.join(name))?;
-        }
-        // The manifest is the completion marker and is published last.
-        fs::hard_link(
-            stage.path().join("manifest.json"),
-            output.join("manifest.json"),
-        )?;
-        Ok(())
-    })();
+    let publish = publish_native_payloads(stage.path(), output);
     // Preserve a partial publication for diagnosis; never delete another writer's files.
     publish
         .context("publish native package (a failed partial directory has no completion manifest)")

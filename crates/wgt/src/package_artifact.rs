@@ -9,12 +9,28 @@ use std::{fs, path::Path};
 pub const NATIVE_FORMAT: &str = "weightlang.native-build.v1";
 pub const OPERATOR_FORMAT: &str = "weightlang.operators.v1";
 pub const OPERATOR_FILES: [&str; 2] = ["manifest.json", "source.wgt"];
+pub const NATIVE_PAYLOADS: [(&str, &str); 3] = [
+    ("model", "model.json"),
+    ("checkpoint", "checkpoint.json"),
+    ("source", "source.wgt"),
+];
 pub const NATIVE_FILES: [&str; 4] = [
     "manifest.json",
-    "model.json",
-    "checkpoint.json",
-    "source.wgt",
+    NATIVE_PAYLOADS[0].1,
+    NATIVE_PAYLOADS[1].1,
+    NATIVE_PAYLOADS[2].1,
 ];
+
+/// Publish into a caller-reserved directory without replacing any existing files.
+/// The manifest marks completion, so a failed payload leaves only partial output.
+pub fn publish_native_payloads(stage: &Path, output: &Path) -> Result<()> {
+    for (_, file) in NATIVE_PAYLOADS {
+        fs::hard_link(stage.join(file), output.join(file))?;
+    }
+    fs::hard_link(stage.join("manifest.json"), output.join("manifest.json"))?;
+    Ok(())
+}
+
 pub struct Info {
     pub name: String,
     pub source_hash: String,
@@ -79,11 +95,7 @@ impl Info {
         ensure!(m["edition"] == "0.5", "native package requires edition 0.5");
         let name = m["name"].as_str().context("native model name")?.to_string();
         ensure!(manifest::identifier(&name), "invalid native model name");
-        for (key, file) in [
-            ("model", "model.json"),
-            ("source", "source.wgt"),
-            ("checkpoint", "checkpoint.json"),
-        ] {
+        for (key, file) in NATIVE_PAYLOADS {
             ensure!(m[key] == file, "invalid native payload path");
             ensure!(
                 hash_file(&path.join(file))? == m[format!("{key}_sha256")],

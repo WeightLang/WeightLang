@@ -2,8 +2,11 @@
 use anyhow::{ensure, Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
+use weightlang_wgt::{
+    artifact::hash_file,
+    package_artifact::{publish_native_payloads, NATIVE_FORMAT, NATIVE_PAYLOADS},
+};
 use wgt_language::script;
 
 #[derive(Parser)]
@@ -113,34 +116,27 @@ fn main() -> Result<()> {
                 let input = build["input"].as_u64().context("missing input width")?;
                 let output_width = build["output"].as_u64().context("missing output width")?;
                 fs::write(stage.path().join("source.wgt"), &text)?;
-                let manifest = json!({
-                    "format": "weightlang.native-build.v1",
+                let mut manifest = json!({
+                    "format": NATIVE_FORMAT,
                     "name": text.lines().find_map(|l| l.split('#').next().unwrap_or("").trim().strip_prefix("model ")).map(str::trim).unwrap_or(source.file_stem().unwrap().to_str().context("UTF-8 model name")?),
                     "edition": "0.5",
-                    "checkpoint_sha256": format!("{:x}", Sha256::digest(fs::read(stage.path().join("checkpoint.json"))?)),
                     "compiler_version": env!("CARGO_PKG_VERSION"),
-                    "model": "model.json", "checkpoint": "checkpoint.json", "source": "source.wgt",
-                    "source_sha256": format!("{:x}", Sha256::digest(text.as_bytes())),
-                    "model_sha256": format!("{:x}", Sha256::digest(fs::read(stage.path().join("model.json"))?)),
                     "training_steps": steps,
                     "interface": {"input": {"dtype": "f32", "shape": [input]},
                                   "output": {"dtype": "f32", "shape": [output_width]}},
                     "state": if steps > 0 { "updated" } else { "initialized" },
                     "max_operations": max_operations, "report": report
                 });
+                for (key, file) in NATIVE_PAYLOADS {
+                    manifest[key] = json!(file);
+                    manifest[format!("{key}_sha256")] = json!(hash_file(&stage.path().join(file))?);
+                }
                 fs::write(
                     stage.path().join("manifest.json"),
                     serde_json::to_vec_pretty(&manifest)?,
                 )?;
                 // Manifest is the completion marker; publish it after every required payload.
-                for name in [
-                    "model.json",
-                    "checkpoint.json",
-                    "source.wgt",
-                    "manifest.json",
-                ] {
-                    fs::hard_link(stage.path().join(name), output.join(name))?;
-                }
+                publish_native_payloads(stage.path(), &output)?;
                 Ok(manifest)
             })();
             match result {
