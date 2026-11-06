@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
-const {chromium} = await import(pathToFileURL(process.env.WEIGHTLANG_PLAYWRIGHT));
-const browser = await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
-const page = await browser.newPage({viewport:{width:1440,height:1000}});
-const errors=[];page.on('pageerror',e=>errors.push(e.message));
-const viewer = (fn, arg) => page.evaluate(fn, arg);
-try {
+import {withBrowser} from './support/browser.mjs';
+await withBrowser(async page => {
+ const viewer = (fn, arg) => page.evaluate(fn, arg);
  // Usage: node test/interaction.browser.mjs DIR, where DIR holds tiny_transformer.html.
  await page.goto(pathToFileURL(resolve(process.argv[2],'tiny_transformer.html')).href);
  await page.waitForSelector('.wl-node');
@@ -91,6 +88,5 @@ try {
  await page.setViewportSize({width:390,height:844});
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  assert.equal(await page.locator('.wl-error').textContent(),'');
- assert.deepEqual(errors,[]);
- console.log('PASS: categories, search, edge emphasis, neighbour links, arrow navigation, zoom, LR layout, selectNode expansion, SVG/PNG export, custom layout, mobile');
-} finally {await browser.close();}
+});
+console.log('PASS: categories, search, edge emphasis, neighbour links, arrow navigation, zoom, LR layout, selectNode expansion, SVG/PNG export, custom layout, mobile');

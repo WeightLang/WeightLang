@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
-const {chromium} = await import(pathToFileURL(process.env.WEIGHTLANG_PLAYWRIGHT));
-const browser = await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
-const page = await browser.newPage({viewport:{width:1440,height:1000}});
-const errors=[];page.on('pageerror',e=>errors.push(e.message));
-try {
+import {withBrowser} from './support/browser.mjs';
+await withBrowser(async page => {
  for (const model of ['xor_mlp','tiny_cnn','tiny_transformer','sequence_classifier']) {
   await page.goto(pathToFileURL(resolve(process.argv[2],model+'.html')).href);
   await page.waitForSelector('.wl-node');
@@ -38,6 +35,5 @@ try {
    await page.screenshot({path:resolve(process.argv[2],'transformer.png'),fullPage:true});
   }
  }
- assert.deepEqual(errors,[]);
- console.log('PASS: four architectures, overview/detail, module explanation, recurrent edges, parameter selection, mobile width, no JS errors');
-} finally {await browser.close();}
+});
+console.log('PASS: four architectures, overview/detail, module explanation, recurrent edges, parameter selection, mobile width, no JS errors');

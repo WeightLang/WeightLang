@@ -43,7 +43,7 @@ jobs:
       - name: Check source execution regressions
         run: |
           cargo build --locked --no-default-features -p wgtime-core --example core-transport-test
-          cargo test --locked --no-default-features -p wgtime-core --test accelerator --test assert_syntax --test categorical --test collect_records --test compute --test file_syntax --test legacy_syntax --test model_calls --test native_testing --test postfix_mean --test ppo_records --test ppo_rollout --test ppo_typed --test sample_from --test sample_record --test slicing
+          cargo test --locked --no-default-features -p wgtime-core --test accelerator --test assert_syntax --test async_tasks --test categorical --test collect_records --test compute --test file_syntax --test legacy_syntax --test model_calls --test native_testing --test postfix_mean --test ppo_records --test ppo_rollout --test ppo_typed --test sample_from --test sample_record --test slicing
       - name: Check generated editor support
         run: node scripts/generate_editor_support.cjs --check
       - name: Check prelude catalog
@@ -77,7 +77,39 @@ jobs:
           WGTIME_TEST_DAEMON: ${{ github.workspace }}/target/debug/wgtime
         run: >-
           cargo test --locked --no-fail-fast -p weightlang-wgt
-          --test assert_syntax --test categorical_roundtrip --test cli_service
+          --test assert_syntax --test async_aot --test categorical_roundtrip --test cli_service
           --test client_compiler_boundaries --test lifecycle --test model_calls_aot
           --test native_testing --test postfix_mean --test ppo_typed --test script_compiler
           -- --include-ignored
+
+  editor-viewer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install editor and browser verification tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y vim neovim libxml2-utils
+          npm install --prefix "$RUNNER_TEMP/wgt-tools" tree-sitter-cli@0.26.9 playwright@1.62.1
+          "$RUNNER_TEMP/wgt-tools/node_modules/.bin/playwright" install --with-deps chromium
+          echo "$RUNNER_TEMP/wgt-tools/node_modules/.bin" >> "$GITHUB_PATH"
+          echo "WEIGHTLANG_PLAYWRIGHT=$RUNNER_TEMP/wgt-tools/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
+          chromium_path=$(node -e 'process.stdout.write(require(process.argv[1]).chromium.executablePath())' "$RUNNER_TEMP/wgt-tools/node_modules/playwright")
+          echo "CHROMIUM=$chromium_path" >> "$GITHUB_ENV"
+      - name: Verify editor sources and generated parser
+        run: |
+          npm run generate --prefix editors/tree-sitter-wgt
+          node scripts/test_editor_support.cjs
+          git diff --exit-code
+      - name: Check standalone viewer in Chromium
+        run: |
+          cargo build --locked -p weightlang-wgt --bin wgt
+          node web/viewer/test/support/artifact.cjs "$RUNNER_TEMP/viewer-artifact"
+          target/debug/wgt graph "$RUNNER_TEMP/viewer-artifact" --format html --stdout > "$RUNNER_TEMP/viewer.html"
+          node web/viewer/test/axes.browser.mjs "$RUNNER_TEMP/viewer.html"

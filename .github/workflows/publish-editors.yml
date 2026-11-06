@@ -66,6 +66,7 @@ jobs:
       - name: Verify highlighting and generated assets
         run: |
           node scripts/generate_editor_support.cjs --check
+          (cd editors/tree-sitter-wgt && tree-sitter generate --abi 14)
           npm test --prefix editors/vscode
           node scripts/test_editor_support.cjs
           git diff --exit-code
@@ -79,8 +80,19 @@ jobs:
           git archive --format=tar.gz --prefix="weightlang-editors-$VERSION/" \
             -o "dist/editor-release/weightlang-editors-$VERSION.tar.gz" HEAD \
             editors scripts/editor-templates scripts/generate_editor_support.cjs \
-            scripts/test_editor_support.cjs docs/editors.md
+            scripts/test_editor_support.cjs scripts/test_source_conformance.cjs \
+            language std packages examples docs/editors.md \
+            crates/wgt-language/src/source.rs crates/wgt-language/src/script/parse.rs \
+            crates/wgt-language/src/adaptive/source.rs crates/wgt/src/primitives.rs
           (cd dist/editor-release && sha256sum *.vsix *.tar.gz > SHA256SUMS)
+      - name: Verify the extracted editor source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive_check_dir=$(mktemp -d "$RUNNER_TEMP/wgt-editor-source-XXXXXX")
+          tar -xzf "dist/editor-release/weightlang-editors-$VERSION.tar.gz" -C "$archive_check_dir"
+          cd "$archive_check_dir/weightlang-editors-$VERSION"
+          node scripts/test_editor_support.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.RELEASE_TAG }}

@@ -603,8 +603,6 @@ impl Graph {
         let locales = serde_json::json!({
             "zh-CN": serde_json::from_str::<Value>(include_str!("../../../web/viewer/locales/zh-CN.json"))
                 .context("parse zh-CN viewer locale")?,
-            "en": serde_json::from_str::<Value>(include_str!("../../../web/viewer/locales/en.json"))
-                .context("parse English viewer locale")?,
         });
         let locales = serde_json::to_string(&locales)?.replace('<', "\\u003c");
         let css = include_str!("../../../web/viewer/viewer.css");

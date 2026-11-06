@@ -23,7 +23,7 @@ Client generation should follow ordinary function calls from its entrypoint. A s
 - Calls in conditions, unary expressions, assertions, tasks and other nested expressions can escape those walkers.
 - A helper used by both the client and a service strategy is removed even though the client needs it.
 
-One exhaustive dependency traversal should preserve shared helpers and named entrypoints without reproducing the service's strategy call graph.
+Generation itself records ordinary calls, and a deterministic worklist emits reachable functions. This preserves shared helpers and named entrypoints without adding another AST traversal or reproducing the service's strategy call graph.
 
 ### 3. Share synchronous and asynchronous expression semantics
 
@@ -91,7 +91,7 @@ One fixture should own Playwright loading, Chromium selection, page errors and c
 - Eight viewer browser scripts repeat setup and teardown.
 - Seven hardcode Chromium while one honors `CHROMIUM`.
 
-Run the existing browser scenarios through the common lifecycle; keep model-artifact preparation explicit.
+Route the existing browser scenarios through the common lifecycle; keep model-artifact preparation explicit. Run the axes, locale, theme and mobile assertions against a fresh standalone HTML file produced by the actual `wgt graph` command. The other model-specific scripts retain their existing assertions and fixture requirements.
 
 ### 10. Retain behavioral macro tests
 
@@ -101,6 +101,46 @@ Remove the macro unit test that asserts generated token spelling. Keep the real 
 
 The review retains transport poisoning versus complete application errors, descriptor consumption before metadata rejection, backend capabilities, atomic create versus explicit replacement, sampling versus ordinary writes, operation state versus persisted parameters, resource budgets, bounded readiness polling and public compatibility facades. CPU, packed and GPU arithmetic remain separate where their storage and execution requirements differ.
 
-## Verification
+## Implementation and review
 
-Use Rust/Cargo 1.99.0 with locked offline dependencies. Record workspace compilation, focused behavioral suites, generated metadata/editor checks, archive reproduction, viewer tests and independent final review against the published commits. New regression gates should run in CI. Claims about runtime behavior require executable evidence; compilation alone is recorded as compilation.
+The inventory was published before implementation in `caea8bc`. Operation storage bindings were published in `f876135`; persistence and resident strategy call identities followed in `584f72c`. Parallel changes on `main`, including `21b76f9` and `2f32461`, were integrated before the final verification. The changes retain the repository's migration direction: Rust owns application orchestration; improvements to existing WGT host paths do not restore them as the preferred application architecture.
+
+| Boundary | Result |
+| --- | --- |
+| Operation storage | One storage registry and prepared numeric bindings replace repeated name searches. Parameters form a distinct prefix; state remains excluded from weight export. Writes are validated before commit and revision advance. |
+| Client compilation | Ordinary calls are recorded by the shared expression emitter. A selected-entry worklist preserves recursive and shared helpers, and skips unreachable client code. |
+| Sync/async semantics | The shared emitter owns expression checks and diagnostics. Runtime borrowing, awaiting and unsupported asynchronous capabilities remain explicit. Core asynchronous builtin dispatch now follows the same binding rule. |
+| Service persistence | A private module owns bounded descriptor reads and empty staging-descriptor writes. Session admission and optimizer rules stay with their existing owners. |
+| Resident strategy | Registration binds typed builtin/helper targets. Evaluated boolean operands are checked; skipped branches remain lazy. Ordinary calls reject a shadowing non-callable local binding, while syntax-bound and static calls retain their fixed targets. |
+| Viewer translations | One bilingual catalog supplies both directions. Existing embedded English catalogs remain readable, and canonical catalog precedence is covered by tests. |
+| Editor conformance | Capture expectations live beside each source case. The generic runner checks them without fixture-ID branches. The stale generated Tree-sitter parser was regenerated so the existing `@` grammar is represented in shipped output. |
+| Editor distribution | The source archive contains generator and validation inputs. The release workflow validates the extracted archive before upload or publication. |
+| Browser tests | Eight scripts share browser lifecycle and page-error handling. A small artifact fixture exercises the real standalone graph renderer in the CI Chromium check. |
+| Macro tests | The generated-token spelling assertion was removed. Real renamed-crate compilation, transitive-source rebuild and raw-source escaping coverage remain. |
+
+Independent reviewers re-read the operation binding/transaction path, service persistence, strategy call rules, client generation and editor/viewer packaging. Their concrete follow-up findings were addressed rather than merely recorded:
+
+- Explicit syntax calls in the core async evaluator and generated async code were still using ordinary environment lookup. Their dispatch now matches synchronous evaluation.
+- An ordinary resident call could bypass a same-named local value. Interpreter-parity tests now cover builtin and helper shadowing, while loop-generated builtin calls and static strategy calls keep their intended targets.
+- A client could link imports but send its original, unlinked source to the resident strategy compiler. The client now rejects imports combined with a reachable static strategy call before invoking Cargo or creating an executable. Ordinary imported clients and unreachable strategy functions retain their existing compilation path. Linked resident strategy imports remain unsupported.
+- The editor grammar already described `@`, but checked-in generated parser files did not. Regeneration and a source/capture regression now make that drift visible.
+
+## Verification and scope
+
+Local Rust checks use Cargo/Rust 1.99.0, locked offline dependencies, two build jobs, and disabled dev/test debug information. Logs are retained under `.cache/weightlang/untangle-followup/`. This is focused verification of the changed boundaries, not certification of every repository feature or accelerator backend.
+
+| Check | Evidence |
+| --- | --- |
+| Complete workspace | `cargo check --workspace --all-targets --locked --offline` passes after integrating the current `main` and the final call/import boundary fixes. |
+| Operation storage | Six behavioral tests cover declaration order, state/parameter updates, rollback, revisions and export boundaries. |
+| Core async execution | Thirteen tests pass, including task behavior and the new explicit-builtin binding regression. |
+| Resident strategy | Eleven tests pass; one pre-existing, explicitly opt-in timing probe remains ignored. No performance result is claimed. |
+| Macro consumers | Seven tests pass, including renamed dependencies and rebuild after transitive WGT source changes. |
+| Client admission | Four boundary tests pass, including selected-entry reachability and early rejection of imported resident strategies without executable output. |
+| Generated clients | Eight native client executables compiled locally. Runtime acceptance is assigned to the real-service CI gate, not inferred from compilation. |
+| Viewer logic | Seventeen Node tests pass, including both translation directions and embedded-catalog precedence. |
+| Editor parsing | Twenty Tree-sitter corpus tests and 59 shared source-conformance cases pass. A deliberately wrong highlight expectation still fails after the case ID is changed. |
+| Editor archive | The extracted 105-file archive contains all nine declared generation inputs; generation checks and shared conformance pass. Three XML formats parse locally. The full editor runner requires CI's `xmllint`. |
+| Browser scripts | All eight scripts pass JavaScript syntax checking. Actual Chromium behavior is checked by the standalone-viewer CI job. |
+
+The local container rejects Unix-listener creation and Chromium socket creation with `EPERM`. Consequently, local service-launch failures are recorded as environment-blocked checks, not successes or silently skipped tests. The workflow now runs the resident strategy suite, actual macro consumers, async core/client regressions, full editor checks and a real standalone Chromium viewer check. Final CI results and the tested commit are recorded below after the run completes.

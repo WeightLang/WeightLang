@@ -1,14 +1,11 @@
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
-const {chromium} = await import(pathToFileURL(process.env.WEIGHTLANG_PLAYWRIGHT));
-const browser = await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
-const page = await browser.newPage({viewport:{width:1440,height:900}});
-const errors=[];page.on('pageerror',e=>errors.push(e.message));
-const viewer = (fn, arg) => page.evaluate(fn, arg);
-const zoom = () => viewer(()=>document.querySelector('weightlang-viewer').zoom);
-const scroll = () => page.locator('.wl-flow').evaluate(f=>[f.scrollLeft,f.scrollTop]);
-try {
+import {withBrowser} from './support/browser.mjs';
+await withBrowser(async page => {
+ const viewer = (fn, arg) => page.evaluate(fn, arg);
+ const zoom = () => viewer(()=>document.querySelector('weightlang-viewer').zoom);
+ const scroll = () => page.locator('.wl-flow').evaluate(f=>[f.scrollLeft,f.scrollTop]);
  // Usage: node test/canvas.browser.mjs DIR with CLI-generated tiny_transformer.html and sequence_classifier.html.
  await page.goto(pathToFileURL(resolve(process.argv[2],'tiny_transformer.html')).href);
  await page.waitForSelector('.wl-node');
@@ -88,6 +85,5 @@ try {
  assert.match(nested, /A GRU cell with reset applied before the candidate hidden projection/);
  assert.match(nested, /std\/recurrent\.wgt · L\d+/);
  assert.match(nested, /layer joined: concat\(input, state\)/);
- assert.deepEqual(errors, []);
- console.log('PASS: two-line title, centered fit, wheel zoom, free drag pan, double-click fit, node drag with re-routed edges, reset layout, model/block/nested source comments');
-} finally {await browser.close();}
+}, {viewport: {width: 1440, height: 900}});
+console.log('PASS: two-line title, centered fit, wheel zoom, free drag pan, double-click fit, node drag with re-routed edges, reset layout, model/block/nested source comments');

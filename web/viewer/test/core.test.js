@@ -104,20 +104,34 @@ test('recurrent feedback does not destroy feed-forward ranks', () => {
   assert.ok(p.get('gate').y < p.get('result').y);
 });
 
-test('locale files cover translations in both directions', async () => {
+test('one locale catalog supplies translations in both directions', async () => {
   const {readFile} = await import('node:fs/promises');
   const {translate} = await import('../viewer.js');
   const base = new URL('../locales/', import.meta.url);
   const zh = JSON.parse(await readFile(new URL('zh-CN.json', base), 'utf8'));
-  const en = JSON.parse(await readFile(new URL('en.json', base), 'utf8'));
-  const zhKeys = Object.keys(zh), enKeys = Object.keys(en);
-  assert.ok(zhKeys.length > 0, 'bundled translations must not be empty');
-  assert.deepEqual(new Set(zhKeys.map(key => zh[key])), new Set(enKeys));
+  assert.ok(Object.keys(zh).length > 0, 'bundled translations must not be empty');
   for (const [chinese, english] of Object.entries(zh)) {
     assert.equal(translate(chinese, 'en'), english);
-  }
-  for (const [english, chinese] of Object.entries(en)) {
     assert.equal(translate(english, 'zh-CN'), chinese);
+  }
+});
+
+test('injected locales preserve forward precedence and reverse-only pairs', async () => {
+  const previous = globalThis.__WEIGHTLANG_LOCALES__;
+  globalThis.__WEIGHTLANG_LOCALES__ = {
+    'zh-CN': {'本地标题': 'Local title'},
+    en: {'Local title': '旧标题', 'Extra title': '额外标题'},
+  };
+  try {
+    const {translate} = await import('../viewer.js?injected-locales');
+    assert.equal(translate('本地标题', 'en'), 'Local title');
+    assert.equal(translate('Local title', 'zh-CN'), '本地标题');
+    assert.equal(translate('Extra title', 'zh-CN'), '额外标题');
+    assert.equal(translate('额外标题', 'en'), 'Extra title');
+    assert.equal(translate('untranslated.identifier', 'zh-CN'), 'untranslated.identifier');
+  } finally {
+    if (previous === undefined) delete globalThis.__WEIGHTLANG_LOCALES__;
+    else globalThis.__WEIGHTLANG_LOCALES__ = previous;
   }
 });
 

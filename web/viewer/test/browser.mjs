@@ -1,14 +1,8 @@
 import assert from "node:assert/strict";
 import {pathToFileURL} from "node:url";
 import {resolve} from "node:path";
-const modulePath=process.env.WEIGHTLANG_PLAYWRIGHT;
-if(!modulePath)throw Error("Set WEIGHTLANG_PLAYWRIGHT to an installed playwright module");
-const playwright=await import(pathToFileURL(modulePath));
-const browser=await (playwright.chromium || playwright.default.chromium).launch({executablePath:process.env.CHROMIUM||"/usr/bin/chromium",headless:true,args:["--no-sandbox","--disable-dev-shm-usage"]});
-const page=await browser.newPage({viewport:{width:1440,height:1000}});
-const errors=[];
-page.on("pageerror",e=>errors.push(e.message));
-try {
+import {withBrowser} from './support/browser.mjs';
+await withBrowser(async page => {
   await page.goto(pathToFileURL(resolve(process.argv[2]||"weights/transformer-edit/preview.html")).href);
   await page.waitForSelector(".wl-node");
   await page.selectOption(".wl-language","en");
@@ -40,6 +34,5 @@ try {
   for(const [axis,value] of [[0,1],[2,2],[4,1]]){const input=page.getByLabel("Axis "+axis+" slice",{exact:true});await input.fill(String(value));await input.dispatchEvent("change");}
   assert.equal(await page.evaluate(()=>document.querySelector("weightlang-viewer").plane.values[0]),141);
   assert.equal(await page.locator(".wl-error").textContent(),"");
-  assert.deepEqual(errors,[]);
-  console.log("Browser checks passed: no collapsed data modes, QKV metadata, delta heatmap, responsive layout, arbitrary 5-D axes and CSS-only styling.");
-} finally {await browser.close();}
+});
+console.log("Browser checks passed: no collapsed data modes, QKV metadata, delta heatmap, responsive layout, arbitrary 5-D axes and CSS-only styling.");

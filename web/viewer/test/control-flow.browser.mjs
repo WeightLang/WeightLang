@@ -2,12 +2,9 @@ import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
 import {readFileSync} from 'node:fs';
-const {chromium} = await import(pathToFileURL(process.env.WEIGHTLANG_PLAYWRIGHT));
-const browser = await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
-const page = await browser.newPage({viewport:{width:1440,height:900}});
-const errors=[];page.on('pageerror',e=>errors.push(e.message));
-const fixture = JSON.parse(readFileSync(new URL('./fixtures/control-flow.json', import.meta.url)));
-try {
+import {withBrowser} from './support/browser.mjs';
+await withBrowser(async page => {
+ const fixture = JSON.parse(readFileSync(new URL('./fixtures/control-flow.json', import.meta.url)));
  // Usage: node test/control-flow.browser.mjs DIR, where DIR holds any CLI-generated tiny_transformer.html.
  await page.goto(pathToFileURL(resolve(process.argv[2],'tiny_transformer.html')).href);
  await page.waitForSelector('.wl-node');
@@ -66,6 +63,5 @@ try {
  const sheet = await page.locator('.wl-popup').boundingBox();
  assert.ok(sheet.x >= 0 && sheet.x + sheet.width <= 390);
  assert.equal(await page.locator('.wl-error').textContent(),'');
- assert.deepEqual(errors,[]);
- console.log('PASS: full dotted stage, click-to-open draggable popup, close/Escape, route merge, branch/gate/loop/halt labels, regions, compact expanded cards, export, mobile sheet');
-} finally {await browser.close();}
+}, {viewport: {width: 1440, height: 900}});
+console.log('PASS: full dotted stage, click-to-open draggable popup, close/Escape, route merge, branch/gate/loop/halt labels, regions, compact expanded cards, export, mobile sheet');

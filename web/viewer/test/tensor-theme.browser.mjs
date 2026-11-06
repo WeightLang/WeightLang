@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
-const {chromium} = await import(pathToFileURL(process.env.WEIGHTLANG_PLAYWRIGHT));
-const browser = await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
-const page=await browser.newPage({viewport:{width:1440,height:1000},locale:'zh-CN'});
-const errors=[];page.on('pageerror',e=>errors.push(e.message));
-try {
+import {withBrowser} from './support/browser.mjs';
+await withBrowser(async page => {
  await page.goto(pathToFileURL(resolve(process.argv[2],'tiny_transformer.html')).href);
  await page.waitForSelector('.wl-tensor-cell');
  await page.selectOption('.wl-language','zh-CN');
@@ -59,6 +56,5 @@ try {
  assert.equal(await page.locator('.wl-node[data-path="features"] [data-side="output"] [data-plane]').count(),3);
  assert.ok((await page.locator('.wl-node[data-path="features"] [data-side="output"]').textContent()).includes('4 × 3 × 3'));
  assert.equal(await page.locator('.wl-error').textContent(),'');
- assert.deepEqual(errors,[]);
- console.log('PASS: exact small grids, bounded channel stacks, light/dark/system and reload, compact mode, custom renderers and CSS, mobile');
-} finally {await browser.close();}
+}, {locale: 'zh-CN'});
+console.log('PASS: exact small grids, bounded channel stacks, light/dark/system and reload, compact mode, custom renderers and CSS, mobile');

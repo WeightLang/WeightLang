@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
-const {chromium}=await import(pathToFileURL(process.env.WEIGHTLANG_PLAYWRIGHT));
-const browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
-const page=await browser.newPage({viewport:{width:1440,height:1000}});
-const errors=[];page.on('pageerror',e=>errors.push(e.message));
-try {
+import {withBrowser} from './support/browser.mjs';
+await withBrowser(async page => {
  await page.goto(pathToFileURL(resolve(process.argv[2])).href);
  await page.waitForSelector('.wl-node');
  await page.evaluate(()=>document.querySelector('weightlang-viewer').load({model:'5-D axes',nodes:[{
@@ -32,6 +29,5 @@ try {
  assert.equal(await page.locator('section').first().evaluate(e=>getComputedStyle(e).borderTopWidth),'0px');
  await page.setViewportSize({width:320,height:844});
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
- assert.deepEqual(errors,[]);
- console.log('PASS: default first 3 axes, swap axes, max-3 enforcement, hidden indices zero, scalar slice, language/theme persistence, open layout');
-} finally {await browser.close();}
+});
+console.log('PASS: default first 3 axes, swap axes, max-3 enforcement, hidden indices zero, scalar slice, language/theme persistence, open layout');

@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
-const {chromium} = await import(pathToFileURL(process.env.WEIGHTLANG_PLAYWRIGHT));
-const browser = await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
-const page=await browser.newPage({viewport:{width:1440,height:1000},locale:'zh-CN'});
-const errors=[];page.on('pageerror',e=>errors.push(e.message));
-try {
+import {withBrowser} from './support/browser.mjs';
+await withBrowser(async page => {
  await page.goto(pathToFileURL(resolve(process.argv[2])).href);
  await page.waitForSelector('.wl-node');
  await page.selectOption('.wl-language','zh-CN');
@@ -42,6 +39,5 @@ try {
  await page.selectOption('.wl-language','en');
  assert.equal(await page.locator('.wl-language').inputValue(),'en');
  assert.equal(await page.locator('.wl-error').textContent(),'');
- assert.deepEqual(errors,[]);
- console.log('PASS: bilingual labels/descriptions, preserved graph/tensor/slice state, reload preference, mobile, blocked storage');
-} finally {await browser.close();}
+}, {locale: 'zh-CN'});
+console.log('PASS: bilingual labels/descriptions, preserved graph/tensor/slice state, reload preference, mobile, blocked storage');

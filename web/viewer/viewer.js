@@ -1,26 +1,27 @@
 const injectedLocales = globalThis.__WEIGHTLANG_LOCALES__;
-async function loadLocale(language) {
-  if (injectedLocales?.[language]) return injectedLocales[language];
-  const url = new URL(`./locales/${language}.json`, import.meta.url);
+async function loadLocale() {
+  if (injectedLocales?.['zh-CN']) return injectedLocales['zh-CN'];
+  const url = new URL('./locales/zh-CN.json', import.meta.url);
   try {
     if (url.protocol === 'file:' && globalThis.process?.versions?.node) {
       const {readFile} = await import('node:fs/promises');
       return JSON.parse(await readFile(url, 'utf8'));
     }
     const response = await fetch(url);
-    if (!response.ok) throw Error(`Unable to load ${language} locale`);
+    if (!response.ok) throw Error('Unable to load viewer translations');
     return await response.json();
   } catch {
     return null;
   }
 }
-const [zhLocale, enLocale] = await Promise.all([loadLocale('zh-CN'), loadLocale('en')]);
+const zhLocale = await loadLocale();
 const translationIndex = new Map();
 for (const [zh, en] of Object.entries(zhLocale || {})) {
   translationIndex.set(zh, [zh, en]);
   translationIndex.set(en, [zh, en]);
 }
-for (const [en, zh] of Object.entries(enLocale || {})) {
+// Existing embedders may supply additional pairs in the reverse direction.
+for (const [en, zh] of Object.entries(injectedLocales?.en || {})) {
   if (!translationIndex.has(en)) translationIndex.set(en, [zh, en]);
   if (!translationIndex.has(zh)) translationIndex.set(zh, [zh, en]);
 }

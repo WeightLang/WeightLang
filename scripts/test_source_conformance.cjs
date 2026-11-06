@@ -27,16 +27,16 @@ try {
     assert(result.status === 0 || result.status === 1, result.stderr);
     assert.equal(result.status === 0, entry.editor_accepts, `${entry.id}: ${result.stdout}\n${result.stderr}`);
     if (entry.editor_node) assert(result.stdout.includes(`(${entry.editor_node}`), entry.id);
-    const keyword = entry.id === 'operator-library-structure' ? 'operators'
-      : entry.id === 'tensor-target-loss' ? 'target' : null;
-    if (keyword) {
+    if (entry.editor_captures?.length) {
       const query = spawnSync('tree-sitter', ['query', 'queries/highlights.scm', file], {
         cwd: path.join(root, 'editors/tree-sitter-wgt'), encoding: 'utf8'
       });
       if (query.error) throw query.error;
       assert.equal(query.status, 0, query.stderr);
-      assert(query.stdout.split('\n').some(line => line.includes('keyword') && line.includes('`' + keyword + '`')),
-        `${entry.id}: missing keyword capture`);
+      for (const {capture, text} of entry.editor_captures) {
+        assert(query.stdout.split('\n').some(line => line.includes(capture) && line.includes('`' + text + '`')),
+          `${entry.id}: missing ${capture} capture for ${text}`);
+      }
     }
   }
   console.log(`Shared editor conformance: ${ids.size} cases passed.`);
