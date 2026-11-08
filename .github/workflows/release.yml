@@ -1,0 +1,282 @@
+name: Release
+run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && 'Publish' || 'Validate' }} native release (${{ inputs.version || inputs.bump || 'patch' }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version increment (ignored when version is supplied)'
+        type: choice
+        default: patch
+        options: [patch, minor, major, none]
+      version:
+        description: 'Optional exact version X.Y.Z, for example 0.2.0'
+        type: string
+        required: false
+      publish:
+        description: 'Commit the version, create the tag and publish (disable for build/test only)'
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/release_version.cjs'
+      - 'scripts/release_version.test.cjs'
+      - 'scripts/package_wgt.sh'
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/release_version.cjs'
+      - 'scripts/release_version.test.cjs'
+      - 'scripts/package_wgt.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      tree: ${{ steps.source.outputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Test version selection and manifest updates
+        run: node --test scripts/release_version.test.cjs
+      - name: Prepare the version without changing remote refs
+        id: version
+        env:
+          BUMP: ${{ inputs.bump || 'patch' }}
+          VERSION: ${{ inputs.version }}
+        run: node scripts/release_version.cjs --bump "$BUMP" --version "$VERSION" --write >> "$GITHUB_OUTPUT"
+      - name: Validate the publishing branch and unused tag
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo "::error::Publish from $DEFAULT_BRANCH; other refs support build/test only."
+            exit 1
+          fi
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            echo "::error::Tag $RELEASE_TAG already exists. Choose a new version."
+            exit 1
+          fi
+      - name: Record the exact candidate source tree
+        id: source
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git diff --check
+          git add Cargo.lock crates/wgt/Cargo.toml
+          echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
+          printf '### Release candidate\n\nVersion: `%s`\n\nTag: `%s`\n\nBase commit: `%s`\n' \
+            "$VERSION" "$RELEASE_TAG" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-version
+          path: |
+            Cargo.lock
+            crates/wgt/Cargo.toml
+          if-no-files-found: error
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_TREE: ${{ needs.prepare.outputs.tree }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-version
+      - name: Verify the candidate and build storage
+        run: |
+          git add Cargo.lock crates/wgt/Cargo.toml
+          test "$(git write-tree)" = "$SOURCE_TREE"
+          test "$(uname -m)" = "$ARCH"
+          df -h . "$RUNNER_TEMP"
+          findmnt -T .
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.arch }}
+      - name: Test toolchain installation and service startup
+        run: |
+          cargo test --locked -p weightlang-wgt --test toolchain --test latest --test no_python_cli
+          cargo test --locked -p wgtime-service --test startup --test service
+      - name: Build native tools and the CPU service
+        run: cargo build --locked --release -p weightlang-wgt -p wgtime-service --bins
+      - name: Verify versions and package native assets
+        env:
+          _WGT_VERSION_PROBE: '1'
+        run: |
+          test "$(target/release/wgt --version)" = "wgt $VERSION"
+          test "$(target/release/weightc --version)" = "weightc $VERSION"
+          sh scripts/package_wgt.sh --binary target/release/wgt --output dist/native
+          install -m 755 target/release/wgtime "dist/native/wgtime-linux-$ARCH"
+          (cd dist/native && sha256sum "wgtime-linux-$ARCH" >> SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-linux-${{ matrix.arch }}
+          path: dist/native/
+          if-no-files-found: error
+
+  assemble:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_TREE: ${{ needs.prepare.outputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-version
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-linux-*
+          path: native-assets
+      - name: Assemble verified binaries and matching source
+        run: |
+          git add Cargo.lock crates/wgt/Cargo.toml
+          test "$(git write-tree)" = "$SOURCE_TREE"
+          mkdir -p dist/release
+          for arch in x86_64 aarch64; do
+            directory="native-assets/native-linux-$arch"
+            (cd "$directory" && sha256sum --check SHA256SUMS)
+            for tool in wgt weightc wgtime; do
+              cp "$directory/$tool-linux-$arch" dist/release/
+            done
+            cat "$directory/SHA256SUMS" >> dist/release/SHA256SUMS
+          done
+          git archive --format=tar.gz --prefix="weightlang-$VERSION/" \
+            --output="dist/release/weightlang-$VERSION-source.tar.gz" "$SOURCE_TREE"
+          (cd dist/release && sha256sum "weightlang-$VERSION-source.tar.gz" >> SHA256SUMS)
+          (cd dist/release && sha256sum --check SHA256SUMS)
+          printf '### Build complete\n\nLinux x86_64 and aarch64: wgt, weightc, wgtime, matching source and SHA256SUMS.\n\nDownload the `native-release-%s` artifact below. Only manual runs with `publish` enabled update Git refs and publish a Release.\n' \
+            "$VERSION" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-release-${{ needs.prepare.outputs.version }}
+          path: dist/release/
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    needs: [prepare, assemble]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      SOURCE_TREE: ${{ needs.prepare.outputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-version
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-release-${{ needs.prepare.outputs.version }}
+          path: dist/release
+      - name: Commit and tag the tested source atomically
+        run: |
+          git add Cargo.lock crates/wgt/Cargo.toml
+          test "$(git write-tree)" = "$SOURCE_TREE"
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            # A failed publish job can be retried against its original build.
+            test "$(git rev-parse "$RELEASE_TAG^{tree}")" = "$SOURCE_TREE"
+          else
+            remote_head=$(git ls-remote --exit-code origin "refs/heads/$DEFAULT_BRANCH" | cut -f1)
+            if [[ "$remote_head" != "$GITHUB_SHA" ]]; then
+              echo '::error::The branch changed during the build. Start a new workflow run.'
+              exit 1
+            fi
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            if ! git diff --cached --quiet; then
+              git commit -m "chore(release): wgt $VERSION"
+            fi
+            git tag -a "$RELEASE_TAG" -m "WeightLang native tools $VERSION"
+            git push --atomic origin "HEAD:refs/heads/$DEFAULT_BRANCH" "refs/tags/$RELEASE_TAG"
+          fi
+          echo "RELEASE_COMMIT=$(git rev-parse "$RELEASE_TAG^{commit}")" >> "$GITHUB_ENV"
+      - name: Publish complete release assets
+        run: |
+          (cd dist/release && sha256sum --check SHA256SUMS)
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          Native WeightLang tools $VERSION for Linux x86_64 and aarch64.
+
+          Source commit: $RELEASE_COMMIT
+
+          Assets include matching wgt/weightc executables, the CPU wgtime service,
+          the complete versioned source archive, and SHA256SUMS.
+
+          Start wgtime explicitly in a private directory. Model execution needs cc;
+          weightc compile also needs Rust/Cargo and the matching source archive.
+          Set WGT_CONTROL_SOURCE to its crates/wgtime-control directory and run
+          cargo fetch --locked in the extracted source before compiling scripts.
+
+          See docs/releases.md in the source archive for installation and release instructions.
+          EOF
+          if draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft'); then
+            if [[ "$draft" == false ]]; then
+              echo 'Release is already published; preserving its assets.'
+              gh release view "$RELEASE_TAG" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            gh release upload "$RELEASE_TAG" dist/release/* --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/release/* --verify-tag --draft \
+              --title "WeightLang $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false --latest \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+          gh release view "$RELEASE_TAG" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
