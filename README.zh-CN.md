@@ -4,6 +4,31 @@
 
 > **优雅地描述神经网络的内部架构。**
 
+## 在 PyTorch 中导入 WGT 架构
+
+用 `model.wgt` 描述参数和前向计算，Python 加载后得到标准 `torch.nn.Module`。SDK 复用 Rust 编译器、PyTorch FX、自动求导、优化器及模型查看工具。
+
+```sh
+cargo install --locked --force --path crates/wgt --bin wgt
+uv venv
+uv pip install -e './python[visualize]'
+uv run --no-project python python/examples/mlp/train.py
+```
+
+```python
+import torch
+import weightlang as wgt
+
+model = wgt.load("model.wgt")  # 自动选择可用的加速设备
+input_tensor = torch.zeros(1, *model.input_shape, device=next(model.parameters()).device)
+prediction = model(input_tensor)
+print(wgt.summary(model))
+wgt.visualize(model, "architecture.svg")
+wgt.save(model, "weights/demo/model.pt")
+```
+
+Python 负责数据、训练循环、推理和可视化；已保存的 SDK 模型或预编译 JSON 可在无需编译器、无需模型服务的环境加载。SVG/PNG 需要系统 Graphviz，Mermaid/DOT 仅需 PyTorch。当前 SDK 从源码安装，支持已验收的纯前向 WGT 子集，完整用法与边界见 [Python SDK 指南](docs/python-sdk.md)。原生 Rust/service 路径见下文。
+
 ## 开始训练第一个模型
 
 选一个模板，修改 TOML 参数，就可以训练并试用模型。Python 环境和依赖交给 uv，优化计算复用 PyTorch，小型语言模型复用 Transformers。

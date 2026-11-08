@@ -1,8 +1,9 @@
-# 原生工具链与 Python 清退
+# 原生工具链与可选 Python SDK
 
-当前源码已删除 Python 源文件、测试、包元数据、PyPI 发布工作流和所有 Python CLI
-入口。没有 Python 兼容入口；不支持 `pip install`、`python -m weightlang`、
-Python 数据/训练回调。旧版已发布包未被本次本地修改删除。
+`wgt` 和 `weightc` 使用 Rust 原生工具链，源码检查、编译和原生执行保持独立于 Python。
+可选的 [Python SDK](python-sdk.md) 位于 `python/`，通过 `wgt compile --target torch`
+复用原生前端，将纯前向 WGT 架构加载为 PyTorch 模型。SDK 提供普通 Python API，
+训练循环与数据处理由 Python 宿主负责。`wgt init` 的 PyTorch 模板另由 uv 管理环境。
 
 ## 安装
 
@@ -59,17 +60,16 @@ sh scripts/package_wgt.sh --binary target/release/wgt --output dist/native-relea
 | `weightc compile SOURCE -o EXECUTABLE` | 通过 Rust/Cargo 生成本机程序，不自动训练或保存权重 |
 | `weightc legacy-build SOURCE [-o DIRECTORY] [--max-operations N]` | main 返回模型句柄，保存完整原生模型；N 默认 10000000 且须正数 |
 | `weightc build` | 原生 legacy-build 别名，不是历史源码 ZIP 打包命令 |
-| `wgt run SOURCE [--compiled]` | 原生解释/编译执行，详见 [原生训练](native-training.md) |
-| `wgt sync` | 只同步包依赖，不安装宿主语言运行时 |
+| `wgt compile SOURCE --target torch [-o JSON]` | 为 Python SDK 导出纯前向模型架构，不执行计算 |
+| `wgt run -- COMMAND ARGS` | 在项目的 uv 环境中运行宿主命令 |
+| `wgt sync` | 同步模型包与已配置的 uv 环境；`--no-env` 仅同步模型包 |
 
 原生构建默认输出 `weights/<source stem>/`，已有目录和符号链接一律拒绝覆盖。
 制品包含 `model.json`、`checkpoint.json`、`source.wgt`、`manifest.json`。
 `wgt package --entry DIRECTORY -o NEW_DIRECTORY` 校验并复制原生目录制品；
 `wgt export DIRECTORY_OR_MODEL_JSON -o NEW_MODEL_JSON` 导出推理模型，不执行源码或训练。
 这两个命令不支持旧 ZIP/源码初始化语义，详见[原生制品命令](native-artifact-commands.md)。
-仍依赖旧 CLI 的 `wgt check/build/install/train/trace/debug`
-明确报错，不通过 PATH、`WEIGHTC` 或托管环境回退。
-`wgt test` 现为原生项目测试入口，详见[原生测试](native-testing.md)。
-
-Python 清退不宣称所有历史能力已经迁移。旧声明式源码、标准库和制品夹具保留为
-迁移材料；旧 Python 文档不是当前可调用 API。仅以实际 Rust 实现和行为测试为准。
+`wgt check` 检查源码或项目配置，`wgt train`、`wgt infer` 显式运行已配置的 Python
+host。其他扩展按当前 `wgt --help` 与 PATH 插件规则处理；原生模型测试使用 Cargo，
+详见[原生测试](native-testing.md)。当前 SDK 的接口与验收边界以
+[Python SDK 指南](python-sdk.md)和对应测试为准。

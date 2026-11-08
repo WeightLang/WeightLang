@@ -4,6 +4,38 @@
 
 > **Express neural architectures clearly and elegantly.**
 
+## Use WGT architectures in PyTorch
+
+Write the parameters and forward computation in `model.wgt`, then import a
+standard `torch.nn.Module` from Python. The SDK reuses the Rust compiler and
+PyTorch FX, autograd, optimizers, and model inspection tools.
+
+```sh
+cargo install --locked --force --path crates/wgt --bin wgt
+uv venv
+uv pip install -e './python[visualize]'
+uv run --no-project python python/examples/mlp/train.py
+```
+
+```python
+import torch
+import weightlang as wgt
+
+model = wgt.load("model.wgt")  # Available accelerator selected automatically
+input_tensor = torch.zeros(1, *model.input_shape, device=next(model.parameters()).device)
+prediction = model(input_tensor)
+print(wgt.summary(model))
+wgt.visualize(model, "architecture.svg")
+wgt.save(model, "weights/demo/model.pt")
+```
+
+Python owns data, training loops, inference and visualization. Saved SDK models
+and compiled JSON load without the compiler or a model service. SVG/PNG output
+requires the system Graphviz executable; Mermaid and DOT output use only PyTorch.
+This is the source SDK, with a tested pure-forward subset of WGT. See the
+[Python SDK guide](docs/python-sdk.md) for installation, examples and supported
+operations. The native Rust/service path remains available below.
+
 ## Train your first model
 
 Choose a template, edit its TOML settings, then train and run it. The PyTorch
