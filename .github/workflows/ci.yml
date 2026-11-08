@@ -66,6 +66,11 @@ jobs:
         run: cargo test --locked -p weightlang-wgt --test source_package --test native_publication
       - name: Check native toolchain bundle contracts
         run: cargo test --locked -p weightlang-wgt --test toolchain --test latest
+      - name: Check project onboarding and uv delegation
+        run: >-
+          cargo test --locked -p weightlang-wgt
+          --test project_config --test python_project --test starter_projects
+          --test no_python_cli --test trainer_forwarding
       - name: Check allocator instrumentation configuration
         run: cargo check --locked -p wgtime-service --features allocation-metrics
       - name: Check service lifecycle and transport
@@ -85,6 +90,56 @@ jobs:
           --test client_compiler_boundaries --test lifecycle --test model_calls_aot
           --test native_testing --test postfix_mean --test ppo_typed --test script_compiler
           -- --include-ignored
+
+  python-starters:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      UV_PYTHON_DOWNLOADS: "never"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Install the starter's declared CPU dependencies
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          project = Path(os.environ["RUNNER_TEMP"]) / "wgt-starter"
+          project.mkdir()
+          template = Path("crates/wgt/templates/tiny-lm.toml").read_text(encoding="utf-8")
+          config = template.replace("PROJECT_NAME", "starter-ci").replace("PROJECT_MODULE", "local/starter_ci")
+          (project / "pyproject.toml").write_text(config, encoding="utf-8")
+          PY
+          uv sync --project "$RUNNER_TEMP/wgt-starter" --python 3.12
+      - name: Train, reload, and infer using the real CPU backends
+        run: >-
+          uv run --project "$RUNNER_TEMP/wgt-starter" --locked --offline
+          python "$GITHUB_WORKSPACE/scripts/test_starter_workflows.py"
+      - name: Check MLP with only its own declared dependencies
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+
+          project = Path(os.environ["RUNNER_TEMP"]) / "wgt-mlp-starter"
+          project.mkdir()
+          templates = Path("crates/wgt/templates")
+          config = (templates / "mlp.toml").read_text(encoding="utf-8")
+          config = config.replace("PROJECT_NAME", "mlp-ci").replace("PROJECT_MODULE", "local/mlp_ci")
+          (project / "pyproject.toml").write_text(config, encoding="utf-8")
+          shutil.copyfile(templates / "workflow.py", project / "workflow.py")
+          shutil.copyfile(templates / "mlp.csv", project / "data.csv")
+          PY
+          uv sync --project "$RUNNER_TEMP/wgt-mlp-starter" --python 3.12
+          uv run --project "$RUNNER_TEMP/wgt-mlp-starter" --locked --offline python "$RUNNER_TEMP/wgt-mlp-starter/workflow.py" train --steps 2
+          uv run --project "$RUNNER_TEMP/wgt-mlp-starter" --locked --offline python "$RUNNER_TEMP/wgt-mlp-starter/workflow.py" infer
 
   editor-viewer:
     runs-on: ubuntu-latest

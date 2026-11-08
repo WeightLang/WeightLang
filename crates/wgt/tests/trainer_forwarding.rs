@@ -3,7 +3,7 @@
 use std::{fs, os::unix::fs::PermissionsExt, process::Command};
 
 #[test]
-fn train_does_not_forward_to_external_compiler() {
+fn native_lifecycle_commands_do_not_launch_python_or_external_compiler() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(
         temp.path().join("wgt.mod"),
@@ -11,29 +11,35 @@ fn train_does_not_forward_to_external_compiler() {
     )
     .unwrap();
     fs::write(temp.path().join("model.wgt"), "wgt 0.5\nmodel demo\n").unwrap();
-    let compiler = temp.path().join("compiler");
-    fs::write(
-        &compiler,
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > args.txt\nexit 1\n",
-    )
-    .unwrap();
-    fs::set_permissions(&compiler, fs::Permissions::from_mode(0o755)).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_wgt"))
-        .current_dir(temp.path())
-        .env("WEIGHTC", &compiler)
-        .env("WEIGHTLANG_CACHE", temp.path().join("cache"))
-        .args([
-            "train",
-            "model.wgt",
-            "--trainer",
-            "search=local.py:train",
-            "--trainer",
-            "other=other.py:run",
-            "--offline",
-        ])
-        .output()
+    for name in ["compiler", "uv", "wgt-train", "wgt-infer"] {
+        let executable = temp.path().join(name);
+        fs::write(
+            &executable,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > invoked.txt\nexit 1\n",
+        )
         .unwrap();
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Python weightc CLI has been removed"));
-    assert!(!temp.path().join("args.txt").exists());
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let runtime = temp.path().join(".cache/weightlang/runtime/active.json");
+    fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+    fs::write(&runtime, "invalid").unwrap();
+    for command in ["train", "infer"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_wgt"))
+            .current_dir(temp.path())
+            .env_clear()
+            .env("PATH", temp.path())
+            .env("WEIGHTC", temp.path().join("compiler"))
+            .env("WEIGHTLANG_CACHE", temp.path().join("cache"))
+            .args(["--offline", command])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("requires a Python starter project"),
+            "{error}"
+        );
+    }
+    assert!(!temp.path().join("invoked.txt").exists());
+    assert_eq!(fs::read_to_string(runtime).unwrap(), "invalid");
 }

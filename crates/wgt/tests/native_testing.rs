@@ -5,11 +5,16 @@ use weightlang_wgt::script_compiler;
 use wgtime_core::script;
 
 #[test]
-fn retired_execution_commands_require_extensions_without_running_sources() {
+fn legacy_host_sources_are_not_executed_by_cli_commands() {
     let directory = support::scratch().unwrap();
     let source =
         "wgt 0.5\nfn main(){save text \"executed\" to \"marker\";}\nfn test_ok(){assert true;}";
     fs::write(directory.path().join("model.wgt"), source).unwrap();
+    fs::write(
+        directory.path().join("wgt.toml"),
+        "[project]\nmodule = \"local/native\"\nedition = \"0.5\"\n",
+    )
+    .unwrap();
     fs::create_dir(directory.path().join("tests")).unwrap();
     fs::write(directory.path().join("tests/check.wgt"), source).unwrap();
     fs::write(directory.path().join("tests/fixture.json"), "{}").unwrap();
@@ -29,11 +34,15 @@ fn retired_execution_commands_require_extensions_without_running_sources() {
             .unwrap();
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            error.contains("unknown command")
-                && error.contains(&format!("install wgt-{} on PATH", args[0])),
-            "{error}"
-        );
+        if args[0] == "run" {
+            assert!(error.contains("requires a Python starter project"), "{error}");
+        } else {
+            assert!(
+                error.contains("unknown command")
+                    && error.contains(&format!("install wgt-{} on PATH", args[0])),
+                "{error}"
+            );
+        }
         assert!(output.stdout.is_empty());
         assert!(!directory.path().join("marker").exists());
         assert_eq!(

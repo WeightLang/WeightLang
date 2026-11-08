@@ -60,8 +60,8 @@ fn legacy_commands_do_not_launch_override_or_managed_python() {
 }
 
 #[test]
-fn repository_source_has_no_python_distribution_or_tests() {
-    fn check(path: &std::path::Path) {
+fn native_distribution_keeps_python_in_optional_starter_assets() {
+    fn check(root: &std::path::Path, path: &std::path::Path) {
         if !path.exists() {
             return;
         }
@@ -82,14 +82,24 @@ fn repository_source_has_no_python_distribution_or_tests() {
                 ]
                 .contains(&entry.file_name().to_str().unwrap())
                 {
-                    check(&path);
+                    check(root, &path);
                 }
             } else {
-                assert!(
-                    !path.extension().is_some_and(|e| e == "py" || e == "pyi"),
-                    "{}",
-                    path.display()
-                );
+                if path.extension().is_some_and(|e| e == "py" || e == "pyi") {
+                    // These files are an opt-in host recipe and its acceptance test.
+                    // Native model checking and execution do not import them.
+                    let relative = path.strip_prefix(root).unwrap();
+                    assert!(
+                        [
+                            "crates/wgt/templates/workflow.py",
+                            "scripts/test_starter_workflows.py",
+                        ]
+                        .iter()
+                        .any(|allowed| relative == std::path::Path::new(allowed)),
+                        "unexpected Python runtime source: {}",
+                        path.display()
+                    );
+                }
             }
         }
     }
@@ -102,7 +112,7 @@ fn repository_source_has_no_python_distribution_or_tests() {
         "benchmarks",
         "crates",
     ] {
-        check(&root.join(directory));
+        check(&root, &root.join(directory));
     }
     for file in [
         "pyproject.toml",
@@ -194,15 +204,17 @@ fn release_packaging_requires_matching_pair_and_preserves_existing_output() {
         "#!/bin/sh\necho 'weightc 1.0.0'\n",
     )
     .unwrap();
-    assert!(!Command::new("/bin/sh")
-        .arg(&script)
-        .arg("--binary")
-        .arg(root.path().join("wgt"))
-        .arg("--output")
-        .arg(&invalid)
-        .output()
-        .unwrap()
-        .status
-        .success());
+    assert!(
+        !Command::new("/bin/sh")
+            .arg(&script)
+            .arg("--binary")
+            .arg(root.path().join("wgt"))
+            .arg("--output")
+            .arg(&invalid)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
     assert!(!invalid.exists());
 }

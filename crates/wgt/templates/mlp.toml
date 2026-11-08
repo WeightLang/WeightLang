@@ -1,0 +1,50 @@
+[project]
+name = "PROJECT_NAME"
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+dependencies = ["torch>=2.6,<3", "safetensors>=0.4,<1", "numpy>=1.26,<3"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.wgt.project]
+module = "PROJECT_MODULE"
+edition = "0.5"
+
+[tool.wgt.python]
+runner = "workflow.py"
+
+# A small regression model: one input, two hidden layers, one output.
+[tool.wgt.model]
+kind = "mlp"
+input_size = 1
+output_size = 1
+hidden_size = 16
+layers = 2
+dropout = 0.0
+
+[tool.wgt.runtime]
+device = "cpu"
+
+[tool.wgt.train]
+data = "data.csv" # No header: input columns first, then target columns.
+steps = 100
+batch_size = 4
+learning_rate = 0.01
+weight_decay = 0.01
+seed = 42
+output = "weights/model"
+log_every = 10
+
+[tool.wgt.infer]
+checkpoint = "weights/model"
+inputs = [0.5]
+seed = 42

@@ -1,9 +1,10 @@
 mod project_ignore;
+mod templates;
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
 use fs2::FileExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     ffi::OsString,
     fs,
@@ -14,15 +15,15 @@ use weightlang_wgt::{
     artifact::Artifact,
     graph::Graph,
     manifest::{self, Manifest},
-    package_index, registry, toolchain, upgrade,
+    package_index, python_env, registry, toolchain, upgrade,
 };
 
 #[derive(Parser)]
 #[command(
     name = "wgt",
     version,
-    about = "WeightLang package manager and architecture renderer",
-    after_help = "Extensions: wgt <name> runs wgt-<name> from PATH. Run wgt sync to synchronize model dependencies."
+    about = "Create, train and manage WeightLang model projects",
+    after_help = "Start: wgt init my-model --interactive. Python projects use uv for environments and dependencies. Extensions: wgt <name> runs wgt-<name> from PATH."
 )]
 struct Cli {
     #[arg(short = 'C', long = "directory", global = true, default_value = ".")]
@@ -71,6 +72,8 @@ enum Cmd {
         path: PathBuf,
         #[arg(long)]
         module: Option<String>,
+        #[command(flatten)]
+        options: templates::Options,
     },
     /// Initialize an existing directory without overwriting files
     Init {
@@ -78,6 +81,45 @@ enum Cmd {
         path: PathBuf,
         #[arg(long)]
         module: Option<String>,
+        #[command(flatten)]
+        options: templates::Options,
+    },
+    /// List built-in project templates and their starting commands
+    Templates,
+    /// Train a Python starter (options: --steps N, --device cpu, --force)
+    Train {
+        #[arg(long)]
+        steps: Option<u64>,
+        #[arg(long)]
+        device: Option<String>,
+        #[arg(long)]
+        force: bool,
+        /// Extra arguments for a customized workflow, after --
+        #[arg(last = true)]
+        args: Vec<OsString>,
+    },
+    /// Run saved-model inference (options: --prompt TEXT, --inputs NUMBERS)
+    Infer {
+        #[arg(long)]
+        prompt: Option<String>,
+        #[arg(long)]
+        max_new_tokens: Option<u64>,
+        #[arg(long)]
+        temperature: Option<f64>,
+        #[arg(long)]
+        top_k: Option<u64>,
+        #[arg(long, num_args = 1.., allow_negative_numbers = true)]
+        inputs: Vec<f64>,
+        #[arg(long)]
+        device: Option<String>,
+        /// Extra arguments for a customized workflow, after --
+        #[arg(last = true)]
+        args: Vec<OsString>,
+    },
+    /// Run a command in the project's uv-managed Python environment
+    Run {
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<OsString>,
     },
     /// Add a dependency (latest stable release by default), then pin and fetch it
     Add {
@@ -110,10 +152,10 @@ enum Cmd {
         #[arg(long)]
         weights: Vec<String>,
     },
-    /// Synchronize native model dependencies without installing host runtimes
+    /// Synchronize model dependencies and the configured uv Python environment
     Sync {
-        /// Deprecated compatibility flag; sync never installs a Python environment
-        #[arg(long, hide = true)]
+        /// Synchronize only model packages, without preparing Python
+        #[arg(long)]
         no_env: bool,
     },
     /// Print direct dependency tree
@@ -278,14 +320,22 @@ fn execute(cli: Cli) -> Result<u8> {
     let base = fs::canonicalize(&cli.directory).context("project directory does not exist")?;
     // Checking must return before toolchain dispatch or dependency preparation.
     if let Cmd::Check { source } = &command {
+        let project = manifest::project(&base).unwrap_or_else(|_| base.clone());
         let path = if let Some(source) = source {
             base.join(source)
-        } else if let Some(config) = manifest::ProjectConfig::read(&base)? {
+        } else if let Some(config) = manifest::ProjectConfig::read(&project)? {
+            if config.python.is_some() {
+                python_env::check(&config)?;
+                println!(
+                    "ok: Python starter configuration; no downloads, initialization or execution"
+                );
+                return Ok(0);
+            }
             config
                 .model
                 .source
-                .map(|source| base.join(source))
-                .unwrap_or_else(|| base.join("model.wgt"))
+                .map(|source| project.join(source))
+                .unwrap_or_else(|| project.join("model.wgt"))
         } else {
             base.join("model.wgt")
         };
@@ -296,17 +346,42 @@ fn execute(cli: Cli) -> Result<u8> {
     }
     // Native artifact operations do not execute source or prepare project dependencies.
     match &command {
-        Cmd::Package { entry, output, force, weights, reference } => {
-            ensure!(!force && weights.is_empty() && reference.is_empty(), "native package does not support --force, --weights or --reference");
-            let input = entry.as_ref().context("native package requires --entry NATIVE_BUILD_DIRECTORY")?;
-            weightlang_wgt::native_artifact_commands::package(&base.join(input), &base.join(output))?;
+        Cmd::Package {
+            entry,
+            output,
+            force,
+            weights,
+            reference,
+        } => {
+            ensure!(
+                !force && weights.is_empty() && reference.is_empty(),
+                "native package does not support --force, --weights or --reference"
+            );
+            let input = entry
+                .as_ref()
+                .context("native package requires --entry NATIVE_BUILD_DIRECTORY")?;
+            weightlang_wgt::native_artifact_commands::package(
+                &base.join(input),
+                &base.join(output),
+            )?;
             return Ok(0);
         }
-        Cmd::Export { source, output, force } => {
+        Cmd::Export {
+            source,
+            output,
+            force,
+        } => {
             ensure!(!force, "native export does not support --force");
-            let input = source.as_ref().context("native export requires a native build directory or inference model.json")?;
-            let output = output.as_ref().context("native export requires -o OUTPUT_MODEL_JSON")?;
-            weightlang_wgt::native_artifact_commands::export(&base.join(input), &base.join(output))?;
+            let input = source.as_ref().context(
+                "native export requires a native build directory or inference model.json",
+            )?;
+            let output = output
+                .as_ref()
+                .context("native export requires -o OUTPUT_MODEL_JSON")?;
+            weightlang_wgt::native_artifact_commands::export(
+                &base.join(input),
+                &base.join(output),
+            )?;
             return Ok(0);
         }
         _ => {}
@@ -340,12 +415,82 @@ fn execute(cli: Cli) -> Result<u8> {
                 toolchain::install(&version, path.as_deref(), cli.offline)?.display()
             );
         }
-        Cmd::New { path, module } => {
+        Cmd::New {
+            path,
+            module,
+            options,
+        } => {
             let p = base.join(path);
             ensure!(!p.exists(), "destination already exists");
-            initialize(&p, module)?;
+            let template = templates::initialize(&p, module, &options)?;
+            if options.sync && template.is_python() {
+                return python_env::sync(&p, cli.offline, cli.locked);
+            }
         }
-        Cmd::Init { path, module } => initialize(&base.join(path), module)?,
+        Cmd::Init {
+            path,
+            module,
+            options,
+        } => {
+            let path = base.join(path);
+            let template = templates::initialize(&path, module, &options)?;
+            if options.sync && template.is_python() {
+                return python_env::sync(&path, cli.offline, cli.locked);
+            }
+        }
+        Cmd::Templates => templates::list(),
+        Cmd::Train {
+            steps,
+            device,
+            force,
+            mut args,
+        } => {
+            forward_option(&mut args, "--steps", steps);
+            forward_option(&mut args, "--device", device);
+            if force {
+                args.push("--force".into());
+            }
+            return python_env::workflow(
+                &manifest::project(&base)?,
+                "train",
+                &args,
+                cli.offline,
+                cli.locked,
+            );
+        }
+        Cmd::Infer {
+            prompt,
+            max_new_tokens,
+            temperature,
+            top_k,
+            inputs,
+            device,
+            mut args,
+        } => {
+            forward_option(&mut args, "--prompt", prompt);
+            forward_option(&mut args, "--max-new-tokens", max_new_tokens);
+            forward_option(&mut args, "--temperature", temperature);
+            forward_option(&mut args, "--top-k", top_k);
+            forward_option(&mut args, "--device", device);
+            if !inputs.is_empty() {
+                args.push("--inputs".into());
+                args.extend(
+                    inputs
+                        .into_iter()
+                        .map(|value| OsString::from(value.to_string())),
+                );
+            }
+            return python_env::workflow(
+                &manifest::project(&base)?,
+                "infer",
+                &args,
+                cli.offline,
+                cli.locked,
+            );
+        }
+        Cmd::Run { args } => {
+            return python_env::run(&manifest::project(&base)?, &args, cli.offline, cli.locked);
+        }
         Cmd::Graph {
             artifact,
             format,
@@ -442,6 +587,7 @@ fn execute(cli: Cli) -> Result<u8> {
                 ("git", "remote tags / publishing"),
                 ("gh", "publishing only"),
                 ("weightc", "native script compiler"),
+                ("uv", "Python starter environments and dependencies"),
             ] {
                 println!(
                     "{tool}: {} ({reason})",
@@ -643,7 +789,10 @@ fn execute(cli: Cli) -> Result<u8> {
                         );
                         match version.as_deref() {
                             None | Some("latest") => {
-                                ensure!(!cli.offline, "latest version discovery requires network; use --version with an exact cached version offline");
+                                ensure!(
+                                    !cli.offline,
+                                    "latest version discovery requires network; use --version with an exact cached version offline"
+                                );
                                 registry::Github::new()?.latest(&module)?
                             }
                             Some(version) => version.to_owned(),
@@ -673,7 +822,10 @@ fn execute(cli: Cli) -> Result<u8> {
                         !cli.locked,
                         "dependency upgrades are incompatible with --locked"
                     );
-                    ensure!(!cli.offline, "latest dependency upgrades require network; use fetch --offline --locked to reuse pins");
+                    ensure!(
+                        !cli.offline,
+                        "latest dependency upgrades require network; use fetch --offline --locked to reuse pins"
+                    );
                     if manifest.dependencies.is_empty() {
                         println!("no package dependencies to update");
                     } else {
@@ -724,7 +876,7 @@ fn execute(cli: Cli) -> Result<u8> {
                     )?;
                     println!("removed {module}; source imports are unchanged");
                 }
-                Cmd::Sync { no_env: _ } => {
+                Cmd::Sync { no_env } => {
                     ensure!(
                         !cli.locked || project.join("wgt.sum").is_file(),
                         "--locked requires wgt.sum; run wgt sync first"
@@ -755,14 +907,34 @@ fn execute(cli: Cli) -> Result<u8> {
                         "synchronized {} dependencies (wgt.sum)",
                         manifest.dependencies.len()
                     );
+                    if !no_env
+                        && config
+                            .as_ref()
+                            .is_some_and(|config| config.python.is_some())
+                    {
+                        drop(guard);
+                        return python_env::sync(&project, cli.offline, cli.locked);
+                    }
                 }
                 Cmd::Fetch { weights } => {
                     let known = manifest::read_lock(&project.join("wgt.sum"))?;
                     if cli.offline {
                         for selection in &weights {
-                            let (module, variant) = selection.split_once('=').context("--weights expects MODULE=VARIANT")?;
-                            let version = manifest.dependencies.get(module).context("unknown dependency in --weights")?;
-                            ensure!(known.contains_key(&(module.into(), version.clone(), format!("weights/{variant}.safetensors"))), "selected weights are not locked; fetch them online first");
+                            let (module, variant) = selection
+                                .split_once('=')
+                                .context("--weights expects MODULE=VARIANT")?;
+                            let version = manifest
+                                .dependencies
+                                .get(module)
+                                .context("unknown dependency in --weights")?;
+                            ensure!(
+                                known.contains_key(&(
+                                    module.into(),
+                                    version.clone(),
+                                    format!("weights/{variant}.safetensors")
+                                )),
+                                "selected weights are not locked; fetch them online first"
+                            );
                         }
                     }
                     if cli.offline {
@@ -813,10 +985,16 @@ fn execute(cli: Cli) -> Result<u8> {
                     output,
                     allow_untrained,
                 } => {
-                    ensure!(!allow_untrained, "--allow-untrained is retired: source packages do not claim training; select explicit safetensors attachments with --artifacts");
+                    ensure!(
+                        !allow_untrained,
+                        "--allow-untrained is retired: source packages do not claim training; select explicit safetensors attachments with --artifacts"
+                    );
                     let artifacts = artifacts.map(|p| project.join(p));
                     let index = weightlang_wgt::source_package::package(
-                        &project, artifacts.as_deref(), &version, &project.join(output),
+                        &project,
+                        artifacts.as_deref(),
+                        &version,
+                        &project.join(output),
                     )?;
                     println!(
                         "packaged {}@{} at {}",
@@ -829,51 +1007,12 @@ fn execute(cli: Cli) -> Result<u8> {
     }
     Ok(0)
 }
-fn initialize(path: &Path, module: Option<String>) -> Result<()> {
-    let name = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .context("invalid project name")?
-        .replace('-', "_");
-    ensure!(
-        manifest::identifier(&name),
-        "project directory must form a valid model name"
-    );
-    let module = module.unwrap_or_else(|| format!("local/{name}"));
-    ensure!(
-        !module.chars().any(char::is_whitespace) && !module.contains('#') && !module.is_empty(),
-        "invalid module name"
-    );
-    for file in [
-        "wgt.mod",
-        "wgt.toml",
-        "wgt.sum",
-        "wgt.lock",
-        ".wgt-version",
-        "main.wgt",
-        "model.wgt",
-        "tests/main.json",
-    ] {
-        ensure!(!path.join(file).exists(), "refusing to overwrite {file}");
+fn forward_option(args: &mut Vec<OsString>, name: &str, value: Option<impl ToString>) {
+    if let Some(value) = value {
+        args.extend([OsString::from(name), OsString::from(value.to_string())]);
     }
-    fs::create_dir_all(path.join("tests"))?;
-    fs::write(
-        path.join("wgt.toml"),
-        format!(
-            "[project]\nmodule = {}\nedition = \"0.5\"\n\n[model]\nsource = \"model.wgt\"\noutput = \"weights\"\n\n[revisions]\nmax_versions = 5\n\n[dependencies]\n",
-            serde_json::to_string(&module)?
-        ),
-    )?;
-    fs::write(path.join("wgt.sum"), "")?;
-    fs::write(
-        path.join(toolchain::PIN),
-        format!("{}\n", toolchain::CURRENT),
-    )?;
-    fs::write(path.join("model.wgt"), "wgt 0.5\n# One feature and one output; all iterations update the same initialized model.\nfn main() {\n    let model = mlp([1, 4, 1], \"tanh\", 42, \"adam\");\n    for step in range(0, 100) {\n        let loss = train model on [[0], [1]] against [[0], [1]] {rate:0.03;loss:mse;};\n    }\n    metric(\"training_steps\", 100);\n    return model;\n}\n")?;
-    project_ignore::initialize(path)?;
-    println!("created {} (wgt check; weightc compile model.wgt -o MODEL)", path.display());
-    Ok(())
 }
+
 fn find_executable(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
@@ -907,7 +1046,7 @@ fn executable(path: &Path) -> bool {
 }
 fn list_commands() {
     println!(
-        "Built-in: version toolchain self download new init add remove update fetch sync tree metadata check verify graph package export release-assets publish register cache doctor"
+        "Built-in: version toolchain self download new init templates train infer run add remove update fetch sync tree metadata check verify graph package export release-assets publish register cache doctor"
     );
     let mut names = std::collections::BTreeSet::new();
     if let Some(path) = std::env::var_os("PATH") {

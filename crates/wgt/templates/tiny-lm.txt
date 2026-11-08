@@ -1,0 +1,20 @@
+WeightLang makes a small model easy to study.
+A model reads earlier text and guesses the next byte.
+The first guess is random. Training changes the weights using examples.
+We compare a guess with the text, measure the error, and improve the weights.
+A layer transforms numbers. Several layers can learn more useful patterns.
+Attention lets a token use the tokens that came before it.
+A causal mask hides future tokens while the model is learning.
+The optimizer updates parameters after the gradients have been calculated.
+Small experiments help us understand a system before making it larger.
+We save the model, load its weights, and try a short prompt.
+WeightLang uses PyTorch and Transformers for this language model example.
+The tools already know how to calculate gradients and generate text.
+The project configuration chooses the architecture and training settings.
+The sample is tiny and cannot teach a model to answer general questions.
+Good language models need useful data, careful evaluation, and enough compute.
+Start with a small model. Check each step. Change one setting and compare.
+A model reads earlier text and guesses the next byte.
+Training changes the weights using examples.
+We save the model, load its weights, and try a short prompt.
+WeightLang makes a small model easy to study.

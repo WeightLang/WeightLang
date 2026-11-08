@@ -3,24 +3,27 @@
 > 架构设计入口：[Weight-Native 架构路线图](weight-native-roadmap.md)、[Weight ABI v1 草案](weight-abi.md)。两份文档是未来设计，不代表当前实现或发布承诺。
 > M1：[基线盘点](tensor-contract-inventory.md)与[固定形状契约实现候选](tensor-contract.md)。
 
-`wgt` 管理项目、依赖和工具链，并运行 WGT 0.5 脚本。`weightc` 提供脚本检查、编译和原生模型构建。当前命令的完整参数以 `wgt --help`、`wgt <命令> --help` 和 `weightc --help` 为准。
+`wgt` 创建模型项目、管理依赖和工具链，并通过 uv 运行可选的 PyTorch 模板。`weightc` 提供原生源码检查、编译和兼容模型构建。当前命令的完整参数以 `wgt --help`、`wgt <命令> --help` 和 `weightc --help` 为准。
 
 ```sh
-# 检查只解析，不训练、不构造模型，也不准备依赖。
-weightc check examples/native_training/supervised/model.wgt
-# 显式执行 main；也可以增加 --compiled 使用本机编译执行。
-wgt run examples/native_training/supervised/model.wgt
-# 直接以脚本路径调用等价于 wgt run。
-wgt examples/native_training/supervised/model.wgt
+# 小型语言模型：创建、训练、读取已保存的模型生成文本。
+wgt init text-model --template tiny-lm
+wgt -C text-model train
+wgt -C text-model infer --prompt "Hello"
+
+# 原生 WGT：创建纯模型定义，检查时不准备依赖或执行模型。
+wgt init native-model --template native
+wgt -C native-model check
+weightc check native-model/model.wgt
 ```
 
-`wgt run SOURCE --check` 检查脚本及依赖注释的语法，但不下载依赖、不执行，也不证明所有函数在运行时有效。`wgt run SOURCE --compiled` 编译后执行；`--max-operations N` 设置脚本操作预算。运行、编译及文件路径规则见[原生训练](native-training.md#同一脚本的解释执行与-rust-编译执行)。
+`wgt templates` 列出内置模板，`wgt init --interactive` 提供交互选择。Python 模板的架构、训练和推理参数位于标准 `pyproject.toml` 的 `[tool.wgt]` 中；`wgt check` 验证配置，`wgt train` 和 `wgt infer` 显式运行项目中的 Python host。`wgt run -- COMMAND ARGS` 通过 `uv run` 在项目环境中运行命令，例如 `wgt -C text-model run -- python -c "import torch; print(torch.__version__)"`。完整流程见[项目快速上手](project-quickstart.md)。
 
-`wgt new PATH` 创建新项目，`wgt init` 初始化现有目录；`wgt sync` 同步项目包依赖，`wgt add`、`wgt remove`、`wgt update` 管理依赖。`--offline` 禁止包网络访问，`--locked` 要求沿用现有锁；两者不能保证脚本本身没有网络操作。详见[包与脚本依赖](packages.md)。
+`wgt new PATH` 创建新目录，`wgt init` 也可初始化现有目录；两者都拒绝覆盖模板输出。`wgt sync` 同步 WGT 模型包及已配置的 uv 环境，`--no-env` 只同步模型包。`wgt add`、`wgt remove`、`wgt update` 管理模型包，Python 库使用 uv 原生命令管理。`wgt --offline --locked sync` 限制包网络访问并要求沿用已有锁；用户自己的程序仍自行决定是否联网。详见[包管理说明](packages.md#项目配置与-python-依赖)。
 
-模型源码入口必须命名为 `model.wgt`，自定义可视化样式为同目录的 `model.css`。
+原生 WGT 模型源码入口必须命名为 `model.wgt`，自定义可视化样式为同目录的 `model.css`。
 每个独立模型/训练示例一个目录，用目录名区分功能；例如 `examples/native_training/supervised/model.wgt`。
-新项目模板已经使用 `model.wgt`；维护和迁移项目时也应对齐这一规范。
+原生模板使用 `model.wgt`；PyTorch 模板使用 TOML 与 `workflow.py`，不会生成未参与计算的 WGT 文件。
 CLI 对既有 `wgt.toml` 中显式配置的 `model.source` 保持兼容，但这不改变新建与维护模型的入口规范。
 
 ## 架构可视化
@@ -51,4 +54,4 @@ weightlang-viewer [data-op="self_attention"] { --node-fill: var(--io-fill); }
 
 组件接口和样式变量见 [Viewer 文档](../web/viewer/README.md)。
 
-`weightc compile SOURCE -o EXECUTABLE` 只编译，不执行训练或保存。`weightc legacy-build SOURCE` 显式执行返回模型的 `main`，构建模型目录且拒绝覆盖；它与训练脚本主动使用 `save model` / `save checkpoint` 语句的工作流不同。`wgt` 中仍列出的旧 `check/build/package/install/train/export/trace/debug` 子命令会报迁移错误，不能作为原生训练入口。原生 `wgt test` 用于运行项目测试，见[原生测试](native-testing.md)。完整工具链和发行契约见[工具链说明](weightc-migration.md)。
+`weightc compile SOURCE -o EXECUTABLE` 只编译，不执行训练或保存。`weightc legacy-build SOURCE` 显式执行返回模型的 `main`，构建模型目录且拒绝覆盖；显式保存语句的工作流见[原生训练](native-training.md)。原生模型的应用入口使用 Rust API 和 `wgtime` 服务；`wgt train`、`wgt infer`、`wgt run` 使用已声明的 Python 项目环境。`wgt --list` 列出内置命令与 PATH 中的 `wgt-<name>` 扩展。完整工具链和发行契约见[工具链说明](weightc-migration.md)。

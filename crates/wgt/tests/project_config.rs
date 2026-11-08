@@ -77,6 +77,13 @@ fn sync_is_offline_idempotent_and_locked() {
         5
     );
     assert!(!project.join("wgt.mod").exists());
+    let checked = run(&["-C", "demo", "check"]);
+    assert!(
+        checked.status.success(),
+        "fresh project must be a valid model: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert!(!project.join("weights").exists());
     for _ in 0..2 {
         let result = run(&["-C", "demo", "sync", "--no-env", "--offline", "--locked"]);
         assert!(
