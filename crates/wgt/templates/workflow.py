@@ -139,15 +139,42 @@ def check_output(path, force):
         read_metadata(path)  # --force only replaces a recognized starter output.
 
 
+def requested_device(config, override=None):
+    runtime = config.get("runtime", {})
+    require(isinstance(runtime, dict), "invalid [tool.wgt.runtime]")
+    fields(runtime, "device", "runtime")
+    requested = override if override is not None else runtime.get("device", "auto")
+    require(isinstance(requested, str), "runtime.device must be a device name")
+    kind, separator, index = requested.partition(":")
+    require(requested in ("auto", "cpu", "cuda", "xpu", "mps") or
+            (kind in ("cuda", "xpu") and separator and index.isascii() and index.isdigit()),
+            "device must be auto, cpu, cuda, cuda:N, xpu, xpu:N, or mps")
+    return requested
+
+
 def device_for(torch, requested):
+    requested = requested_device({}, requested)
+    # ROCm uses torch.cuda too. Use PyTorch's availability checks, not driver probes.
+    backends = {"cuda": torch.cuda, "xpu": getattr(torch, "xpu", None), "mps": torch.backends.mps}
+    selected = requested
     if requested == "auto":
-        requested = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-    device = torch.device(requested)
-    require(device.type in ("cpu", "cuda", "mps"), "device must be cpu, cuda, cuda:N, mps, or auto")
-    require(device.type != "cuda" or torch.cuda.is_available(), "CUDA is unavailable; install a CUDA PyTorch build or select cpu")
-    require(device.type != "mps" or torch.backends.mps.is_available(), "MPS is unavailable; select cpu")
+        selected = next((name for name, backend in backends.items()
+                         if backend is not None and backend.is_available()), "cpu")
+    kind, separator, index = selected.partition(":")
+    if kind != "cpu":
+        backend = backends[kind]
+        require(backend is not None and backend.is_available(),
+                f"{kind.upper()} is unavailable; install a compatible PyTorch build or select cpu")
+        if separator:
+            count = backend.device_count()
+            require(int(index) < count, f"{kind} device index {index} is out of range; {count} device(s) available")
+            selected = f"{kind}:{int(index)}"
+    device = torch.device(selected)
     if device.type == "cpu":
         torch.set_num_threads(1)  # These tiny examples are slower with many CPU threads.
+    backend_name = "ROCm" if kind == "cuda" and torch.version.hip else kind.upper()
+    print(f"Device: {device} ({backend_name}, {'auto' if requested == 'auto' else 'explicit'})",
+          file=sys.stderr, flush=True)
     return device
 
 
@@ -287,11 +314,7 @@ def main():
     args = parser.parse_args()
     with (ROOT / "pyproject.toml").open("rb") as source:
         config = tomllib.load(source).get("tool", {}).get("wgt", {})
-    runtime = table(config, "runtime")
-    fields(runtime, "device", "runtime")
-    requested = getattr(args, "device", None) or runtime.get("device", "cpu")
-    require(isinstance(requested, str) and (requested in ("auto", "cpu", "cuda", "mps") or
-            (requested.startswith("cuda:") and requested[5:].isdigit())), "invalid runtime.device")
+    requested = requested_device(config, getattr(args, "device", None))
     if args.action == "infer":
         settings = table(config, "infer")
         settings.setdefault("seed", 42)
