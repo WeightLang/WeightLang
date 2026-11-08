@@ -19,8 +19,8 @@ wgt infer --prompt "Hello"
 
 | 模板 | 模型与数据 | 默认运行方式 |
 | --- | --- | --- |
-| `tiny-lm` | 小型 GPT 风格语言模型，附 `data.txt` | PyTorch + Transformers，CPU |
-| `mlp` | 多层感知机，附数值回归数据 `data.csv` | PyTorch，CPU |
+| `tiny-lm` | 小型 GPT 风格语言模型，附 `data.txt` | PyTorch + Transformers，自动选择设备 |
+| `mlp` | 多层感知机，附数值回归数据 `data.csv` | PyTorch，自动选择设备 |
 | `native` | 纯模型定义 `model.wgt` | Rust API + `wgtime` 服务 |
 
 `wgt init --interactive` 会询问模板；直接按回车选择小型语言模型。`wgt init` 或 `wgt new NAME` 不带模板选项时仍创建原生项目。`init` 可初始化现有目录，遇到将要写入的同名文件会停止；`new` 要求目标目录不存在。
@@ -43,7 +43,7 @@ context_length = 128
 dropout = 0.0
 
 [tool.wgt.runtime]
-device = "cpu"
+device = "auto"
 
 [tool.wgt.train]
 data = "data.txt"
@@ -85,7 +85,7 @@ wgt train --steps 20 --device cpu
 wgt infer --prompt "Hello" --max-new-tokens 16 --temperature 0.7
 ```
 
-增大层数、宽度、上下文和批量都会增加计算或内存需求。先使用默认 CPU 配置完成一次训练，再逐项调整。模板演示的是可运行的架构和训练流程；高质量语言能力还需要合适的数据、模型规模与训练投入。
+增大层数、宽度、上下文和批量都会增加计算或内存需求。先使用默认配置完成一次训练，再逐项调整。模板演示的是可运行的架构和训练流程；高质量语言能力还需要合适的数据、模型规模与训练投入。
 
 ## 3. 使用 uv 管理 Python 和库
 
@@ -112,7 +112,13 @@ wgt --offline --locked sync
 
 离线模式要求 Python 和依赖已在本机可用；`--offline` 限制包管理网络访问，用户自己的 Python 程序仍自行决定是否联网。锁文件语义遵循 [uv 的锁定和同步规则](https://docs.astral.sh/uv/concepts/projects/sync/)。
 
-模板默认使用 CPU 版 PyTorch 索引。需要 CUDA 等加速时，按 [uv 官方 PyTorch 指南](https://docs.astral.sh/uv/guides/integration/pytorch/) 修改 `[tool.uv.sources]` 与 `[[tool.uv.index]]`，同步后再把 `runtime.device` 改为相应设备。环境管理复用 uv；设备可用性由 PyTorch 和本机驱动决定。
+模板默认启用 `[tool.uv].torch-backend = "auto"` 与 `[tool.wgt.runtime].device = "auto"`。首次使用 `wgt sync` 或 `wgt train` 准备环境时，WeightLang 复用 [uv 的 PyTorch 后端探测](https://docs.astral.sh/uv/guides/integration/pytorch/#automatic-backend-selection)，把兼容的安装源记录到标准 `[tool.uv.sources]` 和 `[[tool.uv.index]]`，随后由 uv 正常锁定和安装依赖。之后仍可直接使用 uv 的项目命令；只有 `uv pip` 提供后端探测，直接执行首次 `uv sync` 不会进行这一步。
+
+训练和推理使用 PyTorch 检查设备，优先选择 CUDA／ROCm、其次 XPU、再其次 MPS，均不可用时使用 CPU。实际选择写入终端的诊断输出，推理结果仍单独输出。这里按兼容性和可用性选择加速设备，不会先运行性能竞赛；小模型未必在 GPU 上更快。省略 `runtime` 表或 `device` 字段也采用 `auto`。
+
+需要固定运算设备时，设置 `runtime.device`，或使用 `--device cpu`、`--device cuda:0`、`--device xpu:0`、`--device mps` 覆盖。显式设备不可用或编号越界会报错。需要固定安装构建时，设置 `[tool.uv].torch-backend`，例如 `"cpu"`，再运行 `wgt sync`；uv 的 `UV_TORCH_BACKEND` 环境变量同样有效。用户手动配置的包来源会被保留。
+
+更换机器或 GPU 后运行 `wgt sync` 可重新选择自动管理的安装源；`--locked` 和已有源的离线模式沿用已记录的选择。旧模板若写死了 CPU，要同时移除原 `pytorch-cpu` 来源配置、启用上述两个 `auto` 设置，再运行 `wgt sync`。设备加速需要本机有兼容驱动；目前实际验收使用 CPU，GPU 分支通过模拟可用性检查验证。
 
 ## 4. 保存模型并再次使用
 

@@ -3,6 +3,7 @@ pub mod contracts;
 pub mod graph;
 pub mod manifest;
 pub mod python_env;
+mod torch_backend;
 pub mod preview;
 pub mod registry;
 

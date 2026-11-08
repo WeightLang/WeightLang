@@ -18,7 +18,7 @@ wgt train
 wgt infer --prompt "Hello"
 ```
 
-模板自带文本数据，默认使用 CPU。首次训练由 uv 准备 `.venv` 和 `uv.lock`，无需手动激活环境。层数、宽度、注意力头数、训练步数和生成参数都在 `pyproject.toml` 中；训练输出保存在 `weights/model/`。
+模板自带文本数据，默认自动选择可用的 GPU 加速，无可用 GPU 时使用 CPU。首次训练由 uv 选择兼容的 PyTorch 构建并准备 `.venv` 和 `uv.lock`，无需手动激活环境。层数、宽度、注意力头数、训练步数和生成参数都在 `pyproject.toml` 中；训练输出保存在 `weights/model/`。
 
 | 模板 | 用途 | 修改位置 |
 | --- | --- | --- |

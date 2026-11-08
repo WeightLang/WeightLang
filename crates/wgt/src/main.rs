@@ -86,7 +86,7 @@ enum Cmd {
     },
     /// List built-in project templates and their starting commands
     Templates,
-    /// Train a Python starter (options: --steps N, --device cpu, --force)
+    /// Train a Python starter (automatic device selection; --device overrides it)
     Train {
         #[arg(long)]
         steps: Option<u64>,

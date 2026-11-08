@@ -21,8 +21,9 @@ wgt train
 wgt infer --prompt "Hello"
 ```
 
-The template includes sample text and CPU defaults. The first training command
-lets uv prepare `.venv` and `uv.lock`; no shell activation is needed. Change the
+The template includes sample text and automatically selects an available GPU,
+falling back to CPU. The first training command lets uv select a compatible
+PyTorch build and prepare `.venv` and `uv.lock`; no shell activation is needed. Change the
 layer count, width, attention heads, training steps and generation settings in
 `pyproject.toml`. Training outputs are kept in `weights/model/`.
 
