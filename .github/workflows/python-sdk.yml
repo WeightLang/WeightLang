@@ -62,7 +62,9 @@ jobs:
           uv pip install torch --index-url https://download.pytorch.org/whl/cpu
           uv pip install -e './python[visualize,test]'
       - name: Check compiler, training, persistence and visualization
-        run: .venv/bin/python -m pytest python/tests -q --basetemp=/tmp/weightlang/sdk-tests
+        run: |
+          mkdir -p /tmp/weightlang
+          .venv/bin/python -m pytest python/tests -q --basetemp=/tmp/weightlang/sdk-tests
       - name: Run the complete training example
         run: .venv/bin/python python/examples/mlp/train.py
       - name: Build the Python distribution
