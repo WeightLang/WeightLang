@@ -155,4 +155,6 @@ wgt check
 
 原生模型的训练和执行使用 [Rust API 与 `wgtime` 服务](../README.zh-CN.md#在-rust-中使用-wgt)。Python 模板使用 TOML 配置驱动的 PyTorch 架构；[模板实现](../crates/wgt/templates/workflow.py)中的 `tiny-lm` 复用 Transformers 的 GPT-2 实现，`mlp` 复用 `torch.nn.Sequential`。这一工作流尚未提供任意 WGT 源码到 PyTorch 的转换；修改 Python 模板的架构应编辑 TOML 或其 `workflow.py`。
 
+需要直接把 `model.wgt` 导入 PyTorch 时，使用 [Python SDK](python-sdk.md) 的 `weightlang.load`。SDK 复用 Rust 前端导出纯前向计算图，得到标准 PyTorch 模型；上面的 `tiny-lm` 与 `mlp` 入门脚本仍按自己的 TOML/Python 架构运行。
+
 Python 库使用 `[project].dependencies` 与 `uv.lock`；WGT 模型包使用 `[tool.wgt.dependencies]` 与 `wgt.sum`。两类依赖的命令和格式见[包管理说明](packages.md#项目配置与-python-依赖)。

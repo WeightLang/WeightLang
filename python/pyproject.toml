@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "weightlang"
+version = "0.1.0"
+description = "WeightLang model architectures as native PyTorch modules"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = ["torch>=2.5"]
+
+[project.optional-dependencies]
+visualize = ["torchinfo>=1.8", "numpy>=1.23", "graphviz>=0.20"]
+test = ["pytest>=8"]
+
+[project.urls]
+Repository = "https://github.com/WeightLang/WeightLang"
+Documentation = "https://github.com/WeightLang/WeightLang/blob/main/docs/python-sdk.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["weightlang*"]
+
+[tool.setuptools.package-data]
+weightlang = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

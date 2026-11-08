@@ -1,0 +1,10 @@
+wgt 0.5
+model Regression
+# Each input sample has one feature. Python supplies an optional leading batch.
+input x: f32[1]
+output y: f32[1]
+# Eight independent learned features feed one prediction; weights start untrained.
+layer hidden: linear(8)
+layer activation: tanh
+layer prediction: linear(1)
+init seed=42
