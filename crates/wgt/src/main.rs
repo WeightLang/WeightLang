@@ -57,6 +57,11 @@ enum SelfCommand {
     },
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum CompileTarget {
+    Torch,
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Show the project pin, or write an exact wgt version to .wgt-version
@@ -164,6 +169,17 @@ enum Cmd {
     Metadata,
     /// Strictly parse and validate a WGT model definition without initializing it
     Check { source: Option<PathBuf> },
+    /// Compile a model architecture to JSON for the Python SDK; never executes it
+    Compile {
+        /// WGT model definition, or - to read a definition from stdin
+        #[arg(default_value = "model.wgt")]
+        source: PathBuf,
+        #[arg(long, value_enum, default_value = "torch")]
+        target: CompileTarget,
+        /// New architecture JSON file; omit to write JSON to stdout
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
     /// Copy a verified native build into a new directory package (not ZIP; never trains)
     Package {
         /// Existing native build directory; source files are not supported
@@ -346,6 +362,28 @@ fn execute(cli: Cli) -> Result<u8> {
     }
     // Native artifact operations do not execute source or prepare project dependencies.
     match &command {
+        Cmd::Compile {
+            source,
+            target: CompileTarget::Torch,
+            output,
+        } => {
+            let architecture = if source == Path::new("-") {
+                use std::io::Read;
+                let mut text = String::new();
+                std::io::stdin()
+                    .take(1024 * 1024 + 1)
+                    .read_to_string(&mut text)?;
+                weightlang_wgt::torch_export::compile_source(&text)?
+            } else {
+                weightlang_wgt::torch_export::compile(&base.join(source))?
+            };
+            if let Some(output) = output {
+                weightlang_wgt::torch_export::write(&architecture, &base.join(output))?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&architecture)?);
+            }
+            return Ok(0);
+        }
         Cmd::Package {
             entry,
             output,
@@ -1046,7 +1084,7 @@ fn executable(path: &Path) -> bool {
 }
 fn list_commands() {
     println!(
-        "Built-in: version toolchain self download new init templates train infer run add remove update fetch sync tree metadata check verify graph package export release-assets publish register cache doctor"
+        "Built-in: version toolchain self download new init templates train infer run add remove update fetch sync tree metadata check compile verify graph package export release-assets publish register cache doctor"
     );
     let mut names = std::collections::BTreeSet::new();
     if let Some(path) = std::env::var_os("PATH") {
