@@ -78,6 +78,9 @@ this feature honor pins; an older global wgt must be upgraded first.
 
 ## Native release contract
 
+For version bumps, GitHub Actions publishing, available Linux assets and runtime
+requirements, see the [native release guide](releases.md).
+
 The native installer uses GitHub release tag `wgt-vX.Y.Z` in
 `WeightLang/WeightLang`, separate from Python `weightc` releases. Each release
 contains `SHA256SUMS` plus raw executables:

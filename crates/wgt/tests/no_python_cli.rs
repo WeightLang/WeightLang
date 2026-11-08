@@ -1,10 +1,10 @@
 use std::{fs, process::Command};
 
 #[test]
-fn native_script_check_needs_no_python() {
+fn native_model_check_needs_no_python() {
     let cache = tempfile::tempdir().unwrap();
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/native_training/build/model.wgt");
+        .join("../wgt-model/tests/fixtures/model.wgt");
     let output = Command::new(env!("CARGO_BIN_EXE_weightc"))
         .env_clear()
         .env("PATH", "")
@@ -48,8 +48,12 @@ fn legacy_commands_do_not_launch_override_or_managed_python() {
     assert!(!result.status.success());
     let error = String::from_utf8_lossy(&result.stderr);
     assert!(
-        error.contains("Python weightc CLI has been removed"),
+        error.contains("unknown command \"build\"; install wgt-build on PATH"),
         "{error}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.path().join(".cache/weightlang/runtime/active.json")).unwrap(),
+        "invalid"
     );
     assert!(!root.path().join("dist").exists());
     assert!(!root.path().join("weights").exists());
