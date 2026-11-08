@@ -1,0 +1,25 @@
+wgt 0.5
+model TwoWays
+
+# 每份样本只有一个数；Python 把许多样本排成 [样本数, 1]。
+input x: f32[1]
+output y: f32[1]
+
+# 六个可训练数字：初始值不是已经训练好的知识。
+parameter w_line: f32[1] = [0.3]
+parameter b_line: f32[1] = [0]
+parameter w_curve: f32[1] = [0.1]
+parameter b_curve: f32[1] = [0]
+parameter w_gate: f32[1] = [0.1]
+parameter b_gate: f32[1] = [0]
+
+fn forward(x) {
+    # 第一条路保留 x；第二条路先把 x 平方。
+    let line = x * w_line + b_line;
+    let curve = (x * x) * w_curve + b_curve;
+
+    # 混合比例在 0 到 1 之间，由输入和两项可训练参数决定。
+    # 两条路都会计算；这不是跳过其中一条路的条件执行。
+    let blend_ratio = sigmoid(x * w_gate + b_gate);
+    return blend_ratio * line + ([1] - blend_ratio) * curve;
+}
