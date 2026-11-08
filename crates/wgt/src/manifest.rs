@@ -1,4 +1,4 @@
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -45,6 +45,10 @@ pub struct ProjectConfig {
     #[serde(default)]
     pub train: Option<serde_json::Value>,
     #[serde(default)]
+    pub infer: Option<serde_json::Value>,
+    #[serde(default)]
+    pub python: Option<PythonConfig>,
+    #[serde(default)]
     pub package: Option<serde_json::Value>,
     #[serde(default)]
     pub runtime: RuntimeConfig,
@@ -74,6 +78,19 @@ pub struct ModelConfig {
     pub source: Option<PathBuf>,
     pub output: Option<PathBuf>,
     pub description: Option<String>,
+    pub kind: Option<String>,
+    pub hidden_size: Option<usize>,
+    pub layers: Option<usize>,
+    pub heads: Option<usize>,
+    pub context_length: Option<usize>,
+    pub dropout: Option<f64>,
+    pub input_size: Option<usize>,
+    pub output_size: Option<usize>,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PythonConfig {
+    pub runner: PathBuf,
 }
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -84,7 +101,26 @@ pub struct RuntimeConfig {
 }
 impl ProjectConfig {
     pub fn parse(text: &str) -> Result<Self> {
-        let config: Self = toml_edit::de::from_str(text).context("invalid wgt.toml")?;
+        #[derive(Deserialize)]
+        struct PyProject {
+            tool: PythonTools,
+        }
+        #[derive(Deserialize)]
+        struct PythonTools {
+            wgt: ProjectConfig,
+        }
+        let document = text
+            .parse::<toml_edit::DocumentMut>()
+            .context("invalid project TOML")?;
+        let embedded = wgt_table(&document).is_some();
+        let config: Self = if embedded {
+            toml_edit::de::from_str::<PyProject>(text)
+                .context("invalid [tool.wgt] configuration")?
+                .tool
+                .wgt
+        } else {
+            toml_edit::de::from_str(text).context("invalid wgt.toml")?
+        };
         ensure!(
             !config.project.module.is_empty()
                 && !config.project.module.chars().any(char::is_whitespace)
@@ -105,12 +141,36 @@ impl ProjectConfig {
         if let Some(output) = &config.model.output {
             relative_file(output.to_str().context("invalid model.output")?)?;
         }
+        if let Some(python) = &config.python {
+            ensure!(
+                embedded,
+                "Python projects use pyproject.toml with [tool.wgt.python]"
+            );
+            relative_file(python.runner.to_str().context("invalid python.runner")?)?;
+            ensure!(
+                config.model.source.is_none(),
+                "Python starters use model settings and python.runner; remove the unused model.source"
+            );
+        } else {
+            ensure!(
+                config.model.kind.is_none(),
+                "model.kind requires [tool.wgt.python]"
+            );
+        }
         Ok(config)
     }
     pub fn read(project: &Path) -> Result<Option<Self>> {
-        let path = project.join("wgt.toml");
-        if path.is_file() {
-            Ok(Some(Self::parse(&fs::read_to_string(path)?)?))
+        let path = manifest_path(project)?;
+        if path.is_file() && path.file_name().is_some_and(|name| name != "wgt.mod") {
+            let config = Self::parse(&fs::read_to_string(&path)?)?;
+            ensure!(
+                config.python.is_none()
+                    || path
+                        .file_name()
+                        .is_some_and(|name| name == "pyproject.toml"),
+                "Python projects must use pyproject.toml, so uv reads the same configuration"
+            );
+            Ok(Some(config))
         } else {
             Ok(None)
         }
@@ -119,11 +179,31 @@ impl ProjectConfig {
 pub fn manifest_path(project: &Path) -> Result<PathBuf> {
     let toml = project.join("wgt.toml");
     let legacy = project.join("wgt.mod");
+    let python = project.join("pyproject.toml");
+    let is_python = if python.is_file() {
+        let text = fs::read_to_string(&python)?;
+        let document = text
+            .parse::<toml_edit::DocumentMut>()
+            .context("invalid pyproject.toml")?;
+        wgt_table(&document).is_some()
+    } else {
+        false
+    };
     ensure!(
-        !(toml.exists() && legacy.exists()),
-        "both wgt.toml and wgt.mod exist; keep one authoritative manifest"
+        usize::from(toml.exists()) + usize::from(legacy.exists()) + usize::from(is_python) <= 1,
+        "multiple WeightLang manifests; keep one authoritative wgt.toml, wgt.mod or [tool.wgt] in pyproject.toml"
     );
-    Ok(if toml.exists() { toml } else { legacy })
+    Ok(if toml.exists() {
+        toml
+    } else if is_python {
+        python
+    } else {
+        legacy
+    })
+}
+
+fn wgt_table(document: &toml_edit::DocumentMut) -> Option<&toml_edit::Item> {
+    document.get("tool").and_then(|tool| tool.get("wgt"))
 }
 
 pub fn module_parts(module: &str) -> Result<Vec<&str>> {
@@ -232,10 +312,22 @@ impl Manifest {
     }
     pub fn edited(&self, module: &str, version: Option<&str>) -> String {
         if let Ok(mut document) = self.text.parse::<toml_edit::DocumentMut>() {
-            if document.get("dependencies").is_none() {
-                document["dependencies"] = toml_edit::Item::Table(toml_edit::Table::new());
+            let project = if wgt_table(&document).is_some() {
+                document["tool"]["wgt"]
+                    .as_table_like_mut()
+                    .expect("validated tool.wgt")
+            } else {
+                document.as_table_mut()
+            };
+            if project.get("dependencies").is_none() {
+                project.insert(
+                    "dependencies",
+                    toml_edit::Item::Table(toml_edit::Table::new()),
+                );
             }
-            let dependencies = document["dependencies"]
+            let dependencies = project
+                .get_mut("dependencies")
+                .expect("inserted dependencies")
                 .as_table_like_mut()
                 .expect("validated dependencies");
             if let Some(v) = version {
@@ -283,11 +375,11 @@ pub fn project(start: &Path) -> Result<PathBuf> {
         &start
     };
     for p in directory.ancestors() {
-        if p.join("wgt.mod").is_file() || p.join("wgt.toml").is_file() {
+        if manifest_path(p)?.is_file() {
             return Ok(p.to_path_buf());
         }
     }
-    bail!("no wgt.toml or wgt.mod found; run wgt init");
+    bail!("no WeightLang project found; run wgt init --interactive");
 }
 pub fn read_lock(path: &Path) -> Result<Lock> {
     let text = match fs::read_to_string(path) {

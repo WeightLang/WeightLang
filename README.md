@@ -4,6 +4,42 @@
 
 > **Express neural architectures clearly and elegantly.**
 
+## Train your first model
+
+Choose a template, edit its TOML settings, then train and run it. The PyTorch
+templates use uv for Python and dependencies, PyTorch for optimization, and
+Transformers for the small language model.
+
+These commands use the current source checkout. Install the CLI from the
+repository root and install [uv](https://docs.astral.sh/uv/getting-started/installation/):
+
+```sh
+cargo install --locked --force --path crates/wgt --bin wgt --bin weightc
+wgt init my-model --template tiny-lm
+cd my-model
+wgt train
+wgt infer --prompt "Hello"
+```
+
+The template includes sample text and CPU defaults. The first training command
+lets uv prepare `.venv` and `uv.lock`; no shell activation is needed. Change the
+layer count, width, attention heads, training steps and generation settings in
+`pyproject.toml`. Training outputs are kept in `weights/model/`.
+
+| Template | Use | Edit |
+| --- | --- | --- |
+| `tiny-lm` | Train a small GPT-style language model on local text | `pyproject.toml`, `data.txt` |
+| `mlp` | Learn a numerical mapping from a small CSV dataset | `pyproject.toml`, `data.csv` |
+| `native` | Define a WGT model for the Rust/service API | `model.wgt`, `wgt.toml` |
+
+Run `wgt templates` to list templates, or `wgt init --interactive` for a guided
+choice. `wgt init` without options keeps the native template. The language model
+is a learning example; useful language quality requires suitable data and
+training. See the [project quickstart](docs/project-quickstart.md) for configuration,
+environment management and the separate native/PyTorch execution paths.
+
+## Native WGT models
+
 WGT describes a model's internal architecture: parameters, state, and the
 operations that compute or update them. Rust controls data preparation, I/O,
 orchestration and training or search loops. The unique `wgtime` service owns

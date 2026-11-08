@@ -5,6 +5,19 @@
 `wgt.index.json` 中；实际分发只使用 GitHub Releases 附件，不需要新的 registry。
 本页描述本地实现，不表示某个版本已经发布，也不表示新的 Rust crate、网络 API 或下载流程已经发布或经过网络验证。
 
+## 项目配置与 Python 依赖
+
+原生项目使用 `wgt.toml`，兼容已有 `wgt.mod`。可选的 PyTorch 模板使用标准
+`pyproject.toml`：Python 版本要求和 Python 库放在 `[project]`，WeightLang 的模型、
+训练、推理及模型包依赖配置放在 `[tool.wgt]`。同一项目只使用一份 WeightLang manifest；
+不要同时放置 `wgt.toml`、`wgt.mod` 或带 `[tool.wgt]` 的 `pyproject.toml`。
+
+Python 库由 `uv add`、`uv remove` 和 `uv sync` 管理，版本锁定在 `uv.lock`；
+WGT 模型包由 `wgt add`、`wgt remove` 和 `wgt fetch` 管理，锁定在 `wgt.sum`。
+在 PyTorch 项目中，模型包依赖写入 `[tool.wgt.dependencies]`，不会改写
+`[project].dependencies`。`wgt sync` 同步这两类依赖，`wgt train`、`wgt infer`
+和 `wgt run` 通过 uv 使用项目 Python 环境。完整例子见[项目快速上手](project-quickstart.md)。
+
 ## Rust 应用与 WGT 模型的入口
 
 Rust 主程序可通过 `wgt-model` facade crate 使用 WGT 模型定义，crate 名为 `wgt-model`，Rust 路径为 `wgt`。`model!` / `include_model!` 字符串宏会在编译期解析并校验模型源码，再将源码嵌入产物；运行时源码加载入口执行纯解析。编译期嵌入和运行时加载属于三种入口中的两种。宏嵌入的是 WGT 源码，不是静态 IR；加载或解析架构不会自动获取权重、训练或创建训练产物。

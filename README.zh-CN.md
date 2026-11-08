@@ -4,6 +4,32 @@
 
 > **优雅地描述神经网络的内部架构。**
 
+## 开始训练第一个模型
+
+选一个模板，修改 TOML 参数，就可以训练并试用模型。Python 环境和依赖交给 uv，优化计算复用 PyTorch，小型语言模型复用 Transformers。
+
+以下命令对应当前源码。在仓库根目录安装命令行工具，并安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)：
+
+```sh
+cargo install --locked --force --path crates/wgt --bin wgt --bin weightc
+wgt init my-model --template tiny-lm
+cd my-model
+wgt train
+wgt infer --prompt "Hello"
+```
+
+模板自带文本数据，默认使用 CPU。首次训练由 uv 准备 `.venv` 和 `uv.lock`，无需手动激活环境。层数、宽度、注意力头数、训练步数和生成参数都在 `pyproject.toml` 中；训练输出保存在 `weights/model/`。
+
+| 模板 | 用途 | 修改位置 |
+| --- | --- | --- |
+| `tiny-lm` | 用本地文本训练一个小型 GPT 风格语言模型 | `pyproject.toml`、`data.txt` |
+| `mlp` | 从小型 CSV 数据集学习数值关系 | `pyproject.toml`、`data.csv` |
+| `native` | 为 Rust/service API 定义 WGT 模型 | `model.wgt`、`wgt.toml` |
+
+`wgt templates` 列出模板，`wgt init --interactive` 提供交互选择；不带选项的 `wgt init` 默认使用原生模板。语言模型模板用于学习完整流程，实际语言能力取决于数据和训练投入。配置方法、环境管理和执行边界见[项目快速上手](docs/project-quickstart.md)。
+
+## 原生 WGT 模型
+
 WGT 描述模型内部的参数、状态，以及计算和更新它们的操作。Rust 负责数据准备、I/O、调度以及训练或搜索循环；唯一的 `wgtime` 服务拥有可变模型实例。可复用算法通过标准库显式导入。
 
 前向计算、loss 与 backprop 是一种可选的模型路径。模型也可以使用有状态操作，或接收外部生成的参数更新。操作文档所列的 core 状态回滚、无梯度搜索、真实 service 操作和 CNN 回归范围已通过本地验收。typed 操作不支持自动微分（AD）；既有 forward 路径保留显式训练策略。这些能力已在本地实现，但尚未发布；边界与验收范围见[多范式模型操作](docs/model-operations.md)。

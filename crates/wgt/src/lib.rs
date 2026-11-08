@@ -2,6 +2,7 @@ pub mod artifact;
 pub mod contracts;
 pub mod graph;
 pub mod manifest;
+pub mod python_env;
 pub mod preview;
 pub mod registry;
 
