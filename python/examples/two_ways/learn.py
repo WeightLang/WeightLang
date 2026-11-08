@@ -10,6 +10,11 @@ import torch
 import weightlang as wgt
 
 
+def answer(x):
+    """这堂课的出题规则；训练数据和检查数据共用同一条规则。"""
+    return 2 * x * x + 0.5 * x + 1
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("weights/first"))
@@ -27,10 +32,10 @@ def main():
     # 这是为了教学自己出的题。真实任务应换成自己的输入及对应答案。
     # unsqueeze(1) 把一列数排成 [65 份样本, 每份 1 个特征]。
     x = torch.linspace(-1, 1, 65, device=device).unsqueeze(1)
-    y = 2 * x * x + 0.5 * x + 1
+    y = answer(x)
     # 相邻训练点的中点只用来检查，不参与调整参数。
     check_x = (x[:-1] + x[1:]) / 2
-    check_y = 2 * check_x * check_x + 0.5 * check_x + 1
+    check_y = answer(check_x)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.03)
     criterion = torch.nn.MSELoss()
@@ -57,7 +62,7 @@ def main():
     print(f"训练误差：{initial:.8f} → {final:.8f}")
     print(f"未参加训练的中点误差：{check_mse:.8f}")
     for value, predicted in zip(sample_x.flatten().cpu().tolist(), predictions):
-        expected = 2 * value * value + 0.5 * value + 1
+        expected = answer(value)
         print(f"输入 {value:5.2f}，预测 {predicted:.5f}，正确答案 {expected:.5f}")
 
     args.output.mkdir(parents=True)
@@ -76,7 +81,7 @@ def main():
         "training_mse_after": final,
         "held_out_midpoint_mse": check_mse,
         "examples": [
-            {"input": value, "prediction": predicted, "target": 2 * value * value + 0.5 * value + 1}
+            {"input": value, "prediction": predicted, "target": answer(value)}
             for value, predicted in zip(sample_x.flatten().cpu().tolist(), predictions)
         ],
         "reload_matches": True,
