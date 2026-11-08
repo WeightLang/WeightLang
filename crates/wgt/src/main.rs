@@ -869,9 +869,9 @@ fn initialize(path: &Path, module: Option<String>) -> Result<()> {
         path.join(toolchain::PIN),
         format!("{}\n", toolchain::CURRENT),
     )?;
-    fs::write(path.join("model.wgt"), "wgt 0.5\n# One feature and one output; all iterations update the same initialized model.\nfn main() {\n    let model = mlp([1, 4, 1], \"tanh\", 42, \"adam\");\n    for step in range(0, 100) {\n        let loss = train model on [[0], [1]] against [[0], [1]] {rate:0.03;loss:mse;};\n    }\n    metric(\"training_steps\", 100);\n    return model;\n}\n")?;
+    fs::write(path.join("model.wgt"), "wgt 0.5\nmodel Scale\ninput x: f32[1]\noutput y: f32[1]\n# One feature; parsing this definition does not initialize or train weights.\nparameter gain: f32[1] = [1]\nfn forward(x) { return x * gain; }\n")?;
     project_ignore::initialize(path)?;
-    println!("created {} (wgt check; weightc compile model.wgt -o MODEL)", path.display());
+    println!("created {} (run wgt check inside the project)", path.display());
     Ok(())
 }
 fn find_executable(name: &str) -> Option<PathBuf> {
