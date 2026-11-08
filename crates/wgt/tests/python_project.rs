@@ -22,6 +22,7 @@ fn pyproject_reads_weightlang_settings_independently_of_python_metadata() {
     assert_eq!(config.project.edition, "0.5");
     assert_eq!(config.model.kind.as_deref(), Some("tiny-lm"));
     assert_eq!(config.model.hidden_size, Some(64));
+    assert_eq!(config.runtime.device.as_deref(), Some("auto"));
     assert_eq!(config.python.unwrap().runner.to_str(), Some("workflow.py"));
     assert!(config.dependencies.is_empty());
 
@@ -175,7 +176,7 @@ fn check_rejects_invalid_architecture_training_and_inference_settings() {
         ),
         (
             "invalid runtime device",
-            "device = \"cpu\"",
+            "device = \"auto\"",
             "device = \"not-a-device\"",
         ),
     ] {
@@ -187,4 +188,24 @@ fn check_rejects_invalid_architecture_training_and_inference_settings() {
             "accepted {description}"
         );
     }
+}
+
+#[test]
+fn runtime_accepts_auto_accelerators_and_omitted_settings() {
+    for device in ["auto", "cpu", "cuda", "cuda:1", "xpu", "xpu:1", "mps"] {
+        let text = starter().replace("device = \"auto\"", &format!("device = {device:?}"));
+        python_env::check(&ProjectConfig::parse(&text).unwrap()).unwrap();
+    }
+    for device in ["cuda:-1", "xpu:-1", "xpu:", "cuda:١", "mps:0"] {
+        let text = starter().replace("device = \"auto\"", &format!("device = {device:?}"));
+        assert!(python_env::check(&ProjectConfig::parse(&text).unwrap()).is_err());
+    }
+    let mut document = starter().parse::<toml_edit::DocumentMut>().unwrap();
+    document["tool"]["wgt"]
+        .as_table_mut()
+        .unwrap()
+        .remove("runtime");
+    let config = ProjectConfig::parse(&document.to_string()).unwrap();
+    assert!(config.runtime.device.is_none());
+    python_env::check(&config).unwrap();
 }

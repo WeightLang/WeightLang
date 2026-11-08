@@ -54,6 +54,9 @@ fn every_template_starts_offline_without_initializing_weights() {
             );
             let text = fs::read_to_string(root.join("pyproject.toml")).unwrap();
             assert!(!text.contains("PROJECT_"));
+            assert!(text.contains("torch-backend = \"auto\""));
+            assert!(text.contains("device = \"auto\""));
+            assert!(!text.contains("pytorch-cpu"));
         }
     }
 }
@@ -142,6 +145,12 @@ fn workflow_options_are_forwarded_and_failed_uv_status_is_preserved() {
         temp.path(),
         &["init", "demo", "--template", "tiny-lm"],
     ));
+    // Locked execution uses an already selected source; backend discovery is a
+    // separate operation and must not intercept the child's exit status.
+    let config_path = temp.path().join("demo/pyproject.toml");
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str("\n[tool.uv.sources]\ntorch = { index = \"pytorch-cpu\" }\n\n[[tool.uv.index]]\nname = \"pytorch-cpu\"\nurl = \"https://download.pytorch.org/whl/cpu\"\nexplicit = true\n");
+    fs::write(config_path, config).unwrap();
     let executable = temp.path().join("uv");
     fs::write(
         &executable,
@@ -181,4 +190,90 @@ fn workflow_options_are_forwarded_and_failed_uv_status_is_preserved() {
         "{forwarded}"
     );
     assert!(!temp.path().join("demo/weights").exists());
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn uv_selects_the_install_source_before_sync_without_overwriting_user_requirements() {
+    use std::os::unix::fs::PermissionsExt;
+    for backend in ["cpu", "cu128"] {
+        let temp = tempfile::tempdir().unwrap();
+        success(&wgt(temp.path(), &["init", "demo", "--template", "mlp"]));
+        let root = temp.path().join("demo");
+        let path = root.join("pyproject.toml");
+        let mut config = fs::read_to_string(&path).unwrap();
+        config.push_str("\n[tool.uv.pip]\noutput-file = \"requirements.txt\"\n");
+        fs::write(&path, &config).unwrap();
+        fs::write(root.join("requirements.txt"), "keep-user-requirements\n").unwrap();
+        let python = temp.path().join("selected-python");
+        fs::write(&python, "project interpreter fixture").unwrap();
+        let executable = temp.path().join("uv");
+        fs::write(&executable, r#"#!/bin/sh
+printf '%s\n' "$@" >> "$WGT_TEST_UV_LOG"
+case " $* " in
+  *" --no-sync "*) printf '%s\n' "$WGT_TEST_PYTHON" ;;
+  *" pip compile "*)
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "--output-file" ]; then shift; output="$1"; fi
+      shift
+    done
+    printf 'torch==2.15.0\n    # from https://download.pytorch.org/whl/%s\n' "$WGT_TEST_BACKEND" > "$output"
+    ;;
+esac
+"#).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let log = temp.path().join("uv-args");
+        let run = |args: &[&str]| {
+            Command::new(env!("CARGO_BIN_EXE_wgt"))
+                .current_dir(&root)
+                .env("PATH", temp.path())
+                .env("WGT_TEST_UV_LOG", &log)
+                .env("WGT_TEST_PYTHON", &python)
+                .env("WGT_TEST_BACKEND", backend)
+                .env_remove("UV_TORCH_BACKEND")
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        success(&run(&["sync"]));
+        let selected = fs::read_to_string(&path).unwrap();
+        assert!(selected.contains(&format!("https://download.pytorch.org/whl/{backend}")));
+        assert!(selected.contains("wgt-pytorch"));
+        let before = config.parse::<toml_edit::DocumentMut>().unwrap();
+        let after = selected.parse::<toml_edit::DocumentMut>().unwrap();
+        assert_eq!(before["project"].to_string(), after["project"].to_string());
+        assert_eq!(
+            fs::read_to_string(root.join("requirements.txt")).unwrap(),
+            "keep-user-requirements\n"
+        );
+        let calls = fs::read_to_string(&log).unwrap();
+        assert!(calls.find("--no-sync\n").unwrap() < calls.find("pip\ncompile\n").unwrap());
+        assert!(calls.contains(&format!("--python\n{}\n", python.display())));
+        let output = calls
+            .lines()
+            .skip_while(|line| *line != "--output-file")
+            .nth(1)
+            .unwrap();
+        assert!(
+            !Path::new(output).exists(),
+            "temporary probe output was not removed"
+        );
+        assert!(calls.ends_with("sync\n"));
+        fs::write(&log, "").unwrap();
+        success(&run(&[
+            "--offline",
+            "--locked",
+            "run",
+            "--",
+            "python",
+            "--version",
+        ]));
+        let calls = fs::read_to_string(&log).unwrap();
+        assert!(
+            !calls.contains("compile"),
+            "offline/locked execution must reuse the saved source"
+        );
+        assert!(calls.contains("--offline\n--locked\n--\npython\n--version\n"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), selected);
+    }
 }

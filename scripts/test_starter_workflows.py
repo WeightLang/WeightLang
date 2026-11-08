@@ -2,6 +2,8 @@
 
 import hashlib
 import importlib.util
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
+import io
 import json
 import math
 import os
@@ -10,9 +12,84 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 TEMPLATES = Path(__file__).resolve().parents[1] / "crates/wgt/templates"
+
+
+class DeviceSelection(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import torch
+
+        cls.torch = torch
+        spec = importlib.util.spec_from_file_location("starter_device_host", TEMPLATES / "workflow.py")
+        cls.host = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.host)
+
+    def select(self, requested, cuda=False, xpu=False, mps=False, count=2, hip=None):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        fake_xpu = SimpleNamespace(is_available=lambda: xpu, device_count=lambda: count)
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(self.torch.cuda, "is_available", return_value=cuda))
+            stack.enter_context(mock.patch.object(self.torch.cuda, "device_count", return_value=count))
+            stack.enter_context(mock.patch.object(self.torch, "xpu", fake_xpu, create=True))
+            stack.enter_context(mock.patch.object(self.torch.backends.mps, "is_available", return_value=mps))
+            stack.enter_context(mock.patch.object(self.torch.version, "hip", hip))
+            stack.enter_context(mock.patch.object(self.torch, "set_num_threads"))
+            stack.enter_context(redirect_stdout(stdout))
+            stack.enter_context(redirect_stderr(stderr))
+            device = self.host.device_for(self.torch, requested)
+        self.assertEqual(stdout.getvalue(), "")
+        return device, stderr.getvalue()
+
+    def test_auto_prefers_available_accelerators(self):
+        for cuda, xpu, mps, expected in (
+            (True, True, True, "cuda"),
+            (False, True, True, "xpu"),
+            (False, False, True, "mps"),
+            (False, False, False, "cpu"),
+        ):
+            with self.subTest(device=expected):
+                device, log = self.select("auto", cuda=cuda, xpu=xpu, mps=mps)
+                self.assertEqual(device.type, expected)
+                self.assertIn(f"Device: {expected}", log)
+                self.assertIn("auto", log)
+
+    def test_explicit_devices_and_indices_are_respected(self):
+        device, log = self.select("cpu", cuda=True, xpu=True, mps=True)
+        self.assertEqual(device.type, "cpu")
+        self.assertIn("explicit", log)
+        for name in ("cuda", "xpu"):
+            device, _ = self.select(f"{name}:1", cuda=True, xpu=True)
+            self.assertEqual((device.type, device.index), (name, 1))
+            for index in ("2", "999999999999999999999999999"):
+                with self.subTest(device=name, index=index), self.assertRaisesRegex(ValueError, "out of range"):
+                    self.select(f"{name}:{index}", cuda=True, xpu=True)
+        for name, availability in (
+            ("cuda", {"xpu": True, "mps": True}),
+            ("xpu", {"cuda": True, "mps": True}),
+            ("mps", {"cuda": True, "xpu": True}),
+        ):
+            with self.subTest(unavailable=name), self.assertRaisesRegex(ValueError, "unavailable"):
+                self.select(name, **availability)
+
+    def test_runtime_defaults_and_command_line_override(self):
+        for config in ({}, {"runtime": {}}, {"runtime": {"device": "auto"}}):
+            self.assertEqual(self.host.requested_device(config), "auto")
+        self.assertEqual(self.host.requested_device({"runtime": {"device": "mps"}}), "mps")
+        self.assertEqual(self.host.requested_device({"runtime": {"device": "cuda"}}, "cpu"), "cpu")
+        self.assertEqual(self.host.requested_device({}, "xpu:1"), "xpu:1")
+        for invalid in ("", "gpu", "cuda:-1", "cuda:١", "xpu:", "mps:0", True):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                self.host.requested_device({"runtime": {"device": invalid}})
+
+    def test_rocm_uses_pytorch_cuda_api_and_is_named_in_log(self):
+        device, log = self.select("auto", cuda=True, hip="6.4")
+        self.assertEqual(device.type, "cuda")
+        self.assertIn("ROCm", log)
 
 
 class StarterWorkflows(unittest.TestCase):
@@ -181,6 +258,29 @@ class StarterWorkflows(unittest.TestCase):
         self.run_workflow(root, "train", "--steps", "1")
         rejected = self.run_workflow(root, "infer", "--inputs", "1", "2", success=False, stdlib=True)
         self.assertIn("1 finite numbers", rejected.stderr)
+
+    def test_omitted_runtime_and_cpu_override_train_and_infer(self):
+        root = self.project("mlp")
+        path = root / "pyproject.toml"
+        config = path.read_text(encoding="utf-8")
+        start = config.index("[tool.wgt.runtime]")
+        end = config.index("[tool.wgt.train]", start)
+        config = config[:start] + config[end:]
+        path.write_text(config, encoding="utf-8")
+        self.run_workflow(root, "check", stdlib=True)
+        self.assertFalse((root / "weights").exists())
+        trained = self.run_workflow(root, "train", "--steps", "2")
+        metadata = self.metadata(root)
+        self.assertEqual(metadata["train"]["steps"], 2)
+        self.assertIn(f"Device: {metadata['runtime']['device']}", trained.stderr)
+        self.assertIn("auto", trained.stderr)
+        path.write_text(config + '\n[tool.wgt.runtime]\ndevice = "cuda:999999"\n', encoding="utf-8")
+        self.run_workflow(root, "infer", success=False)
+        result = self.run_workflow(root, "infer", "--device", "cpu")
+        self.assertIn("Device: cpu (CPU, explicit)", result.stderr)
+        prediction = json.loads(result.stdout)
+        self.assertEqual(len(prediction), 1)
+        self.assertTrue(math.isfinite(prediction[0]))
 
 
 if __name__ == "__main__":

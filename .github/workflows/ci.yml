@@ -71,6 +71,8 @@ jobs:
           cargo test --locked -p weightlang-wgt
           --test project_config --test python_project --test starter_projects
           --test no_python_cli --test trainer_forwarding
+      - name: Check automatic PyTorch backend preparation
+        run: cargo test --locked -p weightlang-wgt --lib torch_backend::tests
       - name: Check allocator instrumentation configuration
         run: cargo check --locked -p wgtime-service --features allocation-metrics
       - name: Check service lifecycle and transport
@@ -114,6 +116,9 @@ jobs:
           project.mkdir()
           template = Path("crates/wgt/templates/tiny-lm.toml").read_text(encoding="utf-8")
           config = template.replace("PROJECT_NAME", "starter-ci").replace("PROJECT_MODULE", "local/starter_ci")
+          # These runners have no GPU; test the declared dependencies using CPU wheels.
+          config += '\n[tool.uv.sources]\ntorch = [{index = "pytorch-ci", marker = "sys_platform != \'darwin\'"}]\n'
+          config += '\n[[tool.uv.index]]\nname = "pytorch-ci"\nurl = "https://download.pytorch.org/whl/cpu"\nexplicit = true\n'
           (project / "pyproject.toml").write_text(config, encoding="utf-8")
           PY
           uv sync --project "$RUNNER_TEMP/wgt-starter" --python 3.12
@@ -133,6 +138,8 @@ jobs:
           templates = Path("crates/wgt/templates")
           config = (templates / "mlp.toml").read_text(encoding="utf-8")
           config = config.replace("PROJECT_NAME", "mlp-ci").replace("PROJECT_MODULE", "local/mlp_ci")
+          config += '\n[tool.uv.sources]\ntorch = [{index = "pytorch-ci", marker = "sys_platform != \'darwin\'"}]\n'
+          config += '\n[[tool.uv.index]]\nname = "pytorch-ci"\nurl = "https://download.pytorch.org/whl/cpu"\nexplicit = true\n'
           (project / "pyproject.toml").write_text(config, encoding="utf-8")
           shutil.copyfile(templates / "workflow.py", project / "workflow.py")
           shutil.copyfile(templates / "mlp.csv", project / "data.csv")

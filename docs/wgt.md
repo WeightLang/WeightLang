@@ -19,6 +19,8 @@ weightc check native-model/model.wgt
 
 `wgt templates` 列出内置模板，`wgt init --interactive` 提供交互选择。Python 模板的架构、训练和推理参数位于标准 `pyproject.toml` 的 `[tool.wgt]` 中；`wgt check` 验证配置，`wgt train` 和 `wgt infer` 显式运行项目中的 Python host。`wgt run -- COMMAND ARGS` 通过 `uv run` 在项目环境中运行命令，例如 `wgt -C text-model run -- python -c "import torch; print(torch.__version__)"`。完整流程见[项目快速上手](project-quickstart.md)。
 
+Python 模板默认自动选择兼容的 PyTorch 构建与可用加速设备，无可用 GPU 时回退到 CPU。首次环境准备通过 uv 的后端探测记录标准包来源，后续依赖仍由 `uv.lock` 管理；`--device` 可覆盖运行设备，`wgt sync` 可重新选择自动管理的安装源。
+
 `wgt new PATH` 创建新目录，`wgt init` 也可初始化现有目录；两者都拒绝覆盖模板输出。`wgt sync` 同步 WGT 模型包及已配置的 uv 环境，`--no-env` 只同步模型包。`wgt add`、`wgt remove`、`wgt update` 管理模型包，Python 库使用 uv 原生命令管理。`wgt --offline --locked sync` 限制包网络访问并要求沿用已有锁；用户自己的程序仍自行决定是否联网。详见[包管理说明](packages.md#项目配置与-python-依赖)。
 
 原生 WGT 模型源码入口必须命名为 `model.wgt`，自定义可视化样式为同目录的 `model.css`。

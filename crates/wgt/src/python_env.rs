@@ -10,6 +10,11 @@ fn configured(project: &Path, action: &str) -> Result<ProjectConfig> {
 }
 
 fn uv(project: &Path, action: &str, args: &[OsString], offline: bool, locked: bool) -> Result<u8> {
+    if action == "sync" {
+        crate::torch_backend::refresh(project, offline, locked)?;
+    } else {
+        crate::torch_backend::prepare(project, offline, locked)?;
+    }
     let mut command = Command::new("uv");
     command.arg("--directory").arg(project).arg(action);
     if offline {
@@ -95,10 +100,16 @@ pub fn check(config: &ProjectConfig) -> Result<()> {
         config.infer.as_ref().context("missing infer settings")?,
         &config.model,
     )?;
-    let device = config.runtime.device.as_deref().unwrap_or("cpu");
-    ensure!(["cpu", "auto", "cuda", "mps"].contains(&device)
-        || device.strip_prefix("cuda:").is_some_and(|index| !index.is_empty() && index.bytes().all(|c| c.is_ascii_digit())),
-        "runtime.device must be cpu, auto, cuda, cuda:N or mps");
+    let device = config.runtime.device.as_deref().unwrap_or("auto");
+    ensure!(
+        ["cpu", "auto", "cuda", "xpu", "mps"].contains(&device)
+            || ["cuda:", "xpu:"]
+                .iter()
+                .any(|prefix| device.strip_prefix(*prefix).is_some_and(
+                    |index| !index.is_empty() && index.bytes().all(|c| c.is_ascii_digit())
+                )),
+        "runtime.device must be auto, cpu, cuda, cuda:N, xpu, xpu:N or mps"
+    );
     ensure!(
         config.runtime.placements.is_empty(),
         "runtime.placements is for native models; Python starters use runtime.device"
