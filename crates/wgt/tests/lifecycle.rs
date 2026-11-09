@@ -18,7 +18,7 @@ const WEIGHTC: &str = env!("CARGO_BIN_EXE_weightc");
 const MEMORY: usize = 4 * 1024 * 1024;
 const TRAINING: &[(f32, f32)] = &[(-1., -1.), (0., 1.), (1., 3.)];
 const HELD_OUT: &[(f32, f32)] = &[(-0.5, 0.), (0.25, 1.5)];
-const MODEL: &str = "wgt 0.5\nmodel LifecycleRegression\ninput x: f32[1]\noutput y: f32[1]\nlayer result: linear(out=1)\ninit seed=42\n";
+const MODEL: &str = "wgt 0.5\nmodel LifecycleRegression\ninput x: f32[1]\noutput y: f32[1]\nlayer result: linear(out=1)\ninit weights=xavier_uniform(42) bias=zeros()\n";
 
 fn command(service: &Service, binary: &str, root: &Path) -> Command {
     let mut command = Command::new(binary);

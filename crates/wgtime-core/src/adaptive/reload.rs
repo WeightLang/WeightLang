@@ -88,6 +88,7 @@ mod tests {
                     name: "w".into(),
                     shape: vec![1],
                     data: vec![data],
+                    initializer: None,
                     frozen: false,
                     probability: false,
                     learn: None,

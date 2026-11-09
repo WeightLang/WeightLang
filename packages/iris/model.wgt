@@ -9,4 +9,4 @@ layer act: tanh
 layer projection: linear(out=8)
 layer projection_act: tanh
 layer classifier: linear(out=3)
-init seed=42
+init weights=xavier_uniform(42) bias=zeros()

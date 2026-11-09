@@ -37,3 +37,4 @@ pub mod package_artifact;
 pub mod native_artifact_commands;
 pub mod sources;
 pub mod source_package;
+pub mod format;

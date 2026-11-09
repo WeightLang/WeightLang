@@ -12,7 +12,7 @@ output y: f32[1]
 layer hidden: linear(in=1,out=8)
 layer activation: tanh
 layer result: linear(in=8,out=1)
-init seed=42
+init weights=xavier_uniform(42) bias=zeros()
 
 fn main() {
     # [1,8,1] 的隐藏层使用 tanh；所有批次共享同一模型参数，初始权重未经训练。
@@ -94,7 +94,17 @@ fn main() {
   (directive
     (parameter
       (identifier))
-    (number))
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (number)))
+    (parameter
+      (identifier))
+    (call
+      (qualified_name
+        (identifier))
+      (arguments)))
   (function_declaration
     (identifier)
     (arguments)

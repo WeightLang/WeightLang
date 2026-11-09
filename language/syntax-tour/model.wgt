@@ -351,7 +351,7 @@ fn loss(prediction, target) {
 # layer s: sigmoid
 # layer i: identity
 # layer result: linear(out=1)
-# init seed=42
+# init weights=xavier_uniform(42) bias=zeros()
 # T09 END
 
 # 11 R01：Rust edition 2024 使用示意，全部是 Rust 注释资料，不是 WGT 语法

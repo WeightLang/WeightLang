@@ -134,7 +134,7 @@ fn async_limits_scope_and_model_resources_are_explicit() {
         ("wgt 0.5\nasync fn child(){tasks{return 1;}}\nfn main(){return await child();}","unavailable"),
         ("wgt 0.5\nasync fn main(){return 1;}","synchronous"),
         ("wgt 0.5\nasync fn recurse(){return await recurse();}\nfn main(){return await recurse();}","recursion limit"),
-        ("wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nlayer id: identity\ninit seed=1\nasync fn child(x){return 1;}\nfn main(){let net=M(\"sgd\");return await child([net]);}","plain data"),
+        ("wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nlayer id: identity\ninit weights=xavier_uniform(1) bias=zeros()\nasync fn child(x){return 1;}\nfn main(){let net=M(\"sgd\");return await child([net]);}","plain data"),
     ] {
         let error=script::run(source,Path::new("."),100000).unwrap_err();
         assert!(format!("{error:#}").contains(expected),"{error:#}");

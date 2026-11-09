@@ -7,6 +7,8 @@ pub mod categorical;
 pub mod weight_artifact;
 pub mod model;
 pub mod operations;
+pub mod initializer;
 mod model_modules;
 
 pub mod ide;
+pub mod format;

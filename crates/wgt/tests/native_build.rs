@@ -64,7 +64,7 @@ model Regression
 input x: f32[1]
 output y: f32[1]
 layer output: linear(out=1)
-init seed=42
+init weights=xavier_uniform(42) bias=zeros()
 fn main() {
     let net = Regression("adam");
     let final_batch_loss = 0;

@@ -17,6 +17,11 @@ pub fn parse_with_metadata(source: &str) -> Result<(Program, Vec<ModuleSchema>)>
     let functions = crate::script::parse::parse_functions(&unit.functions)?;
     parse_definition_with_metadata(source, &functions, true)
 }
+pub(crate) fn compile_with_metadata(source: &str) -> Result<(Program, Vec<ModuleSchema>)> {
+    let unit = crate::source::split(source)?;
+    let functions = crate::script::parse::parse_functions(&unit.functions)?;
+    parse_definition_with_metadata(source, &functions, false)
+}
 pub fn parse_with_functions(
     source: &str,
     functions: &crate::script::parse::Program,
@@ -114,187 +119,67 @@ fn parse_definition_with_details(
                 program.output_type = kind;
             }
             "learn" => {
-                let (name, declaration) = body
-                    .split_once(':')
-                    .context("learn requires name: type = initializer;")?;
-                let declaration = declaration
-                    .trim()
-                    .strip_suffix(';')
-                    .context("learn declaration requires trailing semicolon")?;
-                let (domain, initial) = declaration
-                    .rsplit_once('=')
-                    .context("learn requires explicit initializer")?;
+                let (name, declaration) = body.split_once(':').context("learn requires name: type")?;
+                let declaration = declaration.trim().strip_suffix(';').context("learn declaration requires trailing semicolon")?;
+                let assignment = declaration.rfind('=').filter(|i| *i == 0 || declaration.as_bytes()[i - 1] != b'.');
+                let (domain, initial) = assignment.map_or((declaration, None), |i| (&declaration[..i], Some(declaration[i + 1..].trim())));
                 let domain = domain.trim();
                 let (domain, count) = if let Some(start) = domain.find('[') {
-                    let end = domain[start..]
-                        .find(']')
-                        .context("unterminated learn array shape")?
-                        + start;
-                    ensure!(
-                        ["float", "bool", "int"].contains(&domain[..start].trim()),
-                        "learn array shape must follow its type, before bounds"
-                    );
-                    let count: usize = domain[start + 1..end]
-                        .parse()
-                        .context("learn array requires fixed width")?;
-                    ensure!(
-                        (1..=16384).contains(&count),
-                        "learn array width must be 1..16384"
-                    );
+                    let end = domain[start..].find(']').context("unterminated learn array shape")? + start;
+                    ensure!(["float", "bool", "int"].contains(&domain[..start].trim()), "learn array shape must follow its type, before bounds");
+                    let count: usize = domain[start + 1..end].parse().context("learn array requires fixed width")?;
+                    ensure!((1..=16384).contains(&count), "learn array width must be 1..16384");
                     (format!("{}{}", &domain[..start], &domain[end + 1..]), count)
-                } else {
-                    (domain.to_owned(), 1)
-                };
-                let initial_values = if initial.trim().starts_with('[') {
-                    let value = initial
-                        .trim()
-                        .strip_prefix('[')
-                        .unwrap()
-                        .strip_suffix(']')
-                        .context("invalid learn array initializer")?;
-                    let values = value.split(',').map(str::trim).collect::<Vec<_>>();
-                    ensure!(
-                        values.len() == count,
-                        "learn array initializer length mismatch"
-                    );
-                    values
-                } else {
-                    vec![initial.trim(); count]
-                };
-                let domain = domain.as_str();
-                let mut data = Vec::new();
-                let mut learned_domain = None;
-                for initial in initial_values {
-                    use super::LearnDomain as D;
-                    let (domain, value) = if domain == "bool" {
-                        (
-                            D::Bool,
-                            match initial.trim() {
-                                "true" => 1.,
-                                "false" => 0.,
-                                _ => bail!("learn bool initializer must be true or false"),
-                            },
-                        )
-                    } else {
-                        let value: f32 = initial
-                            .trim()
-                            .parse()
-                            .context("learn initializer must be a finite scalar")?;
-                        let kind = if domain == "float" {
-                            D::Float
-                        } else if let Some(low) = domain.strip_prefix("float >") {
-                            D::Positive {
-                                low: low
-                                    .trim()
-                                    .parse()
-                                    .context("invalid learn strict lower bound")?,
-                            }
-                        } else {
-                            let (kind, bounds) = domain
-                                .split_once(" in ")
-                                .context("unsupported learn type; choice is not supported")?;
-                            let (low, high) = bounds
-                                .split_once("..=")
-                                .context("learn bounds require inclusive low..=high")?;
-                            let low64: f64 =
-                                low.trim().parse().context("invalid learn lower bound")?;
-                            let high64: f64 =
-                                high.trim().parse().context("invalid learn upper bound")?;
-                            if kind.trim() == "int" {
-                                ensure!(
-                                    low64.fract() == 0.
-                                        && high64.fract() == 0.
-                                        && low64.abs() <= 16777216.
-                                        && high64.abs() <= 16777216.,
-                                    "learn int bounds must be exact integers within +/-16777216"
-                                );
-                            }
-                            let low = low64 as f32;
-                            let high = high64 as f32;
-                            match kind.trim() {
-                                "float" => D::Bounded { low, high },
-                                "int" => D::Int { low, high },
-                                _ => bail!("unsupported learn type; choice is not supported"),
-                            }
-                        };
-                        if matches!(kind, D::Int { .. }) {
-                            let exact: f64 = initial
-                                .trim()
-                                .parse()
-                                .context("invalid learn int initializer")?;
-                            ensure!(
-                                exact.is_finite()
-                                    && exact.fract() == 0.
-                                    && f64::from(value) == exact,
-                                "learn int initializer must be an exact f32 integer"
-                            );
-                        }
-                        (kind, value)
-                    };
-                    domain
-                        .validate(value)
-                        .with_context(|| format!("learn {}", name.trim()))?;
-                    data.push(value);
-                    learned_domain = Some(domain);
+                } else { (domain.to_owned(), 1) };
+                let domain = parse_learn_domain(domain.trim())?;
+                let shape = vec![count];
+                let initializer = if let Some(initial) = initial.filter(|v| *v != "external") {
+                    if matches!(domain, super::LearnDomain::Bool) { ensure!(initial.parse::<f64>().is_err(), "learn bool initializer must be true or false"); }
+                    let initial = match initial { "true" => "1".to_owned(), "false" => "0".to_owned(), _ => initial.to_owned() };
+                    let scalar = initial.parse::<f64>().ok();
+                    if let Some(value) = scalar {
+                        ensure!(value.is_finite() && (value as f32).is_finite(), "learn initializer must be finite");
+                        if matches!(domain, super::LearnDomain::Int { .. }) { ensure!(value.fract() == 0. && (value as f32) as f64 == value, "learn int initializer must be an exact f32 integer"); }
+                        domain.validate(value as f32)?;
+                        crate::initializer::Recipe::Full { shape: shape.clone(), value: value as f32 }
+                    } else { crate::initializer::parse(Some(&initial), &shape, functions)? }
+                } else { crate::initializer::Recipe::Unbound };
+                // Explicit numeric literals are checked without running a recipe.
+                if let crate::initializer::Recipe::Literal { values, .. } = &initializer {
+                    for value in values { domain.validate(*value)?; }
                 }
-                program.parameters.push(Parameter {
-                    name: name.trim().into(),
-                    shape: vec![count],
-                    data: if materialize { data } else { vec![] },
-                    frozen: false,
-                    probability: false,
-                    learn: learned_domain,
-                });
+                let data = if materialize {
+                    let values = initializer.materialize(&shape).with_context(|| format!("learn {}", name.trim()))?;
+                    for value in &values { domain.validate(*value)?; }
+                    values
+                } else { Vec::new() };
+                program.parameters.push(Parameter { name: name.trim().into(), shape, data, initializer: Some(initializer), frozen: false, probability: false, learn: Some(domain) });
             }
             "parameter" | "frozen" => {
                 let (name, body) = body
                     .split_once(':')
                     .context("parameter requires name: f32[shape] = values")?;
-                let (shape, values) = body
-                    .split_once('=')
-                    .context("parameter requires explicit values")?;
+                let (shape, values) = body.trim_end_matches(';').split_once('=')
+                    .map_or((body.trim().trim_end_matches(';'), None), |(shape, values)| (shape, Some(values)));
                 let probability = shape.trim() == "prob";
-                let (shape, data) = if probability {
-                    let p: f64 = values
-                        .trim()
-                        .parse()
-                        .context("prob initializer must be a scalar probability")?;
-                    ensure!(
-                        p.is_finite() && (0. ..=1.).contains(&p),
-                        "prob initializer must be in [0,1]"
-                    );
-                    let value = if kw == "frozen" {
-                        p
-                    } else {
-                        ensure!(
-                            p > 0. && p < 1.,
-                            "trainable prob initializer must be strictly between 0 and 1; use frozen for exact endpoints"
-                        );
-                        p.ln() - (-p).ln_1p()
-                    };
-                    (
-                        vec![1],
-                        if materialize {
-                            vec![value as f32]
-                        } else {
-                            Vec::new()
-                        },
-                    )
+                let (shape, initializer) = if probability {
+                    (vec![1], crate::initializer::probability(values, kw == "frozen", functions)?)
                 } else {
                     let shape = shape
                         .trim()
                         .strip_prefix("f32")
                         .context("parameter type must be f32 or prob")?;
                     let shape: Vec<usize> = serde_json::from_str(shape)?;
-                    let count = crate::model::validate_shape(&shape)?;
-                    let data =
-                        crate::model::validate_initializer(values.trim(), count, materialize)?;
-                    (shape, data)
+                    crate::model::validate_shape(&shape)?;
+                    let initializer = crate::initializer::parse(values, &shape, functions)?;
+                    (shape, initializer)
                 };
+                let data = if materialize { initializer.materialize(&shape).with_context(|| format!("parameter {}", name.trim()))? } else { Vec::new() };
                 program.parameters.push(Parameter {
                     name: name.trim().into(),
                     shape,
                     data,
+                    initializer: Some(initializer),
                     frozen: kw == "frozen",
                     probability,
                     learn: None,
@@ -2330,4 +2215,27 @@ impl Lower {
         }
         Ok(())
     }
+}
+
+fn parse_learn_domain(domain: &str) -> Result<super::LearnDomain> {
+    use super::LearnDomain as D;
+    let result = if domain == "float" { D::Float }
+    else if domain == "bool" { D::Bool }
+    else if let Some(low) = domain.strip_prefix("float >") {
+        let low: f32 = low.trim().parse().context("invalid learn strict lower bound")?;
+        ensure!(low.is_finite() && low >= 0. && low < f32::MAX, "invalid learn positive bound");
+        D::Positive { low }
+    } else {
+        let (kind, bounds) = domain.split_once(" in ").context("unsupported learn type")?;
+        let (low, high) = bounds.split_once("..=").context("learn bounds require inclusive low..=high")?;
+        let low64: f64 = low.trim().parse().context("invalid learn lower bound")?;
+        let high64: f64 = high.trim().parse().context("invalid learn upper bound")?;
+        if kind.trim() == "int" {
+            ensure!(low64.fract() == 0. && high64.fract() == 0. && low64.abs() <= 16777216. && high64.abs() <= 16777216., "learn int bounds must be exact f32 integers within +/-16777216");
+        }
+        let (low, high) = (low64 as f32, high64 as f32);
+        ensure!(low.is_finite() && high.is_finite() && low < high, "invalid learn interval");
+        match kind.trim() { "float" => D::Bounded { low, high }, "int" => D::Int { low, high }, _ => bail!("unsupported learn type") }
+    };
+    Ok(result)
 }

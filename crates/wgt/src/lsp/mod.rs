@@ -471,6 +471,7 @@ impl Server {
                 | "textDocument/semanticTokens/full"
                 | "textDocument/inlayHint"
                 | "textDocument/codeAction"
+                | "textDocument/formatting"
         ) {
             return Err((-32601, format!("Method not found: {method}")));
         }
@@ -484,6 +485,32 @@ impl Server {
         else {
             return Ok(Value::Null);
         };
+        if method == "textDocument/formatting" {
+            let overlays = self
+                .documents
+                .values()
+                .filter_map(|document| {
+                    let path = canonical_source(document.path.as_deref()?)?;
+                    let source = if document.sync_error.is_some() {
+                        String::new()
+                    } else {
+                        normalize_newlines(&document.text.source)
+                    };
+                    Some((path, source))
+                })
+                .collect();
+            let formatted = wgt_language::format::format_with_context(
+                &document.text.source,
+                document.path.as_deref(),
+                &overlays,
+            )
+            .map_err(|error| (-32803, format!("{error:#}")))?;
+            return Ok(if formatted == document.text.source {
+                json!([])
+            } else {
+                json!([{"range":document.text.range(0, document.text.source.len()),"newText":formatted}])
+            });
+        }
         if method == "textDocument/documentSymbol" {
             return Ok(document.index.document_symbols(&document.text));
         }
@@ -657,6 +684,7 @@ impl Server {
                 "definitionProvider":true,"referencesProvider":true,"documentHighlightProvider":true,
                 "renameProvider":{"prepareProvider":true},"documentSymbolProvider":true,"workspaceSymbolProvider":true,
                 "foldingRangeProvider":true,"inlayHintProvider":true,
+                "documentFormattingProvider":true,
                 "codeActionProvider":{"codeActionKinds":["quickfix"]},
                 "semanticTokensProvider":{"legend":{"tokenTypes":features::TOKEN_TYPES,"tokenModifiers":features::TOKEN_MODIFIERS},"full":true}
             }});

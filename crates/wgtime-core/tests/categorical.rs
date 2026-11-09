@@ -95,7 +95,7 @@ fn main(){
 #[test]
 fn native_model_versions_and_unknown_fields_remain_strict() {
     use wgtime_core::{Session, categorical::VectorType};
-    let source="wgt 0.5\nmodel Native\ninput x: f32[3]\nlayer passthrough: identity\noutput scores: logits[3]\ninit seed=7\n";
+    let source="wgt 0.5\nmodel Native\ninput x: f32[3]\nlayer passthrough: identity\noutput scores: logits[3]\ninit weights=xavier_uniform(7) bias=zeros()\n";
     let (_,graph)=wgtime_core::source::graph(source).unwrap();
     let model=graph.instantiate().unwrap();
     let encoded=serde_json::to_value(model).unwrap();

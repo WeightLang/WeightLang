@@ -70,10 +70,10 @@ pub fn compile_source(source: &str) -> Result<Architecture> {
 
 fn from_definition(definition: ModelDefinition) -> Result<Architecture> {
     let interface = definition.interface().cloned();
-    let (native_plan, modules) = definition.instantiate_plan_with_modules()?;
+    let (native_plan, modules) = definition.compile_plan_with_modules()?;
     let plan = match native_plan {
         ModelPlan::Graph(graph) => Plan::Sequential {
-            graph_parameters: graph.initial_parameters()?,
+            graph_parameters: graph.parameter_definitions()?,
             graph,
         },
         ModelPlan::Forward(program) => {

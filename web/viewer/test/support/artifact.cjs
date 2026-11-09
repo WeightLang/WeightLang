@@ -16,7 +16,7 @@ header = Buffer.concat([header, Buffer.alloc((8 - header.length % 8) % 8, 32)]);
 const length = Buffer.alloc(8);
 length.writeBigUInt64LE(BigInt(header.length));
 const weights = Buffer.concat([length, header, Buffer.alloc(24)]);
-const source = 'wgt 0.5\nmodel demo\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ninit seed=42\n';
+const source = 'wgt 0.5\nmodel demo\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ninit weights=xavier_uniform(42) bias=zeros()\n';
 const manifest = {
   format: 'weightlang.artifact', format_version: 2, model: 'demo',
   source: {file: 'source.wgt', sha256: hash(source)},

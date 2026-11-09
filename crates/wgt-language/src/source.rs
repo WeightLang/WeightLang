@@ -159,6 +159,9 @@ pub struct Graph {
     pub input: usize,
     pub seed: u64,
     pub layers: Vec<GraphLayer>,
+    /// Explicit recipes or already-bound parameters. None reads legacy seed IR.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<Vec<crate::adaptive::Parameter>>,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct GraphLayer {
@@ -207,6 +210,7 @@ pub fn typed_vector_port(body: &str) -> Result<(String, usize, crate::categorica
 
 pub fn graph(source: &str) -> Result<(String, Graph)> {
     let (mut name, mut input, mut output, mut seed) = (None, None, None, None);
+    let mut initializers: Option<(&str, &str)> = None;
     let mut layers = Vec::new();
     let mut output_type = crate::categorical::VectorType::F32;
     let mut width = 0;
@@ -240,12 +244,17 @@ pub fn graph(source: &str) -> Result<(String, Graph)> {
                 output_type = kind;
             }
             "init" => {
-                ensure!(seed.is_none(), "duplicate init");
-                seed = Some(
-                    body.strip_prefix("seed=")
-                        .context("native init requires seed=N")?
-                        .parse::<u64>()?,
-                );
+                ensure!(seed.is_none() && initializers.is_none(), "duplicate init");
+                if let Some(value) = body.strip_prefix("seed=") {
+                    // Read compatibility for existing source snapshots. New
+                    // models spell out both weight and bias initialization.
+                    seed = Some(value.parse::<u64>()?);
+                } else {
+                    let (weights, bias) = body.strip_prefix("weights=")
+                        .and_then(|value| value.split_once(" bias="))
+                        .context("init requires weights=EXPRESSION bias=EXPRESSION")?;
+                    initializers = Some((weights.trim(), bias.trim()));
+                }
             }
             "layer" => {
                 ensure!(width > 0, "input must precede layers");
@@ -313,13 +322,23 @@ pub fn graph(source: &str) -> Result<(String, Graph)> {
         total <= 4_000_000,
         "native model exceeds 4 million parameters"
     );
-    Ok((
-        name.context("missing model")?,
-        Graph {
+    let mut graph = Graph {
             output_type,
             input: input.context("missing input")?,
-            seed: seed.context("missing init seed")?,
+            seed: seed.unwrap_or(0),
             layers,
-        },
-    ))
+            parameters: None,
+    };
+    if seed.is_none() {
+        let mut parameters = graph.parameter_definitions()?;
+        let mut streams = std::collections::BTreeMap::new();
+        for parameter in &mut parameters {
+            let expression = initializers.map(|(weights, bias)| if parameter.name.ends_with(".weight") { weights } else { bias });
+            let mut recipe = crate::initializer::parse(expression, &parameter.shape, &Default::default())?;
+            recipe.sequence_streams(&mut streams)?;
+            parameter.initializer = Some(recipe);
+        }
+        graph.parameters = Some(parameters);
+    }
+    Ok((name.context("missing model")?, graph))
 }

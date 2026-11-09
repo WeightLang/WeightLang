@@ -22,3 +22,9 @@ test('checks only WGT documentation code fences', () => {
   ].join('\n');
   assert.deepEqual(markdownProblems(markdown), [6]);
 });
+
+test('requires an explicit initialization algorithm in active examples', () => {
+  assert.deepEqual(sourceProblems('init seed=42\n# init seed=7'), [1, 2]);
+  assert.deepEqual(sourceProblems('init weights=xavier_uniform(42) bias=zeros()'), []);
+  assert.deepEqual(markdownProblems('Legacy `init seed=42` remains compatible.\n```wgt\ninit seed=42\n```'), [3]);
+});

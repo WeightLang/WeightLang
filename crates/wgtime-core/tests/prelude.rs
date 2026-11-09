@@ -25,7 +25,7 @@ fn registry_covers_dispatch_and_preserves_contexts() {
     assert!(!prelude::is_builtin("true"));
     for name in ["load_model", "load_checkpoint", "save_checkpoint", "model", "restore", "save"] {
         assert!(parse(&format!("wgt 0.5\nfn {name}() {{}} fn main() {{}}")).is_err());
-        assert!(parse(&format!("wgt 0.5\nmodel {name}\ninput x: f32[1]\noutput y: f32[1]\nlayer a: identity\ninit seed=1")).is_err());
+        assert!(parse(&format!("wgt 0.5\nmodel {name}\ninput x: f32[1]\noutput y: f32[1]\nlayer a: identity\ninit weights=xavier_uniform(1) bias=zeros()")).is_err());
     }
 }
 

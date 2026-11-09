@@ -103,7 +103,7 @@ fn sampling_rejects_old_calls_invalid_models_and_inputs() {
     assert!(script::run(&overflow, Path::new("."), 1000).is_err());
     let text = "wgt 0.5\nfn main(){let net=1;return sample from net([1]);}";
     assert!(script::run(text, Path::new("."), 1000).is_err());
-    let sequential="wgt 0.5\nmodel Identity\ninput x: f32[3]\noutput y: f32[3]\nlayer y: identity\ninit seed=1\nfn main(){let net=Identity(\"adam\");seed(7);return sample from net([0,0,0]);}";
+    let sequential="wgt 0.5\nmodel Identity\ninput x: f32[3]\noutput y: f32[3]\nlayer y: identity\ninit weights=xavier_uniform(1) bias=zeros()\nfn main(){let net=Identity(\"adam\");seed(7);return sample from net([0,0,0]);}";
     let expected = legacy_sample(&[0., 0., 0.], &mut 7) as f64;
     assert_eq!(
         script::run(sequential, Path::new("."), 1000)

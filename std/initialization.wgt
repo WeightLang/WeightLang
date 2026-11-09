@@ -1,0 +1,16 @@
+wgt 0.5
+operators Initialization
+
+# Shapes come from the declared target parameter. These functions are recipes;
+# they run only when the host explicitly initializes the corresponding storage.
+fn identity(gain) {
+    return eye() * gain;
+}
+
+fn symmetric(seed, amplitude) {
+    return uniform(seed, -1, 1) * amplitude;
+}
+
+fn constant(value) {
+    return full(value);
+}

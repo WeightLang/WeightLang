@@ -41,9 +41,9 @@ fn model_rejects_application_code_invalid_shapes_and_imports() {
 }
 #[test]
 fn sequential_graph_definition_retains_initializer_until_instantiation() {
-    let source="wgt 0.5\nmodel Dense\ninput x: f32[2]\noutput y: f32[1]\nlayer dense: linear(1)\ninit seed=7\n";
+    let source="wgt 0.5\nmodel Dense\ninput x: f32[2]\noutput y: f32[1]\nlayer dense: linear(1)\ninit weights=xavier_uniform(7) bias=zeros()\n";
     let definition=ModelDefinition::parse(source).unwrap();
     assert_eq!(definition.parameters()[0].shape,vec![1,2]);
     let ModelPlan::Graph(graph)=definition.instantiate_plan().unwrap() else {panic!("graph model")};
-    assert_eq!(graph.seed,7);
+    assert_eq!(graph.seed,0); // Explicit seeds live in recipes, not the legacy graph field.
 }

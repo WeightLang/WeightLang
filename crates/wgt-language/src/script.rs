@@ -9,20 +9,28 @@ use anyhow::{ensure, Result};
 use std::{collections::BTreeMap,path::Path};
 pub use parse::{Expr, Program, Statement, Stmt};
 pub fn parse(source: &str) -> Result<Program> {
-    parse_linked(source, Program::new())
+    parse_linked(source, Program::new(), true)
 }
 pub fn parse_with_imports(
     source: &str,
     root: &Path,
     dependencies: &BTreeMap<String, String>,
 ) -> Result<Program> {
+    parse_imported(source, root, dependencies, true)
+}
+/// Compatibility-script validation without generating model parameters. This
+/// output is for static checking only, not an initialized execution program.
+pub fn check_with_imports(source: &str, root: &Path, dependencies: &BTreeMap<String, String>) -> Result<Program> {
+    parse_imported(source, root, dependencies, false)
+}
+fn parse_imported(source: &str, root: &Path, dependencies: &BTreeMap<String, String>, materialize: bool) -> Result<Program> {
     let (source,modules)=modules::link(source,root)?;
     let (source, functions) = operators::link(&source, root, dependencies)?;
-    let mut program=parse_linked(&source, functions)?;
+    let mut program=parse_linked(&source, functions, materialize)?;
     for (name,function) in modules {ensure!(program.insert(name,function).is_none(),"duplicate module function");}
     Ok(program)
 }
-fn parse_linked(source: &str, imported: Program) -> Result<Program> {
+fn parse_linked(source: &str, imported: Program, materialize: bool) -> Result<Program> {
     let unit = crate::source::split(source)?;
     let mut program = parse::parse_functions(&unit.functions)?;
     for (name, function) in &imported {
@@ -59,7 +67,8 @@ fn parse_linked(source: &str, imported: Program) -> Result<Program> {
             "model name conflicts with function: {name}"
         );
         let (builtin, plan) = if program.contains_key("forward") {
-            let plan = crate::adaptive::parse_with_functions(source, &program)?;
+            let plan = if materialize { crate::adaptive::parse_with_functions(source, &program)? }
+                else { crate::adaptive::validate_definition(source, &program)? };
             program.remove("forward");
             program.remove("loss");
             ("__adaptive", serde_json::to_string(&plan)?)

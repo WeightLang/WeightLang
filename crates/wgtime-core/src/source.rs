@@ -77,6 +77,7 @@ mod security_tests {
             output_type: crate::categorical::VectorType::F32,
             input,
             seed: 1,
+            parameters: None,
             layers: vec![GraphLayer { name: "dense".into(), op: "linear".into(), input, output, bias: true }],
         })
     }

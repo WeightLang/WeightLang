@@ -16,9 +16,17 @@ pub fn check_file(path: &Path) -> Result<()> {
     if source.lines().any(|line| line.trim().starts_with("operators ")) {
         wgt_language::script::operators::library(&source)?;
     } else {
-        wgt_language::script::parse_with_imports(
-            &source, path.parent().unwrap_or(Path::new(".")), &Default::default(),
-        )?;
+        let unit = wgt_language::source::split(&source)?;
+        let functions = wgt_language::script::parse::parse_functions(&unit.functions)?;
+        let model = unit.declarations.lines().any(|line| line.trim().starts_with("model "));
+        let application = functions.keys().any(|name| name == "main" || name.starts_with("test_"));
+        if model && !application {
+            wgt_language::model::ModelDefinition::from_file(path)?;
+        } else {
+            wgt_language::script::check_with_imports(
+                &source, path.parent().unwrap_or(Path::new(".")), &Default::default(),
+            )?;
+        }
     }
     Ok(())
 }

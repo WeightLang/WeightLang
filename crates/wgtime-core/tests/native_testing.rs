@@ -50,7 +50,7 @@ fn main() { let net=mlp([1,1], "identity", 42, "sgd"); benchmark(net,[0],0,1,"gp
 
 #[test]
 fn model_constructor_is_not_discovered_as_a_test() {
-    let suite = Suite::parse("wgt 0.5\nmodel test_model\ninput x: f32[1]\noutput y: f32[1]\nlayer same: identity\ninit seed=1\nfn test_real() {}").unwrap();
+    let suite = Suite::parse("wgt 0.5\nmodel test_model\ninput x: f32[1]\noutput y: f32[1]\nlayer same: identity\ninit weights=xavier_uniform(1) bias=zeros()\nfn test_real() {}").unwrap();
     assert_eq!(suite.names(), &["test_real"]);
 }
 
