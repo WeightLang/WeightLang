@@ -16,6 +16,8 @@ enum Edge {
     Permute { x: usize, input_shape: [usize; MAX_RANK], axes: [usize; MAX_RANK], rank: usize },
     SoftmaxAxis { x: usize, groups: super::tensor::AxisGroups },
     Scale { x: usize, factor: f32 },
+    ScaleBy { x: usize, scalar: usize },
+    Div { a: usize, b: usize },
 
     Minimum {
         a: usize,
@@ -174,6 +176,9 @@ impl Tape {
             }),
             Op::SoftmaxAxis(r,x,groups) => (r, Edge::SoftmaxAxis { x:self.reg(x)?,groups }),
             Op::Scale(r,x,factor) => (r, Edge::Scale { x:self.reg(x)?,factor }),
+            Op::ScaleBy(r,x,scalar) => (r, Edge::ScaleBy { x:self.reg(x)?,scalar:self.reg(scalar)? }),
+            Op::Div(r,a,b) => (r, Edge::Div { a:self.reg(a)?,b:self.reg(b)? }),
+            Op::Ge(..) => anyhow::bail!("ge does not support automatic differentiation; use non-AD evaluation"),
             Op::Constant(r, _) | Op::Unary(r, _, Unary::Detach) => (r, Edge::Leaf),
             Op::Minimum(r, a, b) => (
                 r,
@@ -545,6 +550,24 @@ impl ForwardPass {
                 Edge::SoftmaxAxis { x,groups } => groups.softmax_vjp(&node.value,gradient,&mut gradients[x]),
                 Edge::Scale { x,factor } => {
                     for (i,g) in gradient.iter().enumerate() { gradients[x][i] += g * factor; }
+                },
+                Edge::ScaleBy { x,scalar } => {
+                    let factor = before[scalar].value[0];
+                    let mut scalar_gradient = 0f64;
+                    for (i,&g) in gradient.iter().enumerate() {
+                        if g == 0. { continue; }
+                        gradients[x][i] += g * factor;
+                        scalar_gradient += f64::from(g) * f64::from(before[x].value[i]);
+                    }
+                    gradients[scalar][0] += scalar_gradient as f32;
+                },
+                Edge::Div { a,b } => {
+                    for (i,&g) in gradient.iter().enumerate() {
+                        if g == 0. { continue; }
+                        let (g,av,bv) = (f64::from(g),f64::from(before[a].value[i]),f64::from(before[b].value[i]));
+                        gradients[a][i] += (g / bv) as f32;
+                        gradients[b][i] += (-(g * av) / (bv * bv)) as f32;
+                    }
                 },
                 Edge::Minimum { a, b } => {
                     for (i, &g) in gradient.iter().enumerate() {

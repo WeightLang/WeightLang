@@ -2,7 +2,7 @@
 
 WeightLang 描述模型内部的参数、张量计算、分支、循环和状态。Python 负责数据、训练循环、推理调用与可视化。SDK 复用 Rust 前端，把模型加载为标准 `torch.nn.Module`：纯张量模型使用 FX 图，含动态控制或状态的模型按原生中间指令执行 PyTorch 张量计算。
 
-当前转换覆盖顺序图、forward 程序和 typed operations 三种模型计划，以及原生指令目录中的全部 44 种指令。转换验收同时检查输出、梯度、初始化、参数共享、惰性执行和事务提交；实际行为由[原生差分测试](../python/tests/test_native_parity.py)与[编译覆盖测试](../crates/wgt/tests/torch_export.rs)约束。
+当前转换覆盖顺序图、forward 程序和 typed operations 三种模型计划，以及原生指令目录中的全部 48 种指令。转换验收同时检查输出、梯度、初始化、参数共享、惰性执行和事务提交；实际行为由[原生差分测试](../python/tests/test_native_parity.py)与[编译覆盖测试](../crates/wgt/tests/torch_export.rs)约束。Ge 不提供梯度；typed operations 保持无 AD 合同。SNN、局部 FF 与遗传算法的入口见[无反传学习](local-learning.md)。
 
 ## 安装
 

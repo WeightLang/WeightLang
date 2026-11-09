@@ -10,7 +10,8 @@ name = "wgt"
 
 [dependencies]
 anyhow = "1"
-serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
 libc = "0.2"
 wgtime = { path = "../wgtime" }
 wgt-language = { path = "../wgt-language" }

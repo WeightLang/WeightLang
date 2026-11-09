@@ -44,6 +44,10 @@ pub const OPERATOR_CONTRACTS: &[OperatorContract] = &[
     OperatorContract { name: "branch", min_ir_version: 1, shape: "condition=[1]; valid targets", layout: "control", gradient: "none", effect: "control" },
     OperatorContract { name: "jump", min_ir_version: 1, shape: "valid target", layout: "control", gradient: "none", effect: "control" },
     OperatorContract { name: "return", min_ir_version: 1, shape: "initialized result register; consistent return shape", layout: "control", gradient: "seed_boundary", effect: "control" },
+    OperatorContract { name: "scale_by", min_ir_version: 3, shape: "same input/output shape; scalar=[1]; explicit runtime scaling only", layout: "materialized", gradient: "vjp", effect: "pure" },
+    OperatorContract { name: "ge", min_ir_version: 3, shape: "equal shapes; finite values; output f32 0/1; true on equality", layout: "materialized", gradient: "unsupported; AD execution rejects without STE", effect: "pure" },
+    OperatorContract { name: "div", min_ir_version: 3, shape: "equal shapes; no broadcast; runtime finite-value checks", layout: "materialized", gradient: "vjp", effect: "pure" },
+    OperatorContract { name: "sqrt", min_ir_version: 3, shape: "same input/output shape; runtime finite-value checks; zero forward allowed", layout: "materialized", gradient: "vjp; nonzero upstream at zero rejects nonfinite gradient", effect: "pure" },
 ];
 
 impl Instruction {
@@ -93,6 +97,10 @@ impl Instruction {
             Self::Branch { .. } => &OPERATOR_CONTRACTS[41],
             Self::Jump { .. } => &OPERATOR_CONTRACTS[42],
             Self::Return { .. } => &OPERATOR_CONTRACTS[43],
+            Self::ScaleBy { .. } => &OPERATOR_CONTRACTS[44],
+            Self::Ge { .. } => &OPERATOR_CONTRACTS[45],
+            Self::Div { .. } => &OPERATOR_CONTRACTS[46],
+            Self::Sqrt { .. } => &OPERATOR_CONTRACTS[47],
         }
     }
 }

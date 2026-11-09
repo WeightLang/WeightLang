@@ -1,0 +1,31 @@
+wgt 0.5
+import snn from "std/snn"
+model SpikingNetwork
+
+# Both cells have two neurons. Each array element owns its own voltage and gain;
+# calling one element twice shares that element's state and parameters.
+model Cell {
+    parameter gain: f32[2] = [1, 1]
+    frozen leak: f32[1] = [0.95]
+    frozen threshold: f32[2] = [1, 1]
+    state voltage: f32[2] = [0, 0];
+    fn step(current: f32[2]) -> f32[2] {
+        let (next_v, spike) = snn.lif(voltage, current * gain, leak, threshold);
+        voltage <- next_v;
+        return spike;
+    }
+    fn observe() -> f32[2] { return voltage; }
+    fn reset() { voltage <- [0, 0]; }
+}
+
+cells: Cell[2];
+
+# A host call is one fixed time step. Both cell updates commit together.
+fn step(current: f32[2]) -> f32[2] {
+    return cells[1].step(cells[0].step(current));
+}
+fn observe() -> f32[2] { return cells[1].observe(); }
+fn reset() {
+    cells[0].reset();
+    cells[1].reset();
+}

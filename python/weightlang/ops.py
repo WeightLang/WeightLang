@@ -308,6 +308,90 @@ def log(value: torch.Tensor) -> torch.Tensor:
     return _Log.apply(value)
 
 
+def ge(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+    """Hard comparison has no implicit surrogate or straight-through gradient."""
+    if torch.is_grad_enabled():
+        raise RuntimeError("ge does not support automatic differentiation; use torch.no_grad()")
+    return torch.ge(left, right).to(left.dtype)
+
+
+class _Div(torch.autograd.Function):
+    generate_vmap_rule = True
+
+    @staticmethod
+    def forward(left, right):
+        return torch.div(left, right)
+
+    @staticmethod
+    def setup_context(ctx, inputs, output):
+        ctx.save_for_backward(*inputs)
+
+    @staticmethod
+    def backward(ctx, gradient):
+        left, right = ctx.saved_tensors
+        g, a, b = _accumulate(gradient), _accumulate(left), _accumulate(right)
+        da = torch.where(g == 0, torch.zeros_like(g), g / b)
+        db = torch.where(g == 0, torch.zeros_like(g), -(g * a) / (b * b))
+        return (_sum_to_shape(_restore(da, left), left.shape),
+                _sum_to_shape(_restore(db, right), right.shape))
+
+
+def div(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+    return _Div.apply(left, right)
+
+
+class _Sqrt(torch.autograd.Function):
+    generate_vmap_rule = True
+
+    @staticmethod
+    def forward(value):
+        return torch.sqrt(value)
+
+    @staticmethod
+    def setup_context(ctx, inputs, output):
+        ctx.save_for_backward(output)
+
+    @staticmethod
+    def backward(ctx, gradient):
+        (output,) = ctx.saved_tensors
+        # Native Unary computes the derivative in storage precision first.
+        result = gradient * (0.5 / output)
+        return torch.where(gradient == 0, torch.zeros_like(result), result)
+
+
+def sqrt(value: torch.Tensor) -> torch.Tensor:
+    return _Sqrt.apply(value)
+
+
+class _ScaleBy(torch.autograd.Function):
+    generate_vmap_rule = True
+
+    @staticmethod
+    def forward(value, scalar, rank):
+        return value * scalar.reshape(*scalar.shape[:-1], *((1,) * rank))
+
+    @staticmethod
+    def setup_context(ctx, inputs, output):
+        value, scalar, ctx.rank = inputs
+        ctx.save_for_backward(value, scalar)
+
+    @staticmethod
+    def backward(ctx, gradient):
+        value, scalar = ctx.saved_tensors
+        multiplier = scalar.reshape(*scalar.shape[:-1], *((1,) * ctx.rank))
+        dx = torch.where(gradient == 0, torch.zeros_like(gradient), gradient * multiplier)
+        g = _accumulate(gradient)
+        products = torch.where(g == 0, torch.zeros_like(g), g * _accumulate(value))
+        ds = products.sum(dim=tuple(range(-ctx.rank, 0))).unsqueeze(-1)
+        return (_sum_to_shape(dx, value.shape),
+                _sum_to_shape(_restore(ds, scalar), scalar.shape), None)
+
+
+def scale_by(value: torch.Tensor, scalar: torch.Tensor, rank: int) -> torch.Tensor:
+    """Scale each example by its explicit f32[1], with no general broadcasting."""
+    return _ScaleBy.apply(value, scalar, rank)
+
+
 class _FiniteGradient(torch.autograd.Function):
     """A standard autograd boundary for the native finite-gradient contract."""
 

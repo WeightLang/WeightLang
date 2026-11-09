@@ -1,0 +1,27 @@
+wgt 0.5
+import ff from "std/ff"
+model LocalForwardForward
+
+# Columns are features of one sample, rows of weight are output units.
+# These are initialized parameters, not a pretrained model.
+parameter weight: f32[2,2] = [0.2, 0.1, 0.1, 0.3]
+parameter bias: f32[2,1] = [0.1, 0.1]
+frozen threshold: f32[1] = [1]
+frozen epsilon: f32[1] = [0.000001]
+
+fn forward(input: f32[2]) -> f32[2] {
+    let activity = ff.dense_relu(reshape(weight,[2,2]), reshape(bias,[2,1]), reshape(input,[2,1]));
+    return reshape(ff.normalize(activity, epsilon), [2]);
+}
+fn goodness(input: f32[2]) -> f32[1] {
+    return ff.goodness(ff.dense_relu(reshape(weight,[2,2]), reshape(bias,[2,1]), reshape(input,[2,1])));
+}
+
+# Each call maximizes the mean local objective of one positive/negative pair.
+# Updating both tensors in one operation preserves the shared old-parameter rule.
+fn adapt(positive: f32[2], negative: f32[2], rate: f32[1]) {
+    let (next_weight, next_bias) = ff.update_relu(reshape(weight,[2,2]), reshape(bias,[2,1]),
+        reshape(positive, [2,1]), reshape(negative, [2,1]), rate, threshold);
+    weight <- next_weight;
+    bias <- next_bias;
+}

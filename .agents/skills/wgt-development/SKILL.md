@@ -27,7 +27,7 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 
 ### 多入口操作
 
-本地指定范围已验收：core 7 suite 共 31 项、typed import roundtrip 1/1；覆盖状态演化与隔离、reset、预算写后回滚、两次状态写后读及参数混合更新、零存储及仅 void 操作、混合参数与局部变量 `<-` 拒绝、外部搜索、权重与状态分离、策略及优化器处理。最终 daemon 重建后真实 IPC 5/5（operations 1、既有 service 1、CNN 3）；language 与 model 常规测试 16 项通过、8 项 ignored，相关服务测试单独执行。workspace all-targets、typed `model!` 宏编译和完整示例解析均通过；解析不证明执行，不能说全仓验收或已发布。合同见 [docs/model-operations.md](../../../docs/model-operations.md)。每个 typed 参数为 `f32[N]`，N=1..16384，各参数宽度总和不超过 16384；返回 `f32[N]` 或省略表示 void，`fn reset() {}` 合法。状态声明 `state name: f32[N] = [有限数值, ...]` 可省末尾分号；`name <- expression;` 必须以裸状态或参数名为目标且分号必填。typed 模式不用根级 input/output/target，不支持 loss、子模型或操作互调；typed forward 禁止写入。
+本地指定范围已验收：core 7 suite 共 31 项、typed import roundtrip 1/1；覆盖状态演化与隔离、reset、预算写后回滚、两次状态写后读及参数混合更新、零存储及仅 void 操作、混合参数与局部变量 `<-` 拒绝、外部搜索、权重与状态分离、策略及优化器处理。最终 daemon 重建后真实 IPC 5/5（operations 1、既有 service 1、CNN 3）；language 与 model 常规测试 16 项通过、8 项 ignored，相关服务测试单独执行。workspace all-targets、typed `model!` 宏编译和完整示例解析均通过；解析不证明执行，不能说全仓验收或已发布。合同见 [docs/model-operations.md](../../../docs/model-operations.md)。每个 typed 参数为 `f32[N]`，N=1..16384，各参数宽度总和不超过 16384；返回 `f32[N]` 或省略表示 void，`fn reset() {}` 合法。状态声明 `state name: f32[N] = [有限数值, ...]` 可省末尾分号；`name <- expression;` 必须以裸状态或参数名为目标且分号必填。typed 模式不用根级 input/output/target，不支持 loss；已支持具名操作互调、有状态子模型和实例数组，子调用共享整次事务；typed forward 禁止任何传递写入。
 
 模型定义出现 typed 签名或 `state`，或没有 `forward` 但有无参函数时进入操作模式。无参且无返回类型的函数是 void 入口，不是 helper，不能返回张量；无参返回值入口须显式标注如 `fn observe() -> f32[1] { ... }`。纯 helper 须至少有一个无类型标注参数。
 
@@ -35,7 +35,7 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 
 ### 固定 shape 多轴张量几何（行为待验证）
 
-核心合同为 WGT 0.5，相关 adaptive IR 为 v3；旧 IR v1/v2 仅在显式提供一维 `shape=[len]` 时接受，shape 缺失拒绝。局部绑定支持 `let q: f32[sequence=8, hidden=32] = x;`，注解检查 rank/维度并允许从同元素数的一维向量直接重解释；命名轴参与编译期收缩和归约检查。`reshape(x,[d1,...,dn])` 仍可显式重解释，维度为 1..8 个正整数常量，每轴 1..16384，元素总数不超过 16777216，且总元素数须保持不变。`transpose(x)` / `x.T` 只接受 rank-2；`matmul(a,b)` / `a @ b` 为 rank-2 `[M,K] @ [K,N] -> [M,N]`，不广播。`permute(x,[axes])` 支持 rank 1..8 的完整轴排列，可使用整数索引或已声明的轴名；interpreter 以 base/offset/shape/strides 实现零拷贝 view，Matmul/BatchMatmul 直接消费；其他算子按需物化，AOT compiled-forward 当前物化回退。`batch_matmul(a,b)` 支持等 batch 维的 rank-3 `[B,M,K] @ [B,K,N] -> [B,M,N]`，不广播。`softmax(x,axis)` 的 axis 可为非负整数字面量或已声明的轴名，沿整轴独立稳定归一化并使用 f64 累加；原 `softmax(x)` 与 `log_softmax(x)` 仍为 rank-1 形式。`scale(x,literal)` 接受有限有符号数值字面量，不广播并保 shape。既有 forward 服务入口为单个 f32 向量，矩阵结果需 reshape 为向量；typed 操作多输入验收范围见上节。指定范围已本地验证：core 7 suites / 30 tests、真实 service 集成 1 项和 macro fixture 编译 1 项。native-cpu attention 100 步 SGD 的 MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训及资源释放。核心补充 IR 安全校验后须回归；不能据此声称完整 Transformer、多头 attention、动态 batch 或 GPU 路径已验证。完整 attention 模型见 [docs/tensor-geometry.md](../../../docs/tensor-geometry.md) 和 `language/syntax-tour/model.wgt` 的注释 T10。
+核心合同为 WGT 0.5，相关 adaptive IR 为 v3；旧 IR v1/v2 仅在显式提供一维 `shape=[len]` 时接受，shape 缺失拒绝。局部绑定支持 `let q: f32[sequence=8, hidden=32] = x;`，注解检查 rank/维度并允许从同元素数的一维向量直接重解释；命名轴参与编译期收缩和归约检查。`reshape(x,[d1,...,dn])` 仍可显式重解释，维度为 1..8 个正整数常量，每轴 1..16384，元素总数不超过 16777216，且总元素数须保持不变。`transpose(x)` / `x.T` 只接受 rank-2；`matmul(a,b)` / `a @ b` 为 rank-2 `[M,K] @ [K,N] -> [M,N]`，不广播。`permute(x,[axes])` 支持 rank 1..8 的完整轴排列，可使用整数索引或已声明的轴名；interpreter 以 base/offset/shape/strides 实现零拷贝 view，Matmul/BatchMatmul 直接消费；其他算子按需物化，AOT compiled-forward 当前物化回退。`batch_matmul(a,b)` 支持等 batch 维的 rank-3 `[B,M,K] @ [B,K,N] -> [B,M,N]`，不广播。`softmax(x,axis)` 的 axis 可为非负整数字面量或已声明的轴名，沿整轴独立稳定归一化并使用 f64 累加；原 `softmax(x)` 与 `log_softmax(x)` 仍为 rank-1 形式。`scale(x,s)` 接受有限有符号数值字面量或运行时 `f32[1]`，显式缩放并保 shape，不提供一般广播。既有 forward 服务入口为单个 f32 向量，矩阵结果需 reshape 为向量；typed 操作多输入验收范围见上节。指定范围已本地验证：core 7 suites / 30 tests、真实 service 集成 1 项和 macro fixture 编译 1 项。native-cpu attention 100 步 SGD 的 MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训及资源释放。核心补充 IR 安全校验后须回归；不能据此声称完整 Transformer、多头 attention、动态 batch 或 GPU 路径已验证。完整 attention 模型见 [docs/tensor-geometry.md](../../../docs/tensor-geometry.md) 和 `language/syntax-tour/model.wgt` 的注释 T10。
 
 ### 可学习架构参数
 
@@ -43,7 +43,7 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 
 `learn` 每项独占一行且以分号结束：float 无界、float 闭区间、float 严格下界、bool 字面量及有界 int；类型名后紧跟 `[N]`（1..16384），例如 `int[2] in 0..=3`；不能写在范围末尾，此语法及错误形式的拒绝均已实现并通过测试，syntax-tour T12 已解析通过。标量初值填充或等长列表逐项初始化。float 在 SGD/Adam 更新后投影；int/bool 使用连续 shadow，硬读取并以 identity STE 反传。读取形状为 f32[1] 或 f32[N]，索引须编译期确定；不能直接作为 linear 原始参数或被 write，`choice` 不支持。
 
-`repeat depth [indexed i] carrying h=initial { body }` 以常量或范围落在 0..=256 的 learn int 作深度，逐轮传递同形状态；indexed i 为零基编译期索引，必须与 carrying 状态名不同。学习深度训练时全部候选计算并以 STE 传梯度，推理跳过未启用的内联候选；一般动态循环不因此可微。`model A { ... }` 定义子模型，根模型仍写 `model Root`；`blocks: A[2];` 中不同索引参数独立、同一索引共享，实例索引只接受编译期常量或 repeat 索引。子模型调用的输入和结果须符合其声明的输入、输出合同；子模型 forward 仅不可变 let 和最终 return，不能嵌套子模型定义或自带 loss。
+`repeat depth [indexed i] carrying h=initial { body }` 以常量或范围落在 0..=256 的 learn int 作深度，逐轮传递同形状态；indexed i 为零基编译期索引，必须与 carrying 状态名不同。学习深度训练时全部候选计算并以 STE 传梯度，推理跳过未启用的内联候选；一般动态循环不因此可微。`model A { ... }` 定义子模型，根模型仍写 `model Root`；`blocks: A[2];` 中不同索引参数独立、同一索引共享，实例索引只接受编译期常量或 repeat 索引。子模型调用的输入和结果须符合其声明的输入、输出合同；旧普通 forward 子模型仍限不可变 let 和最终 return；typed 操作模型支持有状态嵌套组合、直接具名调用和静态实例数组，子模型 loss 仍拒绝。
 
 `blend { p => a; (1-p) => b; }` 权重各在 [0,1]，逐项求和不归一化；gate/route 的门为 [1] 或与值完全同 shape，route 两支也须完全同 shape，仅等长不足。表达式 if 的 learn bool 或 `learn_int >= 整数字面量` 条件使用 STE，其余支持的比较及语句 if 为硬分支。有限字面量乘张量是缩放，`**` 仅支持指数 2；不提供一般张量广播。完整签名及局部验证范围见主参考。
 
@@ -52,7 +52,7 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 旧通用 WGT 宿主脚本的 `agent Actor {policy; [critic;] learner:update;}` 与 `learn actor {...yield record;}` 属于不同的整批采集/learner 回调机制；不将它们与顶层模型定义中的标量 learn 参数混为一谈，也不把旧脚本机制作为新模型 API 的发展方向。保留中的现有实现契约见 docs/agents-environments.md。
 原生environment声明observation/action/feedback固定f32宽度及reset/step；Ctor(state,seed)构造reset一次，reset->{state,observation}，step->{state,observation,feedback,terminated,truncated}；同步纯WGT，state固定schema，有界有限记录字面量，全部验证后state/RNG原子提交。结束后拒step至reset，实例RNG隔离，reset重放seed，不影响host RNG。actor.act仅类别sample，logprob先取actor.policy局部变量。资源递归拒save json/async，无agent/env整实例checkpoint，仅显式policy checkpoint。完整签名/限制docs/agents-environments.md，真实例子crates/wgtime-core/tests/agent_environment.rs。
 语境能力见 language/source_capabilities.json；共同正负语料在 language/conformance.json。
-连续声明 `let a=expr, b=expr;` 在共用 parser 展开为原有 Stmt::Let 序列；从左到右各求值一次，后项可引用前项，无整组回滚。host/async/forward/loss 继承原有作用域和重名规则；纯 operator 在支持它的工作区同样展开。嵌套调用/列表/record 的逗号不分隔声明；无元组/新赋值语法或尾逗号，sample 解构及 collect/learn 须独立声明。完整例子 crates/wgtime-core/tests/continuous_let.rs；验证 tests/continuous_let.rs 与真实 AOT。
+连续声明 `let a=expr, b=expr;` 在共用 parser 展开为原有 Stmt::Let 序列；从左到右各求值一次，后项可引用前项，无整组回滚。host/async/forward/loss 继承原有作用域和重名规则；纯 operator 在支持它的工作区同样展开。嵌套调用/列表/record 的逗号不分隔声明；模型纯函数另支持 2..16 项扁平张量元组与 `let (a,b)=helper(...);`，不进入服务 ABI；普通宿主脚本仍不支持张量元组。sample 解构及 collect/learn 须独立声明。完整例子 crates/wgtime-core/tests/continuous_let.rs；验证 tests/continuous_let.rs 与真实 AOT。
 函数共用 parser 不表示普通 fn 与 tensor forward/loss 语义相同；模型声明独立解析。
 language/primitive_specs.json 是制品 graph 原语域，不是源码内置表。编辑器容错不证明源码有效。
 在 language/prelude.json 维护原生函数、张量 intrinsic、语法、类型、常量与内部接口的统一内部目录；同步纯 helper 的 operator_arity 和需要保留的名称标记，不在 parser 或生成器另写名单。
@@ -150,6 +150,12 @@ KL/交叉熵 p>0 且 q=0 报错，JS 支持不相交分布。无张量梯度或�
 GPU/WGSL（本地 WGT 0.5）：devices() 枚举 CPU 与硬件 GPU；training_device(model,id,memory_bytes,max_batch) 为顺序模型选择训练后端，training_status(model) 返回实际 device/steps/inference_device/state。声明式 train/reinforce 支持 GPU MSE/CE/REINFORCE + SGD/Adam；forward/loss 仍只在 CPU，推理仍 CPU。wgsl_kernel(source,entry,id,memory_bytes) 编译字符串，wgsl_run(kernel,input,output_count,[x,y,z]) 调度固定 group0/binding0 只读输入、binding1 读写输出的 f32 缓冲；不参与自动求导、不支持 NPU。启用宿主策略或 compute_budget 时拒绝直接 GPU 训练/WGSL。检查和编译不执行 GPU；GPU 验证须使用启用 gpu feature 的实际运行时与硬件，不能由客户端编译成功推断。完整契约 docs/wgsl.md，真实例子 crates/wgtime-core/tests/script_gpu.rs 与 crates/wgtime-core/tests/gpu_training.rs。训练事务合并一次提交并复用同尺寸设备缓冲，每步仍上传和回读；不要声称跨步权重常驻。
 
 ## 原生测试与评估
+
+### 无 AD 学习与状态组合
+
+用 `std/snn`、`std/plasticity`、`std/ff` 的纯公式描述模型内部更新，通过 `<-` 同时提交元组返回的候选；不要引入算法关键字或旧宿主训练 DSL。完整签名与示例见 [local-learning](../../../docs/local-learning.md) 和 [标准库](../../../docs/standard-library.md#脉冲与局部学习模块)。`ge(a,b)` 同形返回精确 0/1、相等为 1、拒绝 AD；`div`/`/`、`sqrt`、动态 `scale(x,s:f32[1])` 有常规 VJP，当前目录共 48 项 IR。多轴参数读取仍得到向量，传矩阵公式前显式 reshape。
+
+复用候选 schema 的 `candidate_updatable`，不要从 frozen/learn 猜测全部可进化参数。Rust/Python GA 使用同一固定 schema、域感知变异、独立 episode、明确 reset 和完整搜索 checkpoint；FF 调度调用 `adapt(positive,negative,rate)`，本地解析梯度不等同数学无梯度。修改这些能力时运行 `adaptive_numeric`、`local_learning`、`wgt-model --test evolution` 以及 Python 对应差分 tests；真实服务测试需要允许 Unix IPC 的环境，默认 ignored 不算已执行。
 
 新增测试通过 Cargo 验证 Rust 模型定义与真实服务。`wgt-model/tests/service.rs` 的执行用例需要预构建 `WGTIME_TEST_DAEMON` 并显式包含 ignored 测试，默认解析测试通过不能计作服务执行通过。
 旧 `wgtime_core::script::testing::Suite` 只从传入源码发现 `test_*` 函数并独立运行，不扫描目录或提供 CLI filter/JSON 汇总。维护入口、覆盖映射和编译拒绝边界见 references/native-testing.md 与 docs/native-testing.md。

@@ -28,11 +28,13 @@ DEFAULT_MEMORY_BYTES = 256 * 1024**2
 _UNARY = {
     "detach": torch.detach, "exp": torch.exp, "log": ops.log,
     "tanh": torch.tanh, "sigmoid": torch.sigmoid, "relu": torch.relu,
-    "neg": torch.neg,
+    "neg": torch.neg, "sqrt": ops.sqrt,
 }
-_BINARY = {"add": torch.add, "mul": torch.mul, "minimum": torch.minimum}
+_BINARY = {"add": torch.add, "mul": torch.mul, "minimum": torch.minimum,
+           "ge": ops.ge, "div": ops.div}
 _GEOMETRY = {"conv", "max_pool2d", "avg_pool2d", "reshape", "transpose", "permute",
-             "matmul", "batch_matmul", "layer_norm", "softmax_axis", "scale"}
+             "matmul", "batch_matmul", "layer_norm", "softmax_axis", "scale",
+             "ge", "div", "sqrt", "scale_by"}
 _FIELDS = {
     **{name: "out input" for name in _UNARY},
     **{name: "out left right" for name in _BINARY},
@@ -41,7 +43,8 @@ _FIELDS = {
     "reshape": "out input", "transpose": "out input", "permute": "out input axes",
     "matmul": "out left right", "batch_matmul": "out left right",
     "layer_norm": "out input gamma beta axis epsilon", "softmax_axis": "out input axis",
-    "scale": "out input factor", "constant": "out data", "clip": "out input low high",
+    "scale": "out input factor", "scale_by": "out input scalar",
+    "constant": "out data", "clip": "out input low high",
     "sum": "out input", "mean": "out input", "log_softmax": "out input",
     "softmax": "out input", "validate_probabilities": "out input",
     "memory_alloc": "out slots width", "memory_free": "memory",
@@ -320,7 +323,7 @@ class ProgramExecutor:
                 _require(bias["shape"] == shape and bias.get("learn") is None and not bias.get("probability"), "linear bias mismatch")
         elif op in _BINARY:
             _require(shape == reg("left") == reg("right"), f"{op} shape mismatch")
-        elif op in _UNARY or op in {"softmax", "log_softmax", "validate_probabilities", "clip", "scale", "softmax_axis", "layer_norm"}:
+        elif op in _UNARY or op in {"softmax", "log_softmax", "validate_probabilities", "clip", "scale", "scale_by", "softmax_axis", "layer_norm"}:
             previous = reg("input")
             _require(shape == previous, f"{op} shape mismatch")
             if op in {"softmax", "log_softmax", "validate_probabilities"}:
@@ -329,6 +332,8 @@ class ProgramExecutor:
                 _require(_finite(item["low"], "clip low") <= _finite(item["high"], "clip high"), "invalid clip bounds")
             if op == "scale":
                 _finite(item["factor"], "scale factor")
+            if op == "scale_by":
+                _require(reg("scalar") == (1,), "scale_by scalar must have shape [1]")
             if op in {"softmax_axis", "layer_norm"}:
                 axis = item["axis"]
                 _require(type(axis) is int and 0 <= axis < len(shape), "invalid tensor axis")
@@ -482,6 +487,8 @@ class ProgramExecutor:
                     elif op in _UNARY:
                         out = _UNARY[op](get("input"))
                     elif op in _BINARY:
+                        _require(op != "ge" or not differentiable,
+                                 "ge does not support automatic differentiation; use non-AD evaluation")
                         out = _BINARY[op](get("left"), get("right"))
                     elif op in {"gate", "route"}:
                         probability = get("probability")
@@ -512,6 +519,8 @@ class ProgramExecutor:
                         out = ops.layer_norm(value, get("gamma").reshape(affine), get("beta").reshape(affine), axis, item["epsilon"])
                     elif op == "scale":
                         out = get("input") * item["factor"]
+                    elif op == "scale_by":
+                        out = ops.scale_by(get("input"), get("scalar"), len(self.shapes[item["out"]]))
                     elif op == "clip":
                         out = ops.clip(get("input"), item["low"], item["high"])
                     elif op in {"sum", "mean"}:

@@ -2254,7 +2254,7 @@
         "tensor_forward",
         "tensor_loss"
       ],
-      "purpose": "以有限有符号数值字面量缩放张量；不广播并保持 shape。",
+      "purpose": "Explicit scaling without general broadcast: a finite scalar literal retains Scale; a runtime tensor of shape [1] uses ScaleBy with gradients to both operands.",
       "implementation": "crates/wgt-language/src/adaptive/source.rs",
       "documentation": "docs/tensor-geometry.md",
       "position": "expression",
@@ -2834,6 +2834,54 @@
       "purpose": "Compiler-only train block lowering; source __ calls rejected.",
       "defaults": {},
       "implementation": "crates/wgtime-core/src/script.rs"
+    },
+    {
+      "name": "ge",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Elementwise finite f32 comparison with equal shape; returns 0 or 1, including equality; automatic differentiation is rejected.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "signature": "ge(left,right)",
+      "defaults": {},
+      "operator_arity": {
+        "min": 2,
+        "max": 2
+      }
+    },
+    {
+      "name": "div",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Elementwise f32 division with equal shape and no broadcasting; reject nonfinite results; ordinary VJP.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "signature": "div(left,right)",
+      "defaults": {},
+      "operator_arity": {
+        "min": 2,
+        "max": 2
+      }
+    },
+    {
+      "name": "sqrt",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Elementwise f32 square root preserving shape; reject nonfinite results; zero is valid forward, but nonzero upstream at zero rejects nonfinite VJP.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "signature": "sqrt(input)",
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
     }
   ]
 }

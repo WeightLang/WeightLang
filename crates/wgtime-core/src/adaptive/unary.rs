@@ -10,6 +10,7 @@ pub(super) enum Unary {
     Detach,
     Exp,
     Log,
+    Sqrt,
     LogSoftmax,
     ValidateProbabilities,
 }
@@ -41,6 +42,7 @@ impl Unary {
                 Self::Detach | Self::ValidateProbabilities => value,
                 Self::Exp => value.exp(),
                 Self::Log => value.ln(),
+                Self::Sqrt => value.sqrt(),
                 Self::LogSoftmax => (f64::from(value) - f64::from(max) - total.ln()) as f32,
             };
         }
@@ -76,6 +78,7 @@ impl Unary {
                         Self::ValidateProbabilities => 1.,
                         Self::Exp => y,
                         Self::Log => 1. / input[index],
+                        Self::Sqrt => 0.5 / y,
                         Self::Detach | Self::Softmax | Self::LogSoftmax => unreachable!(),
                     };
                     result[index] += g * derivative;

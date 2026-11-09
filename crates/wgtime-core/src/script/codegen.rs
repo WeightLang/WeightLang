@@ -4,8 +4,8 @@ use anyhow::Result;
 
 fn expr(e: &Expr) -> String {
     let value = match e {
-        Expr::Blend(..) | Expr::Conditional(..) | Expr::Repeat { .. } | Expr::Invoke(..) | Expr::Mix(..) => {
-            "anyhow::bail!(\"mix is only available in tensor forward/loss functions\")".into()
+        Expr::Tuple(..) | Expr::Blend(..) | Expr::Conditional(..) | Expr::Repeat { .. } | Expr::Invoke(..) | Expr::Mix(..) => {
+            "anyhow::bail!(\"model expressions require tensor model functions\")".into()
         }
         Expr::Sample(p, a, b) => format!(
             "{{ let p={}; if rt.draw_probability(p)? {{ {} }} else {{ {} }} }}",
@@ -66,6 +66,7 @@ fn block(body: &[Statement]) -> String {
     let mut code = String::from("(|| -> Result<Flow> {\n");
     for statement in body {
         let inner = match &statement.kind {
+            Stmt::LetTuple(..) => "anyhow::bail!(\"tensor tuple bindings require model functions\");".into(),
             Stmt::Tasks(body) => format!("rt.enter_tasks()?; let result={}; let cleanup=rt.leave_tasks(result.is_ok()); let flow=result?; cleanup?; if !matches!(flow,Flow::Next) {{ return Ok(flow); }}",block(body)),
             Stmt::Let(n,e) => format!("let value = {}; env.insert({n:?}.into(),value);",expr(e)),
             Stmt::LetSample(bindings,n,input) => {

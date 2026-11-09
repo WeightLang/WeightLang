@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from functools import partial
+from collections.abc import Mapping
 import math
 from threading import RLock
 from typing import Any
@@ -56,6 +57,7 @@ class OperationsModule(nn.Module):
         self.state_names: dict[str, str] = {}
         self._specs: dict[str, dict] = {}
         self._entries: dict[str, tuple[dict, ProgramExecutor]] = {}
+        self._candidate_updatable: dict[str, bool] = {}
         self._operation_lock = RLock()
         self.register_buffer("_device_anchor", torch.empty(0), persistent=False)
         try:
@@ -106,6 +108,16 @@ class OperationsModule(nn.Module):
         }
         if len(outer) != len(expected) or normalized(outer) != normalized(expected):
             raise ValueError("operation parameter schemas do not match initialized storage")
+        for schema in outer:
+            name = schema["name"]
+            spec = self._specs[name]
+            eligible = not spec.get("frozen", False) and not spec.get("probability", False)
+            # Old compiler exports lack the public flag, but their initialized
+            # storage describes both exclusions. Never infer from frozen alone.
+            updatable = schema.get("candidate_updatable", eligible)
+            if type(updatable) is not bool or (updatable and not eligible):
+                raise ValueError(f"parameter {name} has inconsistent candidate_updatable metadata")
+            self._candidate_updatable[name] = updatable
         for entry in entries:
             schema, program = entry["schema"], entry["program"]
             name = schema["name"]
@@ -162,6 +174,63 @@ class OperationsModule(nn.Module):
     def operation_schemas(self) -> dict[str, dict]:
         """A copy of each WGT signature and its statically computed effects."""
         return {name: deepcopy(schema) for name, (schema, _) in self._entries.items()}
+
+    @property
+    def parameter_schema(self) -> dict[str, dict]:
+        """Storage domains and external-update eligibility, keyed by WGT name."""
+        return {
+            name: {"name": name, "shape": list(self._specs[name]["shape"]),
+                   "frozen": bool(self._specs[name].get("frozen", False)),
+                   "probability": bool(self._specs[name].get("probability", False)),
+                   "learn": deepcopy(self._specs[name].get("learn")),
+                   "candidate_updatable": self._candidate_updatable[name]}
+            for name in self.parameter_names
+        }
+
+    def parameter_values(self) -> dict[str, torch.Tensor]:
+        """Return detached parameter snapshots under their original WGT names."""
+        with self._operation_lock:
+            return {name: getattr(self, attribute).detach().clone()
+                    for name, attribute in self.parameter_names.items()}
+
+    def genome_schema(self):
+        """Describe fixed-topology genetic search without creating a population."""
+        from .evolution import GenomeSchema
+        return GenomeSchema.from_model(self)
+
+    def update_parameters(self, candidates: Mapping[str, torch.Tensor]) -> None:
+        """Atomically apply a nonempty named subset of parameter candidates.
+
+        Each tensor must already match the model's shape, dtype and device.
+        Integer and bool domains require hard discrete values; this method does
+        not round, project, copy across devices, or update persistent states.
+        Validation and publication share the operation lock with ``call``.
+        """
+        if not isinstance(candidates, Mapping) or not candidates:
+            raise ValueError("parameter candidates must be a nonempty name-to-tensor mapping")
+        with self._operation_lock, torch.no_grad():
+            storage = self._storage()
+            if any(value.requires_grad for value in storage.values()):
+                raise ValueError("typed operations do not support autograd; keep their parameters frozen to gradients")
+            prepared: dict[str, torch.Tensor] = {}
+            for name, value in candidates.items():
+                if name in prepared:
+                    raise ValueError(f"duplicate candidate parameter {name!r}")
+                if name not in self.parameter_names:
+                    raise ValueError(f"unknown candidate parameter {name!r}; states are not parameter candidates")
+                if not self._candidate_updatable[name]:
+                    raise ValueError(f"candidate cannot update frozen, probability or ineligible parameter {name!r}")
+                if not isinstance(value, torch.Tensor):
+                    raise ValueError(f"candidate parameter {name} must be a torch.Tensor")
+                if value.requires_grad:
+                    raise ValueError("parameter candidates must not require autograd")
+                if value.device != storage[name].device or value.dtype != storage[name].dtype:
+                    raise ValueError(f"candidate parameter {name} must match model dtype/device")
+                candidate = value.detach().clone()
+                validate_parameter(candidate, self._specs[name], discrete=True)
+                prepared[name] = candidate
+            for name, candidate in prepared.items():
+                storage[name].copy_(candidate)
 
     def __getattr__(self, name: str) -> Any:
         try:

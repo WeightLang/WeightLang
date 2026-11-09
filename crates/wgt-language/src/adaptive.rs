@@ -116,6 +116,12 @@ pub enum Instruction {
     LayerNorm { out: String, input: String, gamma: String, beta: String, axis: usize, epsilon: f32 },
     SoftmaxAxis { out: String, input: String, axis: usize },
     Scale { out: String, input: String, factor: f32 },
+    /// Runtime scalar scaling is explicit; other elementwise operators never broadcast.
+    ScaleBy { out: String, input: String, scalar: String },
+    /// Finite elementwise comparison; tracing this operation for AD is rejected.
+    Ge { out: String, left: String, right: String },
+    Div { out: String, left: String, right: String },
+    Sqrt { out: String, input: String },
     Constant {
         out: String,
         data: Vec<f32>,
@@ -293,6 +299,7 @@ impl Instruction {
             | Detach { out, input }
             | Exp { out, input }
             | Log { out, input }
+            | Sqrt { out, input }
             | LogSoftmax { out, input }
             | ValidateProbabilities { out, input }
             | Clip { out, input, .. }
@@ -305,8 +312,12 @@ impl Instruction {
             | BatchMatmul { out, left, right }
             | Add { out, left, right }
             | Mul { out, left, right }
+            | Ge { out, left, right }
+            | Div { out, left, right }
             | Minimum { out, left, right } =>
                 (Some(out), [Some(left), Some(right), None], None),
+            ScaleBy { out, input, scalar } =>
+                (Some(out), [Some(input), Some(scalar), None], None),
             Constant { out, .. } | Read { out, .. } | ResourceState { out } =>
                 (Some(out), [None; 3], None),
             Write { value, .. } | Return { value } =>

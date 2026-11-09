@@ -55,7 +55,7 @@ fn forward(x) {
 
 ## 可检查的算子清单
 
-[`language/tensor_contracts.json`](../language/tensor_contracts.json) 为当前 44 个 Adaptive `Instruction` 逐项记录最低 IR 版本、shape、layout、梯度与副作用边界。Rust `Instruction::contract()` 使用穷尽 match，新 enum 变体不能无声漏掉。
+[`language/tensor_contracts.json`](../language/tensor_contracts.json) 为当前 48 个 Adaptive `Instruction` 逐项记录最低 IR 版本、shape、layout、梯度与副作用边界。Rust `Instruction::contract()` 使用穷尽 match，新 enum 变体不能无声漏掉。新增 Ge、Div、Sqrt、ScaleBy 均使用 IR v3；Ge 明确拒绝 AD，ScaleBy 仅接受 `[1]` 标量，不引入通用广播。
 
 ```sh
 node scripts/check_tensor_contracts.cjs --write

@@ -1,0 +1,24 @@
+wgt 0.5
+operators Plasticity
+
+# pre=[inputs,1], post=[outputs,1], weight=[outputs,inputs], rate=f32[1].
+# Pure local Hebbian update; no optimizer, AD, or implicit parameter commit.
+fn hebbian(weight, pre, post, rate) {
+    return weight + scale(post @ pre.T, rate);
+}
+
+# Oja for one output unit: weight/pre have the same shape, post/rate=f32[1].
+fn oja(weight, pre, post, rate) {
+    return weight + scale(pre - scale(weight, post), rate * post);
+}
+
+# Pair-STDP: pre/post and traces are column vectors; rates/decays are f32[1].
+# Use decayed OLD traces for the weight update, then add current spikes.
+# Simultaneous spikes with zero history make no update; weights are not clipped.
+# The caller owns all three returned values and atomically commits them.
+fn pair_stdp(weight, pre, post, pre_trace, post_trace, pre_decay, post_decay, plus, minus) {
+    let old_pre = scale(pre_trace, pre_decay);
+    let old_post = scale(post_trace, post_decay);
+    let delta = scale(post @ old_pre.T, plus) - scale(old_post @ pre.T, minus);
+    return (weight + delta, old_pre + pre, old_post + post);
+}

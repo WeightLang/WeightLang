@@ -316,6 +316,7 @@ impl CompiledForward {
                 9 => "memory is not allocated or has been freed",
                 10 => "memory already allocated; free it before reallocating",
                 11 => "memory address must have one finite [0,1] weight per slot",
+                12 => "ge does not support automatic differentiation; use non-AD evaluation",
                 _ => "invalid control flow",
             }
         );
@@ -651,6 +652,11 @@ impl<'a> Generator<'a> {
                     let (a,n,_) = self.reg(x)?;
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]=r[{a}+i]*{};",Self::literal(*factor)?);
                 },
+                I::ScaleBy { input:x,scalar,.. } => {
+                    let (a,n,_) = self.reg(x)?;
+                    let (s,_,_) = self.reg(scalar)?;
+                    body += &format!("for(size_t i=0;i<{n};i++)t[i]=r[{a}+i]*r[{s}];");
+                },
                 I::SoftmaxAxis { input:x,axis,.. } => {
                     let (a,_,id)=self.reg(x)?;
                     let shape=&self.program.registers[id].shape;
@@ -711,14 +717,29 @@ impl<'a> Generator<'a> {
                     left,
                     right,
                     ..
+                }
+                | I::Div {
+                    left,
+                    right,
+                    ..
+                }
+                | I::Ge {
+                    left,
+                    right,
+                    ..
                 } => {
                     let (a, n, _) = self.reg(left)?;
                     let (b, _, _) = self.reg(right)?;
                     let value = match instruction {
                         I::Add { .. } => format!("r[{a}+i]+r[{b}+i]"),
                         I::Mul { .. } => format!("r[{a}+i]*r[{b}+i]"),
+                        I::Div { .. } => format!("r[{a}+i]/r[{b}+i]"),
+                        I::Ge { .. } => format!("r[{a}+i]>=r[{b}+i]?1.0f:0.0f"),
                         _ => format!("fminf(r[{a}+i],r[{b}+i])"),
                     };
+                    if matches!(instruction, I::Ge { .. }) {
+                        body += "if(traced)return 12;";
+                    }
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]={value};");
                 }
                 I::Tanh { input: x, .. }
@@ -728,6 +749,7 @@ impl<'a> Generator<'a> {
                 | I::Detach { input: x, .. }
                 | I::Exp { input: x, .. }
                 | I::Log { input: x, .. }
+                | I::Sqrt { input: x, .. }
                 | I::ValidateProbabilities { input: x, .. } => {
                     let (a, n, _) = self.reg(x)?;
                     let value = match instruction {
@@ -737,6 +759,7 @@ impl<'a> Generator<'a> {
                         I::Neg { .. } => format!("-r[{a}+i]"),
                         I::Exp { .. } => format!("expf(r[{a}+i])"),
                         I::Log { .. } => format!("logf(r[{a}+i])"),
+                        I::Sqrt { .. } => format!("sqrtf(r[{a}+i])"),
                         _ => format!("r[{a}+i]"),
                     };
                     if matches!(instruction, I::ValidateProbabilities { .. }) {

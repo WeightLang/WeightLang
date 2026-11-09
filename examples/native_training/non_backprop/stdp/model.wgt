@@ -1,0 +1,25 @@
+wgt 0.5
+import plasticity from "std/plasticity"
+model LocalSTDP
+
+parameter weight: f32[2,2] = [0, 0, 0, 0]
+state pre_trace: f32[2] = [0, 0];
+state post_trace: f32[2] = [0, 0];
+
+fn forward(input: f32[2]) -> f32[2] { return linear(input, weight); }
+
+# Inputs are externally observed binary spikes, not analog feature amplitudes.
+# Traces decay before this step; same-step zero-history pairs contribute zero.
+fn adapt(pre: f32[2], post: f32[2]) {
+    let (next_weight, next_pre, next_post) = plasticity.pair_stdp(
+        reshape(weight,[2,2]), reshape(pre,[2,1]), reshape(post,[2,1]),
+        reshape(pre_trace,[2,1]), reshape(post_trace,[2,1]),
+        [0.9], [0.9], [0.01], [0.012]);
+    weight <- next_weight;
+    pre_trace <- reshape(next_pre,[2]);
+    post_trace <- reshape(next_post,[2]);
+}
+fn reset() {
+    pre_trace <- [0,0];
+    post_trace <- [0,0];
+}

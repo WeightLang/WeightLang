@@ -255,6 +255,10 @@ fn forward(x) {
     let smallest=minimum(x,x);
     let clipped=clip(x,-1,1);
     let total=sum(x);
+    let compared=ge(x,x);
+    let divided=div(x,exponential);
+    let rooted=sqrt(exponential);
+    let runtime_scaled=scale(x,mean(x));
     let bank=memory_alloc(4,4);
     let address=softmax(x);
     memory_write(bank,address,x);

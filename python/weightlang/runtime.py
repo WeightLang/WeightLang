@@ -29,9 +29,11 @@ _UNARY = {
     "sigmoid": torch.sigmoid,
     "relu": torch.relu,
     "neg": torch.neg,
+    "sqrt": ops.sqrt,
     "validate_probabilities": ops.probabilities,
 }
-_BINARY = {"add": torch.add, "mul": torch.mul, "minimum": torch.minimum}
+_BINARY = {"add": torch.add, "mul": torch.mul, "minimum": torch.minimum,
+           "ge": ops.ge, "div": ops.div}
 _UNSUPPORTED = {
     "write", "memory_alloc", "memory_free", "memory_read", "memory_write",
     "resource_state", "branch", "jump", "label", "inference_skip", "gate", "route",
@@ -359,7 +361,7 @@ class _Builder:
         shape = self.shapes[out]
         if out == next(iter(self.values)):
             raise ValueError("forward instructions cannot overwrite model input")
-        input_keys = ["input", "left", "right", "gamma", "beta"]
+        input_keys = ["input", "left", "right", "gamma", "beta", "scalar"]
         if op == "conv":
             input_keys += ["kernel", "bias"]
         inputs = [item[key] for key in input_keys if key in item]
@@ -437,6 +439,10 @@ class _Builder:
             gamma = self.reshape(value("gamma"), affine_shape, self.batched[item["gamma"]])
             beta = self.reshape(value("beta"), affine_shape, self.batched[item["beta"]])
             node = self.graph.call_function(ops.layer_norm, (value("input"), gamma, beta, axis, epsilon))
+        elif op == "scale_by":
+            self.equal(shape, source_shape("input"), op)
+            self.equal(source_shape("scalar"), (1,), op)
+            node = self.graph.call_function(ops.scale_by, (value("input"), value("scalar"), len(shape)))
         elif op in ("scale", "clip"):
             self.equal(shape, source_shape("input"), op)
             if op == "scale":

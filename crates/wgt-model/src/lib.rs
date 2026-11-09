@@ -8,6 +8,7 @@ use wgtime::Request;
 pub use wgt_language::model::{ModelDefinition, ModelInterface, ParameterSchema};
 pub use wgt_model_macros::{model, include_model};
 pub use wgt_language::operations::{ArgumentSchema, Effects, OperationSchema, StateSchema};
+pub mod evolution;
 /// ContinuousOnly conservatively rejects every model containing bool/int parameters.
 #[derive(Clone, Copy, Debug)]
 pub enum DifferentiationPolicy { ContinuousOnly, StraightThrough }
@@ -38,17 +39,22 @@ impl Client {
     /// Initialize parameters explicitly; parsing a definition never calls this method.
     pub fn initialize(&self, definition: &ModelDefinition, options: InstanceOptions) -> Result<Model> {
         let reply=self.connection.borrow_mut().call(Request::InitializeDefinition {source:definition.source().into(),memory:options.memory_bytes,optimizer:options.optimizer.map(|o|o.name().into())})?;
-        Ok(Model { connection:self.connection.clone(), handle:Some(reply["handle"].as_u64().context("missing model handle")?), interface:definition.interface().cloned(), operations:definition.operations().to_vec(), backend:reply["backend"].as_str().context("missing execution backend")?.into() })
+        Ok(Model { connection:self.connection.clone(), handle:Some(reply["handle"].as_u64().context("missing model handle")?), definition:definition.clone(), interface:definition.interface().cloned(), operations:definition.operations().to_vec(), backend:reply["backend"].as_str().context("missing execution backend")?.into() })
     }
     pub fn stats(&self) -> Result<serde_json::Value> { self.connection.borrow_mut().call(Request::Stats) }
 }
 
-pub struct Model { connection: Rc<RefCell<wgtime::Client>>, handle: Option<u64>, interface: Option<ModelInterface>, operations: Vec<OperationSchema>, backend: String }
+pub struct Model { connection: Rc<RefCell<wgtime::Client>>, handle: Option<u64>, definition: ModelDefinition, interface: Option<ModelInterface>, operations: Vec<OperationSchema>, backend: String }
 impl Model {
     fn handle(&self)->Result<u64> { self.handle.context("model is closed") }
+    pub fn definition(&self)->&ModelDefinition { &self.definition }
     pub fn interface(&self)->Option<&ModelInterface> { self.interface.as_ref() }
     pub fn operations(&self)->&[OperationSchema] { &self.operations }
     pub fn call(&self,name:&str,inputs:&[Vec<f32>])->Result<Option<Vec<f32>>> {
+        if name == "forward" && self.operations.is_empty() && self.interface.is_some() {
+            ensure!(inputs.len() == 1, "forward requires one input vector");
+            return self.forward(&inputs[0]).map(Some);
+        }
         let schema=self.operations.iter().find(|s|s.name==name).context("unknown operation")?;
         ensure!(inputs.len()==schema.inputs.len() && inputs.iter().zip(&schema.inputs).all(|(v,s)|v.len()==s.width && v.iter().all(|x|x.is_finite())),"operation arguments do not match schema");
         let reply=self.connection.borrow_mut().call(Request::CallOperation{handle:self.handle()?,name:name.into(),inputs:inputs.into()})?;

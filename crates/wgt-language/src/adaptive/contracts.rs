@@ -87,14 +87,20 @@ impl Program {
                     I::Scale { out, input, factor } => {
                         same(out, input)?; ensure!(factor.is_finite(), "nonfinite scale factor");
                     }
+                    I::ScaleBy { out, input, scalar } => {
+                        same(out, input)?;
+                        ensure!(reg(scalar)?.shape == [1], "runtime scale factor must have shape [1]");
+                    }
                     I::Constant { out, data } => ensure!(data.len() == reg(out)?.len && data.iter().all(|v| v.is_finite()), "constant shape/value mismatch"),
-                    I::Add { out, left, right } | I::Mul { out, left, right } | I::Minimum { out, left, right } => {
+                    I::Add { out, left, right } | I::Mul { out, left, right } | I::Minimum { out, left, right }
+                    | I::Ge { out, left, right } | I::Div { out, left, right } => {
                         same(out, left)?; same(left, right)?;
                     }
                     I::Clip { out, input, low, high } => {
                         same(out, input)?; ensure!(low.is_finite() && high.is_finite() && low <= high, "invalid clip interval");
                     }
                     I::Detach { out, input } | I::Exp { out, input } | I::Log { out, input }
+                    | I::Sqrt { out, input }
                     | I::Neg { out, input } | I::Tanh { out, input } | I::Sigmoid { out, input }
                     | I::Relu { out, input } => same(out, input)?,
                     I::Softmax { out, input } | I::LogSoftmax { out, input } | I::ValidateProbabilities { out, input } => {

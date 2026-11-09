@@ -25,7 +25,7 @@ pub(super) fn validate(program: &Program) -> Result<()> {
                     expression(arg, program)?;
                 }
             }
-            Expr::Call(_, args) | Expr::BuiltinCall(_, args) | Expr::List(args) => {
+            Expr::Call(_, args) | Expr::BuiltinCall(_, args) | Expr::List(args) | Expr::Tuple(args) => {
                 for arg in args {
                     expression(arg, program)?;
                 }
@@ -76,6 +76,7 @@ pub(super) fn validate(program: &Program) -> Result<()> {
         for statement in body {
             match &statement.kind {
                 Stmt::Let(_, e)
+                | Stmt::LetTuple(_, e)
                 | Stmt::LetSample(_, _, e)
                 | Stmt::Set(_, e)
                 | Stmt::Eval(e)
