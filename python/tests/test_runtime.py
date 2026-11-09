@@ -43,6 +43,27 @@ fn forward(x) {{ {body} }}
 """
 
 
+@pytest.mark.parametrize("body,parameters", [
+    ("let y=matmul(reshape(x,[1,2]),reshape(w,[2,2])); return reshape(softmax(layer_norm(y,[1,1],[0,0],1,0.0001),1),[2]);",
+     "parameter w:f32[2,2]=[0.2,0.4,-0.1,0.3]"),
+    ("return reshape(conv(reshape(x,[1,2]),reshape(w,[1,1,1]),[0],[1],[0],[1],1),[2]);",
+     "parameter w:f32[1,1,1]=[0.5]"),
+])
+def test_native_precision_adapters_support_compile_export_and_backward(compile_plan, body, parameters):
+    model = build_module(compile_plan(model_source(2, 2, body, parameters)))
+    value = torch.tensor([[0.2, -0.3]], requires_grad=True)
+    expected = model(value)
+    expected_gradients = torch.autograd.grad(expected.square().sum(), (value, *model.parameters()))
+    exported = torch.export.export(model, (value,))
+    torch.testing.assert_close(exported.module()(value), expected)
+    compiled = torch.compile(model, backend="eager", fullgraph=True)
+    actual = compiled(value)
+    torch.testing.assert_close(actual, expected)
+    actual_gradients = torch.autograd.grad(actual.square().sum(), (value, *model.parameters()))
+    for actual_gradient, expected_gradient in zip(actual_gradients, expected_gradients):
+        torch.testing.assert_close(actual_gradient, expected_gradient)
+
+
 def weight(model, name):
     return model.get_parameter(model.parameter_names[name])
 
@@ -75,6 +96,15 @@ parameter beta: f32[3] = [-0.2,0.1,0.3]
     affine = normalized * weight(model, "gamma").reshape(3, 1) + weight(model, "beta").reshape(3, 1)
     expected = torch.softmax(affine, -1).transpose(-2, -1).reshape(3, 2, 12)
     assert_value_and_gradient(model(x), expected, (x, *model.parameters()))
+
+
+def test_layer_norm_can_share_values_with_input_dependent_affine_parameters(compile_plan):
+    definition = compile_plan(model_source(2, 2, "return layer_norm(w,x,[0,0],0,0.0001);",
+                                           "parameter w:f32[2]=[-0.5,0.7]"))
+    model = build_module(definition)
+    x = torch.tensor([[1.0, 2.0], [-0.5, 0.3]], requires_grad=True)
+    expected = F.layer_norm(weight(model, "w"), (2,), eps=0.0001) * x
+    assert_value_and_gradient(model(x), expected, (x, weight(model, "w")))
 
 
 def test_static_heads_and_dynamic_leading_batch_are_independent(compile_plan):
@@ -197,11 +227,11 @@ def test_input_contract_and_unsupported_ir_fail_clearly(compile_plan):
         model([1.0, 2.0])
     malformed = deepcopy(definition)
     malformed["program"]["registers"][0]["shape"] = [3]
-    with pytest.raises(ValueError, match="length does not match shape"):
+    with pytest.raises(ValueError, match="shape/length mismatch"):
         build_module(malformed)
     unsupported = deepcopy(definition)
     unsupported["program"]["instructions"].insert(0, {"op": "write"})
-    with pytest.raises(NotImplementedError, match="write"):
+    with pytest.raises(ValueError, match="fields for write"):
         build_module(unsupported)
     malformed = deepcopy(definition)
     malformed["program"]["version"] = 999
@@ -217,7 +247,7 @@ def test_precompiled_parameter_shapes_and_learn_domains_are_checked(compile_plan
         build_module(malformed)
     malformed = deepcopy(definition)
     malformed["program"]["parameters"][0]["learn"] = {"kind": "bool"}
-    with pytest.raises(NotImplementedError, match="projection"):
+    with pytest.raises(ValueError, match="outside its domain"):
         build_module(malformed)
 
 

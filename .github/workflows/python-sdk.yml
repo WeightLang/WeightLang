@@ -7,6 +7,7 @@ on:
       - 'python/**'
       - 'crates/wgt/**'
       - 'crates/wgt-language/**'
+      - 'crates/wgtime-core/**'
       - 'crates/wgt-model/tests/fixtures/**'
       - 'language/**'
       - 'std/**'
@@ -18,6 +19,7 @@ on:
       - 'python/**'
       - 'crates/wgt/**'
       - 'crates/wgt-language/**'
+      - 'crates/wgtime-core/**'
       - 'crates/wgt-model/tests/fixtures/**'
       - 'language/**'
       - 'std/**'
@@ -41,6 +43,7 @@ jobs:
         python: ['3.10', '3.12']
     env:
       WGT_COMPILER: ${{ github.workspace }}/target/debug/wgt
+      WGT_REFERENCE: ${{ github.workspace }}/target/debug/examples/torch_reference
       OMP_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +56,7 @@ jobs:
       - name: Build and test the native model bridge
         run: |
           cargo test --locked -p weightlang-wgt --test torch_export --test no_python_cli
-          cargo build --locked -p weightlang-wgt --bin wgt
+          cargo build --locked -p weightlang-wgt --bin wgt --example torch_reference
       - name: Install CPU PyTorch and SDK extras
         run: |
           sudo apt-get update -qq
@@ -61,11 +64,13 @@ jobs:
           uv venv --python '${{ matrix.python }}'
           uv pip install torch --index-url https://download.pytorch.org/whl/cpu
           uv pip install -e './python[visualize,test]'
-      - name: Check compiler, training, persistence and visualization
+      - name: Check native parity, training, state and visualization
         run: |
           mkdir -p /tmp/weightlang
           .venv/bin/python -m pytest python/tests -q --basetemp=/tmp/weightlang/sdk-tests
       - name: Run the complete training example
-        run: .venv/bin/python python/examples/mlp/train.py
+        run: |
+          .venv/bin/python python/examples/mlp/train.py
+          .venv/bin/python python/examples/adaptive/train.py
       - name: Build the Python distribution
         run: uv build python --out-dir dist/python

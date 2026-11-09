@@ -35,7 +35,7 @@ def from_ir(
     *,
     device: str | torch.device = "auto",
     dtype: torch.dtype | None = None,
-) -> torch.fx.GraphModule:
+) -> nn.Module:
     """Initialize a PyTorch module from a compiled definition; no compiler needed.
 
     Parameters start from declared initializers. Training and checkpoint restore
@@ -51,7 +51,7 @@ def loads(
     dtype: torch.dtype | None = None,
     compiler: str | os.PathLike[str] | None = None,
     timeout: float = 30,
-) -> torch.fx.GraphModule:
+) -> nn.Module:
     """Compile inline WGT and initialize an ordinary, trainable PyTorch module."""
     return from_ir(compile_source(source, compiler=compiler, timeout=timeout), device=device, dtype=dtype)
 
@@ -63,7 +63,7 @@ def load(
     dtype: torch.dtype | None = None,
     compiler: str | os.PathLike[str] | None = None,
     timeout: float = 30,
-) -> torch.fx.GraphModule:
+) -> nn.Module:
     """Load .wgt source, compiled .json, or a .pt/.pth model saved by save().
 
     Only .wgt requires the native compiler. Saved models contain architecture and
