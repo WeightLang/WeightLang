@@ -427,6 +427,7 @@ fn parse_definition_with_metadata(
         tuples: HashMap::new(),
         constants: HashMap::new(),
         unavailable: HashSet::new(),
+        tuple_bindings: HashSet::new(),
         operation_stack: Vec::new(),
         operation_returns: Vec::new(),
     };
@@ -489,6 +490,7 @@ fn parse_definition_with_metadata(
             tuples: HashMap::new(),
             constants: HashMap::new(),
             unavailable: HashSet::new(),
+            tuple_bindings: HashSet::new(),
             operation_stack: Vec::new(),
             operation_returns: Vec::new(),
         };
@@ -590,6 +592,9 @@ struct Lower {
     tuples: HashMap<String, Vec<String>>,
     constants: HashMap<String, f32>,
     unavailable: HashSet<String>,
+    // Ordinary tensors retain their runtime uninitialized-register contract.
+    // Definite-assignment rejection applies only to new tuple destructuring.
+    tuple_bindings: HashSet<String>,
     operation_stack: Vec<String>,
     operation_returns: Vec<(String, String, Option<usize>)>,
 }
@@ -833,7 +838,7 @@ impl Lower {
     }
     fn value(&mut self, expr: &Expr) -> Result<String> {
         if let Expr::Name(name) = expr {
-            ensure!(!self.unavailable.contains(name), "tensor is not defined on every control-flow path: {name}");
+            ensure!(!self.tuple_bindings.contains(name) || !self.unavailable.contains(name), "tensor is not defined on every control-flow path: {name}");
             ensure!(
                 !self.memories.contains_key(name),
                 "memory handle is not a tensor"
@@ -864,7 +869,7 @@ impl Lower {
     fn assign_inner(&mut self, out: &str, expr: &Expr) -> Result<()> {
         use crate::categorical::VectorType;
         if let Expr::Name(name) = expr {
-            ensure!(!self.unavailable.contains(name), "tensor is not defined on every control-flow path: {name}");
+            ensure!(!self.tuple_bindings.contains(name) || !self.unavailable.contains(name), "tensor is not defined on every control-flow path: {name}");
         }
         if let Expr::Tuple(items) = expr {
             ensure!(!self.sizes.contains_key(out), "tensor binding cannot change to a tuple");
@@ -2143,6 +2148,7 @@ impl Lower {
                         let value = self.value(e)?;
                         let fields = self.tuples.get(&value).context("tuple binding requires a tuple result")?.clone();
                         ensure!(bindings.len() == fields.len(), "tuple binding arity mismatch");
+                        self.tuple_bindings.extend(bindings.iter().cloned());
                         for (name, value) in bindings.iter().zip(fields) { self.assign(name, &Expr::Name(value))?; }
                     }
                     Stmt::Eval(Expr::BuiltinCall(op, args)) if op == "__transaction_write" && args.len() == 2 => {

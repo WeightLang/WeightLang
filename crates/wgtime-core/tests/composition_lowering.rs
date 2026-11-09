@@ -1,5 +1,6 @@
 //! Compile-time instance selection and tuple binding must respect control flow.
 use wgt_language::model::{ModelDefinition, ModelPlan};
+use wgtime_core::adaptive::AdaptiveSession;
 use wgtime_core::operations::OperationSession;
 
 const CELLS: &str = r#"
@@ -174,4 +175,36 @@ fn branch_local_tuples_and_existing_immutable_aliases_evaluate_correctly() {
     ));
     assert_eq!(call(&mut model, "step", 2.), [5.]);
     assert_eq!(call(&mut model, "step", -2.), [17.]);
+}
+
+#[test]
+fn ordinary_tensors_keep_runtime_initialization_and_rollback_with_tuples_present() {
+    let program = wgt_language::adaptive::parse(
+        r#"
+wgt 0.5
+model RuntimeInitialization
+input x: f32[1]
+parameter memory: f32[1] = [0]
+output y: f32[1]
+fn pair(x) { return (x, x); }
+fn forward(x) {
+    let (zero, unused) = pair([0]);
+    write(memory, x);
+    if positive(x) { let y = x + zero; }
+    return y;
+}
+"#,
+    )
+    .unwrap();
+    let mut model = AdaptiveSession::prepare(program, 16 * 1024 * 1024).unwrap();
+    assert_eq!(model.run(&[2.], 100).unwrap(), [2.]);
+    assert_eq!(model.parameter("memory").unwrap(), [2.]);
+    assert_eq!(model.revision(), 1);
+    // The skipped ordinary register is checked at execution, and the preceding
+    // tentative write rolls back instead of reusing y from the prior call.
+    let error = model.run(&[-1.], 100).unwrap_err();
+    assert!(error.to_string().contains("uninitialized"), "{error:#}");
+    assert_eq!(model.parameter("memory").unwrap(), [2.]);
+    assert_eq!(model.revision(), 1);
+    assert_eq!(model.run(&[3.], 100).unwrap(), [3.]);
 }

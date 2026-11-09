@@ -52,7 +52,7 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 旧通用 WGT 宿主脚本的 `agent Actor {policy; [critic;] learner:update;}` 与 `learn actor {...yield record;}` 属于不同的整批采集/learner 回调机制；不将它们与顶层模型定义中的标量 learn 参数混为一谈，也不把旧脚本机制作为新模型 API 的发展方向。保留中的现有实现契约见 docs/agents-environments.md。
 原生environment声明observation/action/feedback固定f32宽度及reset/step；Ctor(state,seed)构造reset一次，reset->{state,observation}，step->{state,observation,feedback,terminated,truncated}；同步纯WGT，state固定schema，有界有限记录字面量，全部验证后state/RNG原子提交。结束后拒step至reset，实例RNG隔离，reset重放seed，不影响host RNG。actor.act仅类别sample，logprob先取actor.policy局部变量。资源递归拒save json/async，无agent/env整实例checkpoint，仅显式policy checkpoint。完整签名/限制docs/agents-environments.md，真实例子crates/wgtime-core/tests/agent_environment.rs。
 语境能力见 language/source_capabilities.json；共同正负语料在 language/conformance.json。
-连续声明 `let a=expr, b=expr;` 在共用 parser 展开为原有 Stmt::Let 序列；从左到右各求值一次，后项可引用前项，无整组回滚。host/async/forward/loss 继承原有作用域和重名规则；纯 operator 在支持它的工作区同样展开。嵌套调用/列表/record 的逗号不分隔声明；模型纯函数另支持 2..16 项扁平张量元组与 `let (a,b)=helper(...);`，不进入服务 ABI；普通宿主脚本仍不支持张量元组。sample 解构及 collect/learn 须独立声明。完整例子 crates/wgtime-core/tests/continuous_let.rs；验证 tests/continuous_let.rs 与真实 AOT。
+连续声明 `let a=expr, b=expr;` 在共用 parser 展开为原有 Stmt::Let 序列；从左到右各求值一次，后项可引用前项，无整组回滚。host/async/forward/loss 继承原有作用域和重名规则；纯 operator 在支持它的工作区同样展开。嵌套调用/列表/record 的逗号不分隔声明；模型纯函数另支持 2..16 项扁平张量元组与 `let (a,b)=helper(...);`，元组绑定不可重定义、分支内新绑定不可逃逸，不进入服务 ABI；普通宿主脚本仍不支持张量元组。sample 解构及 collect/learn 须独立声明。完整例子 crates/wgtime-core/tests/continuous_let.rs；验证 tests/continuous_let.rs 与真实 AOT。
 函数共用 parser 不表示普通 fn 与 tensor forward/loss 语义相同；模型声明独立解析。
 language/primitive_specs.json 是制品 graph 原语域，不是源码内置表。编辑器容错不证明源码有效。
 在 language/prelude.json 维护原生函数、张量 intrinsic、语法、类型、常量与内部接口的统一内部目录；同步纯 helper 的 operator_arity 和需要保留的名称标记，不在 parser 或生成器另写名单。
@@ -155,7 +155,7 @@ GPU/WGSL（本地 WGT 0.5）：devices() 枚举 CPU 与硬件 GPU；training_dev
 
 用 `std/snn`、`std/plasticity`、`std/ff` 的纯公式描述模型内部更新，通过 `<-` 同时提交元组返回的候选；不要引入算法关键字或旧宿主训练 DSL。完整签名与示例见 [local-learning](../../../docs/local-learning.md) 和 [标准库](../../../docs/standard-library.md#脉冲与局部学习模块)。`ge(a,b)` 同形返回精确 0/1、相等为 1、拒绝 AD；`div`/`/`、`sqrt`、动态 `scale(x,s:f32[1])` 有常规 VJP，当前目录共 48 项 IR。多轴参数读取仍得到向量，传矩阵公式前显式 reshape。
 
-复用候选 schema 的 `candidate_updatable`，不要从 frozen/learn 猜测全部可进化参数。Rust/Python GA 使用同一固定 schema、域感知变异、独立 episode、明确 reset 和完整搜索 checkpoint；FF 调度调用 `adapt(positive,negative,rate)`，本地解析梯度不等同数学无梯度。修改这些能力时运行 `adaptive_numeric`、`local_learning`、`wgt-model --test evolution` 以及 Python 对应差分 tests；真实服务测试需要允许 Unix IPC 的环境，默认 ignored 不算已执行。
+复用候选 schema 的 `candidate_updatable`，不要从 frozen/learn 猜测全部可进化参数。Rust/Python GA 使用同一固定 schema、域感知变异、独立 episode、明确 reset 和完整搜索 checkpoint；FF 调度调用 `adapt(positive,negative,rate)`，本地解析梯度不等同数学无梯度。修改这些能力时运行 `adaptive_numeric`、`local_learning`、`composition_lowering`、`wgt-model --test evolution` 以及 Python 对应差分 tests；真实服务测试需要允许 Unix IPC 的环境，默认 ignored 不算已执行。
 
 新增测试通过 Cargo 验证 Rust 模型定义与真实服务。`wgt-model/tests/service.rs` 的执行用例需要预构建 `WGTIME_TEST_DAEMON` 并显式包含 ignored 测试，默认解析测试通过不能计作服务执行通过。
 旧 `wgtime_core::script::testing::Suite` 只从传入源码发现 `test_*` 函数并独立运行，不扫描目录或提供 CLI filter/JSON 汇总。维护入口、覆盖映射和编译拒绝边界见 references/native-testing.md 与 docs/native-testing.md。
