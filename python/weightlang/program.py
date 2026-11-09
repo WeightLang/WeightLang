@@ -309,7 +309,10 @@ class ProgramExecutor:
         elif op in {"read", "write"}:
             spec = self.specs[item["parameter"]]
             tensor_shape = shape if op == "read" else reg("value")
-            _require(tensor_shape == (math.prod(spec["shape"]),), "parameter read/write requires its flattened vector")
+            expected_shape = spec["shape"] if op == "write" and self.transactional else (math.prod(spec["shape"]),)
+            _require(tensor_shape == expected_shape,
+                     "typed parameter write must match storage shape" if op == "write" and self.transactional
+                     else "parameter read/write requires its flattened vector")
             if op == "write":
                 _require(not spec.get("frozen") and not spec.get("probability") and (self.transactional or spec.get("learn") is None),
                          "cannot write frozen/prob/learn storage")

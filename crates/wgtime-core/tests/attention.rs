@@ -103,7 +103,7 @@ fn nonlast_axis_softmax_has_independent_groups_and_gradient() {
 }
 #[test]
 fn tensor_shape_and_serialized_ir_contracts_are_strict() {
-    for expression in ["reshape(x,[2,2])","matmul(reshape(x,[2,3]),reshape(x,[2,3]))","reshape(x,[2,3])+reshape(x,[3,2])","softmax(reshape(x,[2,3]))","softmax(reshape(x,[2,3]),-1)","softmax(reshape(x,[2,3]),2)","transpose(x)","scale(x,[2])"] {
+    for expression in ["reshape(x,[2,2])","matmul(reshape(x,[2,3]),reshape(x,[2,3]))","reshape(x,[2,3])+reshape(x,[3,2])","softmax(reshape(x,[2,3]))","softmax(reshape(x,[2,3]),-1)","softmax(reshape(x,[2,3]),2)","transpose(x)","scale(x,reshape([2],[1,1]))"] {
         let source=format!("wgt 0.5\nmodel Invalid\ninput x:f32[6]\noutput y:f32[6]\nfn forward(x){{return {expression};}}\n");
         assert!(parse(&source).is_err(),"accepted {expression}");
     }

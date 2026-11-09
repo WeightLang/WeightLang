@@ -95,3 +95,40 @@ def test_new_eligibility_metadata_cannot_enable_frozen_or_probability(model):
         spec.pop("candidate_updatable", None)
     restored = wgt.from_ir(definition, device="cpu")
     assert not restored.parameter_schema["probability"]["candidate_updatable"]
+
+
+def test_typed_matrix_write_requires_storage_shape_not_just_element_count(model):
+    definition = wgt.compile_source("""wgt 0.5
+model MatrixUpdate
+parameter weight:f32[2,2]=[1,0,0,1]
+fn set(values:f32[4]) { weight <- reshape(values,[2,2]); }
+""")
+    matrix = wgt.from_ir(definition, device="cpu")
+    matrix.set(torch.tensor([2., 3., 4., 5.]))
+    torch.testing.assert_close(matrix.parameter_values()["weight"], torch.tensor([[2., 3.], [4., 5.]]))
+    program = definition["operations"]["entries"][0]["program"]
+    write = next(item for item in program["instructions"] if item["op"] == "write")
+    write["value"] = program["input"]  # Same four values, wrong [4] vs [2,2] shape.
+    with pytest.raises(ValueError, match="typed parameter write.*storage shape"):
+        wgt.from_ir(definition, device="cpu")
+
+
+def test_legacy_write_keeps_explicit_flattened_vector_contract(model):
+    definition = wgt.compile_source("""wgt 0.5
+model LegacyMatrix
+input x:f32[4]
+output y:f32[4]
+parameter weight:f32[2,2]=[1,0,0,1]
+fn forward(x) { write(weight,x); return x; }
+""")
+    legacy = wgt.from_ir(definition, device="cpu")
+    legacy.run(torch.tensor([2., 3., 4., 5.]))
+    torch.testing.assert_close(legacy.get_parameter(legacy.parameter_names["weight"]), torch.tensor([[2., 3.], [4., 5.]]))
+    program = definition["program"]
+    program["version"] = 3
+    program["registers"].append({"name": "invalid_matrix", "len": 4, "shape": [2,2]})
+    index = next(index for index, item in enumerate(program["instructions"]) if item["op"] == "write")
+    program["instructions"][index]["value"] = "invalid_matrix"
+    program["instructions"].insert(index, {"op": "reshape", "out": "invalid_matrix", "input": program["input"]})
+    with pytest.raises(ValueError, match="flattened vector"):
+        wgt.from_ir(definition, device="cpu")
