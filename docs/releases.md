@@ -35,13 +35,21 @@ PyPI token 和 crates.io token 可配置在对应 environment 或仓库 secrets 
 
 crates.io 的首次发布需要 API token，之后可为 `wgtime`、`wgt-language`、`wgt-model-macros`、`wgt-model` 分别登记 Trusted Publisher，再移除长期 token。账号必须拥有对应包名的发布权。配置步骤见 [crates.io Trusted Publishing](https://crates.io/docs/trusted-publishing)、[PyPI GitHub Publisher](https://docs.pypi.org/trusted-publishers/adding-a-publisher/)、[uv 发布指南](https://docs.astral.sh/uv/guides/publish/)。
 
+首次发布 Rust SDK 时，先完成 crates.io 账号的邮箱验证，创建允许发布上述四个新 crate 的 token（`publish-new` 权限）。在 GitHub **Settings → Environments → crates-io → Environment secrets** 中添加 `CARGO_REGISTRY_TOKEN`，也可使用仓库级同名 secret。token 只填入 GitHub secret；不写进运行输入、源码或问题讨论。四个 crate 首次发布成功后，才能逐个配置表中的 Trusted Publisher 身份。
+
+PyPI 的 Trusted Publisher 匹配工作流文件名。旧 `publish-pypi.yml` 的发布身份不会自动授权 `release.yml`；需要在现有 `weightlang` 项目中添加表中的身份，或在 `pypi` environment 配置 `PYPI_API_TOKEN`。
+
 ## 发布门槛
 
 准备任务先在工作区生成候选版本并记录 Git tree。原生构建、两个 SDK 工作流及 Rust 模型语义测试均下载这份候选文件，并核对源码树，避免不同任务构建不同版本。
 
+手动发布通过默认分支、版本和标签检查后，`check-rust-publishing` 与构建并行执行。缺少 token 且任一 crate 尚不存在时，预检列出这些包并要求首次发布凭据；已有 crate 则实际尝试 OIDC 认证。网络和注册表错误会使预检失败。预检通过才允许 `stage-release` 写入版本提交、标签和草稿，已启动的构建仍可完成验证并保存制品。普通 push、PR 和 `publish=false` 不申请发布身份，也不依赖该预检。
+
+配置了 token 时，预检只确认凭据存在，实际权限由 crates.io 在发布时校验。OIDC 预检获取的短期 token 随任务结束撤销；正式发布重新申请身份，不跨任务传递或保存 token。
+
 | 验证 | 实际执行内容 |
 | --- | --- |
-| 版本与重试逻辑 | 版本选择、全部 manifest/锁文件一致性，以及已发布版本冲突、制品不同、部分成功重试的回归测试 |
+| 版本与发布逻辑 | 版本选择、全部 manifest/锁文件一致性、首次发布凭据、注册表错误，以及已发布版本冲突、制品不同、部分成功重试的回归测试 |
 | 原生工具 | Ubuntu 24.04 x86_64 / ARM64，工具链与服务启动测试，release 构建，`wgt` / `weightc` 版本检查 |
 | Python SDK | Python 3.10 / 3.12，CPU PyTorch，sdist 构建 wheel，Twine 严格元数据检查，安装 wheel 后运行完整 SDK 测试与训练示例 |
 | Python 独立安装 | 仓库外隔离导入、版本与类型标记、编译和推理、梯度、无编译器时恢复 checkpoint 与 IR |
@@ -123,9 +131,11 @@ wgtime --test-directory /tmp/weightlang/wgtime
 | 构建、SDK 测试或发布预演 | 修复失败项后重新运行；远端分支、标签和包仓库尚未修改。 |
 | 构建期间默认分支移动 | 从最新 `main` 重新运行。 |
 | Git refs 推送失败 | 按仓库规则处理机器人权限；原子推送不会只写入其中一个 ref。 |
+| `First crates.io publication requires CARGO_REGISTRY_TOKEN` | 在 `crates-io` environment 或仓库 secrets 配置允许发布所列新 crate 的 token，再重跑失败任务。 |
+| `No Trusted Publishing config found` | 首次发布配置 `CARGO_REGISTRY_TOKEN`；已有 crate 核对各自的 owner、repository、`release.yml` 和 `crates-io` environment。 |
 | 包仓库认证失败 | 检查对应 environment 的 Trusted Publisher 或 secret，再重跑失败任务。 |
 | 某个 crate 已存在且内容不同，或已撤回 | 不覆盖该版本；修正发布版本并重新验证。 |
 | Rust 成功但 Python 失败 | 重跑失败任务，Python 使用原始 artifact 继续上传，成功后公开 GitHub Release。 |
 | 标签已推送但草稿上传失败 | 重跑原运行；先核对已有标签的源码树，再补全草稿资产。 |
 
-重跑需要原运行 artifacts 仍然可用。标签创建后，不要用同一版本另起一次完整发布；新的准备任务会拒绝已存在的标签。
+重跑需要原运行 artifacts 仍然可用。标签创建后，不要用同一版本另起一次完整发布；新的准备任务会拒绝已存在的标签。应在原运行选择 **Re-run failed jobs**，复用已验证制品并继续后续任务。GitHub 重跑保留原事件的 `GITHUB_SHA` 和 `GITHUB_REF`；修改 `main` 上的工作流不会改变旧运行，认证失败的恢复仍须补齐对应 secret 或注册表身份。参见 [GitHub 重跑规则](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)。
