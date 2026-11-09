@@ -5,7 +5,10 @@ mod contracts;
 pub use contracts::{OperatorContract, OPERATOR_CONTRACTS};
 pub use conv::{ConvGeometry, Pool2dGeometry};
 pub use source::{parse, parse_with_functions, parse_with_metadata};
-pub(crate) use source::{validate_definition, lower_operation};
+pub(crate) use source::{validate_definition, lower_operation, analyze_definition};
+pub(crate) type InferredTypes = std::collections::BTreeMap<
+    String, std::collections::BTreeMap<String, crate::tensor::TensorType>,
+>;
 
 /// Source-level instance identity retained separately from the flattened IR.
 /// Repeated calls to one path share the same mapped parameter storage.

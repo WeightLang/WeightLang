@@ -8,3 +8,5 @@ pub mod weight_artifact;
 pub mod model;
 pub mod operations;
 mod model_modules;
+
+pub mod ide;

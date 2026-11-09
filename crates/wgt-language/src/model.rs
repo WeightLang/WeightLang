@@ -55,7 +55,7 @@ impl ModelDefinition {
         let (source, _) = crate::model_modules::resolve(text, None)?;
         Self::parse_resolved(&source)
     }
-    fn parse_resolved(text: &str) -> Result<Self> {
+    pub(crate) fn parse_resolved(text: &str) -> Result<Self> {
         ensure!(text.len() <= MAX_SOURCE_BYTES, "model definition exceeds 1 MiB source limit");
         let unit = source::split(text)?;
         let functions = script::parse::parse_functions(&unit.functions)?;

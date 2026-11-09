@@ -13,18 +13,23 @@ const LIMIT: usize = 1024 * 1024;
 
 pub(crate) fn read(path: &Path) -> Result<String> {
     use std::io::Read;
+    // Reject pipes and devices before opening them: opening a FIFO can block an
+    // editor request even before bounded reading has a chance to run.
+    let metadata = std::fs::metadata(path).with_context(|| path.display().to_string())?;
+    ensure!(metadata.is_file(), "model source must be a regular file: {}", path.display());
+    ensure!(metadata.len() <= LIMIT as u64, "model source exceeds 1 MiB");
     let file = std::fs::File::open(path).with_context(|| path.display().to_string())?;
-    ensure!(
-        file.metadata()?.len() <= LIMIT as u64,
-        "model source exceeds 1 MiB"
-    );
+    let metadata = file.metadata()?;
+    ensure!(metadata.is_file(), "model source must be a regular file: {}", path.display());
+    ensure!(metadata.len() <= LIMIT as u64, "model source exceeds 1 MiB");
     let mut text = String::new();
     file.take(LIMIT as u64 + 1).read_to_string(&mut text)?;
     ensure!(text.len() <= LIMIT, "model source exceeds 1 MiB");
     Ok(text)
 }
 
-struct Resolver {
+struct Resolver<'a> {
+    overlays: &'a BTreeMap<PathBuf, String>,
     boundary: Option<PathBuf>,
     stack: HashSet<PathBuf>,
     dependencies: Vec<PathBuf>,
@@ -34,13 +39,34 @@ struct Resolver {
 }
 
 pub(crate) fn resolve(text: &str, file: Option<&Path>) -> Result<(String, Vec<PathBuf>)> {
+    resolve_with_overlays(text, file, &BTreeMap::new())
+}
+
+// A new editor file need not exist yet; the parent still defines a real boundary.
+fn source_path(path: &Path) -> Result<PathBuf> {
+    match path.canonicalize() {
+        Ok(path) => Ok(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+            Ok(parent.canonicalize()?.join(path.file_name().context("source file needs a name")?))
+        }
+        Err(error) => Err(anyhow::Error::from(error)),
+    }
+}
+
+pub(crate) fn resolve_with_overlays(
+    text: &str,
+    file: Option<&Path>,
+    overlays: &BTreeMap<PathBuf, String>,
+) -> Result<(String, Vec<PathBuf>)> {
     ensure!(text.len() <= LIMIT, "model source exceeds 1 MiB");
-    let root = file.map(|p| p.canonicalize()).transpose()?;
+    let root = file.map(source_path).transpose()?;
     let boundary = root
         .as_ref()
         .and_then(|p| p.parent())
         .map(Path::to_path_buf);
     let mut resolver = Resolver {
+        overlays,
         boundary,
         stack: HashSet::new(),
         dependencies: Vec::new(),
@@ -90,7 +116,7 @@ pub(crate) fn resolve(text: &str, file: Option<&Path>) -> Result<(String, Vec<Pa
     Ok((output, resolver.dependencies))
 }
 
-impl Resolver {
+impl Resolver<'_> {
     fn imports(
         &mut self,
         imports: &[(String, String)],
@@ -121,10 +147,8 @@ impl Resolver {
                 let directory = directory.context(
                     "relative model imports require ModelDefinition::from_file or include_model!",
                 )?;
-                let file = directory
-                    .join(relative)
-                    .canonicalize()
-                    .with_context(|| path.clone())?;
+                let requested = directory.join(relative);
+                let file = source_path(&requested).with_context(|| path.clone())?;
                 ensure!(
                     file.starts_with(
                         self.boundary
@@ -138,7 +162,10 @@ impl Resolver {
                     "cyclic model module import: {}",
                     file.display()
                 );
-                let text = read(&file)?;
+                let text = if let Some(text) = self.overlays.get(&file).or_else(|| self.overlays.get(&requested)) {
+                    ensure!(text.len() <= LIMIT, "model source exceeds 1 MiB");
+                    text.clone()
+                } else { read(&file)? };
                 if !self.dependencies.contains(&file) {
                     self.dependencies.push(file.clone());
                 }
@@ -243,6 +270,15 @@ fn emit_function(out: &mut String, name: &str, function: &Function) -> Result<()
     out.push_str(&format!("\nfn {name}({args}){output} {{\n"));
     fn emit_body(out:&mut String,body:&[parse::Statement])->Result<()> {
         for statement in body {match &statement.kind {
+            Stmt::Let(name,Expr::BuiltinCall(operation,args)) if operation == "__tensor_annot" => {
+                let [Expr::List(dimensions), value] = args.as_slice() else { bail!("invalid tensor annotation"); };
+                let dimensions = dimensions.iter().map(|dimension| {
+                    let Expr::List(pair) = dimension else { bail!("invalid tensor dimension"); };
+                    let [Expr::Text(axis), extent] = pair.as_slice() else { bail!("invalid tensor dimension"); };
+                    Ok(if axis.is_empty() { expression(extent)? } else { format!("{axis}={}", expression(extent)?) })
+                }).collect::<Result<Vec<_>>>()?.join(",");
+                out.push_str(&format!("let {name}: f32[{dimensions}] = {};\n",expression(value)?));
+            }
             Stmt::Let(name,e)=>out.push_str(&format!("let {name} = {};\n",expression(e)?)),
             Stmt::LetTuple(names,e)=>out.push_str(&format!("let ({}) = {};\n",names.join(","),expression(e)?)),
             Stmt::Set(name,e)=>out.push_str(&format!("{name} = {};\n",expression(e)?)),
@@ -268,6 +304,7 @@ fn expression(expr: &Expr) -> Result<String> {
             n.to_string()
         }
         Expr::Name(name) => name.clone(),
+        Expr::Text(text) => serde_json::to_string(text)?,
         Expr::List(items) => format!(
             "[{}]",
             items

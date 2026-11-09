@@ -44,6 +44,25 @@ fn parse_definition_with_metadata(
     functions: &crate::script::parse::Program,
     materialize: bool,
 ) -> Result<(Program, Vec<ModuleSchema>)> {
+    parse_definition_with_details(source, functions, materialize, false)
+        .map(|(program, modules, _)| (program, modules))
+}
+
+/// Compile-time types for editor requests; never initialize parameter storage.
+pub(crate) fn analyze_definition(
+    source: &str,
+    functions: &crate::script::parse::Program,
+) -> Result<(Program, super::InferredTypes)> {
+    parse_definition_with_details(source, functions, false, true)
+        .map(|(program, _, types)| (program, types))
+}
+
+fn parse_definition_with_details(
+    source: &str,
+    functions: &crate::script::parse::Program,
+    materialize: bool,
+    collect_types: bool,
+) -> Result<(Program, Vec<ModuleSchema>, super::InferredTypes)> {
     let unit = crate::source::split(source)?;
     let forward = functions
         .get("forward")
@@ -432,6 +451,8 @@ fn parse_definition_with_metadata(
         operation_returns: Vec::new(),
     };
     lower.block(&forward.body)?;
+    let mut inferred = super::InferredTypes::new();
+    if collect_types { inferred.insert("forward".into(), lower.inferred_types()?); }
 
     ensure!(
         lower
@@ -514,13 +535,14 @@ fn parse_definition_with_metadata(
         if !lower.program.output_type.is_plain() {
             loss_lower.program.version = loss_lower.program.version.max(2);
         }
+        if collect_types { inferred.insert("loss".into(), loss_lower.inferred_types()?); }
         lower.program.loss = Some(Box::new(loss_lower.program));
     }
     if !lower.program.output_type.is_plain() {
         lower.program.version = lower.program.version.max(2);
     }
     lower.program.validate_tensor_contracts()?;
-    Ok((lower.program, module_schemas))
+    Ok((lower.program, module_schemas, inferred))
 }
 // Endpoints are compile-time scalar arithmetic, never tensor values or host calls.
 fn slice_endpoint(expr: &Expr) -> Result<f64> {
@@ -605,6 +627,16 @@ struct BindingFacts {
     available: HashSet<String>,
 }
 impl Lower {
+    fn inferred_types(&self) -> Result<std::collections::BTreeMap<String, TensorType>> {
+        self.program.registers.iter()
+            .filter(|register| !register.name.starts_with("__wgt_"))
+            .map(|register| {
+                let axes = self.axes.get(&register.name).cloned()
+                    .unwrap_or_else(|| vec![None; register.shape.len()]);
+                Ok((register.name.clone(), TensorType::new(DType::F32, register.shape.clone(), axes, ShapeLimits::REGISTER)?))
+            })
+            .collect()
+    }
     fn facts(&self) -> BindingFacts {
         BindingFacts {
             constants: self.constants.clone(),
@@ -2152,8 +2184,13 @@ impl Lower {
                         for (name, value) in bindings.iter().zip(fields) { self.assign(name, &Expr::Name(value))?; }
                     }
                     Stmt::Eval(Expr::BuiltinCall(op, args)) if op == "__transaction_write" && args.len() == 2 => {
-                        let parameter = self.parameter(&args[0])?.name.clone();
+                        let target = self.parameter(&args[0])?;
+                        let (parameter, expected) = (target.name.clone(), target.shape.clone());
+                        ensure!(!target.frozen, "frozen update target: {parameter}");
+                        ensure!(!target.probability, "transactional probability updates are unsupported");
                         let value = self.value(&args[1])?;
+                        let actual = self.shape(&value)?;
+                        ensure!(expected == actual, "update shape mismatch for {parameter}: expected {expected:?}, got {actual:?}");
                         self.program.instructions.push(I::Write { parameter, value });
                     }
                     Stmt::Eval(Expr::BuiltinCall(op, args)) if op == "__operation_dispatch" => {

@@ -42,6 +42,14 @@ pub struct OperationsPlan {
 }
 
 pub(crate) fn lower(text: &str, materialize: bool) -> Result<OperationsPlan> {
+    lower_with_types(text, materialize, false).map(|(plan, _)| plan)
+}
+
+pub(crate) fn analyze(text: &str) -> Result<(OperationsPlan, adaptive::InferredTypes)> {
+    lower_with_types(text, false, true)
+}
+
+fn lower_with_types(text: &str, materialize: bool, collect_types: bool) -> Result<(OperationsPlan, adaptive::InferredTypes)> {
     let flat = composition::flatten(text)?;
     let functions = flat.functions;
     ensure!(
@@ -83,6 +91,7 @@ pub(crate) fn lower(text: &str, materialize: bool) -> Result<OperationsPlan> {
         }
     }
     let mut entries = Vec::new();
+    let mut inferred = adaptive::InferredTypes::new();
     let mut storage = None;
     for (name, function) in functions.iter().collect::<BTreeMap<_, _>>() {
         ensure!(
@@ -180,9 +189,17 @@ pub(crate) fn lower(text: &str, materialize: bool) -> Result<OperationsPlan> {
             input_width.max(1),
             signature.output.unwrap_or(1)
         );
-        let mut plan =
-            adaptive::lower_operation(&source, &helpers, materialize && storage.is_none())
+        let mut plan = if collect_types {
+            let (plan, mut types) = adaptive::analyze_definition(&source, &helpers)
                 .with_context(|| format!("operation {name}"))?;
+            if let Some(public_name) = flat.entries.get(name) {
+                if let Some(types) = types.remove("forward") { inferred.insert(public_name.clone(), types); }
+            }
+            plan
+        } else {
+            adaptive::lower_operation(&source, &helpers, materialize && storage.is_none())
+                .with_context(|| format!("operation {name}"))?
+        };
         let mut seen = BTreeSet::new();
         let mut total = 0usize;
         for parameter in &plan.parameters {
@@ -283,11 +300,11 @@ pub(crate) fn lower(text: &str, materialize: bool) -> Result<OperationsPlan> {
         .unwrap()
         .into_iter()
         .partition(|p| state_names.contains(&p.name));
-    Ok(OperationsPlan {
+    Ok((OperationsPlan {
         parameters,
         states,
         entries,
-    })
+    }, inferred))
 }
 impl OperationsPlan {
     pub fn parameter_schemas(&self) -> Vec<ParameterSchema> {

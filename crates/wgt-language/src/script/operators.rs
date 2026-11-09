@@ -104,12 +104,14 @@ fn validate_inner(
                     !names.contains(n) && identifier(n),
                     "operator local must be unique: {n}"
                 );
-                check_expr(e, &names, functions, stack, checked)?;
+                check_expr(e, &names, functions, stack, checked)
+                    .with_context(|| format!("operator {name}, line {}", s.line))?;
                 names.insert(n.clone());
                 continue;
             }
             Stmt::LetTuple(bindings, e) => {
-                check_expr(e, &names, functions, stack, checked)?;
+                check_expr(e, &names, functions, stack, checked)
+                    .with_context(|| format!("operator {name}, line {}", s.line))?;
                 for n in bindings {
                     ensure!(identifier(n) && names.insert(n.clone()), "operator local must be unique: {n}");
                 }
@@ -118,7 +120,8 @@ fn validate_inner(
             Stmt::Return(e) if i + 1 == f.body.len() => e,
             _ => bail!("operator {name}: only immutable let and a final return are supported"),
         };
-        check_expr(e, &names, functions, stack, checked)?;
+        check_expr(e, &names, functions, stack, checked)
+            .with_context(|| format!("operator {name}, line {}", s.line))?;
     }
     stack.pop();
     checked.insert(name.into());
