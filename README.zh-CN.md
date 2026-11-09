@@ -27,7 +27,7 @@ wgt.visualize(model, "architecture.svg")
 wgt.save(model, "weights/demo/model.pt")
 ```
 
-Python 负责数据、训练循环、推理和可视化；已保存的 SDK 模型或预编译 JSON 可在无需编译器、无需模型服务的环境加载。SVG/PNG 需要系统 Graphviz，Mermaid/DOT 仅需 PyTorch。当前 SDK 从源码安装，支持已验收的纯前向 WGT 子集，完整用法与边界见 [Python SDK 指南](docs/python-sdk.md)。原生 Rust/service 路径见下文。
+Python 负责数据、训练循环、推理和可视化；已保存的 SDK 模型或预编译 JSON 可在无需编译器、无需模型服务的环境加载。SDK 支持张量程序、控制流、可学习架构参数与事务式 typed 操作，保留原生初始化和子模型参数身份，并使用原生后端做差分验收。SVG/PNG 需要系统 Graphviz，Mermaid/DOT 仅需 PyTorch。当前版本从源码安装，完整用法见 [Python SDK 指南](docs/python-sdk.md)。原生 Rust/service 路径见下文。
 
 ## 开始训练第一个模型
 
