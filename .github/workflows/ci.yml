@@ -41,7 +41,7 @@ jobs:
           --test compiled_forward --test compiled_training --test compiled_control_flow
           --test compiled_instruction_coverage --test compiled_semantics
           --test unified_training --test custom_optimization --test operations
-          --test adaptive_numeric --test local_learning
+          --test adaptive_numeric --test local_learning --test composition_lowering
       - name: Check source execution regressions
         run: |
           cargo build --locked --no-default-features -p wgtime-core --example core-transport-test

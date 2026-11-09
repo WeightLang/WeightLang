@@ -7,10 +7,16 @@ on:
       - 'crates/wgt/src/rust_export.rs'
       - 'crates/wgt/tests/rust_export.rs'
       - 'crates/wgt-model/**'
+      - 'crates/wgt-language/**'
+      - 'std/**'
+      - 'examples/native_training/non_backprop/**'
       - 'crates/wgtime-core/src/compiled_forward.rs'
       - 'crates/wgtime-core/src/adaptive*'
       - 'crates/wgtime-core/src/adaptive/**'
       - 'crates/wgtime-core/tests/compiled*.rs'
+      - 'crates/wgtime-core/tests/adaptive_numeric.rs'
+      - 'crates/wgtime-core/tests/local_learning.rs'
+      - 'crates/wgtime-core/tests/composition_lowering.rs'
       - 'crates/wgtime-service/**'
       - 'language/tensor_contracts.json'
       - '.github/workflows/rust-model.yml'
@@ -19,10 +25,16 @@ on:
       - 'crates/wgt/src/rust_export.rs'
       - 'crates/wgt/tests/rust_export.rs'
       - 'crates/wgt-model/**'
+      - 'crates/wgt-language/**'
+      - 'std/**'
+      - 'examples/native_training/non_backprop/**'
       - 'crates/wgtime-core/src/compiled_forward.rs'
       - 'crates/wgtime-core/src/adaptive*'
       - 'crates/wgtime-core/src/adaptive/**'
       - 'crates/wgtime-core/tests/compiled*.rs'
+      - 'crates/wgtime-core/tests/adaptive_numeric.rs'
+      - 'crates/wgtime-core/tests/local_learning.rs'
+      - 'crates/wgtime-core/tests/composition_lowering.rs'
       - 'crates/wgtime-service/**'
       - 'language/tensor_contracts.json'
       - '.github/workflows/rust-model.yml'
@@ -47,6 +59,7 @@ jobs:
           cargo test --locked --no-default-features -p wgtime-core
           --test compiled_instruction_coverage --test compiled_semantics
           --test compiled_forward --test compiled_control_flow --test compiled_training
+          --test adaptive_numeric --test local_learning --test composition_lowering
       - name: Compile and run generated Rust consumers
         run: cargo test --locked -p weightlang-wgt --test rust_export
       - name: Build the real model service

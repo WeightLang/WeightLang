@@ -883,6 +883,11 @@ impl Parser {
                 }
                 "train" => {
                     let model = self.expr(0)?;
+                    ensure!(
+                        !matches!(model, Expr::Tuple(_)),
+                        "line {}: train(...) was removed; use train net on inputs against targets {{rate:...;loss:mse;}}",
+                        t.line
+                    );
                     self.expect("on")?;
                     let inputs = self.expr(0)?;
                     self.expect("against")?;
