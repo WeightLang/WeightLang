@@ -403,13 +403,13 @@ class ProgramExecutor:
             diagnostic_anchor = input.new_zeros((), requires_grad=True)
         context = nullcontext() if differentiable else torch.no_grad()
         with context:
-            values = {self.input: ops.check_finite(input.clone(), diagnostic_anchor)}
+            values = {self.input: ops.check_gradient(input.clone(), diagnostic_anchor)}
             candidates = {}
             for name, spec in self.specs.items():
                 value = parameters[name]
                 validate_parameter(value, spec)
                 _require(value.device == input.device and value.dtype == input.dtype, f"parameter {name} and input device/dtype differ")
-                candidates[name] = ops.check_finite(value.clone(), diagnostic_anchor)
+                candidates[name] = ops.check_gradient(value.clone(), diagnostic_anchor)
             memories: dict[str, torch.Tensor] = {}
             written: set[str] = set()
             work = memory_used = peak = pc = 0
@@ -446,8 +446,10 @@ class ProgramExecutor:
                         out = input.new_tensor(item["data"]).reshape(self.shapes[item["out"]])
                     elif op == "read":
                         name = item["parameter"]
+                        # Candidates are checked at entry and on every write;
+                        # reads cannot change their value or declared domain.
                         out = read_parameter(candidates[name], self.specs[name], differentiable,
-                                             validate=not self.transactional).reshape(self.shapes[item["out"]])
+                                             validate=False).reshape(self.shapes[item["out"]])
                     elif op == "write":
                         name = item["parameter"]
                         candidate = get("value").reshape(self.specs[name]["shape"]).clone()
@@ -483,7 +485,7 @@ class ProgramExecutor:
                             else:
                                 candidate = ops.memory_write(memory, address, get("value"))
                                 _finite_tensor(candidate, "memory write")
-                                memories[name] = ops.check_finite(candidate, diagnostic_anchor)
+                                memories[name] = ops.check_gradient(candidate, diagnostic_anchor)
                     elif op == "linear":
                         bias = candidates[item["bias"]] if item.get("bias") is not None else None
                         out = ops.linear(get("input"), candidates[item["weight"]], bias)
@@ -545,7 +547,7 @@ class ProgramExecutor:
                     if out is not None:
                         _require(tuple(out.shape) == self.shapes[item["out"]], f"{op} produced an unexpected shape")
                         _finite_tensor(out, "activation")
-                        values[item["out"]] = ops.check_finite(out, diagnostic_anchor)
+                        values[item["out"]] = ops.check_gradient(out, diagnostic_anchor)
                 except (KeyError, RuntimeError, ValueError) as error:
                     raise RuntimeError(f"instruction {pc} ({op}): {error}") from error
                 pc += 1

@@ -188,3 +188,20 @@ def test_constant_only_program_retains_diagnostics_without_trainable_parameters(
     invalid = wgt.loads(source("return log([1.401298464324817e-45]);"), device="cpu")
     with pytest.raises(RuntimeError, match="nonfinite WeightLang gradient"):
         invalid(torch.ones(1)).backward()
+
+
+@pytest.mark.parametrize("context", [torch.no_grad, torch.inference_mode])
+@pytest.mark.parametrize("returns_parameter", [False, True])
+def test_inference_aliases_do_not_expose_input_or_parameter_gradients(context, returns_parameter):
+    body = "return gain;" if returns_parameter else "return x;"
+    declarations = "parameter gain:f32[1]=[2]" if returns_parameter else ""
+    model = wgt.loads(source(body, declarations), device="cpu")
+    x = torch.ones(1, requires_grad=True)
+    original = model.get_parameter(model.parameter_names["gain"]) if returns_parameter else x
+    with context():
+        result = model(x)
+    torch.testing.assert_close(result, original)
+    assert not result.requires_grad and result.grad_fn is None
+    assert original.requires_grad and original.grad is None
+    model(x).sum().backward()
+    torch.testing.assert_close(original.grad, torch.ones_like(original))
