@@ -327,7 +327,7 @@ jobs:
           Assets include Linux x86_64/aarch64 wgt/weightc executables, the CPU wgtime service,
           the Python wheel and sdist, four Rust SDK crates, matching source, and SHA256SUMS.
           Python: pip install weightlang==$VERSION
-          Rust: cargo add wgt-model@$VERSION
+          Rust: cargo add wgt-model@=$VERSION
           The Python source compiler and Rust service must come from this same release.
 
           Start wgtime explicitly in a private directory. Model execution needs cc;
