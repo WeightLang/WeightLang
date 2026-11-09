@@ -451,6 +451,9 @@ pub(crate) fn link(
                     line: s.line,
                     kind: match s.kind {
                         Stmt::Let(n, e) => Stmt::Let(n, rewrite(&e, &HashMap::new(), &calls)),
+                        Stmt::LetTuple(names, e) => {
+                            Stmt::LetTuple(names, rewrite(&e, &HashMap::new(), &calls))
+                        }
                         Stmt::Return(e) => Stmt::Return(rewrite(&e, &HashMap::new(), &calls)),
                         _ => unreachable!(),
                     },

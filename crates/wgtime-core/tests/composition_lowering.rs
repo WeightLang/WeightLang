@@ -106,6 +106,31 @@ fn unrolled(x: f32[1]) -> f32[1] {{
     assert_eq!(call(&mut model, "unrolled", 0.), [7.]);
 }
 
+#[test]
+fn indexed_and_sliced_child_results_execute_once() {
+    for result in [
+        "cells[i].tick()[0]",
+        "cells[i].tick()[0:1]",
+        "cells[i].tick()[:1]",
+        "cells[i].tick()[0:]",
+    ] {
+        let mut model = operations(&format!(
+            "{CELLS}\nfn step(x: f32[1]) -> f32[1] {{ let i = [1]; return {result}; }}"
+        ));
+        for count in [1., 2.] {
+            assert_eq!(call(&mut model, "step", 0.), [count], "{result}");
+            assert_eq!(
+                model.state_values(),
+                vec![
+                    ("cells_0_count".into(), vec![1], vec![0.]),
+                    ("cells_1_count".into(), vec![1], vec![count]),
+                ],
+                "{result} must update only the selected child, once"
+            );
+        }
+    }
+}
+
 fn tuple_source(body: &str) -> String {
     format!(
         r#"

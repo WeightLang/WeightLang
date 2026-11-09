@@ -336,6 +336,12 @@ fn expression(expr: &Expr, names: &HashMap<String, String>, calls: &HashMap<Stri
             Expr::BuiltinCall(name,args) => Expr::BuiltinCall(name,args.into_iter().map(|e|visit(e,arrays)).collect::<Result<_>>()?),
             Expr::List(items) => Expr::List(items.into_iter().map(|e|visit(e,arrays)).collect::<Result<_>>()?),
             Expr::Tuple(items) => Expr::Tuple(items.into_iter().map(|e|visit(e,arrays)).collect::<Result<_>>()?),
+            Expr::Index(value, index) => Expr::Index(Box::new(visit(*value, arrays)?), Box::new(visit(*index, arrays)?)),
+            Expr::Slice(value, start, end) => Expr::Slice(
+                Box::new(visit(*value, arrays)?),
+                start.map(|e| visit(*e, arrays).map(Box::new)).transpose()?,
+                end.map(|e| visit(*e, arrays).map(Box::new)).transpose()?,
+            ),
             Expr::Binary(op,a,b) => Expr::Binary(op,Box::new(visit(*a,arrays)?),Box::new(visit(*b,arrays)?)),
             Expr::Unary(op,x) => Expr::Unary(op,Box::new(visit(*x,arrays)?)),
             Expr::Conditional(c,a,b) => Expr::Conditional(Box::new(visit(*c,arrays)?),Box::new(visit(*a,arrays)?),Box::new(visit(*b,arrays)?)),

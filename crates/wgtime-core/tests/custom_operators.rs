@@ -109,3 +109,36 @@ fn arguments_are_evaluated_once_and_inference_laziness_is_preserved() {
     assert_eq!(model.run(&[1e30], 1000).unwrap(), [0.]);
     assert!(model.forward(&[1e30], 1000, 65536).is_err());
 }
+
+#[test]
+fn imported_tuple_destructuring_preserves_library_call_scope() {
+    let scratch = std::env::temp_dir().join("weightlang");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let root = tempfile::tempdir_in(scratch).unwrap();
+    std::fs::write(
+        root.path().join("tuples.wgt"),
+        r#"wgt 0.5
+operators Tuples
+fn pair(x) { return (x, x + [1, 2]); }
+fn combine(x) {
+    let (a, b) = pair(x);
+    return a + b;
+}
+"#,
+    )
+    .unwrap();
+    // The local helper deliberately differs: imported pair must bind to its library.
+    let source = r#"wgt 0.5
+import tuples from "./tuples.wgt"
+model ImportedTuples
+input x: f32[2]
+output y: f32[2]
+fn pair(x) { return (x, x); }
+fn forward(x) { return tuples.combine(x); }
+fn main() { let model = ImportedTuples("none"); return model([2, 3]); }
+"#;
+    assert_eq!(
+        script::run(source, root.path(), 10_000).unwrap().result,
+        serde_json::json!([5., 8.])
+    );
+}

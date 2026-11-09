@@ -547,10 +547,11 @@ def evaluate_isolated(
     scores: dict[int, float] = {}
     with torch.no_grad():
         for candidate in population:
+            parameters = schema.parameters(candidate, device=template._device_anchor.device)
             mean = 0.
             for episode, seed in enumerate(seeds, start=1):
                 instance = deepcopy(template)
-                instance.update_parameters(schema.parameters(candidate, device=instance._device_anchor.device))
+                instance.update_parameters(parameters)
                 if reset_operation is not None:
                     instance.call(reset_operation)
                 try:
