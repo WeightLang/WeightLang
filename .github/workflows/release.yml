@@ -107,8 +107,9 @@ jobs:
             echo "::error::Publish from $DEFAULT_BRANCH; other refs support build/test only."
             exit 1
           fi
-          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
-            echo "::error::Tag $RELEASE_TAG already exists. Choose a new version."
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG" || \
+             git show-ref --verify --quiet "refs/tags/v${RELEASE_TAG#wgt-v}"; then
+            echo "::error::This version already has a native or legacy Python tag. Choose a new version."
             exit 1
           fi
       - name: Record the exact candidate source tree
