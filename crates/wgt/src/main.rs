@@ -57,9 +57,10 @@ enum SelfCommand {
     },
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum CompileTarget {
     Torch,
+    Rust,
 }
 
 #[derive(Subcommand)]
@@ -169,16 +170,19 @@ enum Cmd {
     Metadata,
     /// Strictly parse and validate a WGT model definition without initializing it
     Check { source: Option<PathBuf> },
-    /// Compile a model architecture to JSON for the Python SDK; never executes it
+    /// Compile a model architecture for PyTorch or Rust; never executes it
     Compile {
         /// WGT model definition, or - to read a definition from stdin
         #[arg(default_value = "model.wgt")]
         source: PathBuf,
         #[arg(long, value_enum, default_value = "torch")]
         target: CompileTarget,
-        /// New architecture JSON file; omit to write JSON to stdout
+        /// New architecture file; omit to write the generated target to stdout
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Rust facade dependency path, for example renamed_wgt (default: ::wgt)
+        #[arg(long)]
+        crate_path: Option<String>,
     },
     /// Copy a verified native build into a new directory package (not ZIP; never trains)
     Package {
@@ -364,23 +368,52 @@ fn execute(cli: Cli) -> Result<u8> {
     match &command {
         Cmd::Compile {
             source,
-            target: CompileTarget::Torch,
+            target,
             output,
+            crate_path,
         } => {
-            let architecture = if source == Path::new("-") {
+            ensure!(
+                *target == CompileTarget::Rust || crate_path.is_none(),
+                "--crate-path is only supported with --target rust"
+            );
+            let text = if source == Path::new("-") {
                 use std::io::Read;
                 let mut text = String::new();
                 std::io::stdin()
                     .take(1024 * 1024 + 1)
                     .read_to_string(&mut text)?;
-                weightlang_wgt::torch_export::compile_source(&text)?
+                Some(text)
             } else {
-                weightlang_wgt::torch_export::compile(&base.join(source))?
+                None
             };
-            if let Some(output) = output {
-                weightlang_wgt::torch_export::write(&architecture, &base.join(output))?;
-            } else {
-                println!("{}", serde_json::to_string_pretty(&architecture)?);
+            match target {
+                CompileTarget::Torch => {
+                    let architecture = if let Some(text) = text {
+                        weightlang_wgt::torch_export::compile_source(&text)?
+                    } else {
+                        weightlang_wgt::torch_export::compile(&base.join(source))?
+                    };
+                    if let Some(output) = output {
+                        weightlang_wgt::torch_export::write(&architecture, &base.join(output))?;
+                    } else {
+                        println!("{}", serde_json::to_string_pretty(&architecture)?);
+                    }
+                }
+                CompileTarget::Rust => {
+                    let crate_path = crate_path
+                        .as_deref()
+                        .unwrap_or(weightlang_wgt::rust_export::DEFAULT_CRATE_PATH);
+                    let module = if let Some(text) = text {
+                        weightlang_wgt::rust_export::compile_source(&text, crate_path)?
+                    } else {
+                        weightlang_wgt::rust_export::compile(&base.join(source), crate_path)?
+                    };
+                    if let Some(output) = output {
+                        weightlang_wgt::rust_export::write(&module, &base.join(output))?;
+                    } else {
+                        print!("{module}");
+                    }
+                }
             }
             return Ok(0);
         }
