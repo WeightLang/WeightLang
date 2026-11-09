@@ -7,6 +7,10 @@ description: 编写和验证本仓库当前 WGT 模型定义与 Rust 主程序�
 
 以 docs/reference.zh-CN.md、docs/differentiable-programs.md 和 Rust 实现为准；不是已发布功能承诺。Rust host 集成目标使用 edition 2024；WGT 语言版本仍以实际 parser 声明为准，不能因 Rust edition 将其改写为 WGT 版本。
 
+## 编辑器与语言服务器
+
+使用 `wgt lsp` 为编辑器提供 stdio 服务，配置与形状示例见 [LSP](../../../docs/lsp.md)。维护提示时复用 `wgt_language::ide` 的原生分析，词法索引只处理签名、补全和导航；通过模型验证后再显示中间形状与参数量。区分函数实参数量、可训练/冻结参数元素和状态元素；保留未保存依赖缓冲区及 UTF-16 位置语义。更新服务时运行 `cargo test -p weightlang-wgt --lib lsp::` 和 `cargo test -p weightlang-wgt --test lsp`，更新高亮/客户端时按 [编辑器验证](../../../docs/editors.md#维护与验证) 执行。不要把源码实现写成已发布版本，或将当前文件重命名描述为工作区重构。
+
 ## Tensor 合同维护
 
 固定 Shape/DType/命名轴和 stride 元数据共用 `wgt_language::tensor`，详见 [Tensor Contract](../../../docs/tensor-contract.md)。源定义和未信任 IR 都经过 `Program::validate_tensor_contracts`；保留 IR v1/v2/v3 的线格式和 f32 执行边界。新增 Instruction 必须同步 `language/tensor_contracts.json`，运行 `node scripts/check_tensor_contracts.cjs --write` 后再运行不带参数的检查，补齐源级正反例、CPU 数值和 VJP 测试。不能把 metadata dtype、可读重叠 view 或制品 graph 原语当作通用执行能力。

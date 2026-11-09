@@ -24,6 +24,7 @@ pub mod weight_types;
 pub mod precision;
 
 pub mod source_check;
+pub mod lsp;
 pub mod torch_export;
 pub mod rust_export;
 pub mod script_compiler;

@@ -33,6 +33,14 @@ npm test
 npm run package
 ```
 
+`npm test` checks TextMate scopes and the client's process lifecycle, including
+workspace trust, configuration changes, failed starts and shutdown. The package
+command runs `vscode:prepublish`, which bundles the standard
+`vscode-languageclient` into `dist/extension.cjs` and collects the bundled
+dependencies' licenses in `dist/THIRD_PARTY_NOTICES.txt`. `--no-dependencies` is
+intentional: the installed VSIX contains the complete client bundle and needs no
+`node_modules` directory or package installation on the user's computer.
+
 The resulting `weightlang-0.2.0.vsix` can be installed via **Extensions: Install
 from VSIX**, or uploaded to the VS Code Marketplace publisher management page.
 The `LIghtJUNction` publisher ID must belong to the account used for publication;
@@ -63,4 +71,10 @@ The icon uses the project logo from `assets/logo.png`, exported at 512 × 512
 pixels to satisfy the Marketplace limits (1024 × 1024 pixels and 1 MB).
 
 Grammar maintenance is documented in `../../docs/editors.md`. For extension
-host testing, use `code --extensionDevelopmentPath=/absolute/path/to/editors/vscode`.
+host testing, first run `npm run build`, then use
+`code --extensionDevelopmentPath=/absolute/path/to/editors/vscode`.
+Install or build the matching `wgt` executable and set `weightlang.server.path`
+if it is outside `PATH`. Open a WGT model and verify shape hover, signature help,
+Problems diagnostics and restart. In Restricted Mode, the extension must retain
+highlighting without starting a server process. Unit lifecycle tests and a
+successful VSIX build do not replace an actual extension-host check.

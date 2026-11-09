@@ -7,6 +7,12 @@
 模型声明、训练函数和自更新前向函数属于同一个编译单元，不能通过选择命令改变语法版本。
 工具包版本、模型 JSON 的 `version` 和训练断点版本是独立概念，不随语言版本替换。
 
+## 编辑器检查与提示
+
+[`wgt lsp`](lsp.md) 为 `.wgt` 文件提供函数签名与参数提示、张量形状和命名轴、模型参数元素统计，以及原生语法和形状诊断。形状与统计来自当前文档通过共享前端验证后的模型定义；分析不初始化权重或启动 `wgtime` 服务。当前文件引用与重命名、定义跳转、补全和语义高亮也由该服务提供。
+
+VS Code 源码扩展已接入 stdio LSP；安装、配置和矩阵维度错误示例见[语言服务器](lsp.md)，其他编辑器高亮见[编辑器支持](editors.md)。本节描述源码工具功能，语言版本、固定形状合同和各后端执行边界保持本参考中的定义。
+
 ## Rust 主程序与 WGT 模型目标
 
 目标工作流由 Rust 主程序负责数据准备、I/O、调度与训练循环，WGT 定义模型结构、模型内部计算及可选的可微 loss。Rust 库包名为 `wgt-model`，crate 名为 `wgt`。`ModelDefinition::parse`、`ModelDefinition::from_file`、`model!` 与 `include_model!` 共用模型解析与定义；两个宏仅接受 Rust 字符串字面量，编译时复用同一 parser 检查并嵌入源码，运行时仍解析定义。模型模块导入包含 `std/activation`、`std/loss`、`std/attention` 和 `std/numerics`；文件入口还实现了相对路径纯计算模块及嵌套导入。模块导出、原生执行和真实服务分别验收，当前覆盖清单与命令见 [Rust SDK](rust-sdk.md)，不表示已经发布。既有 forward 模型入口只接受单个 `f32` 向量；多输入 typed 操作遵守独立合同，见[模型操作](model-operations.md)。

@@ -1,12 +1,12 @@
 {
   "name": "weightlang",
   "displayName": "WeightLang",
-  "description": "Syntax highlighting and basic editing support for WeightLang (.wgt)",
+  "description": "WeightLang highlighting, tensor shape diagnostics, parameter hints and code navigation",
   "version": "0.2.0",
   "publisher": "LIghtJUNction",
   "license": "MIT",
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.82.0"
   },
   "categories": [
     "Programming Languages"
@@ -35,15 +35,42 @@
         "scopeName": "source.wgt",
         "path": "./syntaxes/wgt.tmLanguage.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "weightlang.restartServer",
+        "title": "Restart Language Server",
+        "category": "WeightLang",
+        "enablement": "isWorkspaceTrusted"
+      }
+    ],
+    "configuration": {
+      "title": "WeightLang",
+      "properties": {
+        "weightlang.server.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the WeightLang language server in trusted workspaces."
+        },
+        "weightlang.server.path": {
+          "type": "string",
+          "default": "wgt",
+          "scope": "machine-overridable",
+          "description": "Path to the wgt executable. The extension launches it with the lsp argument without a shell."
+        }
+      }
+    }
   },
   "scripts": {
-    "test": "node test.cjs",
+    "test": "node test.cjs && node --test client.test.cjs",
     "preview": "node render-preview.cjs",
-    "package": "vsce package --no-dependencies --baseContentUrl https://github.com/WeightLang/WeightLang/blob/main/editors/vscode --baseImagesUrl https://raw.githubusercontent.com/WeightLang/WeightLang/main/editors/vscode"
+    "package": "vsce package --no-dependencies --baseContentUrl https://github.com/WeightLang/WeightLang/blob/main/editors/vscode --baseImagesUrl https://raw.githubusercontent.com/WeightLang/WeightLang/main/editors/vscode",
+    "build": "node build.cjs",
+    "vscode:prepublish": "npm run build"
   },
   "devDependencies": {
     "@vscode/vsce": "4.1.0",
+    "esbuild": "0.28.2",
     "vscode-oniguruma": "2.0.1",
     "vscode-textmate": "9.2.0"
   },
@@ -57,10 +84,33 @@
     "weightlang",
     "neural network",
     "machine learning",
-    "syntax highlighting"
+    "syntax highlighting",
+    "language server",
+    "LSP",
+    "tensor shapes"
   ],
   "homepage": "https://github.com/WeightLang/WeightLang",
   "bugs": {
     "url": "https://github.com/WeightLang/WeightLang/issues"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
+  },
+  "main": "./dist/extension.cjs",
+  "activationEvents": [
+    "onLanguage:wgt",
+    "onCommand:weightlang.restartServer"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Syntax highlighting is available in Restricted Mode. The language server starts only in trusted workspaces.",
+      "restrictedConfigurations": [
+        "weightlang.server.path"
+      ]
+    }
   }
 }

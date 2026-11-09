@@ -65,6 +65,8 @@ enum CompileTarget {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Start the read-only language server over standard input/output
+    Lsp,
     /// Show the project pin, or write an exact wgt version to .wgt-version
     Version { version: Option<String> },
     /// Install a native wgt version from a release or a trusted local executable
@@ -337,6 +339,9 @@ fn execute(cli: Cli) -> Result<u8> {
         return Ok(0);
     }
     let command = cli.command.context("choose a command; see wgt --help")?;
+    if matches!(command, Cmd::Lsp) {
+        return weightlang_wgt::lsp::run();
+    }
     let base = fs::canonicalize(&cli.directory).context("project directory does not exist")?;
     // Checking must return before toolchain dispatch or dependency preparation.
     if let Cmd::Check { source } = &command {
@@ -458,6 +463,7 @@ fn execute(cli: Cli) -> Result<u8> {
         _ => {}
     }
     match command {
+        Cmd::Lsp => unreachable!("language server returned before project preparation"),
         Cmd::Update {
             module: None,
             version,
@@ -1117,7 +1123,7 @@ fn executable(path: &Path) -> bool {
 }
 fn list_commands() {
     println!(
-        "Built-in: version toolchain self download new init templates train infer run add remove update fetch sync tree metadata check compile verify graph package export release-assets publish register cache doctor"
+        "Built-in: version toolchain self download new init templates train infer run add remove update fetch sync tree metadata check compile verify graph package export release-assets publish register cache doctor lsp"
     );
     let mut names = std::collections::BTreeSet::new();
     if let Some(path) = std::env::var_os("PATH") {

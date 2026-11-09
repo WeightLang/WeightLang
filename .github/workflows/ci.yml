@@ -76,6 +76,10 @@ jobs:
           --test no_python_cli --test trainer_forwarding
       - name: Check automatic PyTorch backend preparation
         run: cargo test --locked -p weightlang-wgt --lib torch_backend::tests
+      - name: Check language server analysis and real stdio protocol
+        run: |
+          cargo test --locked -p weightlang-wgt --lib lsp::
+          cargo test --locked -p weightlang-wgt --test lsp
       - name: Check Rust model export and generated consumers
         run: cargo test --locked -p weightlang-wgt --test rust_export
       - name: Check allocator instrumentation configuration
@@ -180,6 +184,16 @@ jobs:
           npm run generate --prefix editors/tree-sitter-wgt
           node scripts/test_editor_support.cjs
           git diff --exit-code
+      - name: Verify and package the VS Code language client
+        run: |
+          npm ci --prefix editors/vscode
+          npm test --prefix editors/vscode
+          npm run package --prefix editors/vscode
+      - uses: actions/upload-artifact@v4
+        with:
+          name: weightlang-editor-vsix
+          path: editors/vscode/*.vsix
+          if-no-files-found: error
       - name: Check standalone viewer in Chromium
         run: |
           cargo build --locked -p weightlang-wgt --bin wgt

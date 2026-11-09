@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Start the native `wgt lsp` server for tensor diagnostics, shape and parameter
+  hints, completion, navigation, document symbols and semantic highlighting.
+- Add executable-path settings, a restart command, lifecycle tests and workspace
+  trust handling; Restricted Mode retains lexical highlighting.
+- Bundle the standard LSP client and its dependency license notices into the
+  VSIX, with no package installation required after extension installation.
+- Highlight named shapes, tensor postfixes, tuple bindings, model names and
+  `float`/`int`/`bool` learn types; correct native declarations and range operators.
+
 ## 0.2.0
 
 - Update highlighting to WGT 0.5 functions, control flow, native training and forward builtins.

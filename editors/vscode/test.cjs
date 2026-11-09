@@ -53,11 +53,12 @@ const onig = require('vscode-oniguruma');
   for (const type of ['float', 'int', 'bool']) {
     check(`learn gain: ${type}[2] = [0, 1];`, type, 'storage.type.wgt');
   }
-  for (const shape of ['x as [rows=2, columns=3]', 'let x: f32[rows=2, columns=3] = input;']) {
-    check(shape, 'rows', 'entity.name.label.wgt');
-    check(shape, 'columns', 'entity.name.label.wgt');
-    check(shape, '3]', 'constant.numeric.wgt');
-  }
+  const namedShape = 'let x: f32[rows=2, columns=3] = input;';
+  check(namedShape, 'rows', 'entity.name.label.wgt');
+  check(namedShape, 'columns', 'entity.name.label.wgt');
+  check(namedShape, '3]', 'constant.numeric.wgt');
+  check('x as [2,3].T as [6]', 'as', 'keyword.control.wgt');
+  check('x as [2,3].T as [6]', '2', 'constant.numeric.wgt');
   for (const postfix of ['T', 'mean', 'probabilities']) {
     check(`let result = input.${postfix};`, postfix, 'support.variable.property.wgt');
   }
@@ -68,7 +69,7 @@ const onig = require('vscode-oniguruma');
   check('learn depth: int in 1..=12 = 6;', '..=', 'keyword.operator.wgt');
   const rangeTokens = grammar.tokenizeLine('1..=12', tm.INITIAL).tokens;
   assert(rangeTokens.some(t => t.startIndex === 1 && t.endIndex === 4 && t.scopes.includes('keyword.operator.wgt')));
-  const shapeStart = grammar.tokenizeLine('let matrix = x as [', tm.INITIAL);
+  const shapeStart = grammar.tokenizeLine('let matrix: f32[', tm.INITIAL);
   const shapeNext = grammar.tokenizeLine('  rows=2, columns=3];', shapeStart.ruleStack);
   assert(shapeNext.tokens.some(t => t.scopes.includes('entity.name.label.wgt')), 'multiline shapes retain named axes');
   const unfinishedShape = grammar.tokenizeLine('let matrix = x as [2, 3;', tm.INITIAL);

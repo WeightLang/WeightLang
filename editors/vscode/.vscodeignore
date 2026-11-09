@@ -1,6 +1,9 @@
 node_modules/**
 package-lock.json
 test.cjs
+client.test.cjs
+extension.cjs
+build.cjs
 *.vsix
 .cache/**
 .gitignore
