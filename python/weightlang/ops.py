@@ -327,12 +327,20 @@ class _FiniteGradient(torch.autograd.Function):
         return gradient, None
 
 
-def check_finite(value: torch.Tensor, diagnostic_anchor: torch.Tensor | None = None) -> torch.Tensor:
-    """Check native finite activations and their backwards gradients."""
-    torch._assert_async(torch.isfinite(value).all(), "nonfinite WeightLang tensor")
+def check_gradient(value: torch.Tensor, diagnostic_anchor: torch.Tensor | None = None) -> torch.Tensor:
+    """Attach backward validation to an already checked tensor, when recording."""
+    if not torch.is_grad_enabled():
+        # Identity returns must not expose an input/parameter's existing graph.
+        return value.detach() if value.requires_grad else value
     # The local anchor retains native diagnostics for frozen storage and
     # constants without changing their requires_grad flag or accumulating .grad.
     return _FiniteGradient.apply(value, diagnostic_anchor)
+
+
+def check_finite(value: torch.Tensor, diagnostic_anchor: torch.Tensor | None = None) -> torch.Tensor:
+    """Check native finite activations and their backwards gradients."""
+    torch._assert_async(torch.isfinite(value).all(), "nonfinite WeightLang tensor")
+    return check_gradient(value, diagnostic_anchor)
 
 
 def reset_gradient_anchor(module: torch.nn.Module) -> None:
