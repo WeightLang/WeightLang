@@ -20,8 +20,8 @@ parameter keys: f32[3,2] = [0.3,-0.2,0.6,0.4,-0.5,0.7]
 parameter values: f32[3,2] = [0.8,-0.3,-0.4,0.9,0.2,0.5]
 fn forward(x) {
     # 调用方提供字面量 1/sqrt(2)，库不推断缩放或依赖标量广播。
-    let q = scale(reshape(x,[2,2]),0.7071067811865476);
-    return reshape(attention.dot_product_attention(q,reshape(keys,[3,2]),reshape(values,[3,2])),[4]);
+    let q = scale(x as [2,2],0.7071067811865476);
+    return attention.dot_product_attention(q,keys as [3,2],values as [3,2]) as [4];
 }
 "#;
 
@@ -231,11 +231,11 @@ model MatchingRelax
 import numerics from "std/numerics"
 input x: f32[{width}]
 output y: f32[{width}]
-# 同形标量或矩阵；reshape 显式保存逐轴对应关系，不广播。
+# 同形标量或矩阵；as 显式保存逐轴对应关系，不广播。
 parameter observed: f32{shape} = {observation}
 parameter gain: f32{shape} = {gain}
 fn forward(x) {{
-    return reshape(numerics.relax(reshape(x,{shape}),reshape(observed,{shape}),reshape(gain,{shape})),[{width}]);
+    return numerics.relax(x as {shape},observed as {shape},gain as {shape}) as [{width}];
 }}
 "#
         );

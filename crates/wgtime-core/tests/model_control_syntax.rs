@@ -188,8 +188,8 @@ fn pure_helper_conditions_and_matrix_geometry() {
         assert_eq!(s.run(&[-2.], 100000).unwrap(), [2.]);
     }
     for body in [
-        "reshape(blend {0.5 => reshape(x,[2,2]); 0.5 => reshape(x,[2,2]);},[4])",
-        "reshape(if true {reshape(x,[2,2])} else {reshape(x,[2,2])},[4])",
+        "(blend {0.5 => x as [2,2]; 0.5 => x as [2,2];}) as [4]",
+        "(if true {x as [2,2]} else {x as [2,2]}) as [4]",
     ] {
         let text = source("", body)
             .replace("input x:f32[1]", "input x:f32[4]")
@@ -200,8 +200,8 @@ fn pure_helper_conditions_and_matrix_geometry() {
         }
     }
     for body in [
-        "reshape(if true {reshape(x,[2,2])} else {x},[4])",
-        "reshape(blend {0.5 => reshape(x,[2,2]); 0.5 => x;},[4])",
+        "(if true {x as [2,2]} else {x}) as [4]",
+        "(blend {0.5 => x as [2,2]; 0.5 => x;}) as [4]",
     ] {
         let text = source("", body)
             .replace("input x:f32[1]", "input x:f32[4]")

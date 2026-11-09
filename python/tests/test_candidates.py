@@ -101,7 +101,7 @@ def test_typed_matrix_write_requires_storage_shape_not_just_element_count(model)
     definition = wgt.compile_source("""wgt 0.5
 model MatrixUpdate
 parameter weight:f32[2,2]=[1,0,0,1]
-fn set(values:f32[4]) { weight <- reshape(values,[2,2]); }
+fn set(values:f32[4]) { weight <- values as [2,2]; }
 """)
     matrix = wgt.from_ir(definition, device="cpu")
     matrix.set(torch.tensor([2., 3., 4., 5.]))

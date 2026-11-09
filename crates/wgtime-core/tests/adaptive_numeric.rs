@@ -127,9 +127,9 @@ model Matrix
 input x:f32[4]
 output y:f32[4]
 fn forward(x) {
-    let matrix=reshape(x,[2,2]);
+    let matrix=x as [2,2];
     let root=sqrt(matrix);
-    return reshape(scale(root,sum(x)),[4]);
+    return scale(root,sum(x)) as [4];
 }
 "#;
     for compiled in [false, true] {
@@ -216,14 +216,14 @@ fn division_vjp_and_scalar_reduction_avoid_spurious_f32_intermediate_overflow() 
 #[test]
 fn new_operations_reject_shape_aliases_and_never_introduce_implicit_broadcast() {
     for expression in [
-        "ge(reshape(x,[2,2]),x)",
-        "div(reshape(x,[2,2]),x)",
+        "ge(x as [2,2],x)",
+        "div(x as [2,2],x)",
         "div(x,[2])",
         "scale(x,[2,3])",
-        "scale(x,reshape([2],[1,1]))",
+        "scale(x,[2] as [1,1])",
     ] {
         let source = format!(
-            "wgt 0.5\nmodel Invalid\ninput x:f32[4]\noutput y:f32[4]\nfn forward(x){{return reshape({expression},[4]);}}\n"
+            "wgt 0.5\nmodel Invalid\ninput x:f32[4]\noutput y:f32[4]\nfn forward(x){{return ({expression}) as [4];}}\n"
         );
         assert!(ModelDefinition::parse(&source).is_err(), "{expression}");
     }

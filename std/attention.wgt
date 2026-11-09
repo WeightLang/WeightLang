@@ -5,7 +5,7 @@ operators Attention
 #   q: f32[Tq,D]，k: f32[Tk,D]，v: f32[Tk,Dv] -> f32[Tq,Dv]。
 # Tq/Tk 分别是查询/键位置轴，D 是点积通道轴，Dv 是值通道轴；各轴为正数。
 # q 必须由调用方预先缩放，例如 D=4 时用 scale(q,0.5)。本函数不隐式除以 sqrt(D)。
-# transpose(k) 把 [Tk,D] 变成 [D,Tk]；softmax 的 axis=1 只沿键位置归一化。
+# k.T 把 [Tk,D] 变成 [D,Tk]；softmax 的 axis=1 只沿键位置归一化。
 # 不提供 mask、batch、多头拆分、广播或缓存。模型负责各次调用是否共享投影参数。
 # 本纯函数不创建参数、初始化权重、训练或保存状态；梯度沿原语传回 q/k/v。
 fn dot_product_attention(q,k,v) {

@@ -46,7 +46,7 @@ fn layer_norm_aliases_accumulate_all_vjp_contributions() {
 
 #[test]
 fn noncontiguous_reshape_materializes_logical_order_and_its_vjp() {
-    let mut model = session("wgt 0.5\nmodel TransposeFlat\ninput x: f32[6]\noutput y: f32[6]\nfn forward(x) { let matrix = reshape(x,[2,3]); return reshape(matrix.T,[6]); }\n");
+    let mut model = session("wgt 0.5\nmodel TransposeFlat\ninput x: f32[6]\noutput y: f32[6]\nfn forward(x) { let matrix = x as [2,3]; return matrix.T as [6]; }\n");
     let mut pass = model.forward(&[1., 2., 3., 4., 5., 6.], 1000, 1 << 20).unwrap();
     close(pass.output(), &[1., 4., 2., 5., 3., 6.], 0.00001);
     pass.backward(&[1., 2., 3., 4., 5., 6.], &BTreeMap::new()).unwrap();
@@ -55,7 +55,7 @@ fn noncontiguous_reshape_materializes_logical_order_and_its_vjp() {
 
 #[test]
 fn permuted_batch_product_matches_independent_loop_and_finite_difference() {
-    let source = "wgt 0.5\nmodel BatchView\ninput x: f32[20]\noutput y: f32[12]\nfn forward(x) { let a = reshape(x[0:12],[2,2,3]); let b = reshape(x[12:20],[2,2,2]); return reshape(batch_matmul(permute(a,[0,2,1]),b),[12]); }\n";
+    let source = "wgt 0.5\nmodel BatchView\ninput x: f32[20]\noutput y: f32[12]\nfn forward(x) { let a = x[0:12] as [2,2,3]; let b = x[12:20] as [2,2,2]; return batch_matmul(permute(a,[0,2,1]),b) as [12]; }\n";
     let mut model = session(source);
     let input: Vec<_> = (0..20).map(|i| i as f32 * 0.07 - 0.4).collect();
     let mut expected = vec![0.; 12];
@@ -107,7 +107,7 @@ fn annotated_computed_value_keeps_numeric_and_gradient_semantics() {
 
 #[test]
 fn maximum_rank_permutation_preserves_values_and_gradient_order() {
-    let source = "wgt 0.5\nmodel RankEight\ninput x: f32[6]\noutput y: f32[6]\nfn forward(x) { let tensor = reshape(x,[1,1,1,1,1,1,2,3]); return reshape(permute(tensor,[7,6,5,4,3,2,1,0]),[6]); }\n";
+    let source = "wgt 0.5\nmodel RankEight\ninput x: f32[6]\noutput y: f32[6]\nfn forward(x) { let tensor = x as [1,1,1,1,1,1,2,3]; return permute(tensor,[7,6,5,4,3,2,1,0]) as [6]; }\n";
     for compiled in [false, true] {
         let mut model = session(source);
         if compiled { model.enable_compiled().unwrap(); }

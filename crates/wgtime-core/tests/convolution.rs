@@ -272,12 +272,12 @@ fn convolution_strict_shapes_and_boundary_windows() {
         ("[2],[1],[1],2", "[2],[1],[0],2"),
         ("[2],[1],[1],2", "[2],[1],[1],3"),
         ("[2],[1],[1],2", "[2,1],[1],[1],2"),
-        ("reshape(kernel,[4,1,3])", "reshape(kernel,[2,2,3])"),
+        ("kernel as [4,1,3]", "kernel as [2,2,3]"),
     ] {
         assert!(parse(&src.replace(a, b)).is_err(), "accepted {b}");
     }
     // A one-cell input, dilated three-cell kernel and padding: only the center tap is valid.
-    let source = "wgt 0.5\nmodel Boundary\ninput x:f32[1]\noutput y:f32[1]\nfn forward(x){return reshape(conv(reshape(x,[1,1]),reshape([2,3,4],[1,1,3]),[0.5],[1],[2],[2],1),[1]);}\n";
+    let source = "wgt 0.5\nmodel Boundary\ninput x:f32[1]\noutput y:f32[1]\nfn forward(x){return conv(x as [1,1],[2,3,4] as [1,1,3],[0.5],[1],[2],[2],1) as [1];}\n";
     for native in [false, true] {
         let mut s = session(source, native);
         assert_eq!(s.evaluate(&[2.], 100).unwrap(), [6.5]);

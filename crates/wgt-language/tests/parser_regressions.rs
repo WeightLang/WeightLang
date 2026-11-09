@@ -165,8 +165,8 @@ input x: f32[6]
 output y: f32[1]
 parameter projection: f32[3,2] = [1,0,0,1,1,1]
 fn forward(x) {
-    let tokens = reshape(x,[2,3]);
-    let projection_matrix = reshape(projection,[3,2]);
+    let tokens = x as [2,3];
+    let projection_matrix = projection as [3,2];
     let q = tokens @ projection_matrix;
     let k = q.T;
     let scores = q @ k;
@@ -188,8 +188,8 @@ fn project(a,b) {
     return a @ b;
 }
 fn forward(x) {
-    let tokens = reshape(x,[2,3]);
-    let projection_matrix = reshape(projection,[3,2]);
+    let tokens = x as [2,3];
+    let projection_matrix = projection as [3,2];
     let q = project(tokens,projection_matrix);
     return (q @ q.T).mean;
 }
@@ -206,7 +206,7 @@ input x: f32[6]
 output y: f32[1]
 fn forward(x) {
     let tokens: f32[sequence=2, hidden=3] = x;
-    let projection: f32[hidden=3, channel=2] = reshape(x,[3,2]);
+    let projection: f32[hidden=3, channel=2] = x as [3,2];
     let q = tokens @ projection;
     return q.mean;
 }
@@ -222,8 +222,8 @@ model BadNamedAxes
 input x: f32[6]
 output y: f32[1]
 fn forward(x) {
-    let left: f32[sequence=2, hidden=3] = reshape(x,[2,3]);
-    let right: f32[context=3, features=2] = reshape(x,[3,2]);
+    let left: f32[sequence=2, hidden=3] = x as [2,3];
+    let right: f32[context=3, features=2] = x as [3,2];
     let invalid = left @ right;
     return invalid.mean;
 }
@@ -240,7 +240,7 @@ model NamedSoftmaxAxis
 input x: f32[6]
 output y: f32[1]
 fn forward(x) {
-    let scores: f32[queries=2, keys=3] = reshape(x,[2,3]);
+    let scores: f32[queries=2, keys=3] = x as [2,3];
     let probabilities = softmax(scores,"keys");
     return probabilities.mean;
 }
@@ -276,7 +276,7 @@ model DuplicatePermute
 input x: f32[24]
 output y: f32[1]
 fn forward(x) {
-    let tensor: f32[a=2, b=3, c=4] = reshape(x,[2,3,4]);
+    let tensor: f32[a=2, b=3, c=4] = x as [2,3,4];
     let invalid = permute(tensor,[a,a,c]);
     return invalid.mean;
 }
@@ -361,7 +361,7 @@ fn forward(x) {
     # Two independent batches each contract two features into one value.
     let left: f32[batch=2, row=1, feature=2] = x[0:4];
     let right: f32[batch=2, feature=2, column=1] = x[4:8];
-    return reshape(transform(left,right,gamma,beta),[2]);
+    return transform(left,right,gamma,beta) as [2];
 }
 "#;
     let definition = wgt_language::model::ModelDefinition::parse(source).unwrap();
@@ -391,7 +391,7 @@ fn normalize(x) {
 fn forward(x) {
     # Pool one channel over its entire 2 x 2 spatial extent.
     let image: f32[channel=1, height=2, width=2] = x;
-    return normalize(reshape(pool(image),[1]));
+    return normalize(pool(image) as [1]);
 }
 "#;
     let definition = wgt_language::model::ModelDefinition::parse(source).unwrap();

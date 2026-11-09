@@ -139,9 +139,9 @@ model Permute
 input x: f32[24]
 output y: f32[24]
 fn forward(x) {
-    let tensor: f32[sequence=2, heads=3, dim=4] = reshape(x,[2,3,4]);
+    let tensor: f32[sequence=2, heads=3, dim=4] = x as [2,3,4];
     let reordered = permute(tensor,[dim,sequence,heads]);
-    return reshape(reordered,[24]);
+    return reordered as [24];
 }
 "#;
     let ModelPlan::Forward(program) = ModelDefinition::parse(source)
@@ -251,7 +251,7 @@ fn forward(x) {
 
 #[test]
 fn tensor_instruction_versions_are_checked_by_both_backends() {
-    let source = "wgt 0.5\nmodel VersionedPool\ninput x: f32[4]\noutput y: f32[1]\nfn forward(x) { let image=reshape(x,[1,2,2]); let pooled=max_pool2d(image,[2,2],[1,1]); return reshape(pooled,[1]); }\n";
+    let source = "wgt 0.5\nmodel VersionedPool\ninput x: f32[4]\noutput y: f32[1]\nfn forward(x) { let image=x as [1,2,2]; let pooled=max_pool2d(image,[2,2],[1,1]); return pooled as [1]; }\n";
     let program = wgt_language::adaptive::parse(source).unwrap();
     for version in [1, 2] {
         let mut old = program.clone();

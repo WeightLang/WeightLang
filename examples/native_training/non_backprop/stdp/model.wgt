@@ -12,12 +12,12 @@ fn forward(input: f32[2]) -> f32[2] { return linear(input, weight); }
 # Traces decay before this step; same-step zero-history pairs contribute zero.
 fn adapt(pre: f32[2], post: f32[2]) {
     let (next_weight, next_pre, next_post) = plasticity.pair_stdp(
-        reshape(weight,[2,2]), reshape(pre,[2,1]), reshape(post,[2,1]),
-        reshape(pre_trace,[2,1]), reshape(post_trace,[2,1]),
+        weight as [2,2], pre as [2,1], post as [2,1],
+        pre_trace as [2,1], post_trace as [2,1],
         [0.9], [0.9], [0.01], [0.012]);
     weight <- next_weight;
-    pre_trace <- reshape(next_pre,[2]);
-    post_trace <- reshape(next_post,[2]);
+    pre_trace <- next_pre as [2];
+    post_trace <- next_post as [2];
 }
 fn reset() {
     pre_trace <- [0,0];

@@ -8,8 +8,8 @@ parameter bias: f32[4] = [0.02,0.04,0.06,0.08]
 fn forward(x) {
     # 显式恢复输入与 kernel 几何；分组 2，同一 kernel 在各空间位置共享。
     # stride/padding/dilation 分别为 [2]/[1]/[1]；输出 [4, 3]。
-    let features = conv(reshape(x,[2,5]),reshape(kernel,[4,1,3]),bias,[2],[1],[1],2);
+    let features = conv(x as [2,5],kernel as [4,1,3],bias,[2],[1],[1],2);
     # 非线性特征提取后展平；宿主只管理输入、训练循环与权重持久化。
-    return reshape(tanh(features),[12]);
+    return tanh(features) as [12];
 }
 fn loss(prediction,target) { return square(prediction-target).mean; }

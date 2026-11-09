@@ -14,30 +14,30 @@ parameter norm2_gamma: f32[4] = [1,1,1,1]
 parameter norm2_beta: f32[4] = [0,0,0,0]
 
 fn forward(x) {
-    let tokens: f32[sequence=2, hidden=4] = reshape(x,[2,4]);
-    let q = tokens @ reshape(query_weight,[4,4]);
-    let k = tokens @ reshape(key_weight,[4,4]);
-    let v = tokens @ reshape(value_weight,[4,4]);
-    let q_heads: f32[heads=2, query_sequence=2, head_dim=2] = permute(reshape(q,[2,2,2]),[1,0,2]);
-    let k_heads: f32[heads=2, key_sequence=2, head_dim=2] = permute(reshape(k,[2,2,2]),[1,0,2]);
-    let v_heads: f32[heads=2, key_sequence=2, head_dim=2] = permute(reshape(v,[2,2,2]),[1,0,2]);
+    let tokens: f32[sequence=2, hidden=4] = x as [2,4];
+    let q = tokens @ (query_weight as [4,4]);
+    let k = tokens @ (key_weight as [4,4]);
+    let v = tokens @ (value_weight as [4,4]);
+    let q_heads: f32[heads=2, query_sequence=2, head_dim=2] = permute(q as [2,2,2],[1,0,2]);
+    let k_heads: f32[heads=2, key_sequence=2, head_dim=2] = permute(k as [2,2,2],[1,0,2]);
+    let v_heads: f32[heads=2, key_sequence=2, head_dim=2] = permute(v as [2,2,2],[1,0,2]);
 
     # Heads form the batch axis; query and key sequence axes remain distinct.
     let scores = scale(batch_matmul(q_heads,permute(k_heads,[0,2,1])),0.7071067811865476);
     let probabilities = softmax(scores,"key_sequence");
     let attended = batch_matmul(probabilities,v_heads);
-    let merged_heads = reshape(permute(reshape(attended,[1,2,2,2]),[0,2,1,3]),[2,4]);
+    let merged_heads = permute(attended as [1,2,2,2],[0,2,1,3]) as [2,4];
 
-    let attention_projection = merged_heads @ reshape(attention_output,[4,4]);
+    let attention_projection = merged_heads @ (attention_output as [4,4]);
     let attention_residual = tokens + attention_projection;
     let normalized1 = layer_norm(attention_residual,norm1_gamma,norm1_beta,"hidden",0.00001);
 
-    let expanded = normalized1 @ reshape(feed_forward_in,[4,8]);
+    let expanded = normalized1 @ (feed_forward_in as [4,8]);
     let activated = relu(expanded);
-    let contracted = activated @ reshape(feed_forward_out,[8,4]);
+    let contracted = activated @ (feed_forward_out as [8,4]);
     let feed_forward_residual = normalized1 + contracted;
     let encoded = layer_norm(feed_forward_residual,norm2_gamma,norm2_beta,"hidden",0.00001);
-    return reshape(encoded,[8]);
+    return encoded as [8];
 }
 
 fn loss(prediction,target) { return square(prediction-target).mean; }

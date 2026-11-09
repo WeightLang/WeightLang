@@ -17,16 +17,16 @@ parameter b:f32[4]=[0,0,0,0]
 parameter state:f32[4]=[0,0,0,0]
 fn forward(x) {
     # Exercise multiaxis kernels with explicit channel and matrix geometry.
-    let image=reshape(x,[1,2,2]);
-    let kernel=reshape([1],[1,1,1,1]);
+    let image=x as [1,2,2];
+    let kernel=[1] as [1,1,1,1];
     let convolved=conv(image,kernel,[0],[1,1],[0,0],[1,1],1);
     let maximum=max_pool2d(convolved,[2,2],[1,1]);
     let average=avg_pool2d(convolved,[2,2],[1,1]);
-    let matrix=reshape(x,[2,2]);
-    let transposed=transpose(matrix);
+    let matrix=x as [2,2];
+    let transposed=matrix.T;
     let permuted=permute(matrix,[1,0]);
-    let product=matmul(matrix,transposed);
-    let batched=reshape(x,[1,2,2]);
+    let product=matrix @ transposed;
+    let batched=x as [1,2,2];
     let batch_product=batch_matmul(batched,batched);
     let normalized=layer_norm(matrix,[1,1],[0,0],1,0.00001);
     let axis_probabilities=softmax(matrix,1);
