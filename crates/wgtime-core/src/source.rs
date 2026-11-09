@@ -15,37 +15,18 @@ impl Graph {
     pub fn instantiate_bounded(&self, budget: usize) -> Result<crate::Model> {
         ensure!(self.parameter_bytes()? <= budget, "graph parameter memory budget exceeded");
         use crate::{Layer, Parameter, Value};
-        let (mut layers, mut parameters, mut rng) = (Vec::new(), Vec::new(), self.seed);
+        let parameters = self.0.initial_parameters()?.into_iter().map(|parameter| Parameter {
+            name: parameter.name,
+            shape: parameter.shape,
+            frozen: parameter.frozen,
+            value: Value::Resident { data: parameter.data },
+        }).collect();
+        let mut layers = Vec::new();
         for l in &self.layers {
             layers.push(match l.op.as_str() {
                 "linear" => {
                     let weight = format!("{}.weight", l.name);
                     let bias = l.bias.then(|| format!("{}.bias", l.name));
-                    let count = l.input.checked_mul(l.output).context("graph shape overflow")?;
-                    let fan = l.input.checked_add(l.output).context("graph width overflow")?;
-                    let scale = (6. / fan as f64).sqrt();
-                    parameters.push(Parameter {
-                        name: weight.clone(),
-                        shape: vec![l.output, l.input],
-                        frozen: false,
-                        value: Value::Resident {
-                            data: (0..count)
-                                .map(|_| {
-                                    ((crate::training::random(&mut rng) * 2. - 1.) * scale) as f32
-                                })
-                                .collect(),
-                        },
-                    });
-                    if let Some(b) = &bias {
-                        parameters.push(Parameter {
-                            name: b.clone(),
-                            shape: vec![l.output],
-                            frozen: false,
-                            value: Value::Resident {
-                                data: vec![0.; l.output],
-                            },
-                        });
-                    }
                     Layer::Linear { weight, bias }
                 }
                 "relu" => Layer::Relu,

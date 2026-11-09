@@ -1,5 +1,5 @@
 //! Lower ordinary WGT 0.5 forward functions to bounded transactional tensor IR.
-use super::{Instruction as I, Parameter, Program, Register};
+use super::{Instruction as I, ModuleSchema, Parameter, Program, Register};
 use crate::script::parse::{Expr, Statement, Stmt};
 use crate::tensor::{DType, ShapeLimits, TensorType};
 use anyhow::{Context, Result, bail, ensure};
@@ -9,6 +9,13 @@ pub fn parse(source: &str) -> Result<Program> {
     let unit = crate::source::split(source)?;
     let functions = crate::script::parse::parse_functions(&unit.functions)?;
     parse_with_functions(source, &functions)
+}
+/// Lower with the same parser while retaining source-level module identities.
+/// The metadata does not alter instructions, parameter ordering or initialization.
+pub fn parse_with_metadata(source: &str) -> Result<(Program, Vec<ModuleSchema>)> {
+    let unit = crate::source::split(source)?;
+    let functions = crate::script::parse::parse_functions(&unit.functions)?;
+    parse_definition_with_metadata(source, &functions, true)
 }
 pub fn parse_with_functions(
     source: &str,
@@ -30,6 +37,13 @@ fn parse_definition(
     functions: &crate::script::parse::Program,
     materialize: bool,
 ) -> Result<Program> {
+    parse_definition_with_metadata(source, functions, materialize).map(|(program, _)| program)
+}
+fn parse_definition_with_metadata(
+    source: &str,
+    functions: &crate::script::parse::Program,
+    materialize: bool,
+) -> Result<(Program, Vec<ModuleSchema>)> {
     let unit = crate::source::split(source)?;
     let forward = functions
         .get("forward")
@@ -298,7 +312,7 @@ fn parse_definition(
                     .1
                     .clone();
                 ensure!(
-                    instances.insert(name.to_owned(), (source, count)).is_none(),
+                    instances.insert(name.to_owned(), (kind.to_owned(), source, count)).is_none(),
                     "duplicate instance declaration"
                 );
             }
@@ -336,7 +350,8 @@ fn parse_definition(
         parse_definition(source, &child_functions, false).context("invalid submodel definition")?;
     }
     let mut modules = HashMap::new();
-    for (name, (source, count)) in instances {
+    let mut module_schemas = Vec::new();
+    for (name, (model, source, count)) in instances {
         let child_unit = crate::source::split(&source)?;
         ensure!(
             child_unit.models.is_empty(),
@@ -378,6 +393,13 @@ fn parse_definition(
                 .find_map(|s| s.trim().strip_prefix("output "))
                 .context("missing submodel output")?;
             let output = crate::source::typed_vector_port(output)?.1;
+            module_schemas.push(ModuleSchema {
+                path: key.clone(),
+                model: model.clone(),
+                input,
+                output,
+                parameters: mapping.iter().map(|(local, storage)| (local.clone(), storage.clone())).collect(),
+            });
             modules.insert(
                 key,
                 ModuleInstance {
@@ -486,7 +508,7 @@ fn parse_definition(
         lower.program.version = lower.program.version.max(2);
     }
     lower.program.validate_tensor_contracts()?;
-    Ok(lower.program)
+    Ok((lower.program, module_schemas))
 }
 // Endpoints are compile-time scalar arithmetic, never tensor values or host calls.
 fn slice_endpoint(expr: &Expr) -> Result<f64> {

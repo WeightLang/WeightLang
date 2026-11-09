@@ -4,8 +4,19 @@ mod conv;
 mod contracts;
 pub use contracts::{OperatorContract, OPERATOR_CONTRACTS};
 pub use conv::{ConvGeometry, Pool2dGeometry};
-pub use source::{parse, parse_with_functions};
+pub use source::{parse, parse_with_functions, parse_with_metadata};
 pub(crate) use source::{validate_definition, lower_operation};
+
+/// Source-level instance identity retained separately from the flattened IR.
+/// Repeated calls to one path share the same mapped parameter storage.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ModuleSchema {
+    pub path: String,
+    pub model: String,
+    pub input: usize,
+    pub output: usize,
+    pub parameters: std::collections::BTreeMap<String, String>,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Program {

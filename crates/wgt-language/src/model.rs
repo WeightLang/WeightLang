@@ -132,14 +132,20 @@ impl ModelDefinition {
     pub fn source(&self) -> &str { &self.source }
     /// Explicit service-side initialization boundary; callers must enforce their memory budget.
     pub fn instantiate_plan(&self) -> Result<ModelPlan> {
+        self.instantiate_plan_with_modules().map(|(plan, _)| plan)
+    }
+    /// Instantiate the same native plan and retain source-level submodule identities.
+    /// This performs no forward evaluation or service interaction.
+    pub fn instantiate_plan_with_modules(&self) -> Result<(ModelPlan, Vec<adaptive::ModuleSchema>)> {
         let unit = source::split(&self.source)?;
         let functions = script::parse::parse_functions(&unit.functions)?;
         if !self.operations.is_empty() {
-            Ok(ModelPlan::Operations(crate::operations::lower(&self.source, true)?))
+            Ok((ModelPlan::Operations(crate::operations::lower(&self.source, true)?), Vec::new()))
         } else if functions.contains_key("forward") {
-            Ok(ModelPlan::Forward(adaptive::parse(&self.source)?))
+            let (program, modules) = adaptive::parse_with_metadata(&self.source)?;
+            Ok((ModelPlan::Forward(program), modules))
         } else {
-            Ok(ModelPlan::Graph(source::graph(&self.source)?.1))
+            Ok((ModelPlan::Graph(source::graph(&self.source)?.1), Vec::new()))
         }
     }
 }

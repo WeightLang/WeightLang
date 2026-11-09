@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::{io::Write, path::Path};
 use wgt_language::{
-    adaptive::{Parameter, Program},
+    adaptive::{ModuleSchema, Parameter, Program},
     model::{ModelDefinition, ModelInterface, ModelPlan, ParameterSchema},
     operations::OperationSchema,
     source::Graph,
@@ -20,6 +20,7 @@ pub struct Architecture {
     pub interface: Option<ModelInterface>,
     pub parameters: Vec<ParameterSchema>,
     pub source: String,
+    pub modules: Vec<ModuleSchema>,
     #[serde(flatten)]
     pub plan: Plan,
 }
@@ -27,9 +28,16 @@ pub struct Architecture {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Plan {
-    Sequential { graph: Graph },
-    Forward { program: Program },
-    Operations { operations: Operations },
+    Sequential {
+        graph: Graph,
+        graph_parameters: Vec<Parameter>,
+    },
+    Forward {
+        program: Program,
+    },
+    Operations {
+        operations: Operations,
+    },
 }
 
 /// Typed entrypoints share one initialized storage set. Entry programs retain
@@ -47,7 +55,7 @@ pub struct Operation {
     pub program: Program,
 }
 
-/// Resolve pure model imports and lower to a graph supported by the torch SDK.
+/// Resolve pure model imports and lower to native model IR for the torch SDK.
 /// This copies declared initializers; it never executes forward or host code.
 pub fn compile(path: &Path) -> Result<Architecture> {
     let definition = ModelDefinition::from_file(path)
@@ -62,8 +70,12 @@ pub fn compile_source(source: &str) -> Result<Architecture> {
 
 fn from_definition(definition: ModelDefinition) -> Result<Architecture> {
     let interface = definition.interface().cloned();
-    let plan = match definition.instantiate_plan()? {
-        ModelPlan::Graph(graph) => Plan::Sequential { graph },
+    let (native_plan, modules) = definition.instantiate_plan_with_modules()?;
+    let plan = match native_plan {
+        ModelPlan::Graph(graph) => Plan::Sequential {
+            graph_parameters: graph.initial_parameters()?,
+            graph,
+        },
         ModelPlan::Forward(program) => {
             program.validate_tensor_contracts()?;
             Plan::Forward { program }
@@ -91,6 +103,7 @@ fn from_definition(definition: ModelDefinition) -> Result<Architecture> {
         interface,
         parameters: definition.parameters().to_vec(),
         source: definition.source().to_owned(),
+        modules,
         plan,
     })
 }

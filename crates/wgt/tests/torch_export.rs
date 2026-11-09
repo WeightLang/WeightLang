@@ -48,6 +48,77 @@ fn sequential_export_preserves_shapes_names_and_initialization_recipe() {
 }
 
 #[test]
+fn sequential_initializers_match_native_weights_bit_for_bit() {
+    for seed in [0, 7, u64::MAX] {
+        let source = SEQUENTIAL.replace("init seed=7", &format!("init seed={seed}"));
+        let architecture = compile(&source);
+        let (_, graph) = wgtime_core::source::graph(&source).unwrap();
+        let native = graph.instantiate().unwrap();
+        let exported = architecture["graph_parameters"].as_array().unwrap();
+        assert_eq!(exported.len(), native.parameters.len());
+        for (exported, parameter) in exported.iter().zip(native.parameters) {
+            assert_eq!(exported["name"], parameter.name);
+            assert_eq!(exported["shape"], json!(parameter.shape));
+            let wgtime_core::Value::Resident { data } = parameter.value else {
+                panic!("resident initializer")
+            };
+            let actual: Vec<f32> = serde_json::from_value(exported["data"].clone()).unwrap();
+            assert_eq!(
+                actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                data.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
+            );
+        }
+    }
+    // Fixed native reference guards the initializer extraction itself, independent
+    // of the two callers sharing its implementation.
+    let first: Vec<f32> =
+        serde_json::from_value(compile(SEQUENTIAL)["graph_parameters"][0]["data"].clone()).unwrap();
+    assert_eq!(
+        first
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>(),
+        [
+            3195480561, 3213328972, 1063306776, 1043991872, 3184878585, 3205269803
+        ]
+    );
+}
+
+#[test]
+fn source_module_metadata_preserves_instance_identity_and_parameter_sharing() {
+    let source = r#"wgt 0.5
+model Root
+input x:f32[1]
+output y:f32[1]
+model Block {
+input a:f32[1]
+output b:f32[1]
+parameter weight:f32[1]=[2]
+fn forward(a) { return a*weight; }
+}
+blocks:Block[2];
+fn forward(x) { return blocks[0](blocks[0](x))+blocks[1](x); }
+"#;
+    let architecture = compile(source);
+    assert_eq!(
+        architecture["modules"],
+        json!([
+            {"path":"blocks[0]","model":"Block","input":1,"output":1,"parameters":{"weight":"blocks_0_weight"}},
+            {"path":"blocks[1]","model":"Block","input":1,"output":1,"parameters":{"weight":"blocks_1_weight"}},
+        ])
+    );
+    let program: wgt_language::adaptive::Program =
+        serde_json::from_value(architecture["program"].clone()).unwrap();
+    assert_eq!(program.parameters.len(), 2);
+    assert_eq!(
+        serde_json::to_value(wgt_language::adaptive::parse(source).unwrap()).unwrap(),
+        architecture["program"]
+    );
+    let mut native = wgtime_core::adaptive::AdaptiveSession::prepare(program, 65536).unwrap();
+    assert_eq!(native.run(&[2.], 1000).unwrap(), [12.]);
+}
+
+#[test]
 fn forward_export_has_native_ir_and_declared_values_without_execution() {
     let architecture = compile(FORWARD);
     assert_eq!(architecture["kind"], "forward");
