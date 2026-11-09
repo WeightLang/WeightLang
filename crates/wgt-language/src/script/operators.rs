@@ -331,13 +331,13 @@ pub fn imports(source: &str) -> Result<Vec<(String, String)>> {
 /// traversal, symlinks and package shadowing without probing the filesystem.
 pub fn standard_source(path: &str) -> Option<&'static str> {
     match path {
-        "std/activation" => Some(include_str!("../../../../std/activation.wgt")),
-        "std/loss" => Some(include_str!("../../../../std/loss.wgt")),
-        "std/attention" => Some(include_str!("../../../../std/attention.wgt")),
-        "std/numerics" => Some(include_str!("../../../../std/numerics.wgt")),
-        "std/snn" => Some(include_str!("../../../../std/snn.wgt")),
-        "std/plasticity" => Some(include_str!("../../../../std/plasticity.wgt")),
-        "std/ff" => Some(include_str!("../../../../std/ff.wgt")),
+        "std/activation" => Some(include_str!("../../assets/std/activation.wgt")),
+        "std/loss" => Some(include_str!("../../assets/std/loss.wgt")),
+        "std/attention" => Some(include_str!("../../assets/std/attention.wgt")),
+        "std/numerics" => Some(include_str!("../../assets/std/numerics.wgt")),
+        "std/snn" => Some(include_str!("../../assets/std/snn.wgt")),
+        "std/plasticity" => Some(include_str!("../../assets/std/plasticity.wgt")),
+        "std/ff" => Some(include_str!("../../assets/std/ff.wgt")),
         _ => None,
     }
 }

@@ -1,8 +1,10 @@
 [package]
 name = "wgt-language"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/WeightLang/WeightLang"
+readme = "../../README.md"
 description = "Static WeightLang syntax, model plans and artifact schemas"
 
 [dependencies]

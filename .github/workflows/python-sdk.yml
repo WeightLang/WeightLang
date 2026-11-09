@@ -1,40 +1,48 @@
 name: Python SDK
 
 on:
+  workflow_call:
+    inputs:
+      release-version:
+        description: 'Artifact containing coordinated release version files'
+        type: string
+        default: ''
+      source-tree:
+        description: 'Expected Git tree after applying the release version files'
+        type: string
+        default: ''
   push:
     branches: [main]
     paths:
       - 'python/**'
-      - 'crates/wgt/**'
-      - 'crates/wgt-language/**'
-      - 'crates/wgtime-core/**'
-      - 'crates/wgt-model/**'
+      - 'crates/**'
       - 'examples/native_training/non_backprop/**'
       - 'language/**'
       - 'std/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'scripts/check_python_dist.py'
+      - 'scripts/smoke_python_sdk.py'
       - '.github/workflows/python-sdk.yml'
   pull_request:
     paths:
       - 'python/**'
-      - 'crates/wgt/**'
-      - 'crates/wgt-language/**'
-      - 'crates/wgtime-core/**'
-      - 'crates/wgt-model/**'
+      - 'crates/**'
       - 'examples/native_training/non_backprop/**'
       - 'language/**'
       - 'std/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'scripts/check_python_dist.py'
+      - 'scripts/smoke_python_sdk.py'
       - '.github/workflows/python-sdk.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: python-sdk-${{ github.ref }}
-  cancel-in-progress: true
+  group: python-sdk-${{ github.workflow }}-${{ inputs.release-version != '' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ inputs.release-version == '' }}
 
 jobs:
   pytorch:
@@ -51,6 +59,20 @@ jobs:
       OMP_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        if: inputs.release-version != ''
+        with:
+          name: ${{ inputs.release-version }}
+      - name: Verify the coordinated release source
+        if: inputs.release-version != ''
+        env:
+          SOURCE_TREE: ${{ inputs.source-tree }}
+        run: |
+          git add -u
+          test "$(git write-tree)" = "$SOURCE_TREE"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v5
@@ -62,20 +84,38 @@ jobs:
           cargo test --locked -p weightlang-wgt --test torch_export --test no_python_cli
           cargo build --locked -p weightlang-wgt --bin wgt --example torch_reference
           cargo build --locked -p wgt-model --example ga_reference
-      - name: Install CPU PyTorch and SDK extras
+      - name: Build and inspect the source distribution and wheel
+        run: |
+          uv build python --sdist --no-sources --out-dir dist/python
+          uv build dist/python/*.tar.gz --wheel --no-sources --out-dir dist/python
+          python scripts/check_python_dist.py dist/python
+          uvx --from twine twine check --strict dist/python/*
+      - name: Install CPU PyTorch and the built SDK wheel
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y graphviz
           uv venv --python '${{ matrix.python }}'
           uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-          uv pip install -e './python[visualize,test]'
+          wheels=(dist/python/*.whl)
+          uv pip install "${wheels[0]}[visualize,test]"
+          uv pip check
+      - name: Test the installed wheel outside the checkout
+        env:
+          WGT_CHECK_COMPILER_VERSION: ${{ inputs.release-version != '' && '1' || '0' }}
+        run: |
+          cd "$RUNNER_TEMP"
+          "$GITHUB_WORKSPACE/.venv/bin/python" -I "$GITHUB_WORKSPACE/scripts/smoke_python_sdk.py"
       - name: Check native parity, training, state and visualization
         run: |
           mkdir -p /tmp/weightlang
-          .venv/bin/python -m pytest python/tests -q --basetemp=/tmp/weightlang/sdk-tests
+          .venv/bin/python -I -m pytest python/tests -q --import-mode=importlib --basetemp=/tmp/weightlang/sdk-tests
       - name: Run the complete training example
         run: |
           .venv/bin/python python/examples/mlp/train.py
           .venv/bin/python python/examples/adaptive/train.py
-      - name: Build the Python distribution
-        run: uv build python --out-dir dist/python
+      - uses: actions/upload-artifact@v4
+        if: matrix.python == '3.12'
+        with:
+          name: python-sdk
+          path: dist/python/
+          if-no-files-found: error

@@ -8,33 +8,51 @@ const {test} = require('node:test');
 const script = path.join(__dirname, 'release_version.cjs');
 const parent = path.join(os.tmpdir(), 'weightlang');
 fs.mkdirSync(parent, {recursive: true});
+const crates = ['weightlang-wgt', 'wgtime-core', 'wgt-language', 'wgtime',
+  'wgtime-service', 'wgtime-control', 'wgt-model', 'wgt-model-macros'];
+const member = name => `crates/${name === 'weightlang-wgt' ? 'wgt' : name}`;
 
-function fixture(t, version = '0.1.2') {
+function fixture(t, version = '0.2.0') {
   const directory = fs.mkdtempSync(path.join(parent, 'release-version-'));
   t.after(() => fs.rmSync(directory, {recursive: true}));
-  fs.mkdirSync(path.join(directory, 'crates/wgt'), {recursive: true});
-  const manifest = `# Preserve formatting and unrelated versions.\n[package]\nname = "weightlang-wgt"\nversion = "${version}" # launcher/compiler\nedition = "2024"\n\n[dependencies]\nother = { version = "${version}" }\n`;
-  const lock = `# Cargo lockfile\nversion = 4\n\n[[package]]\nname = "other"\nversion = "${version}"\n\n[[package]]\nname = "weightlang-wgt"\nversion = "${version}"\ndependencies = [\n "other",\n]\n\n[[package]]\nname = "wgtime-service"\nversion = "0.1.0"\n`;
-  const write = (file, content) => fs.writeFileSync(path.join(directory, file), content);
+  const files = new Map([
+    ['Cargo.toml', `# Preserve comments, formatting and unrelated versions.\n[workspace]\nmembers = [${crates.map(name => JSON.stringify(member(name))).join(', ')}]\nresolver = "3"\n\n[workspace.package]\nversion = "${version}" # all SDKs\n\n[workspace.dependencies]\n${crates.map(name => `${name} = { path = "${member(name)}", version = "=${version}" }`).join('\n')}\nother = { version = "${version}" }\n`],
+    ['Cargo.lock', `# Cargo lockfile\nversion = 4\n\n[[package]]\nname = "other"\nversion = "${version}"\n${crates.map(name => `\n[[package]]\nname = "${name}"\nversion = "${version}"\ndependencies = [\n "other",\n]\n`).join('')}`],
+    ['python/pyproject.toml', `[project]\nname = "weightlang"\nversion = "${version}" # wheel/sdist\ndependencies = ["torch>=2.5"]\n\n[tool.example]\nversion = "${version}"\n`],
+    ['python/weightlang/__init__.py', `"""WeightLang SDK."""\n__version__ = "${version}" # runtime\n`],
+    ...crates.map(name => [`${member(name)}/Cargo.toml`, `[package]\nname = "${name}"\nversion.workspace = true\nedition = "2024"\n\n[dependencies]\n${name === 'wgtime' ? '' : 'wgtime = { workspace = true }\n'}other = { version = "${version}" }\n`]),
+  ]);
+  const write = (file, content) => {
+    fs.mkdirSync(path.dirname(path.join(directory, file)), {recursive: true});
+    fs.writeFileSync(path.join(directory, file), content);
+  };
   const read = file => fs.readFileSync(path.join(directory, file), 'utf8');
-  write('crates/wgt/Cargo.toml', manifest);
-  write('Cargo.lock', lock);
+  for (const [file, content] of files) write(file, content);
+  const snapshot = () => new Map([...files.keys()].map(file => [file, read(file)]));
+  const unchanged = (expected = files) => {
+    for (const [file, content] of expected) assert.equal(read(file), content, file);
+  };
   const run = (...args) => {
     const result = spawnSync(process.execPath, [script, ...args], {cwd: directory, encoding: 'utf8'});
     if (result.error) throw result.error;
     return result;
   };
-  const unchanged = () => {
-    assert.equal(read('crates/wgt/Cargo.toml'), manifest);
-    assert.equal(read('Cargo.lock'), lock);
-  };
-  return {manifest, lock, read, write, run, unchanged};
+  return {files, read, write, run, snapshot, unchanged};
 }
 
 function output(result, previous, version, changed) {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
   assert.equal(result.stdout, `previous_version=${previous}\nversion=${version}\ntag=wgt-v${version}\nchanged=${changed}\n`);
+}
+
+function rejected(f, pattern, ...args) {
+  const before = f.snapshot();
+  const result = f.run(...args, '--write');
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, pattern);
+  f.unchanged(before);
 }
 
 for (const [bump, expected] of [['patch', '1.2.4'], ['minor', '1.3.0'], ['major', '2.0.0'], ['none', '1.2.3']]) {
@@ -45,46 +63,42 @@ for (const [bump, expected] of [['patch', '1.2.4'], ['minor', '1.3.0'], ['major'
   });
 }
 
-test('write changes only the named package versions and is idempotent', t => {
+test('write synchronizes every SDK and lock entry, preserves unrelated versions and is idempotent', t => {
   const f = fixture(t);
-  output(f.run('--write'), '0.1.2', '0.1.3', true);
-  const manifest = f.manifest.replace('version = "0.1.2" # launcher', 'version = "0.1.3" # launcher');
-  const lock = f.lock.replace('name = "weightlang-wgt"\nversion = "0.1.2"', 'name = "weightlang-wgt"\nversion = "0.1.3"');
-  assert.equal(f.read('crates/wgt/Cargo.toml'), manifest);
+  output(f.run('--write'), '0.2.0', '0.2.1', true);
+  assert.equal(f.read('Cargo.toml'), f.files.get('Cargo.toml')
+    .replace('version = "0.2.0" #', 'version = "0.2.1" #').replaceAll('version = "=0.2.0"', 'version = "=0.2.1"'));
+  let lock = f.files.get('Cargo.lock');
+  for (const name of crates) lock = lock.replace(`name = "${name}"\nversion = "0.2.0"`, `name = "${name}"\nversion = "0.2.1"`);
   assert.equal(f.read('Cargo.lock'), lock);
-  output(f.run('--bump', 'major', '--version', '0.1.3', '--write'), '0.1.3', '0.1.3', false);
-  assert.equal(f.read('crates/wgt/Cargo.toml'), manifest);
-  assert.equal(f.read('Cargo.lock'), lock);
+  assert.equal(f.read('python/pyproject.toml'), f.files.get('python/pyproject.toml').replace('version = "0.2.0" #', 'version = "0.2.1" #'));
+  assert.equal(f.read('python/weightlang/__init__.py'), f.files.get('python/weightlang/__init__.py').replace('"0.2.0"', '"0.2.1"'));
+  for (const name of crates) assert.equal(f.read(`${member(name)}/Cargo.toml`), f.files.get(`${member(name)}/Cargo.toml`));
+  const before = f.snapshot();
+  output(f.run('--bump', 'major', '--version', '0.2.1', '--write'), '0.2.1', '0.2.1', false);
+  f.unchanged(before);
 });
 
-test('custom version overrides bump and preserves CRLF, quotes and comments', t => {
+test('custom version overrides bump and preserves CRLF, single quotes and comments', t => {
   const f = fixture(t);
-  const manifest = f.manifest.replace('version = "0.1.2" #', "version = '0.1.2' #").replaceAll('\n', '\r\n');
-  const lock = f.lock.replaceAll('\n', '\r\n');
-  f.write('crates/wgt/Cargo.toml', manifest);
-  f.write('Cargo.lock', lock);
-  output(f.run('--bump', 'major', '--version', '0.9.7', '--write'), '0.1.2', '0.9.7', true);
-  assert.equal(f.read('crates/wgt/Cargo.toml'), manifest.replace("version = '0.1.2' #", "version = '0.9.7' #"));
-  assert.equal(f.read('Cargo.lock'), lock.replace('name = "weightlang-wgt"\r\nversion = "0.1.2"', 'name = "weightlang-wgt"\r\nversion = "0.9.7"'));
+  for (const [file, content] of f.files) f.write(file, content.replaceAll('"', "'").replaceAll('\n', '\r\n'));
+  output(f.run('--bump', 'major', '--version', '0.9.7', '--write'), '0.2.0', '0.9.7', true);
+  assert.match(f.read('Cargo.toml'), /version = '0\.9\.7' # all SDKs\r\n/);
+  assert.match(f.read('Cargo.toml'), /version = '=0\.9\.7'/);
+  assert.match(f.read('Cargo.lock'), /name = 'wgt-model'\r\nversion = '0\.9\.7'/);
+  assert.match(f.read('python/pyproject.toml'), /version = '0\.9\.7' # wheel\/sdist\r\n/);
+  assert.match(f.read('python/weightlang/__init__.py'), /__version__ = '0\.9\.7' # runtime\r\n/);
+  output(f.run('--bump', 'none'), '0.9.7', '0.9.7', false);
 });
 
 for (const version of ['v1.2.3', '1.2.3-rc.1', '1.2.3+build', '01.2.3', '1.2', '1.2.3\n', ' 1.2.3', '1.2.3 ', '1.2.18446744073709551616', '1'.repeat(65) + '.0.0']) {
-  test(`invalid version ${JSON.stringify(version)} does not modify either file`, t => {
-    const f = fixture(t);
-    const result = f.run('--version', version, '--write');
-    assert.equal(result.status, 1);
-    assert.equal(result.stdout, '');
-    assert.match(result.stderr, /stable X.Y.Z|exceeds u64/);
-    f.unchanged();
+  test(`invalid version ${JSON.stringify(version)} leaves all SDK files unchanged`, t => {
+    rejected(fixture(t), /stable X.Y.Z|exceeds u64/, '--version', version);
   });
 }
 
 test('a downgrade is rejected before writing', t => {
-  const f = fixture(t, '1.2.3');
-  const result = f.run('--version', '1.1.99', '--write');
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /older than/);
-  f.unchanged();
+  rejected(fixture(t, '1.2.3'), /older than/, '--version', '1.1.99');
 });
 
 test('large components are bumped without floating point rounding', t => {
@@ -94,47 +108,77 @@ test('large components are bumped without floating point rounding', t => {
 });
 
 test('component overflow does not modify files', t => {
-  const f = fixture(t, '1.2.18446744073709551615');
-  const result = f.run('--bump', 'patch', '--write');
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /exceeds u64/);
-  f.unchanged();
+  rejected(fixture(t, '1.2.18446744073709551615'), /exceeds u64/, '--bump', 'patch');
 });
 
-test('an inconsistent lockfile is rejected before modifying the manifest', t => {
-  const f = fixture(t);
-  const lock = f.lock.replace('name = "weightlang-wgt"\nversion = "0.1.2"', 'name = "weightlang-wgt"\nversion = "0.1.1"');
-  f.write('Cargo.lock', lock);
-  const result = f.run('--write');
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /versions do not match/);
-  assert.equal(f.read('crates/wgt/Cargo.toml'), f.manifest);
-  assert.equal(f.read('Cargo.lock'), lock);
-});
+for (const name of crates) {
+  test(`an inconsistent ${name} lock entry is rejected before writing`, t => {
+    const f = fixture(t);
+    f.write('Cargo.lock', f.read('Cargo.lock').replace(`name = "${name}"\nversion = "0.2.0"`, `name = "${name}"\nversion = "0.1.0"`));
+    rejected(f, /versions do not match/);
+  });
+}
 
-test('missing and duplicate lockfile package entries are rejected without changes', t => {
+for (const file of ['python/pyproject.toml', 'python/weightlang/__init__.py']) {
+  test(`an inconsistent ${file} is rejected before writing`, t => {
+    const f = fixture(t);
+    f.write(file, f.read(file).replace('"0.2.0"', '"0.1.0"'));
+    rejected(f, /versions do not match/);
+  });
+}
+
+test('missing or duplicate SDK lock entries are rejected', t => {
   const f = fixture(t);
-  for (const lock of [f.lock.replace('name = "weightlang-wgt"', 'name = "unrelated"'), f.lock + '\n[[package]]\nname = "weightlang-wgt"\nversion = "0.1.2"\n']) {
-    f.write('Cargo.lock', lock);
-    const result = f.run('--write');
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /expected one weightlang-wgt package table/);
-    assert.equal(f.read('crates/wgt/Cargo.toml'), f.manifest);
-    assert.equal(f.read('Cargo.lock'), lock);
+  const lock = f.read('Cargo.lock');
+  for (const invalid of [lock.replace('name = "wgt-model"', 'name = "unrelated"'), lock + '\n[[package]]\nname = "wgt-model"\nversion = "0.2.0"\n']) {
+    f.write('Cargo.lock', invalid);
+    rejected(f, /expected one wgt-model package table/);
   }
+});
+
+for (const replacement of ['version = "=0.1.0"', 'version = "^0.2.0"', 'version = "0.2.0"', 'unused = "=0.2.0"']) {
+  test(`invalid internal dependency ${replacement} is rejected`, t => {
+    const f = fixture(t);
+    f.write('Cargo.toml', f.read('Cargo.toml').replace('version = "=0.2.0"', replacement));
+    rejected(f, /versions do not match|one exact version/);
+  });
+}
+
+test('missing centralized dependencies and path-only member dependencies are rejected', t => {
+  const f = fixture(t);
+  f.write('Cargo.toml', f.read('Cargo.toml').replace(/^wgtime = .*\n/m, ''));
+  rejected(f, /must inherit a versioned workspace dependency/);
+  f.write('Cargo.toml', f.files.get('Cargo.toml'));
+  f.write('crates/wgt-model/Cargo.toml', f.read('crates/wgt-model/Cargo.toml').replace('{ workspace = true }', '{ path = "../wgtime" }'));
+  rejected(f, /must inherit a versioned workspace dependency/);
+});
+
+test('non-inherited crate versions and duplicate workspace members are rejected', t => {
+  const f = fixture(t);
+  f.write('crates/wgt-model/Cargo.toml', f.read('crates/wgt-model/Cargo.toml').replace('version.workspace = true', 'version = "0.2.0"'));
+  rejected(f, /must inherit workspace.package.version/);
+  f.write('crates/wgt-model/Cargo.toml', f.files.get('crates/wgt-model/Cargo.toml'));
+  f.write('Cargo.toml', f.read('Cargo.toml').replace('members = [', 'members = ["crates/wgt", '));
+  rejected(f, /distinct explicit/);
+});
+
+test('new workspace packages automatically participate in version updates', t => {
+  const f = fixture(t);
+  f.write('Cargo.toml', f.read('Cargo.toml').replace('members = [', 'members = ["crates/new-sdk", '));
+  f.write('crates/new-sdk/Cargo.toml', '[package]\nname = "new-sdk"\nversion.workspace = true\n');
+  f.write('Cargo.lock', f.read('Cargo.lock') + '\n[[package]]\nname = "new-sdk"\nversion = "0.2.0"\n');
+  output(f.run('--write'), '0.2.0', '0.2.1', true);
+  assert.match(f.read('Cargo.lock'), /name = "new-sdk"\nversion = "0\.2\.1"/);
 });
 
 test('duplicate version fields and invalid options are rejected before writing', t => {
   const f = fixture(t);
-  for (const args of [['--bump', 'prepatch', '--write'], ['--unknown', '--write'], ['--version'], ['--bump']]) {
-    assert.equal(f.run(...args).status, 1);
-    f.unchanged();
+  for (const args of [['--bump', 'prepatch'], ['--unknown'], ['--version'], ['--bump']]) {
+    rejected(f, /release_version:/, ...args);
   }
-  const manifest = f.manifest.replace('edition = "2024"', 'version = "0.1.2"\nedition = "2024"');
-  f.write('crates/wgt/Cargo.toml', manifest);
-  const result = f.run('--write');
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /expected one quoted version/);
-  assert.equal(f.read('crates/wgt/Cargo.toml'), manifest);
-  assert.equal(f.read('Cargo.lock'), f.lock);
+  f.write('Cargo.toml', f.read('Cargo.toml').replace('[workspace.package]\n', '[workspace.package]\nversion = "0.2.0"\n'));
+  rejected(f, /expected one quoted version/);
+  f.write('Cargo.toml', f.files.get('Cargo.toml'));
+  f.write('python/weightlang/__init__.py', f.read('python/weightlang/__init__.py') + '__version__ = "0.2.0"\n');
+  rejected(f, /expected one quoted __version__/);
 });

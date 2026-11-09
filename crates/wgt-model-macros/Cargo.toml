@@ -1,15 +1,17 @@
 [package]
 name = "wgt-model-macros"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/WeightLang/WeightLang"
+readme = "../../README.md"
 description = "Compile-time checked WGT model definitions for Rust programs"
 
 [lib]
 proc-macro = true
 
 [dependencies]
-wgt-language = { path = "../wgt-language" }
+wgt-language = { workspace = true }
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "parsing", "proc-macro"] }

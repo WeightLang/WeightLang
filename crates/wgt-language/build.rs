@@ -1,7 +1,7 @@
 fn main() {
-    println!("cargo:rerun-if-changed=../../language/prelude.json");
+    println!("cargo:rerun-if-changed=assets/prelude.json");
     let catalog: serde_json::Value =
-        serde_json::from_str(include_str!("../../language/prelude.json"))
+        serde_json::from_str(include_str!("assets/prelude.json"))
             .expect("valid source prelude catalog JSON");
     let catalog_entries = catalog["entries"]
         .as_array()

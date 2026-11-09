@@ -1,5 +1,5 @@
 name: Release
-run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && 'Publish' || 'Validate' }} native release (${{ inputs.version || inputs.bump || 'patch' }})
+run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && 'Publish' || 'Validate' }} WeightLang release (${{ inputs.version || inputs.bump || 'patch' }})
 
 on:
   workflow_dispatch:
@@ -14,19 +14,47 @@ on:
         type: string
         required: false
       publish:
-        description: 'Commit the version, create the tag and publish (disable for build/test only)'
+        description: 'Publish matching native tools, Rust crates and Python SDK (disable for build/test only)'
         type: boolean
         default: true
   push:
     branches: [main]
     paths:
       - '.github/workflows/release.yml'
+      - '.github/workflows/python-sdk.yml'
+      - '.github/workflows/rust-sdk.yml'
+      - '.github/workflows/rust-model.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/*/Cargo.toml'
+      - 'crates/wgt-language/assets/**'
+      - 'python/pyproject.toml'
+      - 'python/weightlang/__init__.py'
+      - 'scripts/check_python_dist.py'
+      - 'scripts/smoke_python_sdk.py'
+      - 'scripts/test_rust_sdk_package.py'
+      - 'scripts/publish_rust_sdk.py'
+      - 'scripts/test_publish_rust_sdk.py'
       - 'scripts/release_version.cjs'
       - 'scripts/release_version.test.cjs'
       - 'scripts/package_wgt.sh'
   pull_request:
     paths:
       - '.github/workflows/release.yml'
+      - '.github/workflows/python-sdk.yml'
+      - '.github/workflows/rust-sdk.yml'
+      - '.github/workflows/rust-model.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/*/Cargo.toml'
+      - 'crates/wgt-language/assets/**'
+      - 'python/pyproject.toml'
+      - 'python/weightlang/__init__.py'
+      - 'scripts/check_python_dist.py'
+      - 'scripts/smoke_python_sdk.py'
+      - 'scripts/test_rust_sdk_package.py'
+      - 'scripts/publish_rust_sdk.py'
+      - 'scripts/test_publish_rust_sdk.py'
       - 'scripts/release_version.cjs'
       - 'scripts/release_version.test.cjs'
       - 'scripts/package_wgt.sh'
@@ -35,8 +63,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-release-${{ github.event_name == 'workflow_dispatch' && inputs.publish && 'publish' || github.ref }}
-  cancel-in-progress: false
+  group: weightlang-release-${{ github.event_name == 'workflow_dispatch' && inputs.publish && 'publish' || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !inputs.publish }}
 
 defaults:
   run:
@@ -60,7 +88,9 @@ jobs:
         with:
           node-version: 24
       - name: Test version selection and manifest updates
-        run: node --test scripts/release_version.test.cjs
+        run: |
+          node --test scripts/release_version.test.cjs
+          python3 scripts/test_publish_rust_sdk.py
       - name: Prepare the version without changing remote refs
         id: version
         env:
@@ -77,8 +107,9 @@ jobs:
             echo "::error::Publish from $DEFAULT_BRANCH; other refs support build/test only."
             exit 1
           fi
-          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
-            echo "::error::Tag $RELEASE_TAG already exists. Choose a new version."
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG" || \
+             git show-ref --verify --quiet "refs/tags/v${RELEASE_TAG#wgt-v}"; then
+            echo "::error::This version already has a native or legacy Python tag. Choose a new version."
             exit 1
           fi
       - name: Record the exact candidate source tree
@@ -88,7 +119,7 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           git diff --check
-          git add Cargo.lock crates/wgt/Cargo.toml
+          git add Cargo.toml Cargo.lock python/pyproject.toml python/weightlang/__init__.py
           echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
           printf '### Release candidate\n\nVersion: `%s`\n\nTag: `%s`\n\nBase commit: `%s`\n' \
             "$VERSION" "$RELEASE_TAG" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
@@ -96,8 +127,10 @@ jobs:
         with:
           name: release-version
           path: |
+            Cargo.toml
             Cargo.lock
-            crates/wgt/Cargo.toml
+            python/pyproject.toml
+            python/weightlang/__init__.py
           if-no-files-found: error
 
   build:
@@ -126,7 +159,7 @@ jobs:
           name: release-version
       - name: Verify the candidate and build storage
         run: |
-          git add Cargo.lock crates/wgt/Cargo.toml
+          git add Cargo.toml Cargo.lock python/pyproject.toml python/weightlang/__init__.py
           test "$(git write-tree)" = "$SOURCE_TREE"
           test "$(uname -m)" = "$ARCH"
           df -h . "$RUNNER_TEMP"
@@ -156,8 +189,29 @@ jobs:
           path: dist/native/
           if-no-files-found: error
 
+  python-sdk:
+    needs: prepare
+    uses: ./.github/workflows/python-sdk.yml
+    with:
+      release-version: release-version
+      source-tree: ${{ needs.prepare.outputs.tree }}
+
+  rust-sdk:
+    needs: prepare
+    uses: ./.github/workflows/rust-sdk.yml
+    with:
+      release-version: release-version
+      source-tree: ${{ needs.prepare.outputs.tree }}
+
+  rust-model:
+    needs: prepare
+    uses: ./.github/workflows/rust-model.yml
+    with:
+      release-version: release-version
+      source-tree: ${{ needs.prepare.outputs.tree }}
+
   assemble:
-    needs: [prepare, build]
+    needs: [prepare, build, python-sdk, rust-sdk, rust-model]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -175,9 +229,17 @@ jobs:
         with:
           pattern: native-linux-*
           path: native-assets
-      - name: Assemble verified binaries and matching source
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-sdk
+          path: sdk-assets/python
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-sdk
+          path: sdk-assets/rust
+      - name: Assemble verified binaries, SDKs and matching source
         run: |
-          git add Cargo.lock crates/wgt/Cargo.toml
+          git add Cargo.toml Cargo.lock python/pyproject.toml python/weightlang/__init__.py
           test "$(git write-tree)" = "$SOURCE_TREE"
           mkdir -p dist/release
           for arch in x86_64 aarch64; do
@@ -188,19 +250,25 @@ jobs:
             done
             cat "$directory/SHA256SUMS" >> dist/release/SHA256SUMS
           done
+          cp "sdk-assets/python/weightlang-$VERSION-py3-none-any.whl" dist/release/
+          cp "sdk-assets/python/weightlang-$VERSION.tar.gz" dist/release/
+          for crate in wgtime wgt-language wgt-model-macros wgt-model; do
+            cp "sdk-assets/rust/$crate-$VERSION.crate" dist/release/
+          done
+          (cd dist/release && sha256sum *.whl *.crate "weightlang-$VERSION.tar.gz" >> SHA256SUMS)
           git archive --format=tar.gz --prefix="weightlang-$VERSION/" \
             --output="dist/release/weightlang-$VERSION-source.tar.gz" "$SOURCE_TREE"
           (cd dist/release && sha256sum "weightlang-$VERSION-source.tar.gz" >> SHA256SUMS)
           (cd dist/release && sha256sum --check SHA256SUMS)
-          printf '### Build complete\n\nLinux x86_64 and aarch64: wgt, weightc, wgtime, matching source and SHA256SUMS.\n\nDownload the `native-release-%s` artifact below. Only manual runs with `publish` enabled update Git refs and publish a Release.\n' \
+          printf '### Build complete\n\nLinux x86_64 and aarch64 tools, Python wheel/sdist, four Rust SDK crates, matching source and SHA256SUMS.\n\nDownload the `weightlang-release-%s` artifact below. Only manual runs with `publish` enabled update Git refs and publish a Release.\n' \
             "$VERSION" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: native-release-${{ needs.prepare.outputs.version }}
+          name: weightlang-release-${{ needs.prepare.outputs.version }}
           path: dist/release/
           if-no-files-found: error
 
-  publish:
+  stage-release:
     if: github.event_name == 'workflow_dispatch' && inputs.publish
     needs: [prepare, assemble]
     runs-on: ubuntu-24.04
@@ -224,11 +292,11 @@ jobs:
           name: release-version
       - uses: actions/download-artifact@v4
         with:
-          name: native-release-${{ needs.prepare.outputs.version }}
+          name: weightlang-release-${{ needs.prepare.outputs.version }}
           path: dist/release
       - name: Commit and tag the tested source atomically
         run: |
-          git add Cargo.lock crates/wgt/Cargo.toml
+          git add Cargo.toml Cargo.lock python/pyproject.toml python/weightlang/__init__.py
           test "$(git write-tree)" = "$SOURCE_TREE"
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
             # A failed publish job can be retried against its original build.
@@ -242,22 +310,25 @@ jobs:
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             if ! git diff --cached --quiet; then
-              git commit -m "chore(release): wgt $VERSION"
+              git commit -m "chore(release): WeightLang $VERSION"
             fi
-            git tag -a "$RELEASE_TAG" -m "WeightLang native tools $VERSION"
+            git tag -a "$RELEASE_TAG" -m "WeightLang $VERSION"
             git push --atomic origin "HEAD:refs/heads/$DEFAULT_BRANCH" "refs/tags/$RELEASE_TAG"
           fi
           echo "RELEASE_COMMIT=$(git rev-parse "$RELEASE_TAG^{commit}")" >> "$GITHUB_ENV"
-      - name: Publish complete release assets
+      - name: Upload complete assets to a draft release
         run: |
           (cd dist/release && sha256sum --check SHA256SUMS)
           cat > "$RUNNER_TEMP/release-notes.md" <<EOF
-          Native WeightLang tools $VERSION for Linux x86_64 and aarch64.
+          WeightLang $VERSION: native tools, Rust SDK and Python/PyTorch SDK.
 
           Source commit: $RELEASE_COMMIT
 
-          Assets include matching wgt/weightc executables, the CPU wgtime service,
-          the complete versioned source archive, and SHA256SUMS.
+          Assets include Linux x86_64/aarch64 wgt/weightc executables, the CPU wgtime service,
+          the Python wheel and sdist, four Rust SDK crates, matching source, and SHA256SUMS.
+          Python: pip install weightlang==$VERSION
+          Rust: cargo add wgt-model@$VERSION
+          The Python source compiler and Rust service must come from this same release.
 
           Start wgtime explicitly in a private directory. Model execution needs cc;
           weightc compile also needs Rust/Cargo and the matching source archive.
@@ -277,6 +348,93 @@ jobs:
             gh release create "$RELEASE_TAG" dist/release/* --verify-tag --draft \
               --title "WeightLang $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
-          gh release edit "$RELEASE_TAG" --draft=false --latest \
-            --notes-file "$RUNNER_TEMP/release-notes.md"
+          gh release view "$RELEASE_TAG" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
+
+  publish-rust:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    needs: [prepare, stage-release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      SOURCE_TREE: ${{ needs.prepare.outputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-version
+      - uses: actions/download-artifact@v4
+        with:
+          name: weightlang-release-${{ needs.prepare.outputs.version }}
+          path: dist/release
+      - name: Verify the tested source and distributions
+        run: |
+          git add Cargo.toml Cargo.lock python/pyproject.toml python/weightlang/__init__.py
+          test "$(git write-tree)" = "$SOURCE_TREE"
+          (cd dist/release && sha256sum --check SHA256SUMS)
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: rust-sdk
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Authenticate through crates.io trusted publishing
+        if: env.CARGO_REGISTRY_TOKEN == ''
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish verified crates in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || steps.auth.outputs.token }}
+        run: python scripts/publish_rust_sdk.py dist/release
+
+  publish-python:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    needs: [prepare, publish-rust]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: weightlang-release-${{ needs.prepare.outputs.version }}
+          path: dist/release
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Publish the tested wheel and source distribution
+        run: |
+          (cd dist/release && sha256sum --check SHA256SUMS)
+          if [[ -n "$UV_PUBLISH_TOKEN" ]]; then
+            uv publish "dist/release/weightlang-$VERSION-py3-none-any.whl" "dist/release/weightlang-$VERSION.tar.gz"
+          else
+            uv publish --trusted-publishing always "dist/release/weightlang-$VERSION-py3-none-any.whl" "dist/release/weightlang-$VERSION.tar.gz"
+          fi
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    needs: [prepare, publish-rust, publish-python]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: Make the complete release public
+        run: |
+          gh release edit "$RELEASE_TAG" --draft=false --latest
           gh release view "$RELEASE_TAG" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"

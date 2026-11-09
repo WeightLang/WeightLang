@@ -1,12 +1,27 @@
 name: Rust model coverage
 
 on:
+  workflow_call:
+    inputs:
+      release-version:
+        description: Artifact containing the prepared release manifests
+        type: string
+        default: ''
+      source-tree:
+        description: Exact Git tree of the prepared release candidate
+        type: string
+        default: ''
   push:
     branches: [main]
     paths:
       - 'crates/wgt/src/rust_export.rs'
       - 'crates/wgt/tests/rust_export.rs'
       - 'crates/wgt-model/**'
+      - 'crates/wgt-model-macros/**'
+      - 'crates/wgtime/**'
+      - 'crates/wgtime-control/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'crates/wgt-language/**'
       - 'std/**'
       - 'examples/native_training/non_backprop/**'
@@ -18,13 +33,18 @@ on:
       - 'crates/wgtime-core/tests/local_learning.rs'
       - 'crates/wgtime-core/tests/composition_lowering.rs'
       - 'crates/wgtime-service/**'
-      - 'language/tensor_contracts.json'
+      - 'language/**'
       - '.github/workflows/rust-model.yml'
   pull_request:
     paths:
       - 'crates/wgt/src/rust_export.rs'
       - 'crates/wgt/tests/rust_export.rs'
       - 'crates/wgt-model/**'
+      - 'crates/wgt-model-macros/**'
+      - 'crates/wgtime/**'
+      - 'crates/wgtime-control/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'crates/wgt-language/**'
       - 'std/**'
       - 'examples/native_training/non_backprop/**'
@@ -36,15 +56,15 @@ on:
       - 'crates/wgtime-core/tests/local_learning.rs'
       - 'crates/wgtime-core/tests/composition_lowering.rs'
       - 'crates/wgtime-service/**'
-      - 'language/tensor_contracts.json'
+      - 'language/**'
       - '.github/workflows/rust-model.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: rust-model-${{ github.ref }}
-  cancel-in-progress: true
+  group: rust-model-${{ github.workflow }}-${{ inputs.release-version != '' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ inputs.release-version == '' }}
 
 jobs:
   native-model:
@@ -52,6 +72,20 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        if: inputs.release-version != ''
+        with:
+          name: ${{ inputs.release-version }}
+      - name: Verify the exact release candidate
+        if: inputs.release-version != ''
+        env:
+          SOURCE_TREE: ${{ inputs.source-tree }}
+        run: |
+          git add Cargo.toml Cargo.lock crates/*/Cargo.toml python/pyproject.toml python/weightlang/__init__.py
+          test "$(git write-tree)" = "$SOURCE_TREE"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Check all model instructions and state semantics
