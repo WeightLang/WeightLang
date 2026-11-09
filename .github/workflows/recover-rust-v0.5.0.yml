@@ -1,0 +1,73 @@
+name: Resume tested Rust SDK 0.5.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/recover-rust-v0.5.0.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weightlang-recover-rust-v0.5.0
+  cancel-in-progress: false
+
+jobs:
+  publish-rust:
+    if: github.repository == 'WeightLang/WeightLang'
+    runs-on: ubuntu-24.04
+    environment: crates-io
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - name: Checkout the original tested base commit
+        uses: actions/checkout@v4
+        with:
+          # The archived crates record this commit as their VCS source.
+          ref: 07fe5f37c06e403b2cfb3e1eefbe7714dc544312
+          persist-credentials: false
+      - name: Download the tested version manifests
+        uses: actions/download-artifact@v4
+        with:
+          name: release-version
+          run-id: 42621143177
+          github-token: ${{ github.token }}
+      - name: Download the tested release distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: weightlang-release-0.5.0
+          run-id: 42621143177
+          github-token: ${{ github.token }}
+          path: dist/release
+      - name: Checkout the corrected publisher separately
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
+          sparse-checkout: scripts/publish_rust_sdk.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Verify the staged source tree and original artifacts
+        run: |
+          git add Cargo.toml Cargo.lock python/pyproject.toml python/weightlang/__init__.py
+          test "$(git write-tree)" = db168335908ad8c5effca10c786e0dfaa6d0a7ac
+          test "$(git rev-parse HEAD)" = 07fe5f37c06e403b2cfb3e1eefbe7714dc544312
+          (cd dist/release && sha256sum --check SHA256SUMS)
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: rust-sdk-recover-v0.5.0
+      - name: Authenticate through crates.io trusted publishing
+        if: env.CARGO_REGISTRY_TOKEN == ''
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish only matching tested archives
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN || steps.auth.outputs.token }}
+        run: python3 release-tools/scripts/publish_rust_sdk.py dist/release

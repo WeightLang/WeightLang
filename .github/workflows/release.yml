@@ -71,6 +71,28 @@ defaults:
     shell: bash
 
 jobs:
+  check-rust-publishing:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check first-publication credentials
+        run: python3 scripts/publish_rust_sdk.py --check-publishing
+      - name: Check crates.io trusted publishing
+        if: env.CARGO_REGISTRY_TOKEN == ''
+        uses: rust-lang/crates-io-auth-action@v1
+
   prepare:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -270,7 +292,7 @@ jobs:
 
   stage-release:
     if: github.event_name == 'workflow_dispatch' && inputs.publish
-    needs: [prepare, assemble]
+    needs: [prepare, assemble, check-rust-publishing]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -419,8 +441,53 @@ jobs:
           if [[ -n "$UV_PUBLISH_TOKEN" ]]; then
             uv publish "dist/release/weightlang-$VERSION-py3-none-any.whl" "dist/release/weightlang-$VERSION.tar.gz"
           else
+            unset UV_PUBLISH_TOKEN UV_PUBLISH_USERNAME UV_PUBLISH_PASSWORD
             uv publish --trusted-publishing always "dist/release/weightlang-$VERSION-py3-none-any.whl" "dist/release/weightlang-$VERSION.tar.gz"
           fi
+
+  # Resume the already staged 0.5.0 release without rebuilding or changing its tag.
+  # This one-off push path is removed after the original artifacts are published.
+  resume-python-0-5-0:
+    if: github.event_name == 'push' && github.repository == 'WeightLang/WeightLang'
+    runs-on: ubuntu-24.04
+    environment: pypi
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: weightlang-release-0.5.0
+          run-id: 42621143177
+          github-token: ${{ github.token }}
+          path: dist/release
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Publish the original Python distributions with OIDC
+        run: |
+          (cd dist/release && sha256sum --check SHA256SUMS)
+          unset UV_PUBLISH_TOKEN UV_PUBLISH_USERNAME UV_PUBLISH_PASSWORD
+          uv publish --trusted-publishing always \
+            dist/release/weightlang-0.5.0-py3-none-any.whl \
+            dist/release/weightlang-0.5.0.tar.gz
+
+  resume-release-0-5-0:
+    needs: resume-python-0-5-0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Make the tested 0.5.0 release public
+        run: |
+          if [[ $(gh release view wgt-v0.5.0 --json isDraft --jq '.isDraft') == true ]]; then
+            gh release edit wgt-v0.5.0 --draft=false --latest
+          fi
+          gh release view wgt-v0.5.0 --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     if: github.event_name == 'workflow_dispatch' && inputs.publish

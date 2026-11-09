@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -16,21 +17,49 @@ def checksum(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def registry_version(name, version):
+def registry_record(path):
     request = Request(
-        f"https://crates.io/api/v1/crates/{name}/{version}",
+        f"https://crates.io/api/v1/crates/{path}",
         headers={"User-Agent": "WeightLang-release (https://github.com/WeightLang/WeightLang)"},
     )
     try:
         with urlopen(request, timeout=30) as response:
-            record = json.load(response)["version"]
+            return json.load(response)
     except HTTPError as error:
         if error.code == 404:
             return None
         raise
+
+
+def registry_version(name, version):
+    response = registry_record(f"{name}/{version}")
+    if response is None:
+        return None
+    record = response["version"]
     if record["crate"] != name or record["num"] != version:
         raise ValueError(f"Unexpected registry identity for {name} {version}")
     return record
+
+
+def check_publishing():
+    if os.environ.get("CARGO_REGISTRY_TOKEN", ""):
+        print("CARGO_REGISTRY_TOKEN is configured; crates.io will check its permissions during publication.")
+        return
+    missing = []
+    for name in CRATES:
+        response = registry_record(name)
+        if response is None:
+            missing.append(name)
+        elif response["crate"]["id"] != name:
+            raise ValueError(f"Unexpected registry identity for {name}")
+    if missing:
+        raise ValueError(
+            f"First crates.io publication requires CARGO_REGISTRY_TOKEN for: {', '.join(missing)}. "
+            "Add a token with permission to publish these new crates to the GitHub crates-io "
+            "environment or repository secrets. Trusted Publishing requires existing crates. "
+            "See docs/releases.md#首次配置包仓库."
+        )
+    print("All Rust SDK crates exist; the workflow will now check Trusted Publishing authentication.")
 
 
 def matches_registry(name, version, expected):
@@ -54,12 +83,14 @@ def publish(directory):
         ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True,
     ))
     packages = Path(metadata["target_directory"]) / "package"
+    package_command = ["cargo", "package", "--locked", "--allow-dirty"]
     command = ["cargo", "publish", "--registry", "crates-io", "--locked", "--allow-dirty"]
     for name in pending:
+        package_command.extend(["--package", name])
         command.extend(["--package", name])
-    # Cargo resolves the dependency order and verifies packaged sources. Repacking
-    # must produce the exact archives that passed CI before any registry write.
-    subprocess.run([*command, "--dry-run"], check=True)
+    # `cargo publish --dry-run` does not retain archives in target/package.
+    # Package the complete dependency closure and check its bytes before upload.
+    subprocess.run(package_command, check=True)
     for name in pending:
         if checksum(packages / f"{name}-{version}.crate") != expected[name]:
             raise ValueError(f"{name}: publication archive differs from the tested artifact")
@@ -71,7 +102,12 @@ def publish(directory):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        sys.exit("usage: publish_rust_sdk.py <artifact-directory> | --check-publishing")
     try:
-        publish(Path(sys.argv[1]))
+        if sys.argv[1] == "--check-publishing":
+            check_publishing()
+        else:
+            publish(Path(sys.argv[1]))
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         sys.exit(f"publish_rust_sdk: {error}")
