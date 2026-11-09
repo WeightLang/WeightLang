@@ -63,8 +63,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: rust-model-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  group: rust-model-${{ github.workflow }}-${{ inputs.release-version != '' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ inputs.release-version == '' }}
 
 jobs:
   native-model:

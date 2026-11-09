@@ -47,8 +47,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: rust-sdk-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  group: rust-sdk-${{ github.workflow }}-${{ inputs.release-version != '' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ inputs.release-version == '' }}
 
 jobs:
   package:

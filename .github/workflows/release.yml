@@ -64,7 +64,7 @@ permissions:
 
 concurrency:
   group: weightlang-release-${{ github.event_name == 'workflow_dispatch' && inputs.publish && 'publish' || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !inputs.publish }}
 
 defaults:
   run:
