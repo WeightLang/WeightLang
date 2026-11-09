@@ -1931,7 +1931,7 @@ dependencies = [
 
 [[package]]
 name = "weightlang-wgt"
-version = "0.2.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2103,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "wgt-language"
-version = "0.2.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "safetensors",
@@ -2113,7 +2113,7 @@ dependencies = [
 
 [[package]]
 name = "wgt-model"
-version = "0.2.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -2127,7 +2127,7 @@ dependencies = [
 
 [[package]]
 name = "wgt-model-macros"
-version = "0.2.0"
+version = "0.5.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2137,7 +2137,7 @@ dependencies = [
 
 [[package]]
 name = "wgtime"
-version = "0.2.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "wgtime-control"
-version = "0.2.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -2159,7 +2159,7 @@ dependencies = [
 
 [[package]]
 name = "wgtime-core"
-version = "0.2.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2179,7 +2179,7 @@ dependencies = [
 
 [[package]]
 name = "wgtime-service"
-version = "0.2.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "libc",
