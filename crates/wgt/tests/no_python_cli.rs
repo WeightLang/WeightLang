@@ -60,7 +60,7 @@ fn legacy_commands_do_not_launch_override_or_managed_python() {
 }
 
 #[test]
-fn native_distribution_keeps_python_in_optional_starter_assets() {
+fn native_distribution_limits_python_to_host_and_build_tools() {
     fn check(root: &std::path::Path, path: &std::path::Path) {
         if !path.exists() {
             return;
@@ -86,13 +86,18 @@ fn native_distribution_keeps_python_in_optional_starter_assets() {
                 }
             } else {
                 if path.extension().is_some_and(|e| e == "py" || e == "pyi") {
-                    // These files are an opt-in host recipe and its acceptance test.
-                    // Native model checking and execution do not import them.
+                    // Python is limited to the optional host recipe and build/release checks.
+                    // Native model checking and execution do not import these tools.
                     let relative = path.strip_prefix(root).unwrap();
                     assert!(
                         [
                             "crates/wgt/templates/workflow.py",
                             "scripts/test_starter_workflows.py",
+                            "scripts/check_python_dist.py",
+                            "scripts/smoke_python_sdk.py",
+                            "scripts/test_rust_sdk_package.py",
+                            "scripts/publish_rust_sdk.py",
+                            "scripts/test_publish_rust_sdk.py",
                         ]
                         .iter()
                         .any(|allowed| relative == std::path::Path::new(allowed)),
