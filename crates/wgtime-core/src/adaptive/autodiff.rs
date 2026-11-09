@@ -138,6 +138,11 @@ impl Tape {
         self.memories[m] = Some(self.push(value, Edge::Leaf)?);
         Ok(())
     }
+    pub(super) fn memory_free(&mut self, m: usize) {
+        // Earlier reads retain their immutable nodes. A later allocation of the
+        // same handle starts an independent bank and must not inherit this edge.
+        self.memories[m] = None;
+    }
     pub(super) fn memory_write(
         &mut self,
         m: usize,

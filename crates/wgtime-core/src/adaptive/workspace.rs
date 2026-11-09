@@ -4,7 +4,7 @@ use anyhow::{ensure, Context, Result};
 use serde::Serialize;
 use std::collections::HashMap;
 
-pub(super) fn validate(
+pub(crate) fn validate(
     program: &Program,
     regs: &HashMap<String, usize>,
 ) -> Result<HashMap<usize, (usize, usize)>> {
@@ -179,6 +179,10 @@ impl AdaptiveSession {
     ) -> Result<()> {
         self.ensure_mutable()?;
         self.ensure_idle()?;
+        ensure!(
+            !self.is_compiled(),
+            "resumable execution is unavailable for compiled models; use run or evaluate"
+        );
         ensure!(
             memory_bytes <= self.memory_limit,
             "execution memory exceeds session limit"

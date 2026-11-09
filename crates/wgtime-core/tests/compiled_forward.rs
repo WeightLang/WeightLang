@@ -75,21 +75,19 @@ fn branch_lazy_gate_and_finite_failures_are_native() {
     );
     let program = plan("return x * gain;");
     assert!(CompiledForward::compile(&program, 1).is_err());
-    let mut malformed = program.clone();
-    malformed.instructions.insert(
+    let mut stateful = program.clone();
+    stateful.instructions.insert(
         0,
         Instruction::Write {
             parameter: "gain".into(),
             value: "x".into(),
         },
     );
-    assert!(
-        CompiledForward::compile(&malformed, 1024 * 1024)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("state writes")
-    );
+    let mut compiled = CompiledForward::compile(&stateful, 1024 * 1024).unwrap();
+    let live = [2., 3.];
+    assert_eq!(compiled.run(&[4., 5.], &[&live]).unwrap(), [16., 25.]);
+    assert_eq!(compiled.parameter_candidate(0).unwrap(), [4., 5.]);
+    assert_eq!(live, [2., 3.]);
 }
 #[test]
 fn sequential_graph_uses_native_layer_trace() {

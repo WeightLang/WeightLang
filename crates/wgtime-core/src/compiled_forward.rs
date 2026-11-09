@@ -18,6 +18,7 @@ type Entry = unsafe extern "C" fn(
     *mut f32,
     *mut f32,
     u64,
+    usize,
     *mut u64,
     i32,
     Option<Hook>,
@@ -37,11 +38,21 @@ pub struct CompiledForward {
     input: usize,
     output: usize,
     workspace: Vec<f32>,
+    candidates: Vec<Option<usize>>,
+    memory_available: usize,
+    completed: bool,
     last_steps: u64,
 }
 impl CompiledForward {
     pub fn compile(program: &Program, memory: usize) -> Result<Self> {
-        ensure!(!program.instructions.iter().any(|i| matches!(i, I::Write { .. })), "ordinary forward does not support state writes; use transaction compilation");
+        for instruction in &program.instructions {
+            if let I::Write { parameter, .. } = instruction {
+                let parameter = program.parameters.iter().find(|p| p.name == *parameter)
+                    .context("unknown compiled write parameter")?;
+                ensure!(!parameter.frozen && !parameter.probability && parameter.learn.is_none(),
+                    "ordinary forward cannot write frozen, probability or learn parameters");
+            }
+        }
         Self::compile_transaction(program, memory)
     }
     pub fn compile_transaction(program: &Program, memory: usize) -> Result<Self> {
@@ -62,6 +73,9 @@ impl CompiledForward {
             input: generated.input,
             output: generated.output,
             workspace: vec![0.; generated.workspace],
+            candidates: generated.candidates,
+            memory_available: memory - bytes,
+            completed: false,
             last_steps: 0,
         })
     }
@@ -157,8 +171,16 @@ impl CompiledForward {
     pub fn workspace_bytes(&self) -> usize {
         self.workspace.len() * 4
     }
+    /// Final private storage after a successful native call containing writes.
+    /// The caller owns committing these values; unsuccessful calls never publish candidates.
+    pub fn parameter_candidate(&self, index: usize) -> Result<&[f32]> {
+        ensure!(self.completed, "compiled forward has no successful parameter candidate");
+        let offset = self.candidates.get(index).copied().flatten()
+            .context("compiled parameter has no candidate storage")?;
+        Ok(&self.workspace[offset..offset + self.lengths[index]])
+    }
     pub fn run(&mut self, input: &[f32], parameters: &[&[f32]]) -> Result<Vec<f32>> {
-        self.invoke(input, parameters, 1_000_000, false, &mut |_, _| Ok(()))
+        self.invoke(input, parameters, 1_000_000, self.memory_available, false, &mut |_, _| Ok(()))
     }
     pub fn run_budget(
         &mut self,
@@ -166,7 +188,7 @@ impl CompiledForward {
         parameters: &[&[f32]],
         budget: u64,
     ) -> Result<Vec<f32>> {
-        self.invoke(input, parameters, budget, false, &mut |_, _| Ok(()))
+        self.invoke(input, parameters, budget, self.memory_available, false, &mut |_, _| Ok(()))
     }
     pub fn run_with_hook(
         &mut self,
@@ -176,7 +198,20 @@ impl CompiledForward {
         traced: bool,
         hook: &mut dyn FnMut(usize, &[f32]) -> Result<()>,
     ) -> Result<Vec<f32>> {
-        self.invoke(input, parameters, budget, traced, hook)
+        self.invoke(input, parameters, budget, self.memory_available, traced, hook)
+    }
+    /// Execute with the host's currently available working-memory allowance.
+    /// Fixed model and compiled workspace reservations have already been deducted.
+    pub fn run_with_resources(
+        &mut self,
+        input: &[f32],
+        parameters: &[&[f32]],
+        budget: u64,
+        memory_available: usize,
+        traced: bool,
+        hook: &mut dyn FnMut(usize, &[f32]) -> Result<()>,
+    ) -> Result<Vec<f32>> {
+        self.invoke(input, parameters, budget, memory_available, traced, hook)
     }
     pub fn run_traced(
         &mut self,
@@ -193,16 +228,19 @@ impl CompiledForward {
         budget: u64,
         hook: &mut dyn FnMut(usize, &[f32]) -> Result<()>,
     ) -> Result<Vec<f32>> {
-        self.invoke(input, parameters, budget, true, hook)
+        self.invoke(input, parameters, budget, self.memory_available, true, hook)
     }
     fn invoke(
         &mut self,
         input: &[f32],
         parameters: &[&[f32]],
         budget: u64,
+        memory_available: usize,
         traced: bool,
         hook: &mut dyn FnMut(usize, &[f32]) -> Result<()>,
     ) -> Result<Vec<f32>> {
+        self.completed = false;
+        self.last_steps = 0;
         ensure!(
             input.len() == self.input && input.iter().all(|v| v.is_finite()),
             "invalid compiled forward input"
@@ -254,6 +292,7 @@ impl CompiledForward {
                 self.workspace.as_mut_ptr(),
                 output.as_mut_ptr(),
                 budget,
+                memory_available,
                 &mut self.last_steps,
                 i32::from(traced),
                 Some(callback),
@@ -272,9 +311,15 @@ impl CompiledForward {
                 3 => "uninitialized register",
                 4 => "invalid probability",
                 5 => "trace hook failed",
+                7 => "working memory budget exceeded",
+                8 => "working memory allocation failed",
+                9 => "memory is not allocated or has been freed",
+                10 => "memory already allocated; free it before reallocating",
+                11 => "memory address must have one finite [0,1] weight per slot",
                 _ => "invalid control flow",
             }
         );
+        self.completed = true;
         Ok(output)
     }
 }
@@ -346,7 +391,7 @@ fn load_code(source: &str) -> Result<Arc<Code>> {
         bail!("compiled forward C compilation failed: {diagnostic}");
     }
     let library = unsafe { libloading::Library::new(&library_path) }?;
-    let entry = unsafe { *library.get::<Entry>(b"wgt_forward_v1\0")? };
+    let entry = unsafe { *library.get::<Entry>(b"wgt_forward_v2\0")? };
     let code = Arc::new(Code {
         entry,
         _library: library,
@@ -361,11 +406,13 @@ struct Generated {
     input: usize,
     output: usize,
     workspace: usize,
+    candidates: Vec<Option<usize>>,
 }
 struct Generator<'a> {
     program: &'a Program,
     registers: HashMap<&'a str, (usize, usize, usize)>,
     parameters: HashMap<&'a str, (usize, usize)>,
+    memories: HashMap<usize, (usize, usize)>,
     workspace: usize,
     max: usize,
 }
@@ -394,10 +441,14 @@ impl<'a> Generator<'a> {
             ensure!(p.data.iter().all(|v| v.is_finite()), "nonfinite parameter");
             parameters.insert(p.name.as_str(), (i, len));
         }
+        let memory_registers = registers.iter()
+            .map(|(name, (_, _, index))| ((*name).to_owned(), *index)).collect();
+        let memories = crate::adaptive::workspace::validate(program, &memory_registers)?;
         Ok(Self {
             program,
             registers,
             parameters,
+            memories,
             workspace,
             max,
         })
@@ -413,6 +464,46 @@ impl<'a> Generator<'a> {
             .get(name)
             .copied()
             .context("unknown compiled parameter")
+    }
+    fn memory(&self, name: &str) -> Result<(usize, usize, usize)> {
+        let (_, _, index) = self.reg(name)?;
+        let &(slots, width) = self.memories.get(&index).context("unknown compiled memory handle")?;
+        Ok((index, slots, width))
+    }
+    fn cost(&self, instruction: &I) -> Result<usize> {
+        let shape = |name: &str| -> Result<&[usize]> {
+            Ok(&self.program.registers[self.reg(name)?.2].shape)
+        };
+        let extra = match instruction {
+            I::Conv { input, kernel, bias, stride, padding, dilation, groups, .. } => {
+                return wgt_language::adaptive::ConvGeometry::new(shape(input)?, shape(kernel)?, shape(bias)?, stride, padding, dilation, *groups)?.work();
+            }
+            I::MaxPool2d { input, kernel, stride, .. } | I::AvgPool2d { input, kernel, stride, .. } => {
+                return wgt_language::adaptive::Pool2dGeometry::new(shape(input)?, kernel, stride)?.work();
+            }
+            I::Reshape { out, .. } | I::Transpose { out, .. } | I::Permute { out, .. } => self.reg(out)?.1,
+            I::Matmul { left, right, .. } => {
+                let a = shape(left)?;
+                let b = shape(right)?;
+                a[0].checked_mul(a[1]).and_then(|n| n.checked_mul(b[1]))
+                    .context("matmul work overflow")?
+            }
+            I::BatchMatmul { left, right, .. } => {
+                let a = shape(left)?;
+                let b = shape(right)?;
+                a[0].checked_mul(a[1]).and_then(|n| n.checked_mul(a[2]))
+                    .and_then(|n| n.checked_mul(b[2]))
+                    .context("batch_matmul work overflow")?
+            }
+            I::LayerNorm { out, .. } => self.reg(out)?.1.checked_mul(3).context("LayerNorm work overflow")?,
+            I::MemoryAlloc { slots, width, .. } => slots.checked_mul(*width).context("memory size overflow")?,
+            I::MemoryRead { memory, .. } | I::MemoryWrite { memory, .. } => {
+                let (_, slots, width) = self.memory(memory)?;
+                slots.checked_mul(width).context("memory size overflow")?
+            }
+            _ => 0,
+        };
+        extra.checked_add(1).context("compiled instruction work overflow")
     }
     fn literal(value: f32) -> Result<String> {
         ensure!(value.is_finite(), "nonfinite compiled constant");
@@ -433,7 +524,7 @@ impl<'a> Generator<'a> {
             labels.get(name).copied().context("unknown compiled label")
         };
         let mut code = String::from(
-            "#include <math.h>\n#include <stdint.h>\n#include <stddef.h>\n#include <string.h>\ntypedef int (*trace_fn)(void*,size_t,const float*,size_t);\nint wgt_forward_v1(const float *input,const float *const *p,float *r,float *output,uint64_t budget,uint64_t *used,int traced,trace_fn trace,void *context){\n",
+            "#include <math.h>\n#include <stdint.h>\n#include <stddef.h>\n#include <stdlib.h>\n#include <string.h>\ntypedef int (*trace_fn)(void*,size_t,const float*,size_t);\nstatic int execute(const float *input,const float *const *p,float *r,float *output,uint64_t budget,size_t memory_available,uint64_t *used,int traced,trace_fn trace,void *context,float **memory){\nsize_t memory_used=0;\n",
         );
         code += &format!(
             "unsigned char ready[{}]={{0}};float *t=r+{};memcpy(r+{},input,{}*sizeof(float));ready[{}]=1;\n",
@@ -444,12 +535,14 @@ impl<'a> Generator<'a> {
             input_id
         );
         let mut transaction_bytes = 0usize;
+        let mut candidates = vec![None; self.parameters.len()];
         if self.program.instructions.iter().any(|i| matches!(i, I::Write { .. })) {
             // Candidate storage is native workspace, never the caller's immutable parameter slices.
             let offset = self.workspace + self.max;
             code += &format!("const float *original[{}];float *candidate[{}];", self.parameters.len().max(1), self.parameters.len().max(1));
             for (index, parameter) in self.program.parameters.iter().enumerate() {
                 let len = parameter.data.len();
+                candidates[index] = Some(offset + transaction_bytes);
                 code += &format!("original[{index}]=p[{index}];candidate[{index}]=r+{};memcpy(candidate[{index}],original[{index}],{len}*sizeof(float));", offset + transaction_bytes);
                 transaction_bytes = transaction_bytes.checked_add(len).context("transaction workspace overflow")?;
             }
@@ -457,7 +550,14 @@ impl<'a> Generator<'a> {
         }
         let mut output_width = None;
         for (index, instruction) in self.program.instructions.iter().enumerate() {
-            code += &format!("L{index}:;if(*used>=budget)return 2;++*used;{{\n");
+            code += &format!("L{index}:;if(*used>=budget)return 2;{{\n");
+            // Memory access validates liveness before charging work, as the reference does.
+            if let I::MemoryRead { memory, .. } | I::MemoryWrite { memory, .. } = instruction {
+                let (id, _, _) = self.memory(memory)?;
+                code += &format!("if(!memory[{id}])return 9;");
+            }
+            let cost = self.cost(instruction)?;
+            code += &format!("if(budget-*used<{cost})return 2;*used+={cost};");
             let metadata = instruction.metadata();
             let mut reads = metadata.inputs;
             let mut body = String::new();
@@ -465,8 +565,8 @@ impl<'a> Generator<'a> {
                 I::Conv { input:x,kernel,bias,stride,padding,dilation,groups,.. } => {
                     let (a,_,xi)=self.reg(x)?;let (k,_,ki)=self.reg(kernel)?;let (b,_,bi)=self.reg(bias)?;
                     let g=wgt_language::adaptive::ConvGeometry::new(&self.program.registers[xi].shape,&self.program.registers[ki].shape,&self.program.registers[bi].shape,stride,padding,dilation,*groups)?;
-                    let work=g.work()?-1;let ov=g.output_volume();let iv=g.input_volume();let kv=g.kernel_volume();let cg=g.channels/g.groups;let og=g.outputs/g.groups;let count=g.outputs*ov;
-                    body+=&format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{count};z++){{size_t oc=z/{ov},pos=z%{ov},coords[3]={{0}};");
+                    let ov=g.output_volume();let iv=g.input_volume();let kv=g.kernel_volume();let cg=g.channels/g.groups;let og=g.outputs/g.groups;let count=g.outputs*ov;
+                    body+=&format!("for(size_t z=0;z<{count};z++){{size_t oc=z/{ov},pos=z%{ov},coords[3]={{0}};");
                     for d in (0..g.rank).rev(){body+=&format!("coords[{d}]=pos%{};pos/={};",g.output[d],g.output[d]);}
                     body+=&format!("double sum=r[{b}+oc];for(size_t c=0;c<{cg};c++)for(size_t q=0;q<{kv};q++){{size_t rem=q,kc[3]={{0}},ix=0;int valid=1;");
                     for d in (0..g.rank).rev(){body+=&format!("kc[{d}]=rem%{};rem/={};",g.kernel[d],g.kernel[d]);}
@@ -480,15 +580,14 @@ impl<'a> Generator<'a> {
                         &self.program.registers[xi].shape, kernel, stride
                     )?;
                     let (_,out_len,_) = self.reg(o)?;
-                    let work = g.work()?;
                     let spatial = g.output_h * g.output_w;
                     let window = g.window_len();
                     let is_max = matches!(instruction, I::MaxPool2d { .. });
                     if is_max {
-                        body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{out_len};z++){{size_t c=z/{spatial},p=z%{spatial},oy=p/{},ox=p%{};float v=-INFINITY;for(size_t ky=0;ky<{};ky++)for(size_t kx=0;kx<{};kx++){{size_t ix=(c*{}+oy*{}+ky)*{}+ox*{}+kx;v=fmaxf(v,r[{a}+ix]);}}t[z]=v;}}",
+                        body += &format!("for(size_t z=0;z<{out_len};z++){{size_t c=z/{spatial},p=z%{spatial},oy=p/{},ox=p%{};float v=-INFINITY;for(size_t ky=0;ky<{};ky++)for(size_t kx=0;kx<{};kx++){{size_t ix=(c*{}+oy*{}+ky)*{}+ox*{}+kx;v=fmaxf(v,r[{a}+ix]);}}t[z]=v;}}",
                             g.output_w,g.output_w,g.kernel_h,g.kernel_w,g.input_h,g.stride_h,g.input_w,g.stride_w);
                     } else {
-                        body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{out_len};z++){{size_t c=z/{spatial},p=z%{spatial},oy=p/{},ox=p%{};double v=0.;for(size_t ky=0;ky<{};ky++)for(size_t kx=0;kx<{};kx++){{size_t ix=(c*{}+oy*{}+ky)*{}+ox*{}+kx;v+=(double)r[{a}+ix];}}t[z]=(float)(v/{window}.0);}}",
+                        body += &format!("for(size_t z=0;z<{out_len};z++){{size_t c=z/{spatial},p=z%{spatial},oy=p/{},ox=p%{};double v=0.;for(size_t ky=0;ky<{};ky++)for(size_t kx=0;kx<{};kx++){{size_t ix=(c*{}+oy*{}+ky)*{}+ox*{}+kx;v+=(double)r[{a}+ix];}}t[z]=(float)(v/{window}.0);}}",
                             g.output_w,g.output_w,g.kernel_h,g.kernel_w,g.input_h,g.stride_h,g.input_w,g.stride_w);
                     }
                 },
@@ -508,7 +607,7 @@ impl<'a> Generator<'a> {
                     let rank = input_shape.len();
                     let (_,out_len,out_id) = self.reg(o)?;
                     let output_shape = &self.program.registers[out_id].shape;
-                    let mut body_code = format!("if(budget-*used<{out_len})return 2;*used+={out_len};for(size_t z=0;z<{out_len};z++){{size_t rem=z,oc[{rank}]={{0}},ic[{rank}]={{0}};");
+                    let mut body_code = format!("for(size_t z=0;z<{out_len};z++){{size_t rem=z,oc[{rank}]={{0}},ic[{rank}]={{0}};");
                     for axis in (0..rank).rev() {
                         body_code += &format!("oc[{axis}]=rem%{};rem/={};", output_shape[axis], output_shape[axis]);
                     }
@@ -526,8 +625,7 @@ impl<'a> Generator<'a> {
                     let (a,_,ai) = self.reg(left)?; let (b,_,bi) = self.reg(right)?;
                     let sa = &self.program.registers[ai].shape; let sb = &self.program.registers[bi].shape;
                     let (m,k,n)=(sa[0],sa[1],sb[1]);
-                    let work=m.checked_mul(k).and_then(|v|v.checked_mul(n)).context("matmul work overflow")?;
-                    body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+i*{k}+q]*(double)r[{b}+q*{n}+j];t[i*{n}+j]=(float)sum;}}");
+                    body += &format!("for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+i*{k}+q]*(double)r[{b}+q*{n}+j];t[i*{n}+j]=(float)sum;}}");
                 },
                 I::BatchMatmul { left,right,.. } => {
                     let (a,_,ai) = self.reg(left)?;
@@ -535,11 +633,9 @@ impl<'a> Generator<'a> {
                     let sa = &self.program.registers[ai].shape;
                     let sb = &self.program.registers[bi].shape;
                     let (batch,m,k,n)=(sa[0],sa[1],sa[2],sb[2]);
-                    let work=batch.checked_mul(m).and_then(|v|v.checked_mul(k))
-                        .and_then(|v|v.checked_mul(n)).context("batch_matmul work overflow")?;
-                    body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t z=0;z<{batch};z++)for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+z*{m}*{k}+i*{k}+q]*(double)r[{b}+z*{k}*{n}+q*{n}+j];t[z*{m}*{n}+i*{n}+j]=(float)sum;}}");
+                    body += &format!("for(size_t z=0;z<{batch};z++)for(size_t i=0;i<{m};i++)for(size_t j=0;j<{n};j++){{double sum=0.;for(size_t q=0;q<{k};q++)sum+=(double)r[{a}+z*{m}*{k}+i*{k}+q]*(double)r[{b}+z*{k}*{n}+q*{n}+j];t[z*{m}*{n}+i*{n}+j]=(float)sum;}}");
                 },
-                I::LayerNorm { out:o,input:x,gamma,beta,axis,epsilon } => {
+                I::LayerNorm { input:x,gamma,beta,axis,epsilon,.. } => {
                     let (a,_,ai) = self.reg(x)?;
                     let (g,_,_) = self.reg(gamma)?;
                     let (b,_,_) = self.reg(beta)?;
@@ -549,9 +645,7 @@ impl<'a> Generator<'a> {
                         shape[*axis],
                         shape[axis+1..].iter().product::<usize>(),
                     );
-                    let (_,out_len,_)=self.reg(o)?;
-                    let work=out_len.checked_mul(3).and_then(|v|v.checked_add(1)).context("LayerNorm work overflow")?;
-                    body += &format!("if(budget-*used<{work})return 2;*used+={work};for(size_t o=0;o<{outer};o++)for(size_t i=0;i<{inner};i++){{double mean=0.;for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;mean+=(double)r[{a}+idx];}}mean/={width};double variance=0.;for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;double delta=(double)r[{a}+idx]-mean;variance+=delta*delta;}}variance/={width};double inv=1.0/sqrt(variance+{epsilon:.17});for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;t[idx]=(float)(((double)r[{a}+idx]-mean)*inv*(double)r[{g}+a]+(double)r[{b}+a]);}}}}");
+                    body += &format!("for(size_t o=0;o<{outer};o++)for(size_t i=0;i<{inner};i++){{double mean=0.;for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;mean+=(double)r[{a}+idx];}}mean/={width};double variance=0.;for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;double delta=(double)r[{a}+idx]-mean;variance+=delta*delta;}}variance/={width};double inv=1.0/sqrt(variance+{epsilon:.17});for(size_t a=0;a<{width};a++){{size_t idx=(o*{width}+a)*{inner}+i;t[idx]=(float)(((double)r[{a}+idx]-mean)*inv*(double)r[{g}+a]+(double)r[{b}+a]);}}}}");
                 },
                 I::Scale { input:x,factor,.. } => {
                     let (a,n,_) = self.reg(x)?;
@@ -779,12 +873,35 @@ impl<'a> Generator<'a> {
                     ensure!(n == m && !self.program.parameters[p].frozen, "invalid transactional write");
                     body += &format!("for(size_t i=0;i<{n};i++)if(!isfinite(r[{a}+i]))return 1;memcpy(candidate[{p}],r+{a},{n}*sizeof(float));if(trace&&trace(context,{index},r+{a},{n}))return 5;");
                 }
-                I::MemoryAlloc { .. }
-                | I::MemoryFree { .. }
-                | I::MemoryRead { .. }
-                | I::MemoryWrite { .. }
-                | I::ResourceState { .. } => {
-                    bail!("compiled forward does not support state writes or working memory")
+                I::MemoryAlloc { out, .. } => {
+                    let (id, slots, width) = self.memory(out)?;
+                    let len = slots.checked_mul(width).context("memory size overflow")?;
+                    let bytes = len.checked_mul(4).context("memory size overflow")?;
+                    body += &format!("if(memory[{id}])return 10;if({bytes}>memory_available-memory_used)return 7;memory[{id}]=calloc({len},sizeof(float));if(!memory[{id}])return 8;memory_used+={bytes};if(trace&&trace(context,{index},memory[{id}],{len}))return 5;");
+                }
+                I::MemoryFree { memory } => {
+                    let (id, slots, width) = self.memory(memory)?;
+                    let bytes = slots.checked_mul(width).and_then(|n|n.checked_mul(4)).context("memory size overflow")?;
+                    // A non-null dummy pointer keeps the zero-length Rust callback slice valid.
+                    body += &format!("if(!memory[{id}])return 9;free(memory[{id}]);memory[{id}]=NULL;memory_used-={bytes};if(trace&&trace(context,{index},r,0))return 5;");
+                }
+                I::MemoryRead { out, memory, address } => {
+                    let (id, slots, width) = self.memory(memory)?;
+                    let (a, n, _) = self.reg(address)?;
+                    ensure!(n == slots && self.reg(out)?.1 == width, "compiled memory read shape mismatch");
+                    body += &format!("for(size_t i=0;i<{slots};i++)if(!isfinite(r[{a}+i])||r[{a}+i]<0.f||r[{a}+i]>1.f)return 11;for(size_t j=0;j<{width};j++){{double sum=0.;for(size_t i=0;i<{slots};i++)sum+=(double)r[{a}+i]*(double)memory[{id}][i*{width}+j];t[j]=(float)sum;}}");
+                }
+                I::MemoryWrite { memory, address, value } => {
+                    let (id, slots, width) = self.memory(memory)?;
+                    let (a, n, _) = self.reg(address)?;
+                    let (v, m, _) = self.reg(value)?;
+                    ensure!(n == slots && m == width, "compiled memory write shape mismatch");
+                    let len = slots.checked_mul(width).context("memory size overflow")?;
+                    body += &format!("for(size_t i=0;i<{slots};i++)if(!isfinite(r[{a}+i])||r[{a}+i]<0.f||r[{a}+i]>1.f)return 11;for(size_t i=0;i<{slots};i++)for(size_t j=0;j<{width};j++){{double a=r[{a}+i];size_t z=i*{width}+j;memory[{id}][z]=(float)((1.-a)*(double)memory[{id}][z]+a*(double)r[{v}+j]);if(!isfinite(memory[{id}][z]))return 1;}}if(trace&&trace(context,{index},memory[{id}],{len}))return 5;");
+                }
+                I::ResourceState { out } => {
+                    ensure!(self.reg(out)?.1 == 3, "resource state output must have three elements");
+                    body += "t[0]=(float)(budget-*used);t[1]=(float)(memory_available-memory_used);t[2]=(float)memory_used;";
                 }
             }
             for name in reads.into_iter().flatten() {
@@ -801,6 +918,9 @@ impl<'a> Generator<'a> {
             code += "}\n";
         }
         code += "return 6;}\n";
+        // All exits, including budget exhaustion and rejected trace callbacks, free every bank.
+        // The execution function cannot bypass this cleanup boundary with an early return.
+        code += &format!("int wgt_forward_v2(const float *input,const float *const *p,float *r,float *output,uint64_t budget,size_t memory_available,uint64_t *used,int traced,trace_fn trace,void *context){{float *memory[{}]={{0}};int status=execute(input,p,r,output,budget,memory_available,used,traced,trace,context,memory);for(size_t i=0;i<{};i++)free(memory[i]);return status;}}\n", self.registers.len().max(1), self.registers.len());
         ensure!(
             code.len() <= 8 * 1024 * 1024,
             "compiled source byte limit exceeded"
@@ -814,6 +934,7 @@ impl<'a> Generator<'a> {
                 .checked_add(self.max)
                 .and_then(|n| n.checked_add(transaction_bytes))
                 .context("workspace overflow")?,
+            candidates,
         })
     }
 }

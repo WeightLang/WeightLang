@@ -713,15 +713,34 @@ fn forward(x) {
         );
 
         let stats = owner.execute(Request::Stats, &shared)?;
-        let error = owner.execute(
+        let initialized = owner.execute(
             Request::InitializeDefinition {
                 source: source.into(),
                 memory: 1024 * 1024,
                 optimizer: None,
             },
             &shared,
+        )?;
+        assert_eq!(initialized["backend"], "native-cpu");
+        let compiled_handle = initialized["handle"].as_u64().unwrap();
+        for (input, output, revision) in [([2., 3.], 3., 1), ([4., 3.], 9., 2)] {
+            assert_eq!(
+                owner.execute(Request::Predict { handle: compiled_handle, input: input.into() }, &shared)?,
+                serde_json::json!({"output": [output], "revision": revision})
+            );
+        }
+        let parameters = owner.execute(Request::ParameterValues { handle: compiled_handle }, &shared)?;
+        let error = owner.execute(
+            Request::Predict { handle: compiled_handle, input: vec![4., f32::MAX] },
+            &shared,
         ).unwrap_err();
-        assert!(error.to_string().contains("ordinary forward does not support state writes"), "{error:#}");
+        assert!(error.to_string().contains("nonfinite"), "{error:#}");
+        assert_eq!(owner.execute(Request::ParameterValues { handle: compiled_handle }, &shared)?, parameters);
+        assert_eq!(
+            owner.execute(Request::Predict { handle: compiled_handle, input: vec![0., 3.] }, &shared)?,
+            serde_json::json!({"output": [9.], "revision": 3})
+        );
+        owner.execute(Request::Drop { handle: compiled_handle }, &shared)?;
         let after = owner.execute(Request::Stats, &shared)?;
         assert_eq!(after["sessions"], stats["sessions"]);
         assert_eq!(after["reserved"], stats["reserved"]);

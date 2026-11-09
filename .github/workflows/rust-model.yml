@@ -1,0 +1,59 @@
+name: Rust model coverage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/wgt/src/rust_export.rs'
+      - 'crates/wgt/tests/rust_export.rs'
+      - 'crates/wgt-model/**'
+      - 'crates/wgtime-core/src/compiled_forward.rs'
+      - 'crates/wgtime-core/src/adaptive*'
+      - 'crates/wgtime-core/src/adaptive/**'
+      - 'crates/wgtime-core/tests/compiled*.rs'
+      - 'crates/wgtime-service/**'
+      - 'language/tensor_contracts.json'
+      - '.github/workflows/rust-model.yml'
+  pull_request:
+    paths:
+      - 'crates/wgt/src/rust_export.rs'
+      - 'crates/wgt/tests/rust_export.rs'
+      - 'crates/wgt-model/**'
+      - 'crates/wgtime-core/src/compiled_forward.rs'
+      - 'crates/wgtime-core/src/adaptive*'
+      - 'crates/wgtime-core/src/adaptive/**'
+      - 'crates/wgtime-core/tests/compiled*.rs'
+      - 'crates/wgtime-service/**'
+      - 'language/tensor_contracts.json'
+      - '.github/workflows/rust-model.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-model-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check all model instructions and state semantics
+        run: >-
+          cargo test --locked --no-default-features -p wgtime-core
+          --test compiled_instruction_coverage --test compiled_semantics
+          --test compiled_forward --test compiled_control_flow --test compiled_training
+      - name: Compile and run generated Rust consumers
+        run: cargo test --locked -p weightlang-wgt --test rust_export
+      - name: Build the real model service
+        run: cargo build --locked -p wgtime-service --bin wgtime
+      - name: Verify service commit and rollback boundary
+        run: cargo test --locked -p wgtime-service --bin wgtime adaptive_predict_commits_writes_and_rolls_back_failed_output
+      - name: Run Rust SDK models against the real service
+        env:
+          WGTIME_TEST_DAEMON: ${{ github.workspace }}/target/debug/wgtime
+        run: cargo test --locked -p wgt-model -p wgt-model-macros --tests -- --include-ignored
