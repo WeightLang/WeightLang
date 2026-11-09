@@ -1,22 +1,12 @@
 [project]
-name = "PROJECT_NAME"
-version = "0.1.0"
-requires-python = ">=3.11,<3.14"
-dependencies = ["torch>=2.6,<3", "safetensors>=0.4,<1", "numpy>=1.26,<3"]
-
-[tool.uv]
-package = false
-torch-backend = "auto" # wgt asks uv to select a compatible PyTorch build.
-
-[tool.wgt.project]
 module = "PROJECT_MODULE"
 edition = "0.5"
 
-[tool.wgt.python]
+[python]
 runner = "workflow.py"
 
 # A small regression model: one input, two hidden layers, one output.
-[tool.wgt.model]
+[model]
 kind = "mlp"
 input_size = 1
 output_size = 1
@@ -24,10 +14,10 @@ hidden_size = 16
 layers = 2
 dropout = 0.0
 
-[tool.wgt.runtime]
+[runtime]
 device = "auto"
 
-[tool.wgt.train]
+[train]
 data = "data.csv" # No header: input columns first, then target columns.
 steps = 100
 batch_size = 4
@@ -37,7 +27,7 @@ seed = 42
 output = "weights/model"
 log_every = 10
 
-[tool.wgt.infer]
+[infer]
 checkpoint = "weights/model"
 inputs = [0.5]
 seed = 42

@@ -142,10 +142,6 @@ impl ProjectConfig {
             relative_file(output.to_str().context("invalid model.output")?)?;
         }
         if let Some(python) = &config.python {
-            ensure!(
-                embedded,
-                "Python projects use pyproject.toml with [tool.wgt.python]"
-            );
             relative_file(python.runner.to_str().context("invalid python.runner")?)?;
             ensure!(
                 config.model.source.is_none(),
@@ -154,7 +150,7 @@ impl ProjectConfig {
         } else {
             ensure!(
                 config.model.kind.is_none(),
-                "model.kind requires [tool.wgt.python]"
+                "model.kind requires a configured Python runner ([python] or legacy [tool.wgt.python])"
             );
         }
         Ok(config)
@@ -162,15 +158,7 @@ impl ProjectConfig {
     pub fn read(project: &Path) -> Result<Option<Self>> {
         let path = manifest_path(project)?;
         if path.is_file() && path.file_name().is_some_and(|name| name != "wgt.mod") {
-            let config = Self::parse(&fs::read_to_string(&path)?)?;
-            ensure!(
-                config.python.is_none()
-                    || path
-                        .file_name()
-                        .is_some_and(|name| name == "pyproject.toml"),
-                "Python projects must use pyproject.toml, so uv reads the same configuration"
-            );
-            Ok(Some(config))
+            Ok(Some(Self::parse(&fs::read_to_string(&path)?)?))
         } else {
             Ok(None)
         }

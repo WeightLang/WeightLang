@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import math
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -19,9 +20,48 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def load_config():
+    """Use the CLI-selected manifest, or the nearest project around this host."""
+    def read(path):
+        with path.open("rb") as source:
+            return tomllib.load(source)
+
+    def embedded(document):
+        tool = document.get("tool", {})
+        return tool.get("wgt") if isinstance(tool, dict) else None
+
+    selected = os.environ.get("WGT_CONFIG_FILE")
+    if selected is not None:
+        path = Path(selected)
+        require(path.is_absolute(), "WGT_CONFIG_FILE must be an absolute configuration path")
+    else:
+        for directory in (ROOT, *ROOT.parents):
+            python = directory / "pyproject.toml"
+            candidates = [directory / name for name in ("wgt.toml", "wgt.mod")
+                          if (directory / name).exists()]
+            if python.is_file() and embedded(read(python)) is not None:
+                candidates.append(python)
+            require(len(candidates) <= 1,
+                    f"multiple WeightLang manifests in {directory}; keep one wgt.toml or legacy [tool.wgt]")
+            if candidates:
+                path = candidates[0]
+                break
+        else:
+            raise ValueError("no WeightLang configuration found; expected wgt.toml or legacy [tool.wgt]")
+    require(path.name != "wgt.mod", "Python workflows need wgt.toml or legacy [tool.wgt], not wgt.mod")
+    path = path.resolve(strict=True)
+    document = read(path)
+    legacy = embedded(document)
+    require(path.name != "pyproject.toml" or legacy is not None,
+            "pyproject.toml has no [tool.wgt]; put WeightLang settings in wgt.toml")
+    config = legacy if legacy is not None else document
+    require(isinstance(config, dict), "WeightLang configuration must be a TOML table")
+    return path, config
+
+
 def table(config, key):
     value = config.get(key)
-    require(isinstance(value, dict), f"missing or invalid [tool.wgt.{key}]")
+    require(isinstance(value, dict), f"missing or invalid [{key}] in WeightLang configuration")
     return dict(value)
 
 
@@ -106,7 +146,7 @@ def validate_infer(config, model):
 
 def load_data(config, model):
     path = validate_train(config)
-    require(path.is_file(), f"training data not found: {path}; set train.data in pyproject.toml")
+    require(path.is_file(), f"training data not found: {path}; set train.data in the selected WeightLang configuration")
     if model["kind"] == "tiny-lm":
         data = path.read_text(encoding="utf-8").encode("utf-8")
         require(len(data) >= model["context_length"],
@@ -141,7 +181,7 @@ def check_output(path, force):
 
 def requested_device(config, override=None):
     runtime = config.get("runtime", {})
-    require(isinstance(runtime, dict), "invalid [tool.wgt.runtime]")
+    require(isinstance(runtime, dict), "invalid [runtime] in WeightLang configuration")
     fields(runtime, "device", "runtime")
     requested = override if override is not None else runtime.get("device", "auto")
     require(isinstance(requested, str), "runtime.device must be a device name")
@@ -212,7 +252,7 @@ def publish(stage, output, force):
         shutil.rmtree(backup)
 
 
-def train(torch, model_config, settings, data, device, force):
+def train(torch, model_config, settings, data, device, force, config_path):
     output = local_path(settings["output"], "train.output", weights=True)
     torch.manual_seed(settings["seed"])
     model = make_model(torch, model_config).to(device)
@@ -260,9 +300,13 @@ def train(torch, model_config, settings, data, device, force):
 
             save_file(model.state_dict(), stage / "model.safetensors")
         metadata = {"format": FORMAT, "model": model_config, "train": settings, "runtime": {"device": str(device)},
+                    "config_file": config_path.name,
                     "metrics": {"initial_loss": initial, "final_loss": final}}
         (stage / "weightlang.json").write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-        shutil.copyfile(ROOT / "pyproject.toml", stage / "pyproject.toml")
+        shutil.copyfile(config_path, stage / config_path.name)
+        python_project = ROOT / "pyproject.toml"
+        if python_project.is_file() and python_project != config_path:
+            shutil.copyfile(python_project, stage / "pyproject.toml")
         publish(stage, output, force)
     finally:
         if stage.exists():
@@ -297,6 +341,7 @@ def infer(torch, settings, metadata, device):
 
 
 def main():
+    global ROOT
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
     commands.add_parser("check", help="validate settings and local data without importing PyTorch")
@@ -312,8 +357,9 @@ def main():
     inference.add_argument("--top-k", type=int)
     inference.add_argument("--inputs", type=float, nargs="+")
     args = parser.parse_args()
-    with (ROOT / "pyproject.toml").open("rb") as source:
-        config = tomllib.load(source).get("tool", {}).get("wgt", {})
+    config_path, config = load_config()
+    ROOT = config_path.parent
+    print(f"Config: {config_path}", file=sys.stderr)
     requested = requested_device(config, getattr(args, "device", None))
     if args.action == "infer":
         settings = table(config, "infer")
@@ -342,7 +388,7 @@ def main():
         raise ValueError("PyTorch is missing; run wgt sync, then retry") from error
     device = device_for(torch, requested)
     if args.action == "train":
-        train(torch, model_config, settings, data, device, args.force)
+        train(torch, model_config, settings, data, device, args.force, config_path)
     else:
         infer(torch, settings, metadata, device)
 

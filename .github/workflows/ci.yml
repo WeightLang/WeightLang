@@ -114,7 +114,7 @@ jobs:
 
           project = Path(os.environ["RUNNER_TEMP"]) / "wgt-starter"
           project.mkdir()
-          template = Path("crates/wgt/templates/tiny-lm.toml").read_text(encoding="utf-8")
+          template = Path("crates/wgt/templates/tiny-lm.pyproject.toml").read_text(encoding="utf-8")
           config = template.replace("PROJECT_NAME", "starter-ci").replace("PROJECT_MODULE", "local/starter_ci")
           # These runners have no GPU; test the declared dependencies using CPU wheels.
           config += '\n[tool.uv.sources]\ntorch = [{index = "pytorch-ci", marker = "sys_platform != \'darwin\'"}]\n'
@@ -136,11 +136,13 @@ jobs:
           project = Path(os.environ["RUNNER_TEMP"]) / "wgt-mlp-starter"
           project.mkdir()
           templates = Path("crates/wgt/templates")
-          config = (templates / "mlp.toml").read_text(encoding="utf-8")
+          config = (templates / "mlp.pyproject.toml").read_text(encoding="utf-8")
           config = config.replace("PROJECT_NAME", "mlp-ci").replace("PROJECT_MODULE", "local/mlp_ci")
           config += '\n[tool.uv.sources]\ntorch = [{index = "pytorch-ci", marker = "sys_platform != \'darwin\'"}]\n'
           config += '\n[[tool.uv.index]]\nname = "pytorch-ci"\nurl = "https://download.pytorch.org/whl/cpu"\nexplicit = true\n'
           (project / "pyproject.toml").write_text(config, encoding="utf-8")
+          wgt_config = (templates / "mlp.toml").read_text(encoding="utf-8").replace("PROJECT_MODULE", "local/mlp_ci")
+          (project / "wgt.toml").write_text(wgt_config, encoding="utf-8")
           shutil.copyfile(templates / "workflow.py", project / "workflow.py")
           shutil.copyfile(templates / "mlp.csv", project / "data.csv")
           PY

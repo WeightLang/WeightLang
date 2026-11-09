@@ -7,15 +7,26 @@
 
 ## 项目配置与 Python 依赖
 
-原生项目使用 `wgt.toml`，兼容已有 `wgt.mod`。可选的 PyTorch 模板使用标准
-`pyproject.toml`：Python 版本要求和 Python 库放在 `[project]`，WeightLang 的模型、
-训练、推理及模型包依赖配置放在 `[tool.wgt]`。同一项目只使用一份 WeightLang manifest；
-不要同时放置 `wgt.toml`、`wgt.mod` 或带 `[tool.wgt]` 的 `pyproject.toml`。
+`wgt.toml` 统一保存 WeightLang 项目、模型配方、运行设备、训练、推理、Python runner
+和 WGT 模型包依赖。Python 与 Rust 的依赖继续由各自工具管理：
+
+| 文件 | 配置内容 | 依赖锁文件 |
+| --- | --- | --- |
+| `wgt.toml` | `[project]`、`[model]`、`[runtime]`、`[train]`、`[infer]`、`[python]`、WGT `[dependencies]` | `wgt.sum` |
+| `pyproject.toml` | Python `[project]`、`requires-python`、Python 库依赖、`[tool.uv]` | `uv.lock` |
+| `Cargo.toml` | Rust package、crate 依赖与构建设置 | `Cargo.lock`，遵循 Cargo 规则 |
+
+这些文件可以共存；新 PyTorch 模板生成 `wgt.toml` 和普通 `pyproject.toml`。原生模板
+生成 `wgt.toml` 与 `model.wgt`，不要求 Python 环境。旧的 `wgt.mod` 和
+`pyproject.toml` 中整份 `[tool.wgt]` 配置继续兼容，但同一项目只能有一个 WGT 配置来源。
+同时存在 `wgt.toml`、`wgt.mod` 或带 `[tool.wgt]` 的 `pyproject.toml` 中的两种会报错；
+配置不会逐字段合并。迁移方式见[项目快速上手](project-quickstart.md#6-迁移旧项目配置)。
 
 Python 库由 `uv add`、`uv remove` 和 `uv sync` 管理，版本锁定在 `uv.lock`；
 WGT 模型包由 `wgt add`、`wgt remove` 和 `wgt fetch` 管理，锁定在 `wgt.sum`。
-在 PyTorch 项目中，模型包依赖写入 `[tool.wgt.dependencies]`，不会改写
-`[project].dependencies`。`wgt sync` 同步这两类依赖，`wgt train`、`wgt infer`
+新项目的模型包依赖写入 `wgt.toml` 的 `[dependencies]`；旧格式继续使用
+`[tool.wgt.dependencies]`。这些命令不改写 Python 的 `[project].dependencies` 或
+Rust 的 `[dependencies]`。`wgt sync` 同步模型包及已声明的 Python 环境，`wgt train`、`wgt infer`
 和 `wgt run` 通过 uv 使用项目 Python 环境。完整例子见[项目快速上手](project-quickstart.md)。
 
 ## Rust 应用与 WGT 模型的入口
