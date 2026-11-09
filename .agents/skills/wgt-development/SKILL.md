@@ -15,6 +15,8 @@ description: 编写和验证本仓库当前 WGT 模型定义与 Rust 主程序�
 
 gate/route 的同形概率张量也参与轴名合并与冲突检查；route 两支必须兼容。只保留既有 `[1]` 标量门例外，不把 `[1,1]` 或其他单元素 shape 扩展成标量广播。
 
+高频形状变换优先写 `value as [d1,...,dn]`，等价于内置 `reshape(value,[d1,...,dn])`；两种写法均保留，复用既有 Reshape IR。按 `.T`、索引、调用相同的后缀顺序结合，优先于一元/二元运算；重塑整个乘积写 `(a @ b) as [N]`。维度必须是值为正整数的数值字面量，沿用 1..8 轴、单轴 1..16384、元素总数一致的合同；不接受变量、算术表达式或 `-1` 推断，结果清除轴名。使用共享前端，保持 typed 操作无 AD；普通宿主列表无此张量操作。完整示例为 `examples/native_training/non_backprop/ff/model.wgt`，语言与后端检查见 `docs/tensor-geometry.md`。
+
 ## 架构迁移方向
 
 Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT 与 `std/` 聚焦可复用模型架构及模型内部参数/张量流、子模块、分支、循环和状态，并可定义可微 loss。旧通用 WGT 宿主脚本架构正在退出，不新建宿主控制脚本，也不将其描述为持续支持方向；这不表示现有代码已经删除。
@@ -153,7 +155,7 @@ GPU/WGSL（本地 WGT 0.5）：devices() 枚举 CPU 与硬件 GPU；training_dev
 
 ### 无 AD 学习与状态组合
 
-用 `std/snn`、`std/plasticity`、`std/ff` 的纯公式描述模型内部更新，通过 `<-` 同时提交元组返回的候选；不要引入算法关键字或旧宿主训练 DSL。完整签名与示例见 [local-learning](../../../docs/local-learning.md) 和 [标准库](../../../docs/standard-library.md#脉冲与局部学习模块)。`ge(a,b)` 同形返回精确 0/1、相等为 1、拒绝 AD；`div`/`/`、`sqrt`、动态 `scale(x,s:f32[1])` 有常规 VJP，当前目录共 48 项 IR。多轴参数读取仍得到向量，传矩阵公式前显式 reshape。
+用 `std/snn`、`std/plasticity`、`std/ff` 的纯公式描述模型内部更新，通过 `<-` 同时提交元组返回的候选；不要引入算法关键字或旧宿主训练 DSL。完整签名与示例见 [local-learning](../../../docs/local-learning.md) 和 [标准库](../../../docs/standard-library.md#脉冲与局部学习模块)。`ge(a,b)` 同形返回精确 0/1、相等为 1、拒绝 AD；`div`/`/`、`sqrt`、动态 `scale(x,s:f32[1])` 有常规 VJP，当前目录共 48 项 IR。多轴参数读取仍得到向量，传矩阵公式前用 `weight as [2,2]` 等形式显式给出 shape。
 
 复用候选 schema 的 `candidate_updatable`，不要从 frozen/learn 猜测全部可进化参数。Rust/Python GA 使用同一固定 schema、域感知变异、独立 episode、明确 reset 和完整搜索 checkpoint；FF 调度调用 `adapt(positive,negative,rate)`，本地解析梯度不等同数学无梯度。修改这些能力时运行 `adaptive_numeric`、`local_learning`、`composition_lowering`、`wgt-model --test evolution` 以及 Python 对应差分 tests；真实服务测试需要允许 Unix IPC 的环境，默认 ignored 不算已执行。
 

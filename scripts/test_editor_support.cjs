@@ -36,7 +36,7 @@ for (const [capture, text] of [['keyword', 'state'], ['variable', 'activity'], [
 const sample = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/editor_current.wgt');
 const vocabulary = JSON.parse(fs.readFileSync(path.join(root, 'editors/vocabulary.json'), 'utf8'));
 assert(vocabulary.keywords.includes('against'), 'against must be highlighted as a training keyword');
-for (const keyword of ['blend', 'repeat', 'indexed', 'carrying']) {
+for (const keyword of ['blend', 'repeat', 'indexed', 'carrying', 'as']) {
   assert(vocabulary.keywords.includes(keyword), `${keyword} must be highlighted as a model expression keyword`);
 }
 const candidate = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_control.wgt');
@@ -70,6 +70,7 @@ for (const query of ['highlights', 'outline', 'indents', 'brackets']) {
     assert(/keyword[^\n]*`train`/.test(captures), 'train expression keyword must be highlighted');
     assert(/keyword[^\n]*`against`/.test(captures), 'against keyword must be highlighted');
     assert(/keyword[^\n]*`using`/.test(captures), 'using keyword must be highlighted');
+    assert(/keyword[^\n]*`as`/.test(captures), 'reshape suffix must be highlighted as a keyword');
     assert(/function[^\n]*`update`/.test(captures), 'train strategy name must be highlighted as a function');
     assert(/function[^\n]*`save_public`/.test(captures), 'native declaration name must be highlighted');
     assert(/comment[^\n]*`# @contexts/.test(captures), 'declaration annotations must remain comments');

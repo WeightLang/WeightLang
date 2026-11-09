@@ -5,7 +5,7 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const prelude = JSON.parse(read('language/prelude.json')).entries;
 const vocabulary = {
-  keywords: 'blend repeat indexed carrying agent environment state learn assert async await spawn tasks sleep break checkpoint collect continue else fn for from frozen if import in init input json layer let load mix model onehot operators output overwrite parameter reload return sample save size text then to train on against rate clip target using wgt while yield native intrinsic'.split(' '),
+  keywords: 'blend repeat indexed carrying agent environment state learn as assert async await spawn tasks sleep break checkpoint collect continue else fn for from frozen if import in init input json layer let load mix model onehot operators output overwrite parameter reload return sample save size text then to train on against rate clip target using wgt while yield native intrinsic'.split(' '),
   builtins: [...new Set(prelude.filter(e => e.kind === 'function' && e.contexts.includes('ordinary_function')).map(e => e.name))].sort(),
   intrinsics: [...new Set(prelude.filter(e => e.kind === 'intrinsic' && e.contexts.some(context => ['tensor', 'tensor_forward', 'tensor_loss'].includes(context))).map(e => e.name))].sort(),
   layers: [...new Set(prelude.filter(e => e.kind === 'layer').map(e => e.name))].sort(),

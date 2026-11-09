@@ -15,6 +15,11 @@ native intrinsic depth_gate(depth, literal_index);
 fn forward(x) {
     return route(depth_gate(depth, 1), x, x);
 }
+# The six flat values are two rows of three features; transpose swaps these axes.
+# Chained shape suffixes return the resulting matrix to the flat model boundary.
+fn reshape_features(x) {
+    return x as [2, 3].T as [6];
+}
 fn strategy(model, inputs, targets) {
     return train model on inputs against targets using update;
 }

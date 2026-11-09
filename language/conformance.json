@@ -1,6 +1,10 @@
 {
   "schema_version": 1,
   "cases": [
+    {"id":"tensor-reshape-suffix","context":"tensor_forward","rust_accepts":true,"editor_accepts":true,"editor_captures":[{"capture":"keyword","text":"as"}],"source":"wgt 0.5\nmodel ReshapeSuffix\ninput x: f32[6]\noutput y: f32[6]\nfn forward(x){return x as [2,3].T as [6];}\n"},
+    {"id":"tensor-reshape-suffix-arguments","context":"tensor_forward","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nmodel MatrixSuffix\ninput x: f32[4]\noutput y: f32[2]\nfn forward(x){return matmul(x as [2,2], [1,1] as [2,1]) as [2];}\n"},
+    {"id":"tensor-reshape-suffix-element-count","context":"tensor_forward","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel InvalidShape\ninput x: f32[6]\noutput y: f32[1]\nfn forward(x){return x as [2,2].mean;}\n"},
+    {"id":"tensor-reshape-suffix-inferred-axis","context":"tensor_forward","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nmodel InvalidShape\ninput x: f32[6]\noutput y: f32[1]\nfn forward(x){return x as [2,-1].mean;}\n"},
     {"id":"let-group-host","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let a=1,\n b=a+1,c={x:[a,b],y:2};return c.x;}\n"},
     {"id":"let-group-forward","context":"tensor_forward","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[2]\noutput y: f32[1]\nfn forward(x){let a=square(x), b=a.mean;return b;}\n"},
     {"id":"let-group-loss","context":"tensor_loss","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x){return x;}\nfn loss(prediction,target){let a=prediction-target,b=square(a);return b.mean;}\n"},

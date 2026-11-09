@@ -51,6 +51,17 @@ for current in [torch.tensor([0.6, 0.2]), torch.tensor([0.6, 1.0])]:
 
 完整定义：[FF model.wgt](../examples/native_training/non_backprop/ff/model.wgt)。首期规则为 Dense/ReLU，goodness 是未归一化活动平方和；每一对正负样本从同一组旧参数计算更新，优化 pair mean 局部二元对数似然。向后层传递前使用 L2 长度归一化，零向量保持为零。[原始 FF 目标](https://arxiv.org/html/2212.13345v1)
 
+模型内用 `as [...]` 直接标出公式需要的形状。参数读取与输入端口提供向量；weight 的行对应输出单元、列对应输入特征，bias/input 各为列向量。归一化后重塑回端口要求的 `[2]`：
+
+```wgt
+fn forward(input: f32[2]) -> f32[2] {
+    let activity = ff.dense_relu(weight as [2, 2], bias as [2, 1], input as [2, 1]);
+    return ff.normalize(activity, epsilon) as [2];
+}
+```
+
+`as [...]` 与 `reshape(value,[...])` 使用同一形状检查和 Reshape IR；完整规则见[张量几何](tensor-geometry.md#直接在张量后面写形状)。
+
 ```python
 import torch
 import weightlang as wl
