@@ -72,6 +72,8 @@ jobs:
           test "$(git write-tree)" = "$SOURCE_TREE"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: rust-sdk
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -79,12 +81,33 @@ jobs:
         run: >-
           cargo package --locked --allow-dirty
           -p wgtime -p wgt-language -p wgt-model-macros -p wgt-model
+      - name: Select only the current release archives
+        run: |
+          python - <<'PYSDK'
+          from pathlib import Path
+          import shutil
+          import tomllib
+          version = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
+          destination = Path("dist/rust")
+          destination.mkdir(parents=True, exist_ok=True)
+          for name in ("wgtime", "wgt-language", "wgt-model-macros", "wgt-model"):
+              source = Path("target/package") / f"{name}-{version}.crate"
+              shutil.copyfile(source, destination / source.name)
+          PYSDK
       - name: Build the matching native service
         run: cargo build --locked -p wgtime-service --bin wgtime
       - name: Verify installed crates with a real downstream application
-        run: python scripts/test_rust_sdk_package.py --daemon target/debug/wgtime
+        run: python scripts/test_rust_sdk_package.py --packages dist/rust --daemon target/debug/wgtime
+      - name: Rehearse registry publication of the tested candidate
+        if: inputs.release-version != ''
+        run: |
+          cargo publish --dry-run --locked --allow-dirty --registry crates-io \
+            -p wgtime -p wgt-language -p wgt-model-macros -p wgt-model
+          for archive in dist/rust/*.crate; do
+            cmp "$archive" "target/package/$(basename "$archive")"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: rust-sdk
-          path: target/package/*.crate
+          path: dist/rust/
           if-no-files-found: error
