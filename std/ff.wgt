@@ -1,0 +1,32 @@
+wgt 0.5
+operators ForwardForward
+
+# Sum of squares of UNNORMALIZED activities, returned as f32[1].
+fn goodness(activity) {
+    return sum(activity * activity);
+}
+
+# L2 length normalization, not LayerNorm. epsilon is positive f32[1].
+# Zero remains zero; lengths below epsilon are not normalized to unit length.
+fn normalize(activity, epsilon) {
+    let norm = sqrt(sum(activity * activity));
+    let divisor = -minimum(-norm, -epsilon);
+    return scale(activity, [1] / divisor);
+}
+
+# weight=[outputs,inputs], input=[inputs,1], bias=[outputs,1].
+fn dense_relu(weight, bias, input) {
+    return relu(weight @ input + bias);
+}
+
+# Analytic local gradient ascent for the MEAN objective of one positive/negative
+# pair. Both activities use the same old parameters. The factor 2 from h^2
+# cancels the factor 1/2 from pair averaging. rate/threshold are f32[1].
+# This needs no AD tape, but is mathematically a local gradient, not gradient-free.
+fn update_relu(weight, bias, positive, negative, rate, threshold) {
+    let pos = relu(weight @ positive + bias);
+    let neg = relu(weight @ negative + bias);
+    let pos_delta = scale(pos, rate * ([1] - sigmoid(sum(pos * pos) - threshold)));
+    let neg_delta = scale(neg, -(rate * sigmoid(sum(neg * neg) - threshold)));
+    return (weight + pos_delta @ positive.T + neg_delta @ negative.T, bias + pos_delta + neg_delta);
+}

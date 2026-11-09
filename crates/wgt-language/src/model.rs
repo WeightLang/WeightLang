@@ -20,6 +20,10 @@ pub struct ParameterSchema {
     pub shape: Vec<usize>,
     pub frozen: bool,
     pub learn: Option<adaptive::LearnDomain>,
+    /// Eligible for atomic external candidate updates; independent of AD support.
+    /// Older schemas default to false rather than accidentally evolving frozen/prob storage.
+    #[serde(default)]
+    pub candidate_updatable: bool,
 }
 
 /// Source and validated schemas; no initialized parameters, optimizer or service connection.
@@ -87,7 +91,7 @@ impl ModelDefinition {
                 let count = validate_shape(&p.shape)?;
                 total = total.checked_add(count).context("parameter size overflow")?;
                 ensure!(total <= MAX_PARAMETER_ELEMENTS, "model parameter element limit exceeded");
-                Ok(ParameterSchema { name:p.name, shape:p.shape, frozen:p.frozen, learn:p.learn })
+                Ok(ParameterSchema { name:p.name, shape:p.shape, frozen:p.frozen, learn:p.learn, candidate_updatable:!p.frozen && !p.probability })
             }).collect::<Result<Vec<_>>>()?;
             (ModelInterface {input,output,output_type,target}, parameters)
         } else {
@@ -101,7 +105,7 @@ impl ModelDefinition {
                         .chain(layer.bias.then(||(format!("{}.bias",layer.name),vec![layer.output]))) {
                         total=total.checked_add(validate_shape(&shape)?).context("parameter size overflow")?;
                         ensure!(total <= MAX_PARAMETER_ELEMENTS, "model parameter element limit exceeded");
-                        parameters.push(ParameterSchema{name,shape,frozen:false,learn:None});
+                        parameters.push(ParameterSchema{name,shape,frozen:false,learn:None,candidate_updatable:true});
                     }
                 }
             }

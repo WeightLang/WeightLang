@@ -13,7 +13,15 @@
 
 模型执行、参数和优化器状态由唯一的机器级 `wgtime` 服务持有。定义解析、编译期检查和源码嵌入不连接服务或初始化模型；Rust 程序须先显式调用 `Client::connect()`，再请求初始化、训练或权重保存。当前 facade 提供 `Model::save_weights`，没有公共训练 checkpoint API。Rust facade 通过 IPC 使用服务端原生编译 forward；这不意味着旧脚本执行路径已全部删除。API 已在本地实现并通过定点验证，尚未发布；不代表更广泛的能力支持。完整签名与契约见 [Rust 后端契约](native-backend.md)。
 
-`wgt compile model.wgt --target rust [-o src/model.rs] [--crate-path wgt]` 导出可被 Rust `include!` 的自包含架构模块；源文件 `-` 表示 stdin，省略 `-o` 输出到 stdout，已有目标文件拒绝覆盖。生成的 `SOURCE` 和 `definition() -> wgt::Result<ModelDefinition>` 保留声明与纯计算 imports，定义构造仍调用同一前端。服务编译路径覆盖当前 44 个模型 IR 指令，包括普通写入、工作内存和资源查询；Rust `Model::forward` 成功后提交显式写入，执行失败回滚。数值、梯度、状态与实际生成代码的验收范围见 [Rust SDK](rust-sdk.md)。
+`wgt compile model.wgt --target rust [-o src/model.rs] [--crate-path wgt]` 导出可被 Rust `include!` 的自包含架构模块；源文件 `-` 表示 stdin，省略 `-o` 输出到 stdout，已有目标文件拒绝覆盖。生成的 `SOURCE` 和 `definition() -> wgt::Result<ModelDefinition>` 保留声明与纯计算 imports，定义构造仍调用同一前端。服务编译路径覆盖当前 48 个模型 IR 指令，包括普通写入、工作内存和资源查询；Rust `Model::forward` 成功后提交显式写入，执行失败回滚。数值、梯度、状态与实际生成代码的验收范围见 [Rust SDK](rust-sdk.md)。
+
+### 状态模型与局部学习
+
+WGT 0.5 的扩展沿用 `state`、typed `fn` 与 `<-`，不新增 SNN、FF 或 GA 关键字。操作可以静态调用其他具名操作、拥有子模型及实例数组；嵌套调用展开到同一次事务，读写效果包含所有子调用。typed `forward` 仍禁止任何参数/状态写入，普通旧 forward 保留原行为。调用图与实例图拒绝递归；操作内联深度最多 32、展开调用最多 1024，实例总数最多 256。完整合同见[模型操作](model-operations.md)。
+
+模型纯函数支持 2..16 项的扁平张量元组 `(a,b)` 及 `let (x,y) = helper(...);`。各项可以具有不同 shape，绑定数量必须匹配；元组只是编译期组合，不进入外部端口或 IR，不支持嵌套元组。元组及其别名不可重绑定，绑定不能在 tensor/tuple 之间改类型。分支或 while 内新建的元组不能在外层使用，解构出的张量须在所有路径赋值后才能读取。纯 helper 参数左至右各求值一次，局部绑定仍不可重名；宿主脚本不支持这种张量元组。示例和全部签名见[标准库](standard-library.md#脉冲与局部学习模块)。
+
+新增 `std/snn`、`std/plasticity`、`std/ff` 显式导入模块。它们返回下一状态或候选参数，由模型用 `<-` 提交。宿主负责时间步、正负样本与种群调度；Rust 原生 GA 和 Python API 见[无反传学习](local-learning.md)。这些是当前源码实现，未通过本次开发发布版本。
 
 ```rust,ignore
 use wgt::{include_model, model, Client, InstanceOptions, ModelDefinition};
@@ -163,7 +171,7 @@ fn main() {
 值包括有限数值、bool、字符串、null、列表、JSON 对象和不透明资源句柄。
 `let name = expr;` 绑定变量，`name = expr;` 修改已有绑定。
 
-`let a = expr, b = expr, c = expr;` 一次声明多项，可在逗号前后换行。每项从左到右求值一次并立即绑定，后项可引用前项；等价于同一块内连续的普通 `let`，不新增作用域或事务，后项失败不回滚前项副作用。普通函数保留原有重绑定规则，forward/loss 保留原有声明与形状约束。函数实参、列表和记录字面量内部的逗号由各自括号消费；最外层逗号才分隔声明，不提供元组或多目标赋值。`collect` 和绑定结果的 `learn` 必须独立书写，不能混入连续声明。组末不能有尾随逗号。
+`let a = expr, b = expr, c = expr;` 一次声明多项，可在逗号前后换行。每项从左到右求值一次并立即绑定，后项可引用前项；等价于同一块内连续的普通 `let`，不新增作用域或事务，后项失败不回滚前项副作用。普通函数保留原有重绑定规则，forward/loss 保留原有声明与形状约束。函数实参、列表和记录字面量内部的逗号由各自括号消费；最外层逗号才分隔连续声明；这里的普通宿主脚本不提供张量元组或多目标赋值，模型中的元组规则见本文开头。`collect` 和绑定结果的 `learn` 必须独立书写，不能混入连续声明。组末不能有尾随逗号。
 完整示例见 [连续声明回归](../crates/wgtime-core/tests/continuous_let.rs)。
 
 支持函数调用、列表/对象索引、一元 `- !`、算术 `+ - * / % @ **`、比较及短路 `&& ||`。
@@ -255,7 +263,7 @@ checkpoint 使用保存的优化器。值、路径各求值一次；相对路径
 
 控制流为 `if condition { ... } else { ... }`、`while condition { ... }`、
 `for name in list { ... }`、`break;`、`continue;`、`return expr;`。
-当前函数内共享变量环境，if/for 不创建词法局部作用域；重复 let 覆盖绑定。
+普通宿主脚本在函数内共享变量环境，if/for 不创建词法局部作用域；重复 let 覆盖绑定。模型张量元组的绑定与分支规则单独受前述约束。
 旧普通脚本兼容层保留 `module NAME` 模块及相对 `./module.wgt` 导入；普通及 async 函数的解析边界见[普通模块解析实现](../crates/wgt-language/src/script/modules.rs)。它们不是 forward/loss 的张量算子。纯张量 `operators NAME` 库是独立的模型导入机制，见[自定义算子](custom-operators.md)。旧 `std/openresponses/harness` 和对应宿主脚本示例已移除；新应用由 Rust 负责工具映射、网络交互与控制循环，不能用历史脚本用例证明当前客户端编译或模型服务支持。
 无任意 Python、shell 或宿主回调。源码函数嵌套与求值均有预算限制。
 
@@ -338,7 +346,10 @@ workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 | `permute(x,[...])` | rank 1..8 的完整轴排列；interpreter 为零拷贝 strided view，其他算子按需物化 |
 | `batch_matmul(a,b)` | rank-3 `[B,M,K] @ [B,K,N] -> [B,M,N]`，batch 维及已有名称相等，保留任一侧的 batch 名称；不广播 |
 | `layer_norm(x,gamma,beta,axis,epsilon)` | 输出保留 x 的 shape/轴名；gamma、beta 为所选轴宽度的向量，已有名称须与该轴一致；axis 为范围内的非负整数字面量或轴名字符串，epsilon 为正有限数字面量 |
-| `scale(x,literal)` | 乘以有限有符号数值字面量，不广播且保持 shape，行为待验证 |
+| `scale(x,s)` | `s` 为有限有符号字面量或 `f32[1]` 张量；显式标量缩放，保留 x 的 shape/轴名；`[1,1]` 不是标量 |
+| `ge(a,b)` | 同形有限 f32 逐元素 `a>=b`，返回同形精确 0/1；相等为 1；执行到该节点的 AD 明确拒绝，不使用 STE |
+| `div(a,b)` / `a/b` | 同形逐元素除法，无广播；除零或其他非有限结果报错；常规 VJP |
+| `sqrt(x)` | 同形平方根；负输入报非有限错误；零处非零上游导数报错，零上游不产生 NaN |
 | `conv(x,kernel,bias,stride,padding,dilation,groups)` | 完整七参数签名，无默认值；无批次、通道优先的 f32 卷积。输入 `x` 为 `[Cin,S1,...,Sd]`，kernel 为 `[Cout,Cin/groups,K1,...,Kd]`，bias 必须为 `[Cout]`；空间 rank `d` 为 1..3，输出为 `[Cout,O1,...,Od]`，`Oa=floor((Sa+2*padding[a]-(dilation[a]*(Ka-1)+1))/stride[a])+1`。stride/dilation 各为长度 d 的正整数常量列表，元素 1..16384；padding 为长度 d 的非负整数常量列表，元素 0..16384，对称零填充；groups 为 1..16384 的整数常量，必须整除 Cin、Cout，kernel 输入通道轴须等于 Cin/groups。输入/权重参数以行优先扁平 f32 存储，必须显式 `reshape` 出所需几何；单向量模型入口不提供 batch 轴。完整语义见[卷积专题](convolution.md)。core 卷积 3/3 和真实 wgtime service 3 项已通过，覆盖训练、权重恢复续训和释放；这是局部验证 |
 | `gate(p,x)` | 返回 p*x；p 的 shape 为 [1] 或与 x 完全相同，每项须在 [0,1]；同形 p/x 的轴名按位置兼容并合并到输出。[1] 门按元素应用；推理时 p 全为 0 跳过 x 表达式 |
 | `route(p,a,b)` | 返回 p*a+(1-p)*b；a/b shape 完全相同且轴名兼容，p 的 shape 为 [1] 或与 a 完全相同且各项在 [0,1]；同形 p 参与轴名合并，仅元素数相同不足以匹配。推理时 p 全为 1 只求值 a，全为 0 只求值 b，否则计算两边 |

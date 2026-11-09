@@ -12,8 +12,7 @@ fn retired_calls_are_reserved_and_rejected_before_execution() {
     ] {
         let source = format!("wgt 0.5\nfn main() {{ let ignored = {name}({args}); }}");
         let error = script::parse(&source).unwrap_err().to_string();
-        let expected = if name == "train" { "expected )" } else { "removed" };
-        assert!(error.contains(expected), "{name}: {error}");
+        assert!(error.contains("removed"), "{name}: {error}");
         let source = format!("wgt 0.5\nfn {name}() {{ return 1; }}\nfn main() {{}}");
         assert!(script::parse(&source).unwrap_err().to_string().contains("reserved"), "{name}");
     }

@@ -32,6 +32,9 @@ enum Op {
     LayerNorm(usize, usize, usize, usize, tensor::AxisGroups, f32),
     SoftmaxAxis(usize, usize, tensor::AxisGroups),
     Scale(usize, usize, f32),
+    ScaleBy(usize, usize, usize),
+    Ge(usize, usize, usize),
+    Div(usize, usize, usize),
 
     Constant(usize, usize),
     Minimum(usize, usize, usize),
@@ -267,6 +270,11 @@ impl AdaptiveSession {
                         let (r,x) = (dest(out)?,reg(input)?);
                         Op::Scale(r,x,*factor)
                     },
+                    Instruction::ScaleBy { out, input, scalar } => {
+                        Op::ScaleBy(dest(out)?,reg(input)?,reg(scalar)?)
+                    },
+                    Instruction::Ge { out, left, right } => Op::Ge(dest(out)?,reg(left)?,reg(right)?),
+                    Instruction::Div { out, left, right } => Op::Div(dest(out)?,reg(left)?,reg(right)?),
                     Instruction::MemoryAlloc { out, slots, width } => {
                         Op::MemoryAlloc(dest(out)?, *slots, *width)
                     }
@@ -377,6 +385,7 @@ impl AdaptiveSession {
                     Instruction::Detach { out, input }
                     | Instruction::Exp { out, input }
                     | Instruction::Log { out, input }
+                    | Instruction::Sqrt { out, input }
                     | Instruction::LogSoftmax { out, input }
                     | Instruction::Tanh { out, input }
                     | Instruction::Sigmoid { out, input }
@@ -394,6 +403,7 @@ impl AdaptiveSession {
                             Instruction::Detach { .. } => Unary::Detach,
                             Instruction::Exp { .. } => Unary::Exp,
                             Instruction::Log { .. } => Unary::Log,
+                            Instruction::Sqrt { .. } => Unary::Sqrt,
                             Instruction::LogSoftmax { .. } => Unary::LogSoftmax,
                             Instruction::ValidateProbabilities { .. } => Unary::ValidateProbabilities,
                             _ => unreachable!(),
@@ -1005,6 +1015,26 @@ impl AdaptiveSession {
                 Op::Scale(r,x,factor) => {
                     self.ready(x)?;
                     for (i,v) in self.registers[x].iter().enumerate() { self.scratch[i] = v * factor; }
+                    output = Some(r);
+                },
+                Op::ScaleBy(r,x,scalar) => {
+                    self.ready(x)?; self.ready(scalar)?;
+                    let factor = self.registers[scalar][0];
+                    for (i,v) in self.registers[x].iter().enumerate() { self.scratch[i] = v * factor; }
+                    output = Some(r);
+                },
+                Op::Ge(r,a,b) | Op::Div(r,a,b) => {
+                    self.ready(a)?; self.ready(b)?;
+                    if matches!(op, Op::Ge(..)) {
+                        ensure!(tape.is_none(), "ge does not support automatic differentiation; use non-AD evaluation");
+                    }
+                    for i in 0..self.program.registers[r].len {
+                        self.scratch[i] = if matches!(op, Op::Ge(..)) {
+                            if self.registers[a][i] >= self.registers[b][i] { 1. } else { 0. }
+                        } else {
+                            self.registers[a][i] / self.registers[b][i]
+                        };
+                    }
                     output = Some(r);
                 },
                 Op::Linear(r, x, w, b) => {

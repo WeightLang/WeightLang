@@ -66,7 +66,7 @@ wgt compile model.wgt --target rust --crate-path renamed_wgt -o src/model.rs
 
 ## 当前模型覆盖范围
 
-覆盖基准为 WGT 0.5 共享前端产生的三种模型计划：顺序 `Graph`、内部程序 `Forward` 和具名 `Operations`。内部程序的完整集合由 [tensor_contracts.json](../language/tensor_contracts.json)列出的 **44 个 IR 指令**定义。编译器对枚举逐项处理；[指令差分测试](../crates/wgtime-core/tests/compiled_instruction_coverage.rs)对照这份目录，防止新增指令后遗漏编译验收。
+覆盖基准为 WGT 0.5 共享前端产生的三种模型计划：顺序 `Graph`、内部程序 `Forward` 和具名 `Operations`。内部程序的完整集合由 [tensor_contracts.json](../language/tensor_contracts.json)列出的 **48 个 IR 指令**定义。编译器对枚举逐项处理；[指令差分测试](../crates/wgtime-core/tests/compiled_instruction_coverage.rs)对照这份目录，防止新增指令后遗漏编译验收。状态子模型、显式 FF 更新与 `wgt::evolution` 原生 GA 的接口见[无反传学习](local-learning.md)。
 
 | 指令类别 | 当前覆盖 |
 | --- | --- |

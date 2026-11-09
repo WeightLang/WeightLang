@@ -1,0 +1,24 @@
+wgt 0.5
+operators Spiking
+
+# One discrete step, subtractive reset, at most one spike per element.
+# voltage/current/threshold have the same shape; leak is f32[1].
+# The caller chooses dt and leak=exp(-dt/tau), owns voltage, and commits next_v.
+# Thresholds must be positive; no refractory period or event queue is implicit.
+fn lif(voltage, current, leak, threshold) {
+    let integrated = scale(voltage, leak) + current;
+    let spike = ge(integrated, threshold);
+    return (integrated - spike * threshold, spike);
+}
+
+# Integrate-and-fire without leak, with the same threshold/reset convention.
+fn integrate_fire(voltage, current, threshold) {
+    let integrated = voltage + current;
+    let spike = ge(integrated, threshold);
+    return (integrated - spike * threshold, spike);
+}
+
+# Decay old activity before adding this step's spike. decay is f32[1].
+fn trace(previous, spike, decay) {
+    return scale(previous, decay) + spike;
+}

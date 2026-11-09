@@ -10,6 +10,7 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+mod composition;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ArgumentSchema {
@@ -41,12 +42,8 @@ pub struct OperationsPlan {
 }
 
 pub(crate) fn lower(text: &str, materialize: bool) -> Result<OperationsPlan> {
-    let unit = crate::source::split(text)?;
-    ensure!(
-        unit.models.is_empty(),
-        "operation submodel declarations are not yet supported"
-    );
-    let functions = script::parse::parse_functions(&unit.functions)?;
+    let flat = composition::flatten(text)?;
+    let functions = flat.functions;
     ensure!(
         !text.contains("wgt_operation_input") && !text.contains("wgt_operation_output"),
         "reserved operation compiler name"
@@ -57,7 +54,7 @@ pub(crate) fn lower(text: &str, materialize: bool) -> Result<OperationsPlan> {
     );
     let mut declarations = String::new();
     let mut state_names = BTreeSet::new();
-    for line in unit.declarations.lines() {
+    for line in flat.declarations.lines() {
         let line = line.split('#').next().unwrap_or("").trim();
         if let Some(body) = line.strip_prefix("state ") {
             let body = body.trim_end_matches(';').trim();
@@ -172,11 +169,7 @@ pub(crate) fn lower(text: &str, materialize: bool) -> Result<OperationsPlan> {
                 kind: Stmt::Return(Expr::List(vec![Expr::Number(0.)])),
             });
         }
-        let mut helpers = functions
-            .iter()
-            .filter(|(_, f)| f.signature.is_none() && !f.args.is_empty())
-            .map(|(n, f)| (n.clone(), f.clone()))
-            .collect::<script::parse::Program>();
+        let mut helpers = functions.clone();
         let mut forward = function.clone();
         forward.args = vec!["wgt_operation_input".into()];
         forward.signature = None;
@@ -254,7 +247,7 @@ pub(crate) fn lower(text: &str, materialize: bool) -> Result<OperationsPlan> {
             names.dedup();
         }
         ensure!(
-            name != "forward"
+            !flat.readonly.contains(name)
                 || effects.writes_parameters.is_empty() && effects.writes_state.is_empty(),
             "forward must not update state or parameters; use a named update operation"
         );
@@ -264,9 +257,9 @@ pub(crate) fn lower(text: &str, materialize: bool) -> Result<OperationsPlan> {
         for parameter in &mut plan.parameters {
             parameter.data = Vec::new();
         }
-        entries.push((
+        if let Some(public_name) = flat.entries.get(name) { entries.push((
             OperationSchema {
-                name: name.clone(),
+                name: public_name.clone(),
                 inputs: function
                     .args
                     .iter()
@@ -280,7 +273,7 @@ pub(crate) fn lower(text: &str, materialize: bool) -> Result<OperationsPlan> {
                 effects,
             },
             plan,
-        ));
+        )); }
     }
     ensure!(
         !entries.is_empty(),
@@ -305,6 +298,7 @@ impl OperationsPlan {
                 shape: p.shape.clone(),
                 frozen: p.frozen,
                 learn: p.learn.clone(),
+                candidate_updatable: !p.frozen && !p.probability,
             })
             .collect()
     }

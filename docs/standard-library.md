@@ -1,6 +1,6 @@
 # 模型内部标准库
 
-WGT 声明模型结构与可微计算，Rust 程序负责实例化、数据、训练调度和应用控制。这里的标准库仅包含可嵌入模型的纯张量函数，不提供网络、数据读取、异步任务或工具调度模块。当前为本地 WGT 0.5 实现，尚未发布。
+WGT 声明模型结构、内部计算与显式局部更新，Rust/Python 程序负责实例化、数据、训练调度和应用控制。这里的标准库仅包含可嵌入模型的纯张量函数，不提供网络、数据读取、异步任务或工具调度模块。当前为本地 WGT 0.5 实现，尚未发布。
 
 ## 语言核心与标准库的边界
 
@@ -52,6 +52,31 @@ fn loss(prediction, target) {
 | `std/numerics` | `relax(estimate,observation,gain)` | 三个输入为同形非空 f32 张量，返回 `estimate + gain * (observation-estimate)`，形状不变 |
 
 所有参数必填。注意力函数不自动除以 `sqrt(D)`；调用方按需预缩放 `q`，例如 `D=4` 时使用 `scale(q,0.5)`。它不提供 mask、batch、多头拆分或缓存。数值更新函数不广播步长，也不限制 `gain` 到 `[0,1]`；标量情况用显式 `[1]` 张量。两者都不创建参数或状态，调用方决定参数共享关系，梯度由展开后的基础原语计算。
+
+## 脉冲与局部学习模块
+
+使用 `import snn from "std/snn"`、`import plasticity from "std/plasticity"`、`import ff from "std/ff"` 显式导入。所有参数必填，无默认值或隐式 batch；函数不分配参数、持有 state 或提交写入。元组返回值必须在模型内解构，外部端口仍是向量或 void。
+
+| 模块 | 完整签名 | 形状、语义与输出 |
+| --- | --- | --- |
+| `std/snn` | `lif(voltage,current,leak,threshold)` | voltage/current/threshold 同形，leak 为 `[1]`；`u=scale(voltage,leak)+current`，返回 `(u-ge(u,threshold)*threshold, ge(u,threshold))` |
+| 同上 | `integrate_fire(voltage,current,threshold)` | 三参同形；无泄漏的相同阈值/减阈值复位，返回 `(next_voltage,spike)` |
+| 同上 | `trace(previous,spike,decay)` | previous/spike 同形，decay 为 `[1]`；先衰减旧迹再加当前脉冲 |
+| `std/plasticity` | `hebbian(weight,pre,post,rate)` | weight `[M,N]`，pre `[N,1]`，post `[M,1]`，rate `[1]`；返回 `weight+rate*(post@pre.T)` |
+| 同上 | `oja(weight,pre,post,rate)` | 单输出单元：weight/pre 同形，post/rate 为 `[1]`；返回 `weight+rate*post*(pre-post*weight)` |
+| 同上 | `pair_stdp(weight,pre,post,pre_trace,post_trace,pre_decay,post_decay,plus,minus)` | weight `[M,N]`，pre/pre_trace `[N,1]`，post/post_trace `[M,1]`，其余 `[1]`；返回 `(next_weight,next_pre_trace,next_post_trace)` |
+| `std/ff` | `goodness(activity)` | 平方和，输出 `[1]`；在长度归一化前计算 |
+| 同上 | `normalize(activity,epsilon)` | epsilon `[1]`；除以 `max(L2长度,epsilon)`，保持 activity shape，零向量保持为零 |
+| 同上 | `dense_relu(weight,bias,input)` | weight `[M,N]`，bias `[M,1]`，input `[N,1]`；返回 `[M,1]` ReLU 活动 |
+| 同上 | `update_relu(weight,bias,positive,negative,rate,threshold)` | weight `[M,N]`，bias `[M,1]`，positive/negative `[N,1]`，rate/threshold `[1]`；返回同形 `(next_weight,next_bias)` |
+
+SNN 的 threshold 应为正值，时间步由宿主约定，leak/decay 的物理含义由调用方选择。每一步每个元素最多一个脉冲；没有隐含不应期、延迟或事件队列。`ge` 不可自动微分，因此 SNN 库用于无 AD 的操作路径。脉冲输入应是 0/1；库按公式计算，未对所有生物模型前置条件做动态验证。
+
+STDP 使用先衰减的旧迹计算 `plus*(post@old_pre.T)-minus*(old_post@pre.T)`，再向迹加入当前脉冲；同一步且零历史的前后脉冲不会产生配对更新。权重不自动裁剪。它是明确的离散 pair-STDP 计算规则，不声称完整生物动力学。
+
+FF 更新最大化一对正负样本的平均局部二元对数似然，goodness 为 ReLU 活动平方和；正负分量均使用同一旧 weight/bias。平方的导数系数 2 与 pair mean 的 1/2 抵消。它无需自动微分，但数学上仍是局部梯度；不直接适用于硬脉冲层。epsilon 必须为正，rate 应为正且有限；这些配置由宿主或模型声明保证。数值溢出按基础原语合同报错。
+
+完整可运行定义与调度接口见[无反传学习](local-learning.md)。
 
 ## 自定义计算模块与依赖闭包
 

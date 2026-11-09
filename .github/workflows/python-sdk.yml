@@ -8,7 +8,8 @@ on:
       - 'crates/wgt/**'
       - 'crates/wgt-language/**'
       - 'crates/wgtime-core/**'
-      - 'crates/wgt-model/tests/fixtures/**'
+      - 'crates/wgt-model/**'
+      - 'examples/native_training/non_backprop/**'
       - 'language/**'
       - 'std/**'
       - 'Cargo.toml'
@@ -20,7 +21,8 @@ on:
       - 'crates/wgt/**'
       - 'crates/wgt-language/**'
       - 'crates/wgtime-core/**'
-      - 'crates/wgt-model/tests/fixtures/**'
+      - 'crates/wgt-model/**'
+      - 'examples/native_training/non_backprop/**'
       - 'language/**'
       - 'std/**'
       - 'Cargo.toml'
@@ -39,11 +41,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
         python: ['3.10', '3.12']
     env:
       WGT_COMPILER: ${{ github.workspace }}/target/debug/wgt
       WGT_REFERENCE: ${{ github.workspace }}/target/debug/examples/torch_reference
+      WGT_GA_REFERENCE: ${{ github.workspace }}/target/debug/examples/ga_reference
       OMP_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@v4
@@ -57,6 +61,7 @@ jobs:
         run: |
           cargo test --locked -p weightlang-wgt --test torch_export --test no_python_cli
           cargo build --locked -p weightlang-wgt --bin wgt --example torch_reference
+          cargo build --locked -p wgt-model --example ga_reference
       - name: Install CPU PyTorch and SDK extras
         run: |
           sudo apt-get update -qq

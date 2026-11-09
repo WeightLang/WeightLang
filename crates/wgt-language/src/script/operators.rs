@@ -108,6 +108,13 @@ fn validate_inner(
                 names.insert(n.clone());
                 continue;
             }
+            Stmt::LetTuple(bindings, e) => {
+                check_expr(e, &names, functions, stack, checked)?;
+                for n in bindings {
+                    ensure!(identifier(n) && names.insert(n.clone()), "operator local must be unique: {n}");
+                }
+                continue;
+            }
             Stmt::Return(e) if i + 1 == f.body.len() => e,
             _ => bail!("operator {name}: only immutable let and a final return are supported"),
         };
@@ -137,13 +144,13 @@ fn check_expr(
                 check_expr(endpoint, names, functions, stack, checked)?;
             }
         }
-        Expr::List(v) => {
+        Expr::List(v) | Expr::Tuple(v) => {
             for e in v {
                 check_expr(e, names, functions, stack, checked)?;
             }
         }
         Expr::Unary(op, x) if op == "-" => check_expr(x, names, functions, stack, checked)?,
-        Expr::Binary(op, a, b) if ["+", "-", "*", "@"].contains(&op.as_str()) => {
+        Expr::Binary(op, a, b) if ["+", "-", "*", "/", "@"].contains(&op.as_str()) => {
             check_expr(a, names, functions, stack, checked)?;
             check_expr(b, names, functions, stack, checked)?;
         }
@@ -251,6 +258,7 @@ pub(crate) fn rewrite(
             a.iter().map(|e| rewrite(e, names, calls)).collect(),
         ),
         Expr::List(a) => Expr::List(a.iter().map(|e| rewrite(e, names, calls)).collect()),
+        Expr::Tuple(a) => Expr::Tuple(a.iter().map(|e| rewrite(e, names, calls)).collect()),
         Expr::Slice(x, start, end) => Expr::Slice(
             r(x),
             start.as_ref().map(|e| r(e)),
@@ -327,6 +335,9 @@ pub fn standard_source(path: &str) -> Option<&'static str> {
         "std/loss" => Some(include_str!("../../../../std/loss.wgt")),
         "std/attention" => Some(include_str!("../../../../std/attention.wgt")),
         "std/numerics" => Some(include_str!("../../../../std/numerics.wgt")),
+        "std/snn" => Some(include_str!("../../../../std/snn.wgt")),
+        "std/plasticity" => Some(include_str!("../../../../std/plasticity.wgt")),
+        "std/ff" => Some(include_str!("../../../../std/ff.wgt")),
         _ => None,
     }
 }
@@ -440,6 +451,9 @@ pub(crate) fn link(
                     line: s.line,
                     kind: match s.kind {
                         Stmt::Let(n, e) => Stmt::Let(n, rewrite(&e, &HashMap::new(), &calls)),
+                        Stmt::LetTuple(names, e) => {
+                            Stmt::LetTuple(names, rewrite(&e, &HashMap::new(), &calls))
+                        }
                         Stmt::Return(e) => Stmt::Return(rewrite(&e, &HashMap::new(), &calls)),
                         _ => unreachable!(),
                     },

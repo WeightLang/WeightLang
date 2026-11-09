@@ -3,7 +3,7 @@ use super::{Instruction as I, ModuleSchema, Parameter, Program, Register};
 use crate::script::parse::{Expr, Statement, Stmt};
 use crate::tensor::{DType, ShapeLimits, TensorType};
 use anyhow::{Context, Result, bail, ensure};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub fn parse(source: &str) -> Result<Program> {
     let unit = crate::source::split(source)?;
@@ -424,6 +424,12 @@ fn parse_definition_with_metadata(
         functions: functions.clone(),
         calls: 0,
         call_depth: 0,
+        tuples: HashMap::new(),
+        constants: HashMap::new(),
+        unavailable: HashSet::new(),
+        tuple_bindings: HashSet::new(),
+        operation_stack: Vec::new(),
+        operation_returns: Vec::new(),
     };
     lower.block(&forward.body)?;
 
@@ -481,6 +487,12 @@ fn parse_definition_with_metadata(
             modules: HashMap::new(),
             calls: 0,
             call_depth: 0,
+            tuples: HashMap::new(),
+            constants: HashMap::new(),
+            unavailable: HashSet::new(),
+            tuple_bindings: HashSet::new(),
+            operation_stack: Vec::new(),
+            operation_returns: Vec::new(),
         };
         for (i, name) in loss.args.iter().enumerate() {
             loss_lower.register(name, if i == 0 { n } else { m })?;
@@ -577,9 +589,49 @@ struct Lower {
     modules: HashMap<String, ModuleInstance>,
     calls: usize,
     call_depth: usize,
+    tuples: HashMap<String, Vec<String>>,
+    constants: HashMap<String, f32>,
+    unavailable: HashSet<String>,
+    // Ordinary tensors retain their runtime uninitialized-register contract.
+    // Definite-assignment rejection applies only to new tuple destructuring.
+    tuple_bindings: HashSet<String>,
+    operation_stack: Vec<String>,
+    operation_returns: Vec<(String, String, Option<usize>)>,
+}
+#[derive(Clone)]
+struct BindingFacts {
+    constants: HashMap<String, f32>,
+    tuples: HashMap<String, Vec<String>>,
+    available: HashSet<String>,
 }
 impl Lower {
+    fn facts(&self) -> BindingFacts {
+        BindingFacts {
+            constants: self.constants.clone(),
+            tuples: self.tuples.clone(),
+            available: self.sizes.keys().filter(|n| !self.unavailable.contains(*n)).cloned().collect(),
+        }
+    }
+    fn restore_facts(&mut self, facts: &BindingFacts) {
+        self.constants = facts.constants.clone();
+        self.tuples = facts.tuples.clone();
+        self.unavailable = self.sizes.keys().filter(|n| !facts.available.contains(*n)).cloned().collect();
+    }
+    fn merge_facts(&mut self, before: &BindingFacts, yes: &BindingFacts, no: &BindingFacts) {
+        self.constants = yes.constants.iter()
+            .filter(|(name, value)| no.constants.get(*name) == Some(*value))
+            .map(|(name, value)| (name.clone(), *value)).collect();
+        // Tuple fields have no runtime phi node. Only an existing immutable tuple
+        // is available after a branch; branch-local tuples must stay local.
+        self.tuples = before.tuples.clone();
+        self.unavailable = self.sizes.keys()
+            .filter(|n| !yes.available.contains(*n) || !no.available.contains(*n))
+            .cloned().collect();
+    }
     fn operator(&mut self, out: &str, name: &str, args: &[Expr]) -> Result<()> {
+        if self.functions[name].signature.is_some() {
+            return self.operation(out, name, args, false);
+        }
         ensure!(self.call_depth < 32, "operator expansion depth exceeded");
         self.call_depth += 1;
         let result = self.expand_operator(out, name, args);
@@ -611,6 +663,13 @@ impl Lower {
                         .with_context(|| format!("operator {name}, line {}", s.line))?;
                     names.insert(n, local);
                 }
+                Stmt::LetTuple(bindings, e) => {
+                    let e = rewrite(&e, &names, &HashMap::new());
+                    let value = self.value(&e)?;
+                    let fields = self.tuples.get(&value).context("tuple binding requires a tuple result")?.clone();
+                    ensure!(bindings.len() == fields.len(), "tuple binding arity mismatch");
+                    for (name, value) in bindings.into_iter().zip(fields) { names.insert(name, value); }
+                }
                 Stmt::Return(e) => {
                     return self
                         .assign(out, &rewrite(&e, &names, &HashMap::new()))
@@ -620,6 +679,72 @@ impl Lower {
             }
         }
         bail!("operator requires return")
+    }
+    /// Inline a typed call into its caller's transaction. Return jumps are local,
+    /// so an early return never exits the parent operation or commits partial state.
+    fn operation(&mut self, out: &str, name: &str, args: &[Expr], discard: bool) -> Result<()> {
+        use crate::script::operators::rewrite;
+        ensure!(self.program.input == "wgt_operation_input", "typed calls require an operation model");
+        ensure!(self.call_depth < 32 && !self.operation_stack.iter().any(|n| n == name), "recursive/deep operation call: {name}");
+        self.calls += 1;
+        ensure!(self.calls <= 1024, "operation expansion limit exceeded");
+        let function = self.functions[name].clone();
+        let signature = function.signature.as_ref().context("missing operation signature")?;
+        ensure!(args.len() == function.args.len(), "operation arity mismatch: {name}");
+        ensure!(discard || signature.output.is_some(), "void operation cannot be used as a tensor: {name}");
+        fn returns(body: &[Statement]) -> bool {
+            match body.last().map(|s| &s.kind) {
+                Some(Stmt::Return(_)) => true,
+                Some(Stmt::If(_, yes, no)) => returns(yes) && returns(no),
+                _ => false,
+            }
+        }
+        ensure!(signature.output.is_none() || returns(&function.body), "operation {name} must return on every path");
+        let mut names = HashMap::new();
+        for ((arg, width), expr) in function.args.iter().zip(&signature.inputs).zip(args) {
+            let value = self.value(expr)?;
+            ensure!(self.shape(&value)? == vec![*width], "operation input shape mismatch: {name}.{arg}");
+            // Copy arguments: a callee's local assignment must not mutate a caller register.
+            let local = self.fresh();
+            self.assign(&local, &Expr::Name(value))?;
+            names.insert(arg.clone(), local);
+        }
+        fn locals(lower: &mut Lower, body: &[Statement], names: &mut HashMap<String, String>) {
+            for statement in body { match &statement.kind {
+                Stmt::Let(name, _) => { names.entry(name.clone()).or_insert_with(|| lower.fresh()); }
+                Stmt::LetTuple(bindings, _) => { for name in bindings { names.entry(name.clone()).or_insert_with(|| lower.fresh()); } }
+                Stmt::If(_, yes, no) => { locals(lower, yes, names); locals(lower, no, names); }
+                Stmt::While(_, body) => locals(lower, body, names),
+                _ => {}
+            }}
+        }
+        locals(self, &function.body, &mut names);
+        fn rename(body: &mut [Statement], names: &HashMap<String, String>) {
+            for statement in body { match &mut statement.kind {
+                Stmt::Let(name, e) | Stmt::Set(name, e) => { *name = names.get(name).unwrap_or(name).clone(); *e = rewrite(e, names, &HashMap::new()); }
+                Stmt::LetTuple(bindings, e) => { for name in bindings { *name = names.get(name).unwrap_or(name).clone(); } *e = rewrite(e, names, &HashMap::new()); }
+                Stmt::Return(e) | Stmt::Eval(e) => *e = rewrite(e, names, &HashMap::new()),
+                Stmt::If(e, yes, no) => { *e = rewrite(e, names, &HashMap::new()); rename(yes, names); rename(no, names); }
+                Stmt::While(e, body) => { *e = rewrite(e, names, &HashMap::new()); rename(body, names); }
+                _ => {}
+            }}
+        }
+        let mut body = function.body;
+        rename(&mut body, &names);
+        let end = self.fresh();
+        self.operation_returns.push((out.into(), end.clone(), signature.output));
+        self.operation_stack.push(name.into());
+        self.call_depth += 1;
+        let loops = std::mem::take(&mut self.loops);
+        let result = self.block(&body);
+        self.loops = loops;
+        self.call_depth -= 1;
+        self.operation_stack.pop();
+        self.operation_returns.pop();
+        result.with_context(|| format!("operation call {name}"))?;
+        if signature.output.is_none() { self.assign(out, &Expr::List(vec![Expr::Number(0.)]))?; }
+        self.program.instructions.push(I::Label { name: end });
+        Ok(())
     }
     fn fresh(&mut self) -> String {
         let n = self.next;
@@ -713,6 +838,7 @@ impl Lower {
     }
     fn value(&mut self, expr: &Expr) -> Result<String> {
         if let Expr::Name(name) = expr {
+            ensure!(!self.tuple_bindings.contains(name) || !self.unavailable.contains(name), "tensor is not defined on every control-flow path: {name}");
             ensure!(
                 !self.memories.contains_key(name),
                 "memory handle is not a tensor"
@@ -728,8 +854,55 @@ impl Lower {
         Ok(out)
     }
     fn assign(&mut self, out: &str, expr: &Expr) -> Result<()> {
+        ensure!(!self.tuples.contains_key(out), "tuple bindings are immutable: {out}");
+        let constant = match expr {
+            Expr::Name(name) => self.constants.get(name).copied(),
+            Expr::List(items) if items.len() == 1 => scalar_literal(&items[0]).ok(),
+            _ => scalar_literal(expr).ok(),
+        };
+        self.constants.remove(out);
+        self.assign_inner(out, expr)?;
+        if let Some(value) = constant { self.constants.insert(out.into(), value); }
+        self.unavailable.remove(out);
+        Ok(())
+    }
+    fn assign_inner(&mut self, out: &str, expr: &Expr) -> Result<()> {
         use crate::categorical::VectorType;
+        if let Expr::Name(name) = expr {
+            ensure!(!self.tuple_bindings.contains(name) || !self.unavailable.contains(name), "tensor is not defined on every control-flow path: {name}");
+        }
+        if let Expr::Tuple(items) = expr {
+            ensure!(!self.sizes.contains_key(out), "tensor binding cannot change to a tuple");
+            let mut fields = Vec::with_capacity(items.len());
+            for item in items {
+                let value = self.value(item)?;
+                ensure!(!self.tuples.contains_key(&value), "nested tensor tuples are unsupported");
+                self.shape(&value)?;
+                // Capture the value now, including when the source is a mutable local.
+                let field = self.fresh();
+                self.assign(&field, &Expr::Name(value))?;
+                fields.push(field);
+            }
+            self.tuples.insert(out.into(), fields);
+            return Ok(());
+        }
+        if let Expr::Name(name) = expr {
+            if let Some(fields) = self.tuples.get(name).cloned() {
+                ensure!(!self.sizes.contains_key(out), "tensor binding cannot change to a tuple");
+                self.tuples.insert(out.into(), fields);
+                return Ok(());
+            }
+        }
+        ensure!(!self.tuples.contains_key(out), "tuple binding cannot change to a tensor");
         if let Expr::BuiltinCall(name, args) = expr {
+            if name == "__operation_dispatch" {
+                let [Expr::Text(base), index, Expr::Text(op), Expr::Number(count), rest @ ..] = args.as_slice() else { bail!("invalid operation dispatch"); };
+                let index = self.static_index(index)?;
+                ensure!(index < *count as usize, "submodel index out of bounds");
+                let name = format!("{base}_{index}_{op}");
+                ensure!(self.functions.get(&name).is_some_and(|f| f.signature.is_some()), "unknown submodel operation: {name}");
+                return self.operation(out, &name, rest, false);
+            }
             if name == "__tensor_annot" {
                 let [Expr::List(dimensions), value] = args.as_slice() else {
                     bail!("invalid internal tensor annotation");
@@ -1009,13 +1182,20 @@ impl Lower {
             }
             let (a, b, end) = (self.fresh(), self.fresh(), self.fresh());
             self.condition(condition, a.clone(), b.clone())?;
+            let before = self.facts();
             self.program.instructions.push(I::Label { name: a });
             self.assign(out, yes)?;
+            ensure!(!self.tuples.contains_key(out), "conditional expressions cannot return tuples");
+            let yes_facts = self.facts();
             self.program.instructions.push(I::Jump {
                 target: end.clone(),
             });
+            self.restore_facts(&before);
             self.program.instructions.push(I::Label { name: b });
             self.assign(out, no)?;
+            ensure!(!self.tuples.contains_key(out), "conditional expressions cannot return tuples");
+            let no_facts = self.facts();
+            self.merge_facts(&before, &yes_facts, &no_facts);
             self.program.instructions.push(I::Label { name: end });
             return Ok(());
         }
@@ -1163,6 +1343,10 @@ impl Lower {
             Expr::Binary(op, left, right) if op == "@" => {
                 matrix_arguments = [(**left).clone(), (**right).clone()];
                 Some(("matmul", matrix_arguments.as_slice()))
+            }
+            Expr::Binary(op, left, right) if op == "/" => {
+                matrix_arguments = [(**left).clone(), (**right).clone()];
+                Some(("div", matrix_arguments.as_slice()))
             }
             _ => None,
         };
@@ -1359,17 +1543,32 @@ impl Lower {
                     ))
                 }
                 ("scale", [x, factor]) => {
-                    let factor = scalar_literal(factor)?;
                     let x = self.value(x)?;
                     let tensor = self.tensor_type(&x)?;
-                    Some((
-                        I::Scale {
-                            out: out.into(),
-                            input: x,
-                            factor,
-                        },
-                        tensor,
-                    ))
+                    let instruction = if let Ok(factor) = scalar_literal(factor) {
+                        I::Scale { out: out.into(), input: x, factor }
+                    } else {
+                        let scalar = self.value(factor)?;
+                        ensure!(self.shape(&scalar)? == [1], "runtime scale factor must have shape [1]");
+                        I::ScaleBy { out: out.into(), input: x, scalar }
+                    };
+                    Some((instruction, tensor))
+                }
+                ("ge", [left, right]) | ("div", [left, right]) => {
+                    let left = self.value(left)?;
+                    let right = self.value(right)?;
+                    let tensor = self.tensor_type(&left)?.elementwise(&self.tensor_type(&right)?, ShapeLimits::REGISTER)?;
+                    let instruction = if op == "ge" {
+                        I::Ge { out: out.into(), left, right }
+                    } else {
+                        I::Div { out: out.into(), left, right }
+                    };
+                    Some((instruction, tensor))
+                }
+                ("sqrt", [input]) => {
+                    let input = self.value(input)?;
+                    let tensor = self.tensor_type(&input)?;
+                    Some((I::Sqrt { out: out.into(), input }, tensor))
                 }
                 _ => None,
             };
@@ -1797,17 +1996,8 @@ impl Lower {
     }
     fn static_index(&self, expr: &Expr) -> Result<usize> {
         let n = if let Expr::Name(name) = expr {
-            self.program
-                .instructions
-                .iter()
-                .rev()
-                .find_map(|i| match i {
-                    I::Constant { out, data } if out == name && data.len() == 1 => {
-                        Some(f64::from(data[0]))
-                    }
-                    _ => None,
-                })
-                .context("index must be a compile-time constant or repeat index")?
+            f64::from(*self.constants.get(name)
+                .context("index must be a compile-time constant or repeat index")?)
         } else {
             slice_endpoint(expr)?
         };
@@ -1944,7 +2134,8 @@ impl Lower {
             (|| -> Result<()> {
                 match &s.kind {
                     Stmt::Let(n, e) | Stmt::Set(n, e) => {
-                        ensure!(!n.starts_with("__wgt_"), "reserved compiler name");
+                        ensure!(!n.starts_with("__wgt_") || !self.operation_stack.is_empty(), "reserved compiler name");
+                        ensure!(!self.tuples.contains_key(n), "tuple bindings are immutable: {n}");
                         if matches!(&s.kind, Stmt::Set(..)) {
                             ensure!(
                                 self.sizes.contains_key(n),
@@ -1953,10 +2144,26 @@ impl Lower {
                         }
                         self.assign(n, e)?;
                     }
+                    Stmt::LetTuple(bindings, e) => {
+                        let value = self.value(e)?;
+                        let fields = self.tuples.get(&value).context("tuple binding requires a tuple result")?.clone();
+                        ensure!(bindings.len() == fields.len(), "tuple binding arity mismatch");
+                        self.tuple_bindings.extend(bindings.iter().cloned());
+                        for (name, value) in bindings.iter().zip(fields) { self.assign(name, &Expr::Name(value))?; }
+                    }
                     Stmt::Eval(Expr::BuiltinCall(op, args)) if op == "__transaction_write" && args.len() == 2 => {
                         let parameter = self.parameter(&args[0])?.name.clone();
                         let value = self.value(&args[1])?;
                         self.program.instructions.push(I::Write { parameter, value });
+                    }
+                    Stmt::Eval(Expr::BuiltinCall(op, args)) if op == "__operation_dispatch" => {
+                        let [Expr::Text(base), index, Expr::Text(op), Expr::Number(count), rest @ ..] = args.as_slice() else { bail!("invalid operation dispatch"); };
+                        let index = self.static_index(index)?;
+                        ensure!(index < *count as usize, "submodel index out of bounds");
+                        let name = format!("{base}_{index}_{op}");
+                        ensure!(self.functions.get(&name).is_some_and(|f| f.signature.is_some()), "unknown submodel operation");
+                        let out = self.fresh();
+                        self.operation(&out, &name, rest, true)?;
                     }
                     Stmt::Eval(Expr::Call(op, args)) if op == "write" && args.len() == 2 => {
                         let parameter = self.parameter(&args[0])?.name.clone();
@@ -1997,6 +2204,17 @@ impl Lower {
                         }
                     }
                     Stmt::Return(e) => {
+                        if let Some((out, end, width)) = self.operation_returns.last().cloned() {
+                            if let Some(width) = width {
+                                self.assign(&out, e)?;
+                                ensure!(self.shape(&out)? == vec![width], "operation return shape mismatch");
+                            } else {
+                                ensure!(matches!(e, Expr::Null), "void operation cannot return a tensor");
+                                self.assign(&out, &Expr::List(vec![Expr::Number(0.)]))?;
+                            }
+                            self.program.instructions.push(I::Jump { target: end });
+                            return Ok(());
+                        }
                         let value = self.value(e)?;
                         ensure!(
                             self.shape(&value)? == vec![self.output],
@@ -2004,19 +2222,43 @@ impl Lower {
                         );
                         self.program.instructions.push(I::Return { value });
                     }
+                    Stmt::Eval(Expr::Call(name, args)) if self.functions.get(name).is_some_and(|f| f.signature.is_some()) => {
+                        let out = self.fresh();
+                        self.operation(&out, name, args, true)?;
+                    }
                     Stmt::If(e, yes, no) => {
                         let (a, b, end) = (self.fresh(), self.fresh(), self.fresh());
                         self.condition(e, a.clone(), b.clone())?;
+                        let before = self.facts();
                         self.program.instructions.push(I::Label { name: a });
                         self.block(yes)?;
+                        let yes_facts = self.facts();
                         self.program.instructions.push(I::Jump {
                             target: end.clone(),
                         });
+                        self.restore_facts(&before);
                         self.program.instructions.push(I::Label { name: b });
                         self.block(no)?;
+                        let no_facts = self.facts();
+                        self.merge_facts(&before, &yes_facts, &no_facts);
                         self.program.instructions.push(I::Label { name: end });
                     }
                     Stmt::While(e, body) => {
+                        fn assigned(body: &[Statement], names: &mut HashSet<String>) {
+                            for statement in body {
+                                match &statement.kind {
+                                    Stmt::Let(name, _) | Stmt::Set(name, _) => { names.insert(name.clone()); }
+                                    Stmt::LetTuple(bindings, _) => names.extend(bindings.iter().cloned()),
+                                    Stmt::If(_, yes, no) => { assigned(yes, names); assigned(no, names); }
+                                    Stmt::While(_, body) => assigned(body, names),
+                                    _ => {}
+                                }
+                            }
+                        }
+                        let before = self.facts();
+                        let mut changed = HashSet::new();
+                        assigned(body, &mut changed);
+                        for name in &changed { self.constants.remove(name); }
                         let (start, go, end) = (self.fresh(), self.fresh(), self.fresh());
                         self.program.instructions.push(I::Label {
                             name: start.clone(),
@@ -2028,6 +2270,8 @@ impl Lower {
                         self.loops.pop();
                         self.program.instructions.push(I::Jump { target: start });
                         self.program.instructions.push(I::Label { name: end });
+                        self.restore_facts(&before);
+                        for name in changed { self.constants.remove(&name); }
                     }
                     Stmt::Break | Stmt::Continue => {
                         let (start, end) =

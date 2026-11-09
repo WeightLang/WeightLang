@@ -41,10 +41,12 @@ jobs:
           --test compiled_forward --test compiled_training --test compiled_control_flow
           --test compiled_instruction_coverage --test compiled_semantics
           --test unified_training --test custom_optimization --test operations
+          --test adaptive_numeric --test local_learning --test composition_lowering
       - name: Check source execution regressions
         run: |
           cargo build --locked --no-default-features -p wgtime-core --example core-transport-test
           cargo test --locked --no-default-features -p wgtime-core --test accelerator --test assert_syntax --test async_tasks --test categorical --test collect_records --test compute --test file_syntax --test legacy_syntax --test model_calls --test native_testing --test openresponses_core --test postfix_mean --test ppo_records --test ppo_rollout --test ppo_typed --test sample_from --test sample_record --test slicing
+          cargo test --locked --no-default-features -p wgtime-core --test custom_operators imported_tuple_destructuring_preserves_library_call_scope
       - name: Check generated editor support
         run: node scripts/generate_editor_support.cjs --check
       - name: Check prelude catalog

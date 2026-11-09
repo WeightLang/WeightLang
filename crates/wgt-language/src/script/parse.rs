@@ -9,6 +9,8 @@ pub enum Expr {
     Null,
     Name(String),
     List(Vec<Expr>),
+    /// Compile-time product of tensor values; no tuple object enters model IR.
+    Tuple(Vec<Expr>),
     Call(String, Vec<Expr>),
     /// A syntax-generated call, unaffected by local value bindings.
     BuiltinCall(String, Vec<Expr>),
@@ -60,7 +62,7 @@ impl Expr {
                 .map(|e| e.height())
                 .fold(x.height(), usize::max),
             Self::Unary(_, a) | Self::SampleFrom(_, a) => a.height(),
-            Self::List(v) | Self::Call(_, v) | Self::BuiltinCall(_, v) | Self::StaticCall(_, v) => {
+            Self::List(v) | Self::Tuple(v) | Self::Call(_, v) | Self::BuiltinCall(_, v) | Self::StaticCall(_, v) => {
                 v.iter().map(Self::height).max().unwrap_or(0)
             }
             _ => 0,
@@ -75,6 +77,7 @@ pub struct Statement {
 #[derive(Clone, Debug)]
 pub enum Stmt {
     Let(String, Expr),
+    LetTuple(Vec<String>, Expr),
     /// Explicit structured sampling; ordinary SampleFrom expressions stay scalar.
     LetSample(Vec<(String, String)>, String, Expr),
     Tasks(Vec<Statement>),
@@ -535,6 +538,23 @@ impl Parser {
     // Expand into ordinary statements: no new scope, transaction or evaluator path.
     fn let_declarations(&mut self) -> Result<Vec<Statement>> {
         let mut declarations = Vec::new();
+        if self.take("(") {
+            let line = self.line();
+            let mut names = Vec::new();
+            loop {
+                let name = self.name()?;
+                ensure!(!names.contains(&name), "duplicate tuple binding: {name}");
+                names.push(name);
+                ensure!(names.len() <= 16, "tuple supports at most 16 fields");
+                if self.take(")") { break; }
+                self.expect(",")?;
+            }
+            ensure!(names.len() >= 2, "tuple binding requires at least two fields");
+            self.expect("=")?;
+            let value = self.expr(0)?;
+            self.expect(";")?;
+            return Ok(vec![Statement { line, kind: Stmt::LetTuple(names, value) }]);
+        }
         loop {
             let line = self.line();
             let kind = if self.take("{") {
@@ -863,6 +883,11 @@ impl Parser {
                 }
                 "train" => {
                     let model = self.expr(0)?;
+                    ensure!(
+                        !matches!(model, Expr::Tuple(_)),
+                        "line {}: train(...) was removed; use train net on inputs against targets {{rate:...;loss:mse;}}",
+                        t.line
+                    );
                     self.expect("on")?;
                     let inputs = self.expr(0)?;
                     self.expect("against")?;
@@ -1022,8 +1047,19 @@ impl Parser {
                 "-" | "!" => Expr::Unary(t.text, Box::new(self.expr(7)?)),
                 "(" => {
                     let e = self.expr(0)?;
-                    self.expect(")")?;
-                    e
+                    if self.take(",") {
+                        let mut fields = vec![e];
+                        loop {
+                            fields.push(self.expr(0)?);
+                            ensure!(fields.len() <= 16, "tuple supports at most 16 fields");
+                            if self.take(")") { break; }
+                            self.expect(",")?;
+                        }
+                        Expr::Tuple(fields)
+                    } else {
+                        self.expect(")")?;
+                        e
+                    }
                 }
                 "[" => {
                     let values = self.arguments("]")?;

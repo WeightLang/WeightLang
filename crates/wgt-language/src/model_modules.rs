@@ -61,26 +61,20 @@ pub(crate) fn resolve(text: &str, file: Option<&Path>) -> Result<(String, Vec<Pa
     let functions = parse::parse_functions(&unit.functions)?;
     let declarations = strip_imports(&unit.declarations);
     let mut output = declarations;
-    for (name, body) in &unit.models {
+    fn emit_model(output: &mut String, name: &str, body: &str, calls: &HashMap<String,String>, depth: usize) -> Result<()> {
+        ensure!(depth < 32, "model nesting exceeds 32");
         let child = crate::source::split(body)?;
         output.push_str(&format!("\nmodel {name} {{\n"));
-        output.push_str(
-            &child
-                .declarations
-                .lines()
-                .skip(2)
-                .collect::<Vec<_>>()
-                .join("\n"),
-        );
-        for (name, mut function) in parse::parse_functions(&child.functions)?
-            .into_iter()
-            .collect::<BTreeMap<_, _>>()
-        {
-            rewrite_function(&mut function, &calls);
-            emit_function(&mut output, &name, &function)?;
+        output.push_str(&child.declarations.lines().skip(2).collect::<Vec<_>>().join("\n"));
+        for (name, body) in &child.models { emit_model(output, name, body, calls, depth + 1)?; }
+        for (name, mut function) in parse::parse_functions(&child.functions)?.into_iter().collect::<BTreeMap<_,_>>() {
+            rewrite_function(&mut function, calls);
+            emit_function(output, &name, &function)?;
         }
         output.push_str("\n}\n");
+        Ok(())
     }
+    for (name, body) in &unit.models { emit_model(&mut output, name, body, &calls, 0)?; }
     for (name, mut function) in functions.into_iter().collect::<BTreeMap<_, _>>() {
         ensure!(
             !resolver.functions.contains_key(&name),
@@ -230,7 +224,7 @@ fn rewrite_function(function: &mut Function, calls: &HashMap<String, String>) {
     fn rewrite(body: &mut [parse::Statement], calls: &HashMap<String,String>) {
         for statement in body {
             match &mut statement.kind {
-                Stmt::Let(_, expr) | Stmt::Set(_, expr) | Stmt::Return(expr) | Stmt::Eval(expr) => *expr=operators::rewrite(expr,&HashMap::new(),calls),
+                Stmt::Let(_, expr) | Stmt::LetTuple(_, expr) | Stmt::Set(_, expr) | Stmt::Return(expr) | Stmt::Eval(expr) => *expr=operators::rewrite(expr,&HashMap::new(),calls),
                 Stmt::If(expr,yes,no) => { *expr=operators::rewrite(expr,&HashMap::new(),calls); rewrite(yes,calls); rewrite(no,calls); },
                 Stmt::While(expr,body) => {*expr=operators::rewrite(expr,&HashMap::new(),calls);rewrite(body,calls);},
                 _=>{},
@@ -250,6 +244,7 @@ fn emit_function(out: &mut String, name: &str, function: &Function) -> Result<()
     fn emit_body(out:&mut String,body:&[parse::Statement])->Result<()> {
         for statement in body {match &statement.kind {
             Stmt::Let(name,e)=>out.push_str(&format!("let {name} = {};\n",expression(e)?)),
+            Stmt::LetTuple(names,e)=>out.push_str(&format!("let ({}) = {};\n",names.join(","),expression(e)?)),
             Stmt::Set(name,e)=>out.push_str(&format!("{name} = {};\n",expression(e)?)),
             Stmt::Return(Expr::Null)=>out.push_str("return;\n"),
             Stmt::Return(e)=>out.push_str(&format!("return {};\n",expression(e)?)),
@@ -281,8 +276,14 @@ fn expression(expr: &Expr) -> Result<String> {
                 .collect::<Result<Vec<_>>>()?
                 .join(",")
         ),
+        Expr::Tuple(items) => format!("({})", items.iter().map(expression).collect::<Result<Vec<_>>>()?.join(",")),
         Expr::BuiltinCall(name, args) if name == "__probabilities" && args.len() == 1 => {
             format!("({}).probabilities", expression(&args[0])?)
+        }
+        Expr::BuiltinCall(name, args) if name == "__record_field" && args.len() == 2 => {
+            let Expr::Text(field) = &args[1] else { bail!("model field name must be static"); };
+            ensure!(operators::identifier(field), "invalid model field name");
+            format!("({}).{field}", expression(&args[0])?)
         }
         Expr::Call(name, args) | Expr::BuiltinCall(name, args) | Expr::StaticCall(name, args) => {
             format!(
