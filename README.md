@@ -6,7 +6,7 @@
 
 ## Train your first model
 
-Choose a template, edit its TOML settings, then train and run it. The PyTorch
+Choose a template, edit `wgt.toml`, then train and run it. The PyTorch
 templates use uv for Python and dependencies, PyTorch for optimization, and
 Transformers for the small language model.
 
@@ -23,21 +23,28 @@ wgt infer --prompt "Hello"
 
 The template includes sample text and automatically selects an available GPU,
 falling back to CPU. The first training command lets uv select a compatible
-PyTorch build and prepare `.venv` and `uv.lock`; no shell activation is needed. Change the
-layer count, width, attention heads, training steps and generation settings in
-`pyproject.toml`. Training outputs are kept in `weights/model/`.
+PyTorch build and prepare `.venv` and `uv.lock`; no shell activation is needed.
+Training outputs are kept in `weights/model/`.
+
+Model dimensions, training, inference and device settings live in `wgt.toml`.
+Python versions, libraries and uv settings stay in `pyproject.toml`; Rust
+applications use `Cargo.toml` for Rust dependencies. The PyTorch templates
+create the WGT and Python files, so changing the model does not require editing
+the Python dependency configuration.
 
 | Template | Use | Edit |
 | --- | --- | --- |
-| `tiny-lm` | Train a small GPT-style language model on local text | `pyproject.toml`, `data.txt` |
-| `mlp` | Learn a numerical mapping from a small CSV dataset | `pyproject.toml`, `data.csv` |
+| `tiny-lm` | Train a small GPT-style language model on local text | `wgt.toml`, `data.txt` |
+| `mlp` | Learn a numerical mapping from a small CSV dataset | `wgt.toml`, `data.csv` |
 | `native` | Define a WGT model for the Rust/service API | `model.wgt`, `wgt.toml` |
 
 Run `wgt templates` to list templates, or `wgt init --interactive` for a guided
 choice. `wgt init` without options keeps the native template. The language model
 is a learning example; useful language quality requires suitable data and
 training. See the [project quickstart](docs/project-quickstart.md) for configuration,
-environment management and the separate native/PyTorch execution paths.
+environment management and the separate native/PyTorch execution paths. Existing
+`[tool.wgt]` configurations in `pyproject.toml` remain supported as a complete
+alternative to `wgt.toml`; see the [migration steps](docs/project-quickstart.md#6-迁移旧项目配置).
 
 ## Native WGT models
 
@@ -118,6 +125,7 @@ The macros validate WGT during compilation and embed the WGT source; runtime
 construction parses it again. They do not embed static IR. Model imports support
 standard modules and nested local modules for file based definitions; see the
 [standard library](docs/standard-library.md) and [package guide](docs/packages.md).
+Declare the Rust dependency in the application's `Cargo.toml`:
 
 ```toml
 [dependencies]

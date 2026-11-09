@@ -6,7 +6,7 @@
 
 ## 开始训练第一个模型
 
-选一个模板，修改 TOML 参数，就可以训练并试用模型。Python 环境和依赖交给 uv，优化计算复用 PyTorch，小型语言模型复用 Transformers。
+选一个模板，修改 `wgt.toml` 参数，就可以训练并试用模型。Python 环境和依赖交给 uv，优化计算复用 PyTorch，小型语言模型复用 Transformers。
 
 以下命令对应当前源码。在仓库根目录安装命令行工具，并安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)：
 
@@ -18,15 +18,19 @@ wgt train
 wgt infer --prompt "Hello"
 ```
 
-模板自带文本数据，默认自动选择可用的 GPU 加速，无可用 GPU 时使用 CPU。首次训练由 uv 选择兼容的 PyTorch 构建并准备 `.venv` 和 `uv.lock`，无需手动激活环境。层数、宽度、注意力头数、训练步数和生成参数都在 `pyproject.toml` 中；训练输出保存在 `weights/model/`。
+模板自带文本数据，默认自动选择可用的 GPU 加速，无可用 GPU 时使用 CPU。首次训练由 uv 选择兼容的 PyTorch 构建并准备 `.venv` 和 `uv.lock`，无需手动激活环境。训练输出保存在 `weights/model/`。
+
+模型尺寸、训练、推理和设备参数集中在 `wgt.toml`。Python 版本、库依赖和 uv 设置保留在 `pyproject.toml`；Rust 应用使用 `Cargo.toml` 管理 Rust 依赖。两个 PyTorch 模板会生成 WGT 和 Python 各自的配置文件，调整模板提供的模型参数时只需编辑 `wgt.toml`。
 
 | 模板 | 用途 | 修改位置 |
 | --- | --- | --- |
-| `tiny-lm` | 用本地文本训练一个小型 GPT 风格语言模型 | `pyproject.toml`、`data.txt` |
-| `mlp` | 从小型 CSV 数据集学习数值关系 | `pyproject.toml`、`data.csv` |
+| `tiny-lm` | 用本地文本训练一个小型 GPT 风格语言模型 | `wgt.toml`、`data.txt` |
+| `mlp` | 从小型 CSV 数据集学习数值关系 | `wgt.toml`、`data.csv` |
 | `native` | 为 Rust/service API 定义 WGT 模型 | `model.wgt`、`wgt.toml` |
 
 `wgt templates` 列出模板，`wgt init --interactive` 提供交互选择；不带选项的 `wgt init` 默认使用原生模板。语言模型模板用于学习完整流程，实际语言能力取决于数据和训练投入。配置方法、环境管理和执行边界见[项目快速上手](docs/project-quickstart.md)。
+
+旧项目仍可整份使用 `pyproject.toml` 中的 `[tool.wgt]` 配置。改用 `wgt.toml` 时，按[迁移步骤](docs/project-quickstart.md#6-迁移旧项目配置)移动配置并更新 runner 的读取逻辑。
 
 ## 原生 WGT 模型
 
@@ -73,6 +77,8 @@ export WGTIME_ENDPOINT=/tmp/weightlang/wgtime/service.sock
 完整代码与中文注释导览见 [WGT 语法总览](language/syntax-tour/model.wgt)，其中明确区分现行语法与设计提案。
 
 workspace package 名为 `wgt-model`，其 Rust library crate 路径为 `wgt`。它提供三种模型源码入口：`model!` 接收内联 Rust 字符串，`include_model!` 在构建时嵌入文件，`ModelDefinition::from_file` 在运行时解析已部署的源码文件。宏会在编译期校验 WGT 并嵌入源码；运行时还会重新解析，不会嵌入静态 IR。模型导入支持标准模块和文件模型的嵌套本地模块，详见[标准库](docs/standard-library.md)与[源码包说明](docs/packages.md)。
+
+在 Rust 应用的 `Cargo.toml` 中声明 crate 依赖：
 
 ```toml
 [dependencies]
