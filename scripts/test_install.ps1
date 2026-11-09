@@ -74,7 +74,7 @@ function Reset-Case([string]$Name, [string]$Tools = 'ready') {
     $env:TEST_INSTALL_FAIL = $null
     $env:TEST_INSTALL_ROOT = $Case
     $env:TEST_INSTALL_FIXTURE = $Fixture
-    $script:Downloads = @()
+    $script:Downloads = New-Object 'System.Collections.Generic.List[string]'
     $script:DownloadFailure = $null
     [Environment]::SetEnvironmentVariable('Path', (Join-Path $Case 'unrelated'), 'User')
     if ($Tools -ne 'missing') {
@@ -90,7 +90,7 @@ function Reset-Case([string]$Name, [string]$Tools = 'ready') {
 }
 
 function Invoke-WebRequest([switch]$UseBasicParsing, [string]$Uri, [string]$OutFile) {
-    $script:Downloads += $Uri
+    $Downloads.Add($Uri)
     if ($DownloadFailure) { throw 'fixture download failed' }
     if ($Uri -like 'https://static.rust-lang.org/rustup/dist/*/rustup-init.exe') {
         Copy-Item $Fixture $OutFile
