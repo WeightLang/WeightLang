@@ -28,6 +28,8 @@ typed `<-` 更新的形状和冻结检查移到相应语句的 lowering 中，�
 
 词法索引按连续 `let a = ..., b = a;` 的实际顺序登记绑定，避免重命名漏掉后续初始化器中的引用。对已经通过检查的模型，候选重命名重新经过原生前端；仅修改 legacy `forward` 输入参数却破坏端口关联的操作会被拒绝。
 
+完整 CI 回归还发现，给纯函数诊断增加 `anyhow` 外层上下文会使只调用 `to_string()` 的既有用户丢失实际错误原因。已将这三处包装改为同时包含算子名称、源码行号和完整原因的文本诊断，保留原有参数数量与闭包捕获检查的断言。
+
 ## 验证结果
 
 以下项目均已在本次工作区实际运行，不把跳过的检查计为通过。
@@ -40,6 +42,8 @@ typed `<-` 更新的形状和冻结检查移到相应语句的 lowering 中，�
 | `wgt-language --test ide` | 12 项通过：形状/命名轴/统计、typed operations、标准库和相对导入、源码定位、设备和目录拒绝 |
 | `wgt-language --lib` | 8 项通过，包括分析不物化参数与状态的验证 |
 | 相关语言回归 | 26 项通过：model_definition 3、model_modules 3、operations_composition_validation 5、shape_syntax 8、tensor_source_contracts 7 |
+| 完整语言回归 | 修复诊断包装后，`cargo test --locked -p wgt-language` 全部 81 项通过，包含上述语言与 IDE 测试 |
+| 源码与原生产物发布回归 | `source_package` 与 `native_publication` 共 6 项通过，原有诊断与缓存保护断言未修改 |
 | 相关原生运行时回归 | 25 项通过：operations 8、composition_lowering 8、local_learning 9 |
 | VS Code 客户端 | 7 项通过：启动、信任、重启、错误清理、配置、退出、文件监听与释放 |
 | TextMate | scope 断言通过，遍历 18 个仓库 WGT 文件 |
@@ -54,7 +58,7 @@ CI 已加入 LSP 单元与 stdio 集成测试、VS Code 客户端测试、VSIX �
 
 ### 验证边界
 
-本地没有完整的 VS Code Extension Host，因此未执行编辑器 UI 自动化；客户端生命周期使用行为测试，服务通过真实进程和 JSON-RPC 协议验证。完整多编辑器脚本在需要 `xmllint` 时因工具缺失停止；XML 另用 Python 解析验证，Vim/Neovim 实际高亮未在本地执行。CI 配置保留这些工具的安装与检查。
+本地没有完整的 VS Code Extension Host，因此未执行编辑器 UI 自动化；客户端生命周期使用行为测试，服务通过真实进程和 JSON-RPC 协议验证。完整多编辑器脚本在本地需要 `xmllint` 时因工具缺失停止；XML 另用 Python 解析验证。提交 `c76c22b` 的[远端 editor-viewer 检查](https://github.com/WeightLang/WeightLang/actions/runs/42625917613/job/129189563768)已全部通过，包含完整多编辑器脚本、Vim/Neovim、VS Code 客户端测试、VSIX 打包上传及 Chromium 查看器检查；这不等同于 VS Code Extension Host 的界面验证。
 
 ## 使用与交付
 
