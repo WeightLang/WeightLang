@@ -1,0 +1,67 @@
+name: Installers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - install.sh
+      - install.ps1
+      - scripts/test_install.*
+      - .github/workflows/installers.yml
+  pull_request:
+    paths:
+      - install.sh
+      - install.ps1
+      - scripts/test_install.*
+      - .github/workflows/installers.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  posix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check shell syntax and isolated installer scenarios
+        run: |
+          sh -n install.sh
+          python scripts/test_install.py
+
+  clean-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official tools and WeightLang in a fresh user environment
+        run: |
+          installer_home="$RUNNER_TEMP/weightlang-install-home"
+          mkdir -p "$installer_home"
+          env -u CARGO_HOME -u RUSTUP_HOME -u RUSTUP_TOOLCHAIN \
+            -u CARGO_INSTALL_ROOT -u UV_INSTALL_DIR -u UV_UNMANAGED_INSTALL \
+            -u XDG_BIN_HOME -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_CACHE_HOME \
+            HOME="$installer_home" PATH=/usr/bin:/bin \
+            WEIGHTLANG_SOURCE="$GITHUB_WORKSPACE" \
+            CARGO_TARGET_DIR="$RUNNER_TEMP/weightlang-install-target" sh install.sh
+          env -i HOME="$installer_home" PATH=/usr/bin:/bin sh -c '
+            set -eu
+            . "$HOME/.profile"
+            uv --version
+            cargo --version
+            rustc --version
+            wgt --help
+            weightc --help
+          '
