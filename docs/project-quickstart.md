@@ -170,7 +170,11 @@ cd native-model
 wgt check
 ```
 
-原生模型的训练和执行使用 [Rust API 与 `wgtime` 服务](../README.zh-CN.md#在-rust-中使用-wgt)。Python 模板使用 `wgt.toml` 配置驱动的 PyTorch 架构；[模板实现](../crates/wgt/templates/workflow.py)中的 `tiny-lm` 复用 Transformers 的 GPT-2 实现，`mlp` 复用 `torch.nn.Sequential`。当前 `wgt train` 和 `wgt infer` 调用 Python runner；统一的 Rust/Python 训练调度尚未实现。这一工作流尚未提供任意 WGT 源码到 PyTorch 的转换；修改 Python 模板的架构应编辑 `wgt.toml` 或其 `workflow.py`。
+原生模型的训练和执行使用 [Rust API 与 `wgtime` 服务](../README.zh-CN.md#在-rust-中使用-wgt)。需要在 Python 中运行 `model.wgt` 时，使用 [Python SDK](python-sdk.md) 的 `weightlang.load("model.wgt", device="auto")`。SDK 复用 Rust 前端导出受支持的纯前向计算图，构造标准 PyTorch 模型；数据、损失函数和训练循环由 Python host 提供。
+
+SDK 使用调用时传入的模型路径和设备参数，不隐式读取项目的 `train`、`infer`、`runtime` 配置或 `WGT_CONFIG_FILE`。自定义 host 若使用 `wgt.toml`，需要自行读取配置，并将相应值传给 SDK、优化器和推理代码。
+
+`tiny-lm` 和 `mlp` 入门模板仍使用 `wgt.toml` 中的模型配方与 Python 代码。[模板实现](../crates/wgt/templates/workflow.py)分别复用 Transformers 的 GPT-2 和 `torch.nn.Sequential`，没有切换为 SDK 源码编译流程。修改这些模板的架构应编辑 `wgt.toml` 或其 `workflow.py`。当前 `wgt train` 和 `wgt infer` 调用 Python runner；统一的 Rust/Python 训练调度尚未实现。
 
 Python 库使用 `pyproject.toml` 的 `[project].dependencies` 与 `uv.lock`；WGT 模型包使用 `wgt.toml` 的 `[dependencies]` 与 `wgt.sum`。两类依赖的命令和格式见[包管理说明](packages.md#项目配置与-python-依赖)。
 

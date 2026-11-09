@@ -4,11 +4,49 @@
 
 > **Express neural architectures clearly and elegantly.**
 
+## Use WGT architectures in PyTorch
+
+Write the parameters and forward computation in `model.wgt`, then import a
+standard `torch.nn.Module` from Python. The SDK reuses the Rust compiler and
+PyTorch FX, autograd, optimizers, and model inspection tools.
+
+```sh
+cargo install --locked --force --path crates/wgt --bin wgt
+uv venv
+uv pip install -e './python[visualize]'
+uv run --no-project python python/examples/mlp/train.py
+```
+
+```python
+import torch
+import weightlang as wgt
+
+model = wgt.load("model.wgt", device="auto")
+input_tensor = torch.zeros(1, *model.input_shape, device=next(model.parameters()).device)
+prediction = model(input_tensor)
+print(wgt.summary(model))
+wgt.visualize(model, "architecture.svg")
+wgt.save(model, "weights/demo/model.pt")
+```
+
+Python owns data, training loops, inference and visualization. Saved SDK models
+and compiled JSON load without the compiler or a model service. SVG/PNG output
+requires the system Graphviz executable; Mermaid and DOT output use only PyTorch.
+This is the source SDK, with a tested pure-forward subset of WGT. See the
+[Python SDK guide](docs/python-sdk.md) for installation, examples and supported
+operations. The native Rust/service path remains available below.
+
+SDK loading uses the model path and device argument supplied by the host. It
+does not read project `train`, `infer` or `runtime` settings automatically. A
+host that uses `wgt.toml` must read those settings and pass them to the SDK and
+PyTorch APIs.
+
 ## Train your first model
 
 Choose a template, edit `wgt.toml`, then train and run it. The PyTorch
 templates use uv for Python and dependencies, PyTorch for optimization, and
-Transformers for the small language model.
+Transformers for the small language model. These recipes construct their models
+from TOML and Python; loading WGT source uses the SDK described above.
 
 These commands use the current source checkout. Install the CLI from the
 repository root and install [uv](https://docs.astral.sh/uv/getting-started/installation/):

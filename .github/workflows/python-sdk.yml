@@ -1,0 +1,71 @@
+name: Python SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'python/**'
+      - 'crates/wgt/**'
+      - 'crates/wgt-language/**'
+      - 'crates/wgt-model/tests/fixtures/**'
+      - 'language/**'
+      - 'std/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/python-sdk.yml'
+  pull_request:
+    paths:
+      - 'python/**'
+      - 'crates/wgt/**'
+      - 'crates/wgt-language/**'
+      - 'crates/wgt-model/tests/fixtures/**'
+      - 'language/**'
+      - 'std/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/python-sdk.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytorch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python: ['3.10', '3.12']
+    env:
+      WGT_COMPILER: ${{ github.workspace }}/target/debug/wgt
+      OMP_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Build and test the native model bridge
+        run: |
+          cargo test --locked -p weightlang-wgt --test torch_export --test no_python_cli
+          cargo build --locked -p weightlang-wgt --bin wgt
+      - name: Install CPU PyTorch and SDK extras
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y graphviz
+          uv venv --python '${{ matrix.python }}'
+          uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+          uv pip install -e './python[visualize,test]'
+      - name: Check compiler, training, persistence and visualization
+        run: |
+          mkdir -p /tmp/weightlang
+          .venv/bin/python -m pytest python/tests -q --basetemp=/tmp/weightlang/sdk-tests
+      - name: Run the complete training example
+        run: .venv/bin/python python/examples/mlp/train.py
+      - name: Build the Python distribution
+        run: uv build python --out-dir dist/python

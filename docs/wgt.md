@@ -30,6 +30,14 @@ Python 模板默认自动选择兼容的 PyTorch 构建与可用加速设备，�
 原生模板使用 `model.wgt`；PyTorch 模板使用 `wgt.toml` 中的模型配方与 `workflow.py`，不会生成未参与计算的 WGT 文件。
 CLI 对既有 `wgt.toml` 中显式配置的 `model.source` 保持兼容，但这不改变新建与维护模型的入口规范。
 
+## 编译到 PyTorch
+
+`wgt compile model.wgt --target torch` 复用原生前端，向 stdout 输出版本化架构 JSON；`-o architecture.json` 写入新文件并拒绝覆盖。`wgt compile - --target torch` 从 stdin 读取源码。编译不会执行 forward、训练或准备 Python 环境。
+
+输出包含解析后的纯计算导入、接口、参数初值和计算图，可通过 [Python SDK](python-sdk.md) 的 `weightlang.from_ir` 或 `weightlang.load` 加载为 PyTorch 模型。目标接受无可变状态的直线计算图，未支持的状态、动态控制流与受约束 learn 参数会明确报错。
+
+SDK 的加载接口使用显式传入的模型路径或架构数据以及设备参数，不隐式应用 `wgt.toml` 的训练、推理和设备设置。由 CLI 启动的 host 可读取 `WGT_CONFIG_FILE` 指向的文件；其他 host 显式选择配置文件，再将相应值传给 SDK 与 PyTorch。源码编译仍遵循编译器的导入和工具链查找规则。`tiny-lm` 和 `mlp` 模板仍通过自己的 TOML/Python 配方构造模型。
+
 ## 架构可视化
 
 `wgt graph ARTIFACT --open` 将已有模型制品生成离线 HTML 并打开；不执行模型脚本或训练。
