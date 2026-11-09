@@ -10,13 +10,20 @@ fn configured(project: &Path, action: &str) -> Result<ProjectConfig> {
 }
 
 fn uv(project: &Path, action: &str, args: &[OsString], offline: bool, locked: bool) -> Result<u8> {
+    let config_file = manifest::manifest_path(project)?
+        .canonicalize()
+        .context("resolve the selected WeightLang configuration")?;
     if action == "sync" {
         crate::torch_backend::refresh(project, offline, locked)?;
     } else {
         crate::torch_backend::prepare(project, offline, locked)?;
     }
     let mut command = Command::new("uv");
-    command.arg("--directory").arg(project).arg(action);
+    command
+        .env("WGT_CONFIG_FILE", config_file)
+        .arg("--directory")
+        .arg(project)
+        .arg(action);
     if offline {
         command.arg("--offline");
     }
@@ -54,17 +61,9 @@ pub fn workflow(
     locked: bool,
 ) -> Result<u8> {
     let config = configured(project, phase)?;
-    if phase == "train" {
-        check_model(&config.model)?;
-        check_train(config.train.as_ref().context("missing train settings")?)?;
-    } else if phase == "infer" {
-        let infer = config.infer.as_ref().context("missing infer settings")?;
-        let checkpoint = weights_path(&infer["checkpoint"], "infer.checkpoint")?;
-        ensure!(
-            project.join(checkpoint).join("weightlang.json").is_file(),
-            "no starter weights at {checkpoint}; run wgt train first"
-        );
-    }
+    // The host validates effective settings after applying CLI overrides. Checking
+    // the unmodified train/infer tables here would reject valid overrides and
+    // impose starter-specific checkpoint formats on custom host programs.
     let runner = config
         .python
         .as_ref()

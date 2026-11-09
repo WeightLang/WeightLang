@@ -148,16 +148,24 @@ pub fn initialize(path: &Path, module: Option<String>, options: &Options) -> Res
             files.push(("model.wgt", include_str!("../templates/native.wgt").into()));
         }
         Template::Mlp | Template::TinyLm => {
-            let source = if matches!(template, Template::TinyLm) {
-                include_str!("../templates/tiny-lm.toml")
+            let (source, python_source) = if matches!(template, Template::TinyLm) {
+                (
+                    include_str!("../templates/tiny-lm.toml"),
+                    include_str!("../templates/tiny-lm.pyproject.toml"),
+                )
             } else {
-                include_str!("../templates/mlp.toml")
+                (
+                    include_str!("../templates/mlp.toml"),
+                    include_str!("../templates/mlp.pyproject.toml"),
+                )
             };
-            let config = source
-                .replace("PROJECT_NAME", &name)
-                .replace("\"PROJECT_MODULE\"", &serde_json::to_string(&module)?);
+            let config = source.replace("\"PROJECT_MODULE\"", &serde_json::to_string(&module)?);
             manifest::ProjectConfig::parse(&config)?;
-            files.push(("pyproject.toml", config));
+            files.push(("wgt.toml", config));
+            files.push((
+                "pyproject.toml",
+                python_source.replace("PROJECT_NAME", &name),
+            ));
             files.push((".python-version", format!("{}\n", python.unwrap())));
             files.push((
                 "workflow.py",
@@ -170,12 +178,20 @@ pub fn initialize(path: &Path, module: Option<String>, options: &Options) -> Res
             });
         }
     }
-    // Preflight every output before creating anything, including an existing
-    // manifest from another ecosystem. A partial starter is hard to recover from.
+    // A legacy embedded configuration is still authoritative. Never create a
+    // second WGT configuration beside it, even when no output file collides.
+    let existing_manifest = manifest::manifest_path(&resolved)?;
+    ensure!(
+        !existing_manifest.exists(),
+        "WeightLang configuration already exists at {}; init will not replace it",
+        existing_manifest.display()
+    );
+    // Preflight every output before creating anything. Native initialization
+    // preserves ordinary Python/Cargo manifests; Python templates need their own
+    // pyproject.toml and refuse collisions instead of merging dependencies.
     for file in [
         "wgt.mod",
         "wgt.toml",
-        "pyproject.toml",
         "wgt.lock",
         "main.wgt",
         "model.wgt",
@@ -209,7 +225,8 @@ pub fn initialize(path: &Path, module: Option<String>, options: &Options) -> Res
     println!("Created {}", resolved.display());
     if template.is_python() {
         println!(
-            "Edit pyproject.toml to choose model size, training and inference settings.\n\
+            "Edit wgt.toml to choose model size, training and inference settings.\n\
+                  Python dependencies and uv settings are in pyproject.toml.\n\
                   From this directory:\n  wgt train\n  wgt infer\n\
                   uv prepares Python and dependencies automatically on the first run.\n\
                   Add Python libraries with: uv add PACKAGE"

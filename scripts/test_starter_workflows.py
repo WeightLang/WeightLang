@@ -113,23 +113,36 @@ class StarterWorkflows(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def project(self, kind, replacements=()):
-        root = self.root / kind
+    def project(self, kind, replacements=(), legacy=False):
+        root = self.root / (kind + ("-legacy" if legacy else ""))
         root.mkdir()
         text = (TEMPLATES / f"{kind}.toml").read_text(encoding="utf-8")
         text = text.replace("PROJECT_NAME", "starter-test").replace("PROJECT_MODULE", "local/starter_test")
         for old, new in replacements:
             self.assertIn(old, text)
             text = text.replace(old, new)
-        (root / "pyproject.toml").write_text(text, encoding="utf-8")
+        python_project = (TEMPLATES / f"{kind}.pyproject.toml").read_text(encoding="utf-8")
+        python_project = python_project.replace("PROJECT_NAME", "starter-test")
+        if legacy:
+            python_project += "\n" + self.embedded(text)
+        else:
+            (root / "wgt.toml").write_text(text, encoding="utf-8")
+        (root / "pyproject.toml").write_text(python_project, encoding="utf-8")
         shutil.copyfile(TEMPLATES / "workflow.py", root / "workflow.py")
         data = ("tiny-lm.txt", "data.txt") if kind == "tiny-lm" else ("mlp.csv", "data.csv")
         shutil.copyfile(TEMPLATES / data[0], root / data[1])
         return root
 
-    def run_workflow(self, root, *args, success=True, stdlib=False):
+    @staticmethod
+    def embedded(text):
+        return "".join("[tool.wgt." + line[1:] if line.startswith("[") else line
+                       for line in text.splitlines(keepends=True))
+
+    def run_workflow(self, root, *args, success=True, stdlib=False, env=None):
         command = [sys.executable, *(["-S"] if stdlib else []), str(root / "workflow.py"), *args]
         environment = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", TOKENIZERS_PARALLELISM="false")
+        environment.pop("WGT_CONFIG_FILE", None)
+        environment.update(env or {})
         result = subprocess.run(command, cwd=self.root, text=True, capture_output=True, timeout=90, env=environment)
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
@@ -151,7 +164,7 @@ class StarterWorkflows(unittest.TestCase):
             self.assertFalse((root / "weights").exists())
             self.assertFalse((root / ".venv").exists())
         project = self.root / "tiny-lm"
-        path = project / "pyproject.toml"
+        path = project / "wgt.toml"
         original = path.read_text(encoding="utf-8")
         for old, new, message in (
             ("heads = 4", "heads = 3", "divisible"),
@@ -193,7 +206,10 @@ class StarterWorkflows(unittest.TestCase):
         self.assertAlmostEqual(loss, metadata["metrics"]["final_loss"], places=6)
         actual = json.loads(self.run_workflow(root, "infer").stdout)[0]
         self.assertAlmostEqual(expected, actual, places=6)
-        path = root / "pyproject.toml"
+        self.assertEqual(metadata["config_file"], "wgt.toml")
+        self.assertEqual((root / "weights/model/wgt.toml").read_bytes(), (root / "wgt.toml").read_bytes())
+        self.assertEqual((root / "weights/model/pyproject.toml").read_bytes(), (root / "pyproject.toml").read_bytes())
+        path = root / "wgt.toml"
         path.write_text(path.read_text().replace("hidden_size = 16", "hidden_size = 32"))
         self.assertEqual(self.run_workflow(root, "infer").stdout, json.dumps([actual]) + "\n")
 
@@ -227,7 +243,7 @@ class StarterWorkflows(unittest.TestCase):
         generated = self.run_workflow(root, "infer", "--max-new-tokens", "8").stdout
         self.assertTrue(generated.startswith("WeightLang"))
         self.assertGreater(len(generated.rstrip("\n")), len("WeightLang"))
-        path = root / "pyproject.toml"
+        path = root / "wgt.toml"
         path.write_text(path.read_text().replace("hidden_size = 32", "hidden_size = 64"))
         self.assertEqual(generated, self.run_workflow(root, "infer", "--max-new-tokens", "8").stdout)
         rejected = self.run_workflow(root, "infer", "--max-new-tokens", "48", success=False)
@@ -261,10 +277,10 @@ class StarterWorkflows(unittest.TestCase):
 
     def test_omitted_runtime_and_cpu_override_train_and_infer(self):
         root = self.project("mlp")
-        path = root / "pyproject.toml"
+        path = root / "wgt.toml"
         config = path.read_text(encoding="utf-8")
-        start = config.index("[tool.wgt.runtime]")
-        end = config.index("[tool.wgt.train]", start)
+        start = config.index("[runtime]")
+        end = config.index("[train]", start)
         config = config[:start] + config[end:]
         path.write_text(config, encoding="utf-8")
         self.run_workflow(root, "check", stdlib=True)
@@ -274,13 +290,74 @@ class StarterWorkflows(unittest.TestCase):
         self.assertEqual(metadata["train"]["steps"], 2)
         self.assertIn(f"Device: {metadata['runtime']['device']}", trained.stderr)
         self.assertIn("auto", trained.stderr)
-        path.write_text(config + '\n[tool.wgt.runtime]\ndevice = "cuda:999999"\n', encoding="utf-8")
+        path.write_text(config + '\n[runtime]\ndevice = "cuda:999999"\n', encoding="utf-8")
         self.run_workflow(root, "infer", success=False)
         result = self.run_workflow(root, "infer", "--device", "cpu")
         self.assertIn("Device: cpu (CPU, explicit)", result.stderr)
         prediction = json.loads(result.stdout)
         self.assertEqual(len(prediction), 1)
         self.assertTrue(math.isfinite(prediction[0]))
+
+    def test_legacy_embedded_configuration_still_trains_and_infers(self):
+        root = self.project("mlp", legacy=True)
+        original = (root / "pyproject.toml").read_bytes()
+        self.run_workflow(root, "check", stdlib=True)
+        result = self.run_workflow(root, "train", "--steps", "2", "--device", "cpu")
+        self.assertIn(f"Config: {root / 'pyproject.toml'}", result.stderr)
+        metadata = self.metadata(root)
+        self.assertEqual(metadata["train"]["steps"], 2)
+        self.assertEqual(metadata["config_file"], "pyproject.toml")
+        self.assertEqual((root / "weights/model/pyproject.toml").read_bytes(), original)
+        self.assertEqual((root / "pyproject.toml").read_bytes(), original)
+        self.assertFalse((root / "wgt.toml").exists())
+        prediction = json.loads(self.run_workflow(root, "infer", "--device", "cpu").stdout)
+        self.assertEqual(len(prediction), 1)
+
+    def test_duplicate_weightlang_configurations_are_rejected_without_torch(self):
+        root = self.project("mlp")
+        python = root / "pyproject.toml"
+        python.write_text(python.read_text() + "\n" + self.embedded((root / "wgt.toml").read_text()))
+        result = self.run_workflow(root, "check", success=False, stdlib=True)
+        self.assertIn("multiple WeightLang manifests", result.stderr)
+        self.assertFalse((root / "weights").exists())
+
+    def test_nested_host_discovers_its_project_independently_of_cwd(self):
+        root = self.project("mlp")
+        nested = root / "scripts"
+        nested.mkdir()
+        (root / "workflow.py").rename(nested / "workflow.py")
+        result = self.run_workflow(nested, "check", stdlib=True)
+        self.assertIn(f"Config: {root / 'wgt.toml'}", result.stderr)
+        self.assertIn("no initialization", result.stdout)
+
+    def test_cli_selected_config_controls_paths_and_explicit_overrides(self):
+        root = self.project("mlp")
+        selected = self.root / "selected"
+        shutil.copytree(root, selected)
+        path = selected / "wgt.toml"
+        text = path.read_text().replace("steps = 100", "steps = 0")
+        text = text.replace('device = "auto"', 'device = "invalid-unless-overridden"')
+        path.write_text(text)
+        environment = {"WGT_CONFIG_FILE": str(path)}
+        self.run_workflow(root, "check", success=False, stdlib=True, env=environment)
+        trained = self.run_workflow(root, "train", "--steps", "2", "--device", "cpu", env=environment)
+        self.assertIn(f"Config: {path}", trained.stderr)
+        self.assertFalse((root / "weights").exists())
+        metadata = self.metadata(selected)
+        self.assertEqual(metadata["train"]["steps"], 2)
+        self.assertEqual(metadata["runtime"]["device"], "cpu")
+        self.assertEqual(path.read_text(), text)
+        prediction = self.run_workflow(root, "infer", "--device", "cpu", env=environment)
+        self.assertEqual(len(json.loads(prediction.stdout)), 1)
+
+    def test_invalid_explicit_config_does_not_fall_back_to_local_project(self):
+        root = self.project("mlp")
+        for path, message in (("wgt.toml", "absolute"), (str(root / "missing.toml"), "missing.toml")):
+            with self.subTest(path=path):
+                result = self.run_workflow(root, "check", success=False, stdlib=True,
+                                           env={"WGT_CONFIG_FILE": path})
+                self.assertIn(message, result.stderr)
+                self.assertNotIn("no initialization", result.stdout)
 
 
 if __name__ == "__main__":
