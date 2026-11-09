@@ -190,6 +190,21 @@ fn live_diagnostics_clear_after_fix_and_close() {
 }
 
 #[test]
+fn declared_initializers_have_catalog_signatures_and_completion() {
+    let source = "wgt 0.5\nmodel Initializer\ninput x:f32[2]\noutput y:f32[2]\nparameter gain:f32[2]=uniform(7, -1, 1)\nfn forward(x){return gain*x;}\n";
+    let messages = run(vec![
+        initialize(), open(URI, source),
+        at(2, "textDocument/signatureHelp", source, "-1, 1"),
+        at(3, "textDocument/completion", source, "uniform("),
+    ]);
+    assert_eq!(diagnostics(&messages)[0]["diagnostics"], json!([]));
+    let signatures = result(&messages, 2)["signatures"].as_array().unwrap();
+    assert_eq!(signatures.len(), 2);
+    assert!(signatures.iter().any(|entry| entry["label"].as_str().unwrap().contains("shape")));
+    assert!(result(&messages, 3).as_array().unwrap().iter().any(|entry| entry["label"] == "xavier_uniform"));
+}
+
+#[test]
 fn hover_inlays_shapes_parameter_counts_and_semantic_tokens() {
     let messages = run(vec![
         initialize(),

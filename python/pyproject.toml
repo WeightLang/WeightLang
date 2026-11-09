@@ -9,7 +9,7 @@ description = "WeightLang model architectures as native PyTorch modules"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-dependencies = ["torch>=2.5"]
+dependencies = ["torch>=2.5", "safetensors>=0.4.3"]
 
 [project.optional-dependencies]
 visualize = ["torchinfo>=1.8", "numpy>=1.23", "graphviz>=0.20"]

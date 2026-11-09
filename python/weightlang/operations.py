@@ -13,7 +13,8 @@ import torch
 from torch import nn
 
 from .program import ProgramExecutor, validate_parameter
-from .runtime import _MAX_ELEMENTS, _attribute, _positive, _shape, _tensor
+from .runtime import _MAX_ELEMENTS, _attribute, _positive, _shape
+from .initialization import materialize
 
 
 def _limit(value: Any, name: str) -> int:
@@ -44,6 +45,8 @@ class OperationsModule(nn.Module):
         *,
         max_work: int = 1_000_000,
         memory_bytes: int = 256 * 1024**2,
+        bindings: dict[str, torch.Tensor] | None = None,
+        _schema_only: bool = False,
     ) -> None:
         super().__init__()
         if definition.get("format") != "weightlang.torch.v1" or definition.get("kind") != "operations":
@@ -61,11 +64,11 @@ class OperationsModule(nn.Module):
         self._operation_lock = RLock()
         self.register_buffer("_device_anchor", torch.empty(0), persistent=False)
         try:
-            self._initialize(self.definition["operations"])
+            self._initialize(self.definition["operations"], bindings, schema_only=_schema_only)
         except (KeyError, TypeError, IndexError) as error:
             raise ValueError(f"malformed typed-operation compiler export: {error}") from error
 
-    def _initialize(self, plan: dict) -> None:
+    def _initialize(self, plan: dict, bindings: dict[str, torch.Tensor] | None = None, *, schema_only: bool = False) -> None:
         entries = plan["entries"]
         if not isinstance(entries, list) or not entries:
             raise ValueError("typed model requires at least one operation")
@@ -91,8 +94,9 @@ class OperationsModule(nn.Module):
                 if key == "states" and (len(shape) != 1 or shape[0] > 16384 or spec.get("frozen")
                                          or spec.get("probability") or spec.get("learn") is not None):
                     raise ValueError(f"state {name} must be a mutable, plain f32 vector")
-                value = _tensor(spec["data"], shape, f"storage {name}")
-                validate_parameter(value, spec)
+                value = materialize(spec, bindings if key == "parameters" else None, schema_only=schema_only)
+                if not schema_only:
+                    validate_parameter(value, spec)
                 attribute = _attribute(self, name, "state" if key == "states" else "parameter")
                 if key == "states":
                     self.register_buffer(attribute, value)

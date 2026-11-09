@@ -21,6 +21,7 @@ from typing import Any
 
 import torch
 
+from .initialization import materialize
 from .operations import OperationsModule
 from .program import _domain
 from .runtime import _shape
@@ -522,7 +523,7 @@ def evaluate_isolated(
     with torch.no_grad():
         for name, attribute in template.state_names.items():
             value = getattr(template, attribute)
-            value.copy_(value.new_tensor(template._specs[name]["data"]).reshape(value.shape))
+            value.copy_(materialize(template._specs[name]).to(device=value.device, dtype=value.dtype))
     entries = template.operation_schemas
     if template.state_names and reset_operation is None:
         raise ValueError("stateful fitness requires an explicit reset_operation")

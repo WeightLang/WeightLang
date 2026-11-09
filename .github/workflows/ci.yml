@@ -83,7 +83,7 @@ jobs:
       - name: Check language server analysis and real stdio protocol
         run: |
           cargo test --locked -p weightlang-wgt --lib lsp::
-          cargo test --locked -p weightlang-wgt --test lsp
+          cargo test --locked -p weightlang-wgt --test lsp --test format
       - name: Check Rust model export and generated consumers
         run: cargo test --locked -p weightlang-wgt --test rust_export
       - name: Check allocator instrumentation configuration

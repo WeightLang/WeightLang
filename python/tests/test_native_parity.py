@@ -423,7 +423,7 @@ output y:f32[1]
 layer hidden:linear(3)
 layer activation:tanh
 layer output:linear(1)
-init seed=7
+init weights=xavier_uniform(7) bias=zeros()
 """
     expected = native(text, input=[0.2, -0.3], target=[0.7])
     before = torch.random.get_rng_state()
@@ -439,6 +439,22 @@ init seed=7
     for name, values in expected["gradients"].items():
         parameter = model.get_parameter(model.parameter_names[name])
         torch.testing.assert_close(parameter.grad.flatten(), torch.tensor(values), atol=1e-6, rtol=1e-6)
+
+
+def test_custom_initialization_recipes_match_native_and_compile_without_values():
+    text = source("return linear(x,weight);", "parameter weight:f32[2,2]=custom(42,0.25)", 2, 2)
+    text += "\nfn custom(seed,amplitude) { let noise=uniform(seed,-1,1); return eye()+noise*amplitude; }\n"
+    definition = wgt.compile_source(text)
+    assert all(parameter["data"] == [] for parameter in definition["program"]["parameters"])
+    expected = native(text, input=[0.2, -0.3])
+    before = torch.random.get_rng_state()
+    model = wgt.from_ir(definition, device="cpu")
+    torch.testing.assert_close(torch.random.get_rng_state(), before, rtol=0, atol=0)
+    for name, values in expected["parameters"].items():
+        torch.testing.assert_close(model.get_parameter(model.parameter_names[name]).flatten(),
+                                   torch.tensor(values), rtol=0, atol=0)
+    torch.testing.assert_close(model(torch.tensor([0.2, -0.3])), torch.tensor(expected["output"]),
+                               rtol=1e-6, atol=1e-6)
 
 
 def test_pure_fx_rejects_nonfinite_input_and_intermediate_values():

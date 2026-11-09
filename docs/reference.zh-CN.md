@@ -9,7 +9,7 @@
 
 ## 编辑器检查与提示
 
-[`wgt lsp`](lsp.md) 为 `.wgt` 文件提供函数签名与参数提示、张量形状和命名轴、模型参数元素统计，以及原生语法和形状诊断。形状与统计来自当前文档通过共享前端验证后的模型定义；分析不初始化权重或启动 `wgtime` 服务。当前文件引用与重命名、定义跳转、补全和语义高亮也由该服务提供。
+[`wgt lsp`](lsp.md) 为 `.wgt` 文件提供函数签名与参数提示、张量形状和命名轴、模型参数元素统计，以及原生语法和形状诊断。形状与统计来自当前文档通过共享前端验证后的模型定义；分析不初始化权重或启动 `wgtime` 服务。当前文件引用与重命名、定义跳转、补全、语义高亮和格式化也由该服务提供。`wgt format` / `wgt fmt` 与 LSP 共用保留 token 的格式化实现，`--check` 不写文件且在有差异时返回非零；见[源码格式化](format.md)。
 
 VS Code 源码扩展已接入 stdio LSP；安装、配置和矩阵维度错误示例见[语言服务器](lsp.md)，其他编辑器高亮见[编辑器支持](editors.md)。本节描述源码工具功能，语言版本、固定形状合同和各后端执行边界保持本参考中的定义。
 
@@ -17,7 +17,7 @@ VS Code 源码扩展已接入 stdio LSP；安装、配置和矩阵维度错误�
 
 目标工作流由 Rust 主程序负责数据准备、I/O、调度与训练循环，WGT 定义模型结构、模型内部计算及可选的可微 loss。Rust 库包名为 `wgt-model`，crate 名为 `wgt`。`ModelDefinition::parse`、`ModelDefinition::from_file`、`model!` 与 `include_model!` 共用模型解析与定义；两个宏仅接受 Rust 字符串字面量，编译时复用同一 parser 检查并嵌入源码，运行时仍解析定义。模型模块导入包含 `std/activation`、`std/loss`、`std/attention` 和 `std/numerics`；文件入口还实现了相对路径纯计算模块及嵌套导入。模块导出、原生执行和真实服务分别验收，当前覆盖清单与命令见 [Rust SDK](rust-sdk.md)，不表示已经发布。既有 forward 模型入口只接受单个 `f32` 向量；多输入 typed 操作遵守独立合同，见[模型操作](model-operations.md)。
 
-模型执行、参数和优化器状态由唯一的机器级 `wgtime` 服务持有。定义解析、编译期检查和源码嵌入不连接服务或初始化模型；Rust 程序须先显式调用 `Client::connect()`，再请求初始化、训练或权重保存。当前 facade 提供 `Model::save_weights`，没有公共训练 checkpoint API。Rust facade 通过 IPC 使用服务端原生编译 forward；这不意味着旧脚本执行路径已全部删除。API 已在本地实现并通过定点验证，尚未发布；不代表更广泛的能力支持。完整签名与契约见 [Rust 后端契约](native-backend.md)。
+模型执行、参数和优化器状态由唯一的机器级 `wgtime` 服务持有。定义解析、编译期检查和源码嵌入不连接服务或初始化模型；Rust 程序须先显式调用 `Client::connect()`，再明确选择初始化或完整权重恢复。`Client::load_weights` / `load_snapshot` 创建新实例并跳过参数配方；`Model::load_weights` 对既有实例绑定权重、保留 state 并重置优化器，frozen 必须保持当前值。`Model::snapshot` 捕获不可变参数快照；当前没有公共训练 checkpoint API。详见[权重快照与迁移](weights.md)。Rust facade 通过 IPC 使用服务端原生编译 forward；这不意味着旧脚本执行路径已全部删除。API 已在本地实现并通过定点验证，尚未发布；不代表更广泛的能力支持。完整签名与契约见 [Rust 后端契约](native-backend.md)。
 
 `wgt compile model.wgt --target rust [-o src/model.rs] [--crate-path wgt]` 导出可被 Rust `include!` 的自包含架构模块；源文件 `-` 表示 stdin，省略 `-o` 输出到 stdout，已有目标文件拒绝覆盖。生成的 `SOURCE` 和 `definition() -> wgt::Result<ModelDefinition>` 保留声明与纯计算 imports，定义构造仍调用同一前端。服务编译路径覆盖当前 48 个模型 IR 指令，包括普通写入、工作内存和资源查询；Rust `Model::forward` 成功后提交显式写入，执行失败回滚。数值、梯度、状态与实际生成代码的验收范围见 [Rust SDK](rust-sdk.md)。
 
@@ -58,14 +58,14 @@ assert_eq!(output, vec![6.0]);
 
 Rust facade 通过 IPC 连接机器级 `wgtime` 服务，由服务持有模型执行、参数和优化器状态；模型 forward 使用服务端原生编译实现。旧脚本控制与执行路径仍在源码中，正在逐步退出，不能据此认为已全部删除或等同于新模型 API。`wgtime` 服务专题见 [wgtime](wgtime.md)。服务连接失败明确报错，不回退到应用进程内执行。模型定义解析、检查和编译不隐式初始化或训练。
 
-当前 `wgt` 内置命令没有 `run`、`script` 或 `test`，以 [CLI 定义](../crates/wgt/src/main.rs) 为准。新应用使用 Rust 主程序与服务；下文的普通脚本、I/O、采样及 benchmark 描述保留中的 core 兼容接口，不构成这些旧 CLI 入口或整个脚本 AOT 路径的支持承诺。模型测试与兼容层测试的有效入口见[测试边界](native-testing.md)。
+当前 `wgt run -- COMMAND ARGS` 通过 uv 执行 Python 项目的宿主命令，不是 WGT 脚本运行器；没有内置 `script` 或 `test`，以 [CLI 定义](../crates/wgt/src/main.rs) 为准。新应用使用 Rust 主程序与服务；下文的普通脚本、I/O、采样及 benchmark 描述保留中的 core 兼容接口，不构成这些旧 CLI 入口或整个脚本 AOT 路径的支持承诺。模型测试与兼容层测试的有效入口见[测试边界](native-testing.md)。
 
 ## 语法与能力边界的机器可读规格
 
 [上下文能力规格](../language/source_capabilities.json) 记录当前源码 edition、解析入口及普通函数、
-张量 forward/loss、模型声明和编辑器的边界；[共同正负语料](../language/conformance.json)
+张量 forward/loss、初始化配方、模型声明和编辑器的边界；[共同正负语料](../language/conformance.json)
 由 Rust 与编辑器本地测试共同读取。这是已测试边界的有限规格，不是完整内置函数表。
-普通函数与 forward/loss 共用函数 parser，但张量 lowering（转换为张量指令）另行限制表达式、
+普通函数、forward/loss 和初始化配方共用函数 parser，但各自的 lowering（转换为张量指令）另行限制表达式、
 控制流与形状；顶层模型声明由独立解析入口处理。函数解析成功不代表运行时调用有效。
 [primitive_specs.json](../language/primitive_specs.json) 描述制品 graph 原语，供制品验证使用，
 不能当作当前源码全部可调用内置函数的清单，也不改变旧制品的读取兼容性。
@@ -76,6 +76,7 @@ Rust facade 通过 IPC 连接机器级 `wgtime` 服务，由服务持有模型�
 `ordinary_function` 供解释与 AOT 共用；`tensor_forward` / `tensor_loss` 是独立张量转换契约，
 不能因名字出现在目录中就用于普通函数。`write` 等标注为语句，`positive` 只用于张量条件。
 目录也列出 `true`、`false`、`null` 常量及 `f32`、`prob`、`logits`、`probabilities` 声明类型；这些不是可调用函数。
+`initializer` 是单独的目录 kind/context：`zeros`、`ones`、`full`、`eye`、`uniform`、`xavier_uniform` 只生成初始化配方，不成为 forward/loss 原语。`std/initialization` 的自定义组合须显式导入，检查和编译不执行它。完整签名见[显式初始化](initialization.md)。
 `std/` 模块不自动导入，仍须按各模块的使用契约显式引入。
 原生 WGT 计算库使用逻辑模块名 `import activation from "std/activation"` 与
 `import loss_ops from "std/loss"`，仅在 forward/loss 中调用，输入为非空同形 f32[N]。编译器随附模块与当前目录无关；开发版也允许相对导入文件的显式源码路径，本地路径不能覆盖 std 逻辑名。AOT 打包实际依赖，不写入开发机绝对源码路径。
@@ -101,7 +102,7 @@ Rust facade 通过 IPC 连接机器级 `wgtime` 服务，由服务持有模型�
 函数使用 `fn name(args) { ... }`，语句以分号结束，控制流块无需分号。
 名称使用 ASCII 字母或下划线开头、后接字母/数字/下划线；`__` 前缀供编译器使用。
 
-一个文件可声明一个根模型、多个具名子模型定义和多个函数。Rust facade 解析定义后，通过 `Client::initialize` 显式初始化服务实例。
+一个文件可声明一个根模型、多个具名子模型定义和多个函数。Rust facade 解析定义后，通过 `Client::initialize` 执行声明配方，或通过 `Client::load_weights` / `load_snapshot` 从完整参数绑定创建服务实例。
 旧脚本兼容层将模型名作为构造函数，并以无参 `fn main()` 为默认执行入口；只解析/编译不访问训练数据、不训练、不保存。
 只有模型声明的文件可以检查和嵌入 Rust 程序；旧脚本客户端可执行文件则要求显式入口。
 
@@ -115,11 +116,11 @@ weightc check model.wgt
 
 ## 多入口模型操作
 
-WGT 0.5 的 typed 操作已通过本地指定范围验收，尚未发布。core 7 个 suite 共 31 项、typed import roundtrip 1/1，最终 daemon 重建后真实 IPC 5/5（operations 1、既有 service 1、CNN 3）；language 与 model 常规测试 16 项通过、8 项 ignored，相关服务测试单独执行。workspace all-targets 检查、typed `model!` 宏编译和完整示例解析通过；解析不证明执行，完整覆盖范围见[模型操作验收状态](model-operations.md#验收状态)。每个入口的每个参数必须标注 `f32[N]`，N 为 1..16384，各参数宽度之和不超过 16384；可有多个参数。返回类型为 `-> f32[N]`，省略表示无返回值；无参无返回的 `fn reset() {}` 合法。typed 模式使用函数签名声明端口，不使用根级 `input`、`output` 或 `target`，不支持 `loss`、子模型或操作互调；纯张量辅助函数仍受各自限制。
+WGT 0.5 的 typed 操作已通过本地指定范围验收，尚未发布。core 7 个 suite 共 31 项、typed import roundtrip 1/1，最终 daemon 重建后真实 IPC 5/5（operations 1、既有 service 1、CNN 3）；language 与 model 常规测试 16 项通过、8 项 ignored，相关服务测试单独执行。workspace all-targets 检查、typed `model!` 宏编译和完整示例解析通过；解析不证明执行，完整覆盖范围见[模型操作验收状态](model-operations.md#验收状态)。每个入口的每个参数必须标注 `f32[N]`，N 为 1..16384，各参数宽度之和不超过 16384；可有多个参数。返回类型为 `-> f32[N]`，省略表示无返回值；无参无返回的 `fn reset() {}` 合法。typed 模式使用函数签名声明端口，不使用根级 `input`、`output` 或 `target`，不支持 `loss`；具名操作互调、子模型及实例数组按模型组合合同展开到同一次事务，纯张量辅助函数仍受各自限制。
 
-模型定义中出现 typed 函数签名或 `state` 声明，或者没有 `forward` 但存在无参函数时，会进入操作模式。该模式中无参且无返回类型标注的函数按 void 入口处理，不是纯 helper；例如 `fn constant() { return [1]; }` 会被拒绝。有返回值的无参入口须写成 `fn observe() -> f32[1] { ... }`。纯 helper 必须至少有一个未标注类型的参数，仍须遵守纯张量 helper 限制。
+模型定义中出现 typed 函数签名或 `state` 声明，或者没有 `forward` 但存在无参函数时，会进入操作模式。该模式中无参且无返回类型标注的普通操作按 void 入口处理；有返回值的无参入口须写成 `fn observe() -> f32[1] { ... }`。纯 tensor helper 必须至少有一个未标注类型的参数，仍须遵守纯张量限制。被初始化配方引用的纯 helper 可以无参，不作为 typed 入口。
 
-`state name: f32[N] = [有限数值, ...]` 声明固定向量状态，初值长度须匹配，末尾分号可选。`name <- expression;` 显式更新裸状态或参数名，分号必需；冻结目标及形状不符的更新拒绝。状态名与参数名不能冲突，入口参数也不能遮蔽存储名。typed `forward` 不允许写状态或参数。表达式遵守当前张量 lowering 限制，不支持任意宿主计算。
+`state name: f32[N] = RECIPE` 声明固定向量状态，配方的结果形状须匹配，末尾分号可选。省略配方可用于检查定义，但实例化或参数快照恢复时仍须得到状态初值；参数快照不补入 state。`name <- expression;` 显式更新裸状态或参数名，分号必需；冻结目标及形状不符的更新拒绝。状态名与参数名不能冲突，入口参数也不能遮蔽存储名。typed `forward` 不允许写状态或参数。表达式遵守当前张量 lowering 限制，不支持任意宿主计算。
 
 同一服务实例的入口共享参数与状态；调用内写后读看到候选值，成功并通过校验才原子提交，失败保持原值。状态与权重分离，普通权重不保存操作状态；不提供状态快照、状态 checkpoint 或重启恢复保证。操作由服务侧原生代码执行而非 VM，typed 操作不支持自动微分或跨状态求导。旧 forward 路径的 `train_with_policy` 提供 `ContinuousOnly`，遇到模型中任意 `learn bool` 或 `learn int` 即拒绝；`StraightThrough` 允许离散参数使用 STE，旧 `train` 保持 STE 兼容行为。策略检查与训练由单个 `TrainStepWithPolicy` 请求原子处理，不持久设置策略。参数候选拒绝 frozen/probability 参数，bool/int 候选必须严格离散；没有 CAS，revision 仅在服务响应中返回，不承诺拒绝过期候选。`update_parameters` 成功清空旧 forward 优化器，失败保持原状态，重新训练须通过 `load_weights` 显式选回。typed 操作无优化器，加载权重保留 state。当前 Rust facade 签名见[Rust 后端契约](native-backend.md#多入口操作)。详见[模型操作](model-operations.md)。
 
@@ -136,9 +137,9 @@ WGT 0.5 的 typed 操作已通过本地指定范围验收，尚未发布。core 
 | `output y: f32[M]` | 一个输出，M 必须等于最后一层宽度；互斥分类也可声明 `logits[M]` 或 `probabilities[M]`，见下文分类向量 |
 | `layer id: linear(in=N,out=M,bias=1)` | out 必填；in 默认前层宽度；bias 仅 0/1，默认 1；可用 `linear(M)` |
 | `layer id: relu` / `tanh` / `sigmoid` / `identity` | 不改变向量宽度，无参数 |
-| `init seed=N` | 必填、不可重复；N 为非负 u64；调用构造函数时进行均匀 Xavier 初始化，bias 为零 |
+| `init weights=EXPR bias=EXPR` | 整条可省略、不可重复；写出时 weights/bias 两项必填，external 保持未绑定；例如显式 `xavier_uniform(7)` 与 `zeros()`；只有宿主初始化才物化 |
 
-层按源码顺序执行，层名唯一。每个模型最多 400 万参数；参数名为 `层名.weight/bias`。
+层按源码顺序执行，层名唯一。顺序模型源码最多 4,000,000 个参数元素，宿主另检查字节预算；参数名为 `层名.weight/bias`。顺序模型同 seed 的随机配方按声明顺序续接流，独立 parameter 配方同 seed/shape 则取相同值。检查和编译不抽样，完整恢复不回退到配方。
 模型构造函数 `Name(optimizer)` 的 optimizer 必填，仅 `"sgd"` 或 `"adam"`。
 调用两次产生独立参数；复用同一个句柄则共享参数及优化器状态。初始化不等于训练。
 
@@ -151,7 +152,7 @@ output y: f32[1]
 layer hidden: linear(out=8)
 layer activation: tanh
 layer result: linear(out=1)
-init seed=42
+init weights=xavier_uniform(42) bias=zeros()
 
 fn main() {
     # 构造只初始化；以下所有步共享同一组参数。
@@ -264,7 +265,7 @@ checkpoint 使用保存的优化器。值、路径各求值一次；相对路径
 仅支持有限 F32、精确 name/shape 和 C row-major little-endian，不猜图、不自动改名/转置/下载/训练。
 成功原子替换，模型句柄别名保留，重置优化器、步数与自定义状态；失败保留原状态和 revision。
 顺序模型 view/add 关系保留，只保存独立参数；forward 可用 none/sgd/adam，顺序模型用 sgd/adam，using 必填。
-文件不含图或训练状态，不能作为 checkpoint 或直接 load weights；完整边界见[权重与训练](native-training.md)。
+文件不含图或训练状态，不能作为 checkpoint。上述旧宿主语法不提供独立的 `load weights` 表达式；新 Rust `Client::load_weights` 直接从明确的模型定义与完整文件创建实例，Python 使用 `restore`。完整边界见[权重快照](weights.md)和[权重与训练](native-training.md)。
 `assert CONDITION;` 或 `assert CONDITION, MESSAGE;` 要求严格 bool，只失败才求字符串消息，默认 `assertion failed`。解释/AOT 相同，错误含语句行号。
 完整签名、格式、安全发布和 JSON 限制见[文件与断言语法](file-io.md)。
 
@@ -328,8 +329,7 @@ workgroups 为三个工作组数量。内核句柄不能序列化为 JSON。
 
 同一个模型可用 `fn forward(x)` 定义有状态前向，替代 layer/init 声明。
 函数参数必须与 input 名称一致，input 使用 `f32[N]`；output 可使用 `f32[N]`、`logits[N]` 或 `probabilities[N]`。
-参数显式声明为 `parameter w: f32[O,I] = [...]` 或 `frozen w: f32[O,I] = [...]`；
-初值是行优先扁平有限 f32 数组，元素数必须与正整数形状匹配。
+参数声明为 `parameter w: f32[O,I]` 或 `frozen w: f32[O,I]`，可追加 `= EXPR`。显式列表是行优先扁平有限 f32 值，元素数须与形状匹配；也可使用生成函数与纯 helper，例如 `= eye()` 或 `= near_identity(7)`。省略初值或写 `= external` 表示等待外部绑定，不默认随机或置零。检查/编译只保留配方，实例化才执行；[显式初始化](initialization.md)列出完整签名、纯表达式限制与 seed 规则。
 自更新模型还可声明标量 `parameter p: prob = 0.7` 或 `frozen p: prob = 1`。
 可训练 prob 的初值须严格在 (0,1)，内部保存 logit 并通过 sigmoid 读取；冻结 prob 可使用闭区间 [0,1] 的精确端点。prob 不支持 forward 的 `write`，也不能直接作为 linear 权重或偏置。
 `learn bool` 提供带连续 shadow 的可学习布尔架构参数；普通 `f32` 参数不会自动限制在 `[0,1]` 或 `{0,1}`。
@@ -436,7 +436,7 @@ CPU `forward` 模型可用 `differentiate(model,inputs,targets)` 显式求 `fn l
 
 以下是 WGT 0.5 的本地实现，尚未发布。core 定点五组共 33/33 通过：adaptive、compiled_forward、control 10、std 5、learn 6；另有 architecture 6/6 和 conv 3/3 通过；真实 service 的 conv 3 项及 architecture 1 项通过，覆盖训练、权重恢复续训和释放。真实 control facade 1/1 已覆盖 native-cpu 子模型、三种 learn 数组、indexed repeat、if、blend 和半平方 loss，以及训练、权重回载、续训一致和释放归零。矩阵分支正反例及 5→5.5 已通过；解析或局部测试通过不等于模块导入与编译 forward 已全面验收。
 
-`learn name: TYPE[N] = INITIAL;` 的 N 为 1..16384 的固定整数，可省略 `[N]` 表示标量；TYPE 为 `bool`、`float`、`float in low..=high`、`float > low` 或 `int in low..=high`，范围写在数组维度之后。INITIAL 必填，可以是同类型标量（填充全部项）或恰好 N 项的列表，逐项遵守标量类型和范围。数组维度必须紧跟类型名，如 `int[2] in 0..=3`，不能放在范围末尾；此语法及错误形式的拒绝均已实现并通过测试，syntax-tour T12 已解析通过。参数数组读取为 f32[N]，索引只能是编译期常量或 repeat 展开索引，不支持运行时动态索引。具体投影及整数限制见[可学习参数](learnable-architecture-parameters.md)。
+`learn name: TYPE[N] = INITIAL;` 的 N 为 1..16384 的固定整数，可省略 `[N]` 表示标量；TYPE 为 `bool`、`float`、`float in low..=high`、`float > low` 或 `int in low..=high`，范围写在数组维度之后。INITIAL 可省略以声明外部绑定；提供时可以是同类型标量（填充全部项）、恰好 N 项的列表或初始化配方，物化值须遵守声明范围。完整外部绑定保留 bool/int 的连续 shadow，不先取整。数组维度必须紧跟类型名，如 `int[2] in 0..=3`，不能放在范围末尾；此语法及错误形式的拒绝均已实现并通过测试，syntax-tour T12 已解析通过。参数数组读取为 f32[N]，索引只能是编译期常量或 repeat 展开索引，不支持运行时动态索引。具体投影及整数限制见[可学习参数](learnable-architecture-parameters.md)。
 
 `blend { weight => value; ... }` 至少一项、每项分号必填，无默认权重；每项计算 gate 后相加，权重逐项位于 [0,1]，shape 可为 [1] 或与值完全相同的门，值形状须匹配，不对权重归一化。`if condition { yes } else { no }` 的两个块各含一个表达式，末尾分号可省，两个结果形状须匹配。直接以 learn bool 或其固定索引为条件，以及 `learn_int >= 整数字面量`，使用硬前向和 STE 路由；其他受支持的标量比较、`positive(x)` 或 bool 字面量使用硬分支，不对分支选择求代理梯度。语句形式 `if` 保持硬分支。
 

@@ -6,6 +6,7 @@ from .inspection import summary, trace, visualize
 from .training import bind_optimizer
 from .evolution import Candidate, GA, GAConfig, GeneticAlgorithm, GenomeSchema, evaluate_isolated
 from .forward_forward import FFReport, train_forward_forward
+from .weights import Plan, WeightRef, WeightSet, restore
 
 __version__ = "0.5.0"
 __all__ = [
@@ -13,4 +14,5 @@ __all__ = [
     "save", "select_device", "summary", "trace", "visualize", "bind_optimizer",
     "Candidate", "GA", "GAConfig", "GeneticAlgorithm", "GenomeSchema", "evaluate_isolated",
     "FFReport", "train_forward_forward",
+    "Plan", "WeightRef", "WeightSet", "restore",
 ]

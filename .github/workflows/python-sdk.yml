@@ -56,6 +56,7 @@ jobs:
       WGT_COMPILER: ${{ github.workspace }}/target/debug/wgt
       WGT_REFERENCE: ${{ github.workspace }}/target/debug/examples/torch_reference
       WGT_GA_REFERENCE: ${{ github.workspace }}/target/debug/examples/ga_reference
+      WGT_WEIGHT_BRIDGE: ${{ github.workspace }}/target/debug/examples/weights_roundtrip
       OMP_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@v4
@@ -83,7 +84,7 @@ jobs:
         run: |
           cargo test --locked -p weightlang-wgt --test torch_export --test no_python_cli
           cargo build --locked -p weightlang-wgt --bin wgt --example torch_reference
-          cargo build --locked -p wgt-model --example ga_reference
+          cargo build --locked -p wgt-model --example ga_reference --example weights_roundtrip
       - name: Build and inspect the source distribution and wheel
         run: |
           uv build python --sdist --no-sources --out-dir dist/python
@@ -113,6 +114,8 @@ jobs:
         run: |
           .venv/bin/python python/examples/mlp/train.py
           .venv/bin/python python/examples/adaptive/train.py
+      - name: Run explicit initialization, mixing and migration
+        run: .venv/bin/python python/examples/weight_lifecycle/build.py
       - uses: actions/upload-artifact@v4
         if: matrix.python == '3.12'
         with:

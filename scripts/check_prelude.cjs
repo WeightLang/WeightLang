@@ -14,7 +14,7 @@ assert.equal(new Set(keys).size, keys.length, 'duplicate kind/name');
 assert.equal(JSON.parse(read('language/source_capabilities.json')).prelude, 'language/prelude.json');
 for (const e of entries) {
   assert(typeof e.name === 'string' && /^[A-Za-z_]\w*$/.test(e.name), 'invalid prelude name');
-  assert(['function', 'intrinsic', 'syntax', 'internal', 'constant', 'type', 'layer'].includes(e.kind), e.name);
+  assert(['function', 'intrinsic', 'initializer', 'syntax', 'internal', 'constant', 'type', 'layer'].includes(e.kind), e.name);
   assert(Array.isArray(e.contexts) && e.contexts.length && e.contexts.every(c => typeof c === 'string'), e.name);
   for (const field of ['signature', 'purpose', 'implementation']) assert(typeof e[field] === 'string' && e[field], `${e.name}: ${field}`);
   assert(e.defaults && typeof e.defaults === 'object' && !Array.isArray(e.defaults), e.name);
@@ -43,6 +43,16 @@ for (const e of entries) {
     }
   }
   if (e.kind === 'intrinsic') assert(e.contexts.every(c => ['tensor_forward', 'tensor_loss'].includes(c)), `${e.name}: tensor context`);
+  if (e.kind === 'initializer') {
+    assert.deepEqual(e.contexts, ['initializer'], `${e.name}: initializer context`);
+    assert(Array.isArray(e.overloads) && e.overloads.length === 2, `${e.name}: initializer overloads`);
+    const [targetShape, explicitShape] = e.overloads;
+    assert(Array.isArray(targetShape) && targetShape.every(p => /^[A-Za-z_]\w*$/.test(p)), `${e.name}: initializer parameters`);
+    assert.deepEqual(explicitShape, ['shape', ...targetShape], `${e.name}: initializer shape overload`);
+    assert.deepEqual(e.arity, {min: targetShape.length, max: explicitShape.length}, `${e.name}: initializer arity`);
+    assert.equal(e.signature, e.overloads.map(args => `${e.name}(${args.join(', ')})`).join(' / '), `${e.name}: initializer signature`);
+    assert.deepEqual(e.defaults, {}, `${e.name}: initializer defaults`);
+  }
   if (Object.hasOwn(e, 'operator_arity')) {
     const a = e.operator_arity;
     assert(e.kind === 'intrinsic' && a && Number.isInteger(a.min) && Number.isInteger(a.max) && a.min > 0 && a.min <= a.max, `${e.name}: operator arity`);
@@ -85,7 +95,13 @@ const actualTensor = new Set([...tensor.matchAll(/\(\s*"(\w+)"\s*,\s*\[/g)].map(
 for (const match of tensor.matchAll(/\bop\s*==\s*"([a-z]\w*)"/g)) actualTensor.add(match[1]);
 const registeredTensor = new Set(entries.filter(e => e.kind === 'intrinsic').map(e => e.name));
 assert.deepEqual([...registeredTensor].sort(), [...actualTensor].sort(), 'tensor intrinsic catalog drift');
+const initializerSource = read('crates/wgt-language/src/initializer.rs');
+const initializerDispatch = /pub fn intrinsic\(name: &str\) -> bool\s*\{([\s\S]*?)\n\}/.exec(initializerSource);
+assert(initializerDispatch, 'initializer intrinsic dispatch required');
+const actualInitializers = [...initializerDispatch[1].matchAll(/"(\w+)"/g)].map(m => m[1]).sort();
+const registeredInitializers = entries.filter(e => e.kind === 'initializer').map(e => e.name).sort();
+assert.deepEqual(registeredInitializers, actualInitializers, 'initializer generator catalog drift');
 for (const e of entries.filter(e => ['constant', 'type', 'layer'].includes(e.kind))) {
   assert(read(e.implementation).includes(e.name), `missing parser token: ${e.name}`);
 }
-console.log(`Prelude validated: ${entries.length} entries, ${actualTensor.size} tensor intrinsics`);
+console.log(`Prelude validated: ${entries.length} entries, ${actualTensor.size} tensor intrinsics, ${actualInitializers.length} initializer generators`);

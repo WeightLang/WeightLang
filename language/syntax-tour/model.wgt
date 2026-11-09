@@ -393,10 +393,10 @@ fn loss(prediction, target) {
 #     // 数学预期 before=[5]，loss=12.5，after=[5.5]；按 f32 容差验收。
 #     let _observed = (before, loss, after);
 #     net.save_weights(Path::new("weights/syntax-tour/weights.safetensors"))?;
-#     // 显式绑定到同定义的独立实例；载入重置优化器，不恢复 checkpoint 状态。
-#     let restored = client.initialize(&inline, InstanceOptions::default())?;
-#     restored.load_weights(Path::new("weights/syntax-tour/weights.safetensors"),
-#                           Some(Optimizer::Sgd))?;
+#     // 直接从完整权重创建独立实例，跳过参数配方；优化器显式新建。
+#     let restored = client.load_weights(&inline,
+#         Path::new("weights/syntax-tour/weights.safetensors"),
+#         InstanceOptions { optimizer: Some(Optimizer::Sgd), ..Default::default() })?;
 #     let _restored_output = restored.forward(&[1.0])?;
 #     restored.close()?;
 #     net.close()?;
@@ -407,6 +407,9 @@ fn loss(prediction, target) {
 # Client::connect() -> anyhow::Result<Client>
 # Client::connect_to(endpoint:&Path) -> anyhow::Result<Client>
 # client.initialize(definition:&ModelDefinition, options:InstanceOptions) -> Result<Model>
+# client.load_weights(definition:&ModelDefinition, path:&Path, options:InstanceOptions) -> Result<Model>
+# client.load_snapshot(definition:&ModelDefinition, directory:&Path, revision:Option<&str>, options:InstanceOptions) -> Result<Model>
+# net.snapshot() -> Result<WeightSet>  // 不含 state 和 optimizer
 # net.forward(input:&[f32]) -> Result<Vec<f32>>
 # net.train(inputs:&[Vec<f32>], targets:Targets<'_>, options:TrainOptions) -> Result<f32>
 # net.save_weights(path:&Path) -> Result<()>

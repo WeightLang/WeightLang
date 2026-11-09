@@ -23,6 +23,10 @@ try {
     ['tensor-context', c => { entry(c, 'reshape', 'intrinsic').contexts = ['ordinary_function']; }, /tensor context/],
     ['operator-arity', c => { entry(c, 'layer_norm', 'intrinsic').operator_arity = {min: 5, max: 1}; }, /operator arity/],
     ['reserved', c => { entry(c, 'permute', 'intrinsic').reserved = 'yes'; }, /reserved/],
+    ['missing-initializer', c => { c.entries = c.entries.filter(e => e.kind !== 'initializer' || e.name !== 'zeros'); }, /initializer generator catalog drift/],
+    ['initializer-context', c => { entry(c, 'zeros', 'initializer').contexts = ['tensor_forward']; }, /initializer context/],
+    ['initializer-arity', c => { entry(c, 'zeros', 'initializer').arity.min = 1; }, /initializer arity/],
+    ['initializer-shape', c => { entry(c, 'uniform', 'initializer').overloads[1][0] = 'seed'; }, /initializer shape overload/],
   ];
   for (const [mode, mutate, diagnostic] of cases) {
     const catalog = structuredClone(original);

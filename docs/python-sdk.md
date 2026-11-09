@@ -35,7 +35,7 @@ output y: f32[1]
 layer hidden: linear(8)
 layer activation: tanh
 layer prediction: linear(1)
-init seed=42
+init weights=xavier_uniform(42) bias=zeros()
 ```
 
 Python 直接加载架构，用 PyTorch 训练 `y = 2x + 1`：
@@ -194,6 +194,98 @@ typed operations 遵循当前 WGT 的无自动微分合同：参数不参与 aut
 
 SDK 使用调用时传入的模型与设备参数，不隐式应用 `wgt.toml` 中的 `train`、`infer`、`runtime` 配置或 `WGT_CONFIG_FILE`。使用统一项目配置的 Python 宿主需读取相关值，再传给 SDK、优化器与推理调用；Python 依赖与 uv 设置继续保存在 `pyproject.toml`。
 
+## 显式权重构造、引用与迁移
+
+`compile` 返回架构和初始化配方，不创建模型参数存储，也不运行初始化函数。`load`、`loads` 与 `from_ir` 创建新实例时才执行声明的配方；未提供初值的参数必须通过完整权重绑定构造。模型没有默认随机初始化。随机初始化需要写出算法与种子，例如 `xavier_uniform(42)`；常量、单位矩阵和纯函数也可作为配方。
+
+`WeightSet` 是不可变的 F32 参数快照，`WeightRef` 指向其中一个固定版本的逻辑参数。名称始终使用 WGT 声明名，例如 `first` 或 `hidden.weight`，与 PyTorch 为避免属性冲突而生成的注册名分开。`snapshot[name]` 和 `reference.tensor()` 返回独立 Tensor 副本，修改副本不改变源快照。读取同一子模型实例的参数仍共享一个逻辑存储项。
+
+以下示例在仓库根目录运行，使用完整的[两层模型](../python/examples/weight_lifecycle/model.wgt)。该模型的 `first`、`second`、`bias` 没有初值，构造计划必须显式填满三个参数：
+
+```python
+import torch
+import weightlang as wgt
+
+definition = wgt.compile("python/examples/weight_lifecycle/model.wgt")
+initial = (
+    wgt.Plan(definition)
+    .set("first", lambda shape: torch.eye(*shape) * 2)
+    .set("second", lambda shape: torch.eye(*shape))
+    .set("bias", lambda shape: torch.zeros(shape))
+)
+print(initial.preview())
+a = initial.build()
+a.save("weights/demo/original")
+```
+
+Python 自定义初始化函数接收目标 shape 并返回 Tensor，只在 `build()` 时执行。`preview()` 列出目标、来源和缺失项，不调用初始化函数；其 `complete` 表示目标已全部获得来源，延迟生成的值仍须在 `build()` 中验证。缺失项在执行任何函数前就会报错；shape、dtype、有限值或取值域错误也会使构造失败。初始化函数由宿主显式提供，manifest 不包含可执行 Python。若参数已经在 WGT 中声明配方，可用 `plan.initialize(["first", "bias"])` 显式选择执行哪些配方；`plan.initialize()` 选择所有尚未赋值且具有配方的目标，任何未绑定目标都会报错。
+
+合并指定层时，用 `base` 明确继承完整快照，再列出替换项。`base` 的参数键集合、shape 和取值域必须与目标合同完全匹配；其余参数保留原值：
+
+```python
+b = (
+    wgt.Plan(definition, base=a)
+    .replace("first", a["first"] + 0.5)
+    .replace("second", a["second"] * 3)
+    .build()
+)
+b.save("weights/demo/alternate")
+
+blend = wgt.Plan(definition, base=a)
+for name in ("first", "second"):
+    blend.replace(
+        name,
+        0.75 * a[name] + 0.25 * b[name],
+        sources=(a.ref(name), b.ref(name)),
+    )
+mixed = blend.build()
+mixed.save("weights/demo/mixed")
+```
+
+这里仅修改两个矩阵，`bias` 保留 `a` 中的值。普通 torch 运算负责加权、转置、拼接和切片；`sources` 显式记录参与变换的快照版本与逻辑名称。工具校验结构和数值合同；两个独立训练模型的神经元排列、词表行意义或不同层的功能是否对应，由调用者选择明确映射并验证输出效果。
+
+架构改变时，创建无 `base` 的计划，逐项指定继承、重命名、扩维和新增参数的来源。下面使用[增加输入坐标的模型](../python/examples/weight_lifecycle/wider/model.wgt)，把 `bias` 映射为 `offset`，保留旧矩阵行，仅新增一行零值，并显式初始化新的输出增益：
+
+```python
+wider = wgt.compile("python/examples/weight_lifecycle/wider/model.wgt")
+migration = (
+    wgt.Plan(wider)
+    .set("first", torch.cat((mixed["first"], torch.zeros(1, 2)), dim=0),
+         sources=[mixed.ref("first")])
+    .copy("second", mixed.ref("second"))
+    .copy("offset", mixed.ref("bias"))
+    .set("gain", lambda shape: torch.ones(shape))
+)
+print(migration.preview())
+migrated = migration.build()
+migrated.save("weights/demo/migrated")
+model = wgt.restore(wider, migrated, device="cpu")
+print(model(torch.tensor([1.0, 2.0, 0.0])))
+```
+
+`restore` 直接把完整快照绑定到新实例，跳过全部参数初始化配方。冻结参数可在创建新实例时绑定预训练值，随后受冻结规则约束。运行状态按其独立声明初始化；权重快照不携带运行状态或优化器历史。已有实例的 `update_parameters` 保持原有候选更新合同，不承担架构迁移。
+
+| API | 合同 |
+| --- | --- |
+| `WeightSet(tensors, provenance=None)` | 从逻辑名称到 F32 Tensor 的映射创建不可变快照，复制输入并拒绝非有限值 |
+| `WeightSet.from_model(model)` | 读取模型参数，不收集 state buffers 或优化器 |
+| `snapshot.ref(name)` | 固定到当前 revision 的只读引用 |
+| `WeightSet.load(path, revision=sha256)` | 校验 manifest、完整 payload SHA-256、张量表及可选的精确版本 pin |
+| `snapshot.save(new_directory)` | 发布新目录，最后发布 manifest；已有文件或目录一律拒绝覆盖 |
+| `Plan(definition, base=None)` | 空计划，或显式继承完整匹配的 base |
+| `set(name, value)` / `copy(name, ref)` | 添加一个目标来源，重复目标报错 |
+| `set_many(mapping)` / `reuse(snapshot, names)` | 整批检查后添加；失败不留部分赋值 |
+| `replace(name, value)` | 修改已有来源；同一目标重复 replace 报错 |
+| `initialize(names=None)` | 显式选择编译器提供的初始化配方，不在此时执行 |
+| `preview()` / `build()` | 检查覆盖情况；完整求值、校验后创建新快照 |
+| `restore(definition, snapshot, device="auto", dtype=None)` | 直接绑定新实例；`dtype` 为显式的模型精度转换 |
+
+快照目录包含 `manifest.json` 与 `weights.safetensors`，格式标识为 `weightlang.weights.v1`。`revision` 是整个 safetensors 文件的 SHA-256；manifest 的 tensor 表记录逻辑名称、shape、`F32`，`provenance` 记录来源。Python 与 Rust SDK 使用同一格式。单个快照上限 64 MiB，manifest 上限 1 MiB，每轴上限 16384；当前跨 SDK 权重交换仅支持 F32。其他精度需要先显式转换。
+
+快照保留实际存储值，包括 `learn bool/int` 的连续 shadow；计划只验证 `[0,1]` 或声明区间，不自动舍入、裁剪或投影。模型读取继续采用 learn 域的离散规则，既有外部候选更新仍要求 bool/int 是严格离散值。训练得到的概率参数保存 logit；冻结概率保存 `[0,1]` 数值。
+
+完整脚本位于 [`python/examples/weight_lifecycle/build.py`](../python/examples/weight_lifecycle/build.py)，会生成 `weights/sdk-weight-lifecycle/` 下的原始、修改、混合和迁移快照。示例默认拒绝覆盖保留的输出。
+
 ## 保存模型与续训
 
 ```python
@@ -201,7 +293,7 @@ wgt.save(model, "weights/demo/model.pt")
 restored = wgt.load("weights/demo/model.pt", device="cpu").eval()
 ```
 
-SDK 保存格式包含版本化架构和标准 `state_dict`，加载使用 `torch.load(weights_only=True)`。它可在未安装 WGT 编译器的 Python 环境恢复模型。typed 模型的持久状态作为 buffers 一并保存，加载后可继续调用入口。`torch.compile(model)` 的包装也可保存，保存的是原始 WGT 模块。该 SDK 模型包与原生仅含参数的权重制品有各自的格式与恢复合同。
+SDK 保存格式包含版本化架构和标准 `state_dict`，加载使用 `torch.load(weights_only=True)`。恢复先按 schema 创建无数据的内部布局，再一次绑定保存的参数与 buffers，不执行参数或状态的初始化配方；已有 `.pt` 模型包也使用这一流程。它可在未安装 WGT 编译器的 Python 环境恢复模型。typed 模型的持久状态作为 buffers 一并保存，加载后可继续调用入口。`torch.compile(model)` 的包装也可保存，保存的是原始 WGT 模块。该 SDK 模型包与仅含参数的 `WeightSet` 各有明确的内容范围。
 
 加载后默认处于 PyTorch 的训练模式，推理时显式调用 `.eval()`。源码加载会按声明初始化权重；加载 `.pt` 会恢复已保存权重。源码、初始化模型、训练权重与优化器状态有不同用途。
 
@@ -281,7 +373,7 @@ exported = torch.export.export(model, (example_input,))
 
 支持范围跟随当前 WGT 模型语法与 IR。前端仍检查 shape、类型、操作签名与模型组合规则；任意宿主脚本不会作为模型执行。未知指令、未知程序字段和非法模型会报错。指令覆盖测试直接对照原生目录，新增指令时必须同时补充转换与验收。
 
-顺序模型使用原生 SplitMix64／Xavier 初始化，显式参数按编译结果加载，均不改变宿主随机数状态。数值转换保留 WGT 的有限值合同、指定的宽精度累积以及端点梯度规则。不同计算后端仍存在浮点舍入差异；差分测试明确设置前向／梯度容差，初始化与离散状态使用精确断言。为保留数值规则，部分算子采用更宽的累积精度；MPS 上需要 float64 的计算通过可微 CPU 临时计算返回原设备，会增加传输成本。
+模型只执行显式声明的初始化配方或接收完整权重绑定。`uniform` 与 `xavier_uniform` 使用显式种子的原生 SplitMix64 随机流，不改变宿主随机数状态。编译结果保存配方，运行时才物化数值。数值转换保留 WGT 的有限值合同、指定的宽精度累积以及端点梯度规则。不同计算后端仍存在浮点舍入差异；差分测试明确设置前向／梯度容差，离散状态使用精确断言。为保留数值规则，部分算子采用更宽的累积精度；MPS 上需要 float64 的计算通过可微 CPU 临时计算返回原设备，会增加传输成本。
 
 SDK 对计算节点的激活与反向梯度执行有限值校验，包括冻结参数和常量的内部梯度。原生顺序图的部分推理路径只校验最终输出，因此中间出现 Inf、随后被激活消去的调用可能在原生推理中返回有限值，而 SDK 会拒绝。这是已知的异常处理差异；当前转换不承诺所有异常路径或浮点结果逐位相同。
 
@@ -296,10 +388,12 @@ SDK 对计算节点的激活与反向梯度执行有限值校验，包括冻结�
 ```sh
 cargo test --locked -p weightlang-wgt --test torch_export --test no_python_cli
 cargo build --locked -p weightlang-wgt --bin wgt --example torch_reference
+cargo build --locked -p wgt-model --example ga_reference --example weights_roundtrip
 uv pip install -e './python[visualize,test]'
 WGT_COMPILER="$PWD/target/debug/wgt" \
 WGT_REFERENCE="$PWD/target/debug/examples/torch_reference" \
+WGT_WEIGHT_BRIDGE="$PWD/target/debug/examples/weights_roundtrip" \
 uv run --no-project python -m pytest python/tests -q
 ```
 
-原生差分测试直接复用 Rust `AdaptiveSession`、`OperationSession` 和 `Trainer`，核对前向、输入／参数梯度、自定义损失、SGD 投影、写入和回滚。另有指令全集覆盖、批次隔离、结构共享、保存恢复、FX／导出捕获、IR 图渲染、非法输入和浮点边界检查。CI 在 Python 3.10、3.12 上执行 CPU 验证，并运行 MLP 与可学习深度示例；GPU 硬件与具体编译加速效果按目标设备另行验收。
+原生差分测试直接复用 Rust `AdaptiveSession`、`OperationSession` 和 `Trainer`，核对前向、输入／参数梯度、自定义损失、SGD 投影、写入和回滚。权重验收另覆盖 Rust→Python→Rust 双向快照交换、版本 pin、指定层混合、扩维迁移、来源覆盖、冲突拒绝，以及不执行初始化配方的直接恢复。另有指令全集覆盖、批次隔离、结构共享、保存恢复、FX／导出捕获、IR 图渲染、非法输入和浮点边界检查。CI 在 Python 3.10、3.12 上执行 CPU 验证，并运行 MLP、可学习深度与权重生命周期示例；GPU 硬件与具体编译加速效果按目标设备另行验收。

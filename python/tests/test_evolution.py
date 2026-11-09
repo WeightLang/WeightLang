@@ -165,6 +165,22 @@ def test_fitness_resets_each_episode_and_never_changes_source_model(model):
     same_storage(model, before)
 
 
+def test_fitness_uses_bound_parameters_without_running_their_initializers(model):
+    definition = deepcopy(model.definition)
+    for spec in definition["operations"]["parameters"]:
+        spec["initializer"] = {"op": "unbound"}
+    weights = wgt.WeightSet({"gain": torch.tensor([2.]), "fixed": torch.tensor([3.])})
+    restored = wgt.restore(definition, weights, device="cpu")
+    restored.step(torch.tensor([9.]))
+    before = deepcopy(restored.state_dict())
+    search = wgt.GA(restored, config=wgt.GAConfig(population_size=2, elite_count=1, tournament_size=2))
+    assert search.ask()[0].values == (2.,)
+    scores = wgt.evaluate_isolated(restored, [search.ask()[0]], lambda view, _: view(torch.ones(1)),
+                                  operation="step", reset_operation="reset", episode_seeds=(11, 23))
+    assert scores == {0: 2.}
+    same_storage(restored, before)
+
+
 def test_fitness_effects_and_reset_are_checked_before_callback(model):
     def forbidden(*_):
         pytest.fail("callback must not run")

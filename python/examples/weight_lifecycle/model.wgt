@@ -1,0 +1,13 @@
+wgt 0.5
+model TwoLayers
+input x: f32[2]
+output y: f32[2]
+# Both matrices use [input, output] axes. The host must explicitly bind every
+# parameter before this definition can become a runnable model instance.
+parameter first: f32[2, 2]
+parameter second: f32[2, 2]
+parameter bias: f32[2]
+fn forward(x) {
+    let hidden = (x as [1, 2]) @ (first as [2, 2]);
+    return (hidden @ (second as [2, 2]) + (bias as [1, 2])) as [2];
+}

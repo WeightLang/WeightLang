@@ -37,7 +37,7 @@ def test_loaded_program_and_executor_snapshot_caller_metadata():
     assert isinstance(model, ProgramModule)
     executor = ProgramExecutor(definition["program"])
     definition["program"]["instructions"].clear()
-    definition["program"]["parameters"][0]["data"][0] = 999
+    definition["program"]["parameters"][0]["initializer"] = {"op": "full", "shape": [1], "value": 999}
     x = torch.tensor([3.0], requires_grad=True)
     torch.testing.assert_close(model(x), torch.tensor([6.0]))
     result = executor.run(x, {"gain": torch.tensor([4.0])}, differentiable=True)
@@ -128,7 +128,7 @@ def test_workspace_admission_and_use_after_free_roll_back_writes():
     torch.testing.assert_close(invalid.get_parameter(invalid.parameter_names["state"]), torch.ones(1))
 
 
-def test_seed_only_exports_reproduce_native_initializers_exactly():
+def test_embedded_graph_recipes_preserve_native_initializers_exactly():
     definition = wgt.compile(ROOT / "python/examples/mlp/model.wgt")
     native = wgt.from_ir(definition, device="cpu")
     del definition["graph_parameters"]
