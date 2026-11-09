@@ -11,9 +11,9 @@ parameter recurrent_weight: f32[2,2] = [0.2,0.1,-0.3,0.4]
 parameter bias: f32[2] = [0.02,-0.03]
 fn cell(observation,previous,iw,rw,b) {
     # 行向量 [1,输入通道]×[输入通道,隐藏通道]，隐藏轴长度始终为 2。
-    # 参数裸读为扁平向量，显式 reshape 恢复矩阵轴，不复制共享参数。
-    let observed = reshape(matmul(reshape(observation,[1,2]),reshape(iw,[2,2])),[2]);
-    let recurrent = reshape(matmul(reshape(previous,[1,2]),reshape(rw,[2,2])),[2]);
+    # 参数裸读为扁平向量，as 显式恢复矩阵轴，不复制共享参数。
+    let observed = ((observation as [1,2]) @ (iw as [2,2])) as [2];
+    let recurrent = ((previous as [1,2]) @ (rw as [2,2])) as [2];
     return tanh(observed+recurrent+b);
 }
 fn forward(x) {

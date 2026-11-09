@@ -14,9 +14,9 @@ parameter down1: f32[3,2] = [0.3,0.2,-0.1,0.4,0.2,-0.3]
 parameter bias1: f32[2] = [-0.02,0.03]
 fn block(v,up,hidden,down,bias) {
     # 参数裸读为扁平向量，显式恢复矩阵轴；增加长度为 1 的样本轴。
-    # 加偏置前恢复向量，避免广播；reshape 不创建独立参数。
-    let h = tanh(reshape(matmul(reshape(v,[1,2]),reshape(up,[2,3])),[3])+hidden);
-    let correction = reshape(matmul(reshape(h,[1,3]),reshape(down,[3,2])),[2])+bias;
+    # 加偏置前恢复向量，避免广播；as 不创建独立参数。
+    let h = tanh(((v as [1,2]) @ (up as [2,3])) as [3] + hidden);
+    let correction = (((h as [1,3]) @ (down as [3,2])) as [2]) + bias;
     return v+correction;
 }
 fn forward(x) {

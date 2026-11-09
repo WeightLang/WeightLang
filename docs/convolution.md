@@ -76,8 +76,8 @@ parameter bias: f32[2] = [0.02,0.04]
 fn forward(x) {
     # stride=[1,2,1]、padding=[0,1,1]、dilation=[1,1,2]；卷积输出 shape 为 [2,1,2,4]。
     # 每个空间位置复用同一 kernel；之后才逐元素应用 tanh 并展平。
-    let features = conv(reshape(x,[2,2,3,4]),reshape(kernel,[2,1,2,2,2]),bias,[1,2,1],[0,1,1],[1,1,2],2);
-    return reshape(tanh(features),[16]);
+    let features = conv(x as [2,2,3,4],kernel as [2,1,2,2,2],bias,[1,2,1],[0,1,1],[1,1,2],2);
+    return tanh(features) as [16];
 }
 fn loss(prediction,target) { return square(prediction-target).mean; }
 ```
@@ -118,7 +118,7 @@ part of this initial implementation.
 ## Compact CNN classifier
 
 The repository also includes a complete two-layer convolutional classifier at
-[`examples/cnn/tiny_image_classifier.wgt`](../examples/cnn/tiny_image_classifier.wgt),
+[`examples/cnn/tiny_image_classifier/model.wgt`](../examples/cnn/tiny_image_classifier/model.wgt),
 with a matching regression fixture at `crates/wgtime-core/tests/fixtures/cnn_classifier/model.wgt`.
 It is deliberately small
 enough for deterministic CPU tests:

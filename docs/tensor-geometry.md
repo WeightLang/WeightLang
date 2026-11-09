@@ -42,7 +42,7 @@ fn forward(x) {
     # 收缩 hidden，保留 queries/keys，沿 keys 独立归一化。
     let scores = queries @ keys.T;
     let probabilities = softmax(scores,"keys");
-    return reshape(probabilities,[4]);
+    return probabilities as [4];
 }
 ```
 
@@ -54,7 +54,7 @@ fn forward(x) {
 
 `gate`/`route` 的同形概率张量也参与按位置的命名轴合并与冲突检查，`route` 先检查两支值的合同。原有 `f32[1]` 门保持逐元素应用语义；`f32[1,1]` 等形状不会自动变成标量门。
 
-模型服务入口仍只接受一个 `f32` 向量；需要矩阵输入时，当前仍须在 forward 内显式 `reshape`。返回值仍须为向量，因此矩阵输出应显式 reshape 回一维。当前版本尚未实现多轴索引、动态 Shape 和通用广播。原生 CPU interpreter 将 `reshape`、`.T` 与 `permute` 表示为带 base/offset/shape/strides 的 TensorView；`@` 与 `batch_matmul` 直接消费 strided view，不复制输入数据。其他不支持 strided 输入的算子会按需物化。AOT compiled-forward 目前使用物化回退路径，因此零拷贝保证仅适用于 interpreter 的 view-aware 路径。
+模型服务入口仍只接受一个 `f32` 向量；需要矩阵输入时，在 forward 内显式使用 `as [...]` 恢复矩阵形状。返回值仍须为向量，因此矩阵输出应显式展平为一维。当前版本尚未实现多轴索引、动态 Shape 和通用广播。原生 CPU interpreter 将 `as [...]`、`.T` 与 `permute` 表示为带 base/offset/shape/strides 的 TensorView；`@` 与 `batch_matmul` 直接消费 strided view，不复制输入数据。其他不支持 strided 输入的算子会按需物化。AOT compiled-forward 目前使用物化回退路径，因此零拷贝保证仅适用于 interpreter 的 view-aware 路径。
 
 | 表达式 | 合同 | 限制 |
 | --- | --- | --- |
@@ -66,7 +66,7 @@ fn forward(x) {
 | `softmax(x,axis)` | 沿指定整轴独立归一化；稳定计算，沿轴使用 f64 累加 | axis 为范围内的非负整数字面常量或已声明的轴名字符串；`softmax(x)` 与 `log_softmax(x)` 仍只接受 rank-1 向量 |
 | `scale(x,literal)` | 以有限有符号数值字面量缩放张量 | 不广播，shape 保持不变 |
 
-实际使用新几何算子或多轴 softmax 时使用 adaptive IR v3；旧 IR v1/v2 的读取规则不因 AST 中出现新 intrinsic 而全定义升级。参数 `read` 与裸参数引用始终产生 flat vector；矩阵参数必须在局部显式写 `reshape(parameter,[...])`。这里没有承诺动态 shape、广播、任意 dtype 或 rank-2 以上 matmul。
+实际使用新几何算子或多轴 softmax 时使用 adaptive IR v3；旧 IR v1/v2 的读取规则不因 AST 中出现新 intrinsic 而全定义升级。参数 `read` 与裸参数引用始终产生 flat vector；矩阵参数必须在局部显式写 `parameter as [...]`。这里没有承诺动态 shape、广播、任意 dtype 或 rank-2 以上 matmul。
 
 ## 完整模型示例
 
@@ -83,21 +83,21 @@ parameter qk: f32[3,2] = [0.3,-0.2,0.1,0.4,-0.3,0.2]
 parameter value: f32[3,3] = [0.2,-0.1,0.3,0.4,0.2,-0.2,-0.1,0.3,0.2]
 parameter output: f32[3,3] = [0.5,0.1,-0.2,-0.1,0.4,0.2,0.3,-0.2,0.5]
 fn forward(x) {
-    # Flat parameter reads are explicitly reshaped before matrix operations.
-    let tokens = reshape(x,[2,3]);
-    let projection = reshape(qk,[3,2]);
-    let values = reshape(value,[3,3]);
-    let outputs = reshape(output,[3,3]);
-    let q = matmul(tokens,projection);
+    # Flat parameter reads are given explicit matrix shapes before operations.
+    let tokens = x as [2,3];
+    let projection = qk as [3,2];
+    let values = value as [3,3];
+    let outputs = output as [3,3];
+    let q = tokens @ projection;
     # Q/K share the projection weights; reusing q here shares a computed value, not a new weight mechanism.
     let k = q;
-    let v = matmul(tokens,values);
+    let v = tokens @ values;
     # [2,2] scores reduce over keys (axis 1), independently for each query.
     let scores = scale(q @ k.T,0.7071067811865476);
     let attention = softmax(scores,1);
-    let context = matmul(attention,v);
+    let context = attention @ v;
     # Output projection preserves tokens; the host contract stays one vector.
-    return reshape(matmul(context,outputs),[6]);
+    return (context @ outputs) as [6];
 }
 fn loss(prediction,target) { return square(prediction-target).mean; }
 ```

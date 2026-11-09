@@ -19,7 +19,7 @@
 [强化学习原语](reinforcement-learning.md)相同。特别是 slice 的起点/长度和 clip 的边界
 仍须在算子函数体中写成字面量，不能使用张量参数代替；linear 的参数身份不作为普通张量传递。
 
-纯 helper 也可组合多轴几何原语：`reshape(x,shape)`、`transpose(x)` / `x.T`、
+纯 helper 也可组合多轴几何原语：`x as [2,3]`（或兼容形式 `reshape(x,[2,3])`）、`x.T` / `transpose(x)`、
 `matmul(a,b)` / `a @ b`、`permute(x,axes)`、`batch_matmul(a,b)`、
 `layer_norm(x,gamma,beta,axis,epsilon)` 及 `softmax(x,axis)`。
 `permute` 与 `batch_matmul` 各有两个必填参数，`layer_norm` 有五个；

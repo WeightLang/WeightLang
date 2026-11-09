@@ -514,9 +514,9 @@ fn loss(prediction, target) {
 
 # T10 BEGIN：独立完整固定 shape 多轴 attention 模型，合同冻结且指定范围已本地验证。
 # 单 vector 入口把两个 token、三个特征按 token-major 顺序展为 [6]；forward 内恢复 [2,3]。
-# 参数 read 始终是 flat vector；qk/value/output 在矩阵乘法前显式 reshape 到声明矩阵 shape。
+# 参数 read 始终是 flat vector；qk/value/output 在矩阵乘法前用 as 显式恢复矩阵形状。
 # Q/K 共用 qk:[3,2] 投影；score 为 [2,2]，沿 axis=1 对每个 query 的 keys 做 softmax。
-# V/output 使用 [3,3]；返回矩阵显式 reshape 为 [6]，满足模型单向量输出合同。
+# V/output 使用 [3,3]；返回矩阵显式转为 [6]，满足模型单向量输出合同。
 # 参数是声明初值，不是已训练权重；此模型不改活跃 T01。
 # wgt 0.5
 # model TinyAttention
@@ -526,26 +526,26 @@ fn loss(prediction, target) {
 # parameter value: f32[3,3] = [0.2,-0.1,0.3,0.4,0.2,-0.2,-0.1,0.3,0.2]
 # parameter output: f32[3,3] = [0.5,0.1,-0.2,-0.1,0.4,0.2,0.3,-0.2,0.5]
 # fn forward(x) {
-#     let tokens = reshape(x,[2,3]);
-#     let projection = reshape(qk,[3,2]);
-#     let values = reshape(value,[3,3]);
-#     let outputs = reshape(output,[3,3]);
-#     let q = matmul(tokens,projection);
+#     let tokens = x as [2,3];
+#     let projection = qk as [3,2];
+#     let values = value as [3,3];
+#     let outputs = output as [3,3];
+#     let q = tokens @ projection;
 #     # Q 与 K 使用同一个共享权重 projection；本地数值验证确认复用 q 结果时输出和梯度一致且 work 更少。
 #     # 这里的 let k = q 复用计算结果；本身不代表新增的共享权重机制。
 #     let k = q;
-#     let v = matmul(tokens,values);
-#     let scores = scale(matmul(q,transpose(k)),0.7071067811865476);
+#     let v = tokens @ values;
+#     let scores = scale(q @ k.T,0.7071067811865476);
 #     let attention = softmax(scores,1);
-#     let context = matmul(attention,v);
-#     return reshape(matmul(context,outputs),[6]);
+#     let context = attention @ v;
+#     return (context @ outputs) as [6];
 # }
 # fn loss(prediction,target) { return square(prediction-target).mean; }
 # T10 END
 # T10 合同：WGT 0.5；实际使用新几何 op 或多轴 softmax 时用 adaptive IR v3。
 # 旧 IR v1/v2 不因 AST 出现新 intrinsic 而全定义升级；read/裸参数引用始终 flat vector。
 # 局部 let 可写 f32[sequence=2,hidden=3]，按相同元素数直接绑定 Shape 并声明编译期轴名。
-# reshape 仍兼容；reshape 目标为 1..8 轴正整数常量，每轴 1..16384、总元素<=16777216，元素数相同。
+# 首选 x as [d1,...,dn]；reshape(x,[...]) 仍兼容。目标为 1..8 轴正整数常量，每轴 1..16384、总元素<=16777216，元素数相同。
 # @ / matmul [M,K]@[K,N]->[M,N]；.T / transpose 仅 rank2；permute 接受完整轴排列。
 # batch_matmul 支持 [B,M,K]@[B,K,N]->[B,M,N] 且 batch 相等；不广播。permute 当前物化数据。
 # softmax(x,axis) 的 axis 是非负整常量，沿轴独立稳定归一化并用 f64 累加；softmax(x)/log_softmax(x) 仍为 rank1。
