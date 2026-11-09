@@ -90,7 +90,7 @@ class PublishTests(unittest.TestCase):
 
     def run_cargo(self, command, **kwargs):
         self.calls.append(command)
-        if "--dry-run" not in command:
+        if command[1] == "publish":
             for name in release.CRATES:
                 if name in command:
                     self.registry[name] = self.published(name)
@@ -108,8 +108,9 @@ class PublishTests(unittest.TestCase):
     def test_publishes_all_crates_after_verifying_packaged_bytes(self):
         self.run_release()
         self.assertEqual(len(self.calls), 2)
-        self.assertIn("--dry-run", self.calls[0])
-        self.assertNotIn("--dry-run", self.calls[1])
+        self.assertEqual(self.calls[0][1], "package")
+        self.assertEqual(self.calls[1][1], "publish")
+        self.assertEqual(self.calls[0][2:], [arg for arg in self.calls[1][2:] if arg not in ("--registry", "crates-io")])
         self.assertEqual(set(self.registry), set(release.CRATES))
 
     def test_retry_skips_only_identical_already_published_crates(self):
@@ -137,7 +138,7 @@ class PublishTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "differs from the tested artifact"):
             self.run_release()
         self.assertEqual(len(self.calls), 1)
-        self.assertIn("--dry-run", self.calls[0])
+        self.assertEqual(self.calls[0][1], "package")
 
     def test_missing_artifact_aborts_before_registry_operations(self):
         (self.artifacts / "wgtime-0.2.1.crate").unlink()

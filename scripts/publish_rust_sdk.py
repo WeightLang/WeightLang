@@ -83,12 +83,14 @@ def publish(directory):
         ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"], text=True,
     ))
     packages = Path(metadata["target_directory"]) / "package"
+    package_command = ["cargo", "package", "--locked", "--allow-dirty"]
     command = ["cargo", "publish", "--registry", "crates-io", "--locked", "--allow-dirty"]
     for name in pending:
+        package_command.extend(["--package", name])
         command.extend(["--package", name])
-    # Cargo resolves the dependency order and verifies packaged sources. Repacking
-    # must produce the exact archives that passed CI before any registry write.
-    subprocess.run([*command, "--dry-run"], check=True)
+    # `cargo publish --dry-run` does not retain archives in target/package.
+    # Package the complete dependency closure and check its bytes before upload.
+    subprocess.run(package_command, check=True)
     for name in pending:
         if checksum(packages / f"{name}-{version}.crate") != expected[name]:
             raise ValueError(f"{name}: publication archive differs from the tested artifact")
