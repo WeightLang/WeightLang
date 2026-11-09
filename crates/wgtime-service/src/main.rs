@@ -15,7 +15,10 @@ use wgtime::receive;
 
 mod admission;
 mod metrics;
+mod model_lifecycle;
 mod persistence;
+#[cfg(test)]
+mod weights_tests;
 mod sessions;
 use sessions::{Session, Sessions, MAX_SESSION_BYTES};
 #[cfg(feature="allocation-metrics")]
@@ -161,38 +164,7 @@ impl Connection {
                 Ok(serde_json::json!({"handle": handle}))
             }
             Request::InitializeDefinition { source, memory, optimizer } => {
-                ensure!(source.len() <= 1024 * 1024, "definition exceeds 1 MiB");
-                let admission = self.sessions.admit(memory).context("definition admission budget exceeded")?;
-                ensure!(optimizer.as_deref().is_none_or(|s| matches!(s,"sgd"|"adam")), "unsupported optimizer");
-                // Re-parse untrusted source in the service; macro validation is not authority.
-                let definition = wgt_language::model::ModelDefinition::parse(&source)?;
-                // Core preparation separately accounts for activations, workspace and optimizer state.
-                let required = admission::storage_bytes(
-                    definition.parameters().iter().map(|p| p.shape.as_slice())
-                        .chain(definition.states().iter().map(|state| state.shape.as_slice())),
-                    if definition.operations().is_empty() { 1 } else { 4 },
-                )?;
-                ensure!(required <= memory, "definition storage memory budget exceeded");
-                let handle = shared.next_handle()?;
-                let program = match definition.instantiate_plan()? {
-                    wgt_language::model::ModelPlan::Graph(graph) => {
-                        let model = wgtime_core::source::Graph(graph).instantiate_bounded(memory)?;
-                        wgtime_core::compiled_forward::CompiledForward::model_program(&model)?
-                    }
-                    wgt_language::model::ModelPlan::Forward(program) => program,
-                    wgt_language::model::ModelPlan::Operations(plan) => {
-                        ensure!(optimizer.is_none(), "typed operations do not support optimizers or cross-state differentiation");
-                        let session = wgtime_core::operations::OperationSession::prepare(plan, memory)?;
-                        admission.insert(handle, Session::Operations(session));
-                        return Ok(serde_json::json!({"handle":handle,"backend":"native-operations"}));
-                    },
-                };
-                let mut session = wgtime_core::adaptive::AdaptiveSession::prepare(program, memory)?;
-                session.enable_compiled()?;
-                if let Some(name)=optimizer { session.set_optimizer(if name=="adam" {Optimizer::Adam} else {Optimizer::Sgd})?; }
-                let backend = session.execution_backend();
-                admission.insert(handle, Session::Adaptive(session));
-                Ok(serde_json::json!({"handle":handle,"backend":backend}))
+                self.initialize_definition(source, memory, optimizer, None, shared)
             }
             Request::CallOperation { handle, name, inputs } => {
                 let Some(Session::Operations(session)) = self.sessions.get_mut(&handle) else {
@@ -303,7 +275,7 @@ impl Connection {
                 self.sessions.remove(&handle)?;
                 Ok(serde_json::json!({"released": true}))
             }
-            Request::PersistFd { .. } | Request::LoadFd { .. } | Request::InspectArtifactFd { .. } | Request::ExportWeightsFd { .. } | Request::BindWeightsFd { .. } => {
+            Request::PersistFd { .. } | Request::LoadFd { .. } | Request::InspectArtifactFd { .. } | Request::ExportWeightsFd { .. } | Request::BindWeightsFd { .. } | Request::InitializeWeightsFd { .. } => {
                 bail!("file operation requires descriptor")
             }
             Request::CreateGraph {

@@ -339,6 +339,15 @@ impl Trainer {
         let schema = model.parameters.iter().filter(|p| matches!(p.value, Value::Resident { .. }))
             .map(|p| (p.name.clone(), p.shape.clone())).collect::<Vec<_>>();
         let values = crate::weight_artifact::decode(&schema, bytes, 64 * 1024 * 1024)?;
+        // Snapshot preserves transitive freezing of view/expression dependencies.
+        // Check the complete candidate before changing any resident value.
+        for (parameter, candidate) in model.parameters.iter()
+            .filter(|p| matches!(p.value, Value::Resident { .. })).zip(&values)
+        {
+            if let Value::Resident { data } = &parameter.value {
+                ensure!(!parameter.frozen || data == candidate, "cannot replace frozen parameter: {}", parameter.name);
+            }
+        }
         let mut values = values.into_iter();
         for parameter in &mut model.parameters {
             if let Value::Resident { data } = &mut parameter.value { *data = values.next().unwrap(); }

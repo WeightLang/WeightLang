@@ -9,6 +9,7 @@ pub use wgt_language::model::{ModelDefinition, ModelInterface, ParameterSchema};
 pub use wgt_model_macros::{model, include_model};
 pub use wgt_language::operations::{ArgumentSchema, Effects, OperationSchema, StateSchema};
 pub mod evolution;
+pub mod weights;
 /// ContinuousOnly conservatively rejects every model containing bool/int parameters.
 #[derive(Clone, Copy, Debug)]
 pub enum DifferentiationPolicy { ContinuousOnly, StraightThrough }
@@ -39,6 +40,29 @@ impl Client {
     /// Initialize parameters explicitly; parsing a definition never calls this method.
     pub fn initialize(&self, definition: &ModelDefinition, options: InstanceOptions) -> Result<Model> {
         let reply=self.connection.borrow_mut().call(Request::InitializeDefinition {source:definition.source().into(),memory:options.memory_bytes,optimizer:options.optimizer.map(|o|o.name().into())})?;
+        self.model_from_reply(definition, reply)
+    }
+    /// Construct an instance from complete safetensors values, without running parameter initializers.
+    /// Runtime state uses its declared initialization; weights never restore optimizer/state implicitly.
+    pub fn load_weights(&self, definition: &ModelDefinition, path: &Path, options: InstanceOptions) -> Result<Model> {
+        self.load_weights_pinned(definition, path, None, options)
+    }
+    /// Load a manifest-backed immutable snapshot and pin the bytes checked by the service.
+    pub fn load_snapshot(&self, definition: &ModelDefinition, directory: &Path, revision: Option<&str>, options: InstanceOptions) -> Result<Model> {
+        let snapshot = weights::WeightSet::open(directory, revision)?;
+        snapshot.validate_for(definition)?;
+        self.load_weights_pinned(definition, &directory.join("weights.safetensors"), Some(snapshot.revision().into()), options)
+    }
+    fn load_weights_pinned(&self, definition: &ModelDefinition, path: &Path, revision: Option<String>, options: InstanceOptions) -> Result<Model> {
+        let file = OpenOptions::new().read(true).open(path)?;
+        ensure!(file.metadata()?.is_file(), "weights require regular file");
+        let reply = self.connection.borrow_mut().call_with_file(Request::InitializeWeightsFd {
+            source: definition.source().into(), memory: options.memory_bytes,
+            optimizer: options.optimizer.map(|o| o.name().into()), revision,
+        }, &file)?;
+        self.model_from_reply(definition, reply)
+    }
+    fn model_from_reply(&self, definition: &ModelDefinition, reply: serde_json::Value) -> Result<Model> {
         Ok(Model { connection:self.connection.clone(), handle:Some(reply["handle"].as_u64().context("missing model handle")?), definition:definition.clone(), interface:definition.interface().cloned(), operations:definition.operations().to_vec(), backend:reply["backend"].as_str().context("missing execution backend")?.into() })
     }
     pub fn stats(&self) -> Result<serde_json::Value> { self.connection.borrow_mut().call(Request::Stats) }
@@ -63,6 +87,12 @@ impl Model {
         Ok(output)
     }
     pub fn parameters(&self)->Result<Vec<ParameterCandidate>> { Ok(serde_json::from_value(self.connection.borrow_mut().call(Request::ParameterValues{handle:self.handle()?})?)?) }
+    /// Capture one complete parameter snapshot; this excludes runtime and optimizer state.
+    pub fn snapshot(&self) -> Result<weights::WeightSet> {
+        weights::WeightSet::new(self.parameters()?.into_iter().map(|(name,shape,data)| {
+            Ok((name,weights::Tensor::new(shape,data)?))
+        }).collect::<Result<_>>()?)
+    }
     pub fn state(&self)->Result<Vec<ParameterCandidate>> { Ok(serde_json::from_value(self.connection.borrow_mut().call(Request::StateValues{handle:self.handle()?})?)?) }
     /// Atomically replace a validated candidate batch; clears legacy optimizer state.
     pub fn update_parameters(&self,candidates:&[ParameterCandidate])->Result<()> {

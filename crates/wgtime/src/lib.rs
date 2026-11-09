@@ -30,6 +30,7 @@ pub enum Request {
         memory: usize,
     },
     InitializeDefinition { source: String, memory: usize, optimizer: Option<String> },
+    InitializeWeightsFd { source: String, memory: usize, optimizer: Option<String>, revision: Option<String> },
     CallOperation { handle: u64, name: String, inputs: Vec<Vec<f32>> },
     OperationSchemas { handle: u64 },
     ParameterValues { handle: u64 },
@@ -124,6 +125,7 @@ impl Request {
                 | Self::InspectArtifactFd { .. }
                 | Self::ExportWeightsFd { .. }
                 | Self::BindWeightsFd { .. }
+                | Self::InitializeWeightsFd { .. }
         )
     }
 }

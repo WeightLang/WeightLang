@@ -22,6 +22,14 @@ impl Connection {
             "invalid persistence descriptor"
         );
         match request {
+            Request::InitializeWeightsFd { source, memory, optimizer, revision } => {
+                let bytes = read_payload(&mut file, "weights")?;
+                if let Some(expected) = revision {
+                    use sha2::{Digest, Sha256};
+                    ensure!(expected == format!("{:x}", Sha256::digest(&bytes)), "pinned weight revision mismatch");
+                }
+                self.initialize_definition(source, memory, optimizer, Some(&bytes), shared)
+            }
             Request::ExportWeightsFd { handle } => {
                 write_payload(&mut file, || match self.sessions.get_mut(&handle) {
                     Some(Session::Operations(session)) => session.weights_bytes(MAX_ARTIFACT_BYTES),
