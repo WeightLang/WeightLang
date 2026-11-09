@@ -7,7 +7,7 @@ from .training import bind_optimizer
 from .evolution import Candidate, GA, GAConfig, GeneticAlgorithm, GenomeSchema, evaluate_isolated
 from .forward_forward import FFReport, train_forward_forward
 
-__version__ = "0.2.0"
+__version__ = "0.5.0"
 __all__ = [
     "CompilationError", "compile", "compile_source", "from_ir", "load", "loads",
     "save", "select_device", "summary", "trace", "visualize", "bind_optimizer",

@@ -3,15 +3,15 @@ members = ["crates/wgt", "crates/wgtime-core", "crates/wgt-language", "crates/wg
 resolver = "3"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.5.0"
 
 [workspace.dependencies]
-wgt-language = { path = "crates/wgt-language", version = "=0.2.0" }
-wgt-model = { path = "crates/wgt-model", version = "=0.2.0" }
-wgt-model-macros = { path = "crates/wgt-model-macros", version = "=0.2.0" }
-wgtime = { path = "crates/wgtime", version = "=0.2.0" }
-wgtime-control = { path = "crates/wgtime-control", version = "=0.2.0" }
-wgtime-core = { path = "crates/wgtime-core", version = "=0.2.0", default-features = false }
+wgt-language = { path = "crates/wgt-language", version = "=0.5.0" }
+wgt-model = { path = "crates/wgt-model", version = "=0.5.0" }
+wgt-model-macros = { path = "crates/wgt-model-macros", version = "=0.5.0" }
+wgtime = { path = "crates/wgtime", version = "=0.5.0" }
+wgtime-control = { path = "crates/wgtime-control", version = "=0.5.0" }
+wgtime-core = { path = "crates/wgtime-core", version = "=0.5.0", default-features = false }
 
 [profile.release]
 strip = true

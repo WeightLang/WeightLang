@@ -7,16 +7,35 @@
 
 ## 安装
 
+在仓库根目录运行一次安装器，准备 uv、Rust/Cargo、`weightc` 和 `wgt`：
+
 ```sh
-cargo install --locked --force --path crates/wgt --bin weightc --bin wgt
-# 等价本地安装/更新：
-WEIGHTLANG_SOURCE="$PWD" sh install.sh
+sh install.sh
+. "${XDG_CONFIG_HOME:-$HOME/.config}/weightlang/env"
 ```
 
-Windows 使用 `install.ps1`。两个安装器需要 Rust/Cargo，默认安装到 Cargo bin 目录，
-遵循 Cargo 自身的安装路径配置。仓库外默认从 GitHub main 构建，
-`WEIGHTLANG_VERSION` 指定 Git tag，必须包含原生工具源码。
-旧 Python/Torch/uv 安装选项已删除。重复安装显式替换这两个程序，不修改模型目录。
+Windows PowerShell：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+脚本会检查工具能否实际运行，复用已有工具；缺少 uv 时使用 [uv 官方安装器](https://docs.astral.sh/uv/reference/installer/)，缺少 Rust/Cargo 时使用 [rustup](https://rust-lang.github.io/rustup/installation/other.html) 安装 stable 最小工具链。仅有 rustup、尚未设置默认工具链时会补齐默认值。安装完成会输出 uv、Cargo、rustc、wgt 和 weightc 的版本；下载、构建或版本检查失败时返回非零状态。
+
+Linux/macOS 的共享环境文件为 `${XDG_CONFIG_HOME:-$HOME/.config}/weightlang/env`。安装器在 `.profile`、`.bashrc`、已有的 Bash 登录配置和 `${ZDOTDIR:-$HOME}/.zshenv` 中加入一次加载语句，并生成 fish 的 `conf.d/weightlang.fish`。重复运行不会重复添加配置。当前 POSIX 终端执行上面的 `.` 命令即可生效；fish 打开新终端，或执行 `source ~/.config/fish/conf.d/weightlang.fish`（设置 XDG_CONFIG_HOME 时使用对应路径）。Windows 更新当前安装进程和用户环境变量，运行上述子进程命令后打开新终端；直接在当前 PowerShell 执行 `& .\install.ps1` 时，该会话的 PATH 也会更新。
+
+| 环境变量 | 作用与默认值 |
+| --- | --- |
+| `CARGO_HOME` | Cargo 工具与缓存目录，默认 `~/.cargo` |
+| `RUSTUP_HOME` | Rust 工具链目录，默认 `~/.rustup` |
+| `CARGO_INSTALL_ROOT` | `wgt`、`weightc` 安装根目录，默认使用 `CARGO_HOME`；安装器显式传入 `--root`，并把其 `bin` 目录加入 PATH |
+| `UV_INSTALL_DIR` | 新装 uv 的目录；默认 `~/.local/bin`，Linux/macOS 也遵循 `XDG_BIN_HOME`、`XDG_DATA_HOME` |
+| `WEIGHTLANG_SOURCE` | 优先从指定本地源码目录的 `crates/wgt` 构建 |
+| `WEIGHTLANG_VERSION` | 在未选择本地源码时使用指定 Git tag，例如 `wgt-v0.5.0` |
+
+未设置 `WEIGHTLANG_SOURCE` 时，安装器优先使用当前目录下的源码；仓库外默认从 GitHub main 构建。重复安装会更新两个原生命令。编译缓存放在磁盘上的用户缓存目录，也可用 `CARGO_TARGET_DIR` 指定已有缓存。
+
+源码构建需要系统链接器：Linux 使用 C/C++ 构建工具链，macOS 使用 Xcode Command Line Tools，Windows 使用包含 C++ 工作负载和 Windows SDK 的 Visual Studio Build Tools。已有 Rust 过旧时，可先运行 `rustup update stable`，并检查 `rustup show` 的实际工具链选择。uv 管理项目所需的 Python 和依赖；Python SDK 按[SDK 安装步骤](python-sdk.md#安装)装入项目环境。
 
 旧虚拟环境、缓存和 PATH 中的 Python 启动器不会被扫描删除；若还残留旧启动器，
 用 `command -v weightc` 或 `Get-Command weightc` 找到它，并将 Cargo bin 排在前面。

@@ -65,7 +65,7 @@ cargo install --path crates/wgt --bin wgt --locked
 wgt lsp --help
 ```
 
-在 VS Code 中通过 **Extensions: Install from VSIX** 安装 `weightlang-0.2.0.vsix`，打开可信工作区的 `.wgt` 文件即可启动。可用 `weightlang.server.path` 指定 `wgt` 的绝对路径。安装包仍沿用仓库版本 0.2.0；此次生成安装包不代表 Marketplace 或新 Release 已发布。
+在 VS Code 中通过 **Extensions: Install from VSIX** 安装 `weightlang-0.2.0.vsix`，打开可信工作区的 `.wgt` 文件即可启动。可用 `weightlang.server.path` 指定 `wgt` 的绝对路径。安装包使用编辑器扩展版本 0.2.0，集成后的 Rust 工具链使用主分支版本 0.5.0，两者独立编号；此次生成安装包不代表 Marketplace 或新 Release 已发布。
 
 本次安装包大小：492,258 字节。SHA-256：
 

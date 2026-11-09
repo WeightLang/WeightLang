@@ -92,6 +92,7 @@ fn native_distribution_limits_python_to_host_and_build_tools() {
                     assert!(
                         [
                             "crates/wgt/templates/workflow.py",
+                            "scripts/test_install.py",
                             "scripts/test_starter_workflows.py",
                             "scripts/check_python_dist.py",
                             "scripts/smoke_python_sdk.py",
@@ -126,41 +127,6 @@ fn native_distribution_limits_python_to_host_and_build_tools() {
     ] {
         assert!(!root.join(file).exists(), "{file}");
     }
-}
-
-#[cfg(unix)]
-#[test]
-fn installer_updates_both_native_binaries_without_python() {
-    use std::os::unix::fs::PermissionsExt;
-    let root = tempfile::tempdir().unwrap();
-    let cargo = root.path().join("cargo");
-    fs::write(
-        &cargo,
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$INSTALL_LOG\"\n",
-    )
-    .unwrap();
-    fs::set_permissions(&cargo, fs::Permissions::from_mode(0o755)).unwrap();
-    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .unwrap();
-    let log = root.path().join("install.log");
-    let output = Command::new("/bin/sh")
-        .arg(source.join("install.sh"))
-        .current_dir(root.path())
-        .env("PATH", root.path())
-        .env("INSTALL_LOG", &log)
-        .env("WEIGHTLANG_SOURCE", &source)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let args = fs::read_to_string(log).unwrap();
-    assert!(args.contains("install\n--locked\n--force\n--path\n"));
-    assert!(args.contains("--bin\nweightc\n--bin\nwgt\n"));
 }
 
 #[cfg(unix)]
