@@ -18,10 +18,10 @@ parameter classifier_bias: f32[3] = [0.02, -0.01, 0.0]
 
 fn forward(image) {
     let image2d = image as [1, 8, 8];
-    let conv1 = conv(image2d, conv1_kernel, conv1_bias, [2, 2], [1, 1], [1, 1], 1);
+    let conv1 = conv(image2d, conv1_kernel as [4,1,3,3], conv1_bias, [2, 2], [1, 1], [1, 1], 1);
     let features1 = relu(conv1);
 
-    let conv2 = conv(features1, conv2_kernel, conv2_bias, [2, 2], [1, 1], [1, 1], 1);
+    let conv2 = conv(features1, conv2_kernel as [4,4,3,3], conv2_bias, [2, 2], [1, 1], [1, 1], 1);
     let features2 = relu(conv2);
 
     let flattened = features2 as [16];

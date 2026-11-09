@@ -27,14 +27,21 @@ fn every_current_model_example_passes_the_shared_frontend() {
     }
     models.sort();
     assert!(models.len() >= 25, "missing model examples from inventory");
+    let mut failures = Vec::new();
     for path in models {
         // This compatibility fixture intentionally contains the retired host `fn main`.
         if path.ends_with("crates/wgtime-core/tests/fixtures/ppo_legacy/model.wgt") {
             continue;
         }
-        let model = ModelDefinition::from_file(&path)
-            .unwrap_or_else(|error| panic!("{}: {error:#}", path.display()));
-        model.instantiate_plan()
-            .unwrap_or_else(|error| panic!("{}: {error:#}", path.display()));
+        let result = ModelDefinition::from_file(&path)
+            .and_then(|model| model.instantiate_plan().map(|_| ()));
+        if let Err(error) = result {
+            failures.push(format!("{}: {error:#}", path.display()));
+        }
     }
+    assert!(
+        failures.is_empty(),
+        "invalid WGT examples:\n{}",
+        failures.join("\n")
+    );
 }
