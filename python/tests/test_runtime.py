@@ -44,9 +44,9 @@ fn forward(x) {{ {body} }}
 
 
 @pytest.mark.parametrize("body,parameters", [
-    ("let y=matmul(reshape(x,[1,2]),reshape(w,[2,2])); return reshape(softmax(layer_norm(y,[1,1],[0,0],1,0.0001),1),[2]);",
+    ("let y=(x as [1,2]) @ (w as [2,2]); return softmax(layer_norm(y,[1,1],[0,0],1,0.0001),1) as [2];",
      "parameter w:f32[2,2]=[0.2,0.4,-0.1,0.3]"),
-    ("return reshape(conv(reshape(x,[1,2]),reshape(w,[1,1,1]),[0],[1],[0],[1],1),[2]);",
+    ("return conv(x as [1,2],w as [1,1,1],[0],[1],[0],[1],1) as [2];",
      "parameter w:f32[1,1,1]=[0.5]"),
 ])
 def test_native_precision_adapters_support_compile_export_and_backward(compile_plan, body, parameters):
@@ -79,11 +79,11 @@ def assert_value_and_gradient(actual, expected, arguments):
 
 def test_matrix_geometry_nonlast_norm_axis_and_noncontiguous_batches(compile_plan):
     source = model_source(6, 12, """
-        let matrix = reshape(x,[3,2]);
-        let projected = matrix @ reshape(w,[2,4]);
+        let matrix = x as [3,2];
+        let projected = matrix @ (w as [2,4]);
         let normalized = layer_norm(projected,gamma,beta,0,0.00001);
         let probabilities = softmax(normalized,1);
-        return reshape(permute(probabilities,[1,0]),[12]);
+        return permute(probabilities,[1,0]) as [12];
     """, """
 parameter w: f32[2,4] = [0.1,0.2,-0.3,0.4,0.5,-0.6,0.7,0.8]
 parameter gamma: f32[3] = [0.7,1.0,1.3]
@@ -109,9 +109,9 @@ def test_layer_norm_can_share_values_with_input_dependent_affine_parameters(comp
 
 def test_static_heads_and_dynamic_leading_batch_are_independent(compile_plan):
     source = model_source(12, 8, """
-        let heads = reshape(x,[2,2,3]);
-        let projected = batch_matmul(heads,reshape(w,[2,3,2]));
-        return reshape(projected,[8]);
+        let heads = x as [2,2,3];
+        let projected = batch_matmul(heads,w as [2,3,2]);
+        return projected as [8];
     """, "parameter w: f32[2,3,2] = [0.1,0.2,0.3,-0.4,0.5,0.6,0.7,-0.8,0.9,1.0,1.1,1.2]")
     model = build_module(compile_plan(source))
     x = torch.linspace(-2, 2, 240).reshape(4, 5, 12).requires_grad_()
@@ -130,10 +130,10 @@ def test_convolution_ranks_grouping_values_and_gradients(compile_plan, input_sha
     kernel_data = [round((i % 11 - 5) * 0.03, 3) for i in range(math.prod(kernel_shape))]
     bias_data = [round(i * 0.1, 2) for i in range(kernel_shape[0])]
     source = model_source(math.prod(input_shape), math.prod(output_shape), f"""
-        let image = reshape(x,{list(input_shape)});
-        let result = conv(image,reshape(kernel,{list(kernel_shape)}),bias,
+        let image = x as {list(input_shape)};
+        let result = conv(image,kernel as {list(kernel_shape)},bias,
                           {[1] * rank},{[0] * rank},{[1] * rank},{groups});
-        return reshape(result,[{math.prod(output_shape)}]);
+        return result as [{math.prod(output_shape)}];
     """, f"""
 parameter kernel: f32[{','.join(map(str, kernel_shape))}] = {kernel_data}
 parameter bias: f32[{kernel_shape[0]}] = {bias_data}
@@ -150,8 +150,8 @@ parameter bias: f32[{kernel_shape[0]}] = {bias_data}
 @pytest.mark.parametrize("operation", ["max_pool2d", "avg_pool2d"])
 def test_pooling_keeps_examples_separate(compile_plan, operation):
     source = model_source(32, 12, f"""
-        let image = reshape(x,[2,4,4]);
-        return reshape({operation}(image,[2,2],[1,2]),[12]);
+        let image = x as [2,4,4];
+        return {operation}(image,[2,2],[1,2]) as [12];
     """)
     model = build_module(compile_plan(source))
     x = torch.linspace(-1, 1, 192).reshape(2, 3, 32).requires_grad_()
@@ -206,7 +206,7 @@ def test_constant_model_repeats_per_example_and_buffers_follow_dtype(compile_pla
 
 def test_mean_sum_and_detach_reduce_model_axes_only(compile_plan):
     source = model_source(6, 1, """
-        let matrix = reshape(x,[2,3]);
+        let matrix = x as [2,3];
         let energy = mean(matrix * matrix);
         return energy + detach(sum(matrix));
     """)

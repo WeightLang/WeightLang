@@ -13,7 +13,7 @@ fn matrix_forms_share_named_axis_rules_and_preserve_result_axes() {
             let product = {product};
             let activated = relu(product);
             let copy = activated;
-            return reshape(softmax(copy,"cols"),[4]);
+            return softmax(copy,"cols") as [4];
         "#));
         let program = adaptive::parse(&source).unwrap();
         assert!(program.instructions.iter().any(|instruction|
@@ -29,7 +29,7 @@ fn batch_product_keeps_a_batch_name_from_either_operand() {
         let left: f32[2, rows=2, inner=3] = x[0:12];
         let right: f32[batch=2, inner=3, cols=2] = x[12:24];
         let product = batch_matmul(left,right);
-        return reshape(permute(product,[cols,batch,rows]),[8]);
+        return permute(product,[cols,batch,rows]) as [8];
     "#);
     let program = adaptive::parse(&source).unwrap();
     assert!(program.instructions.iter().any(|instruction|
@@ -47,7 +47,7 @@ fn elementwise_results_refine_and_preserve_names_through_unary_operations() {
             let combined = {expression};
             let changed = -tanh(combined);
             let copy = changed;
-            return reshape(softmax(copy,"features"),[6]);
+            return softmax(copy,"features") as [6];
         "#));
         adaptive::parse(&source).unwrap();
         assert!(adaptive::parse(&source.replace("f32[2, features=3]", "f32[other_rows=2, features=3]")).is_err());
@@ -62,7 +62,7 @@ fn layer_norm_checks_affine_axis_names_and_preserves_the_input_axes() {
         let gamma: f32[features=3] = [1,1,1];
         let beta: f32[features=3] = [0,0,0];
         let normalized = layer_norm(input,gamma,beta,"features",0.0001);
-        return reshape(softmax(normalized,"features"),[6]);
+        return softmax(normalized,"features") as [6];
     "#);
     adaptive::parse(&source).unwrap();
     for operand in ["gamma", "beta"] {
@@ -74,9 +74,9 @@ fn layer_norm_checks_affine_axis_names_and_preserves_the_input_axes() {
 #[test]
 fn matrix_operator_does_not_resolve_a_submodel_named_matmul() {
     let source = model(6, 4, r#"
-        let left = reshape(x,[2,3]);
-        let right = reshape(x,[3,2]);
-        return reshape(left @ right,[4]);
+        let left = x as [2,3];
+        let right = x as [3,2];
+        return (left @ right) as [4];
     "#).replace("model TensorContracts", r#"
         model Block {
             input x: f32[1]
@@ -99,11 +99,11 @@ fn repeated_bindings_and_branches_keep_one_register_tensor_type() {
             let left: f32[rows=2, features=3] = x[0:6];
             let right: f32[rows=2, channels=3] = x[6:12];
             {binding}
-            return reshape(selected,[6]);
+            return selected as [6];
         "#));
         assert!(adaptive::parse(&source).is_err());
         let compatible = source.replace("f32[rows=2, channels=3]", "f32[2,3]")
-            .replace("reshape(selected,[6])", "reshape(softmax(selected,\"features\"),[6])");
+            .replace("selected as [6]", "softmax(selected,\"features\") as [6]");
         adaptive::parse(&compatible).unwrap();
     }
 }
@@ -116,7 +116,7 @@ fn gate_and_route_merge_named_probability_vectors_but_keep_scalar_gates() {
             let value: f32[2,3] = x;
             let other: f32[2,3] = x;
             let result = {expression};
-            return reshape(softmax(result,"features"),[6]);
+            return softmax(result,"features") as [6];
         "#));
         adaptive::parse(&source).unwrap();
         let conflicting = source.replace("value: f32[2,3]", "value: f32[rows=2, channels=3]")

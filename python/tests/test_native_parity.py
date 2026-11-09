@@ -115,15 +115,15 @@ CASES = [
     pytest.param(source("return x*count;", "learn count:int[2] in -3..=3=[0,0];", 2, 2), [1.0, 2.0], {"count": [-0.5, 0.5]}, id="integer-ties-ste"),
     pytest.param(source("return blend {p => 3*x; (1-p) => x;};", "learn p:float in 0..=1=0.25;"), [1.0], {}, id="bounded-blend"),
     pytest.param(source("return blocks[0](blocks[0](x))+blocks[1](x);", BLOCK), [2.0], {}, id="shared-submodels"),
-    pytest.param(source("return reshape(conv(reshape(slice(x,0,3),[1,3]),reshape(slice(x,3,1),[1,1,1]),[0],[1],[0],[1],1),[3]);", "", 4, 3), [1.0, 2.0, 3.0, 0.5], {}, id="input-generated-kernel"),
+    pytest.param(source("return conv(x[0:3] as [1,3],x[3:4] as [1,1,1],[0],[1],[0],[1],1) as [3];", "", 4, 3), [1.0, 2.0, 3.0, 0.5], {}, id="input-generated-kernel"),
     pytest.param(source("return mean(x);", input_width=2), [3e38, 3e38], {}, id="mean-wide-accumulation"),
     pytest.param(source("return sum(x);", input_width=3), [3e38, 3e38, -3e38], {}, id="sum-wide-cancellation"),
     pytest.param(source("return layer_norm(x,[1,1],[0,0],0,0.0001);", input_width=2, output_width=2), [1e20, -1e20], {}, id="layer-norm-wide-variance"),
     pytest.param(source("return linear(x,w,b);", "parameter w:f32[1,2]=[1,1]\nparameter b:f32[1]=[1]", 2, 1), [1e8, -1e8], {}, id="linear-bias-first"),
-    pytest.param(source("return reshape(matmul(reshape(x,[1,2]),reshape(w,[2,1])),[1]);", "parameter w:f32[2,1]=[2,-2]", 2, 1), [3e38, 3e38], {}, id="matmul-wide-products"),
+    pytest.param(source("return ((x as [1,2]) @ (w as [2,1])) as [1];", "parameter w:f32[2,1]=[2,-2]", 2, 1), [3e38, 3e38], {}, id="matmul-wide-products"),
     pytest.param(source("return (x as [2,3] @ w as [2,3].T) as [4];", "parameter w:f32[2,3]=[1,2,3,-1,0,2]", 6, 4), [1., 2., 3., 4., 5., 6.], {}, id="shape-postfix-matmul-transpose"),
-    pytest.param(source("return reshape(conv(reshape(x,[1,2]),reshape(w,[1,1,2]),[0],[1],[0],[1],1),[1]);", "parameter w:f32[1,1,2]=[2,-2]", 2, 1), [3e38, 3e38], {}, id="conv-wide-products"),
-    pytest.param(source("return reshape(avg_pool2d(reshape(x,[1,2,2]),[2,2],[2,2]),[1]);", input_width=4), [3e38] * 4, {}, id="pool-wide-accumulation"),
+    pytest.param(source("return conv(x as [1,2],w as [1,1,2],[0],[1],[0],[1],1) as [1];", "parameter w:f32[1,1,2]=[2,-2]", 2, 1), [3e38, 3e38], {}, id="conv-wide-products"),
+    pytest.param(source("return avg_pool2d(x as [1,2,2],[2,2],[2,2]) as [1];", input_width=4), [3e38] * 4, {}, id="pool-wide-accumulation"),
 ]
 
 
@@ -291,7 +291,7 @@ def test_nested_optimizer_binding_and_removal():
 
 @pytest.mark.parametrize("text,rows", [
     (source("if positive(mean(x)) { return x*gain; } return -x;", "parameter gain:f32[2]=[2,3]", 2, 2), [[0.2, 0.3], [-0.2, -0.3], [0.0, 0.0]]),
-    (source("return reshape(conv(reshape(slice(x,0,3),[1,3]),reshape(slice(x,3,1),[1,1,1]),[0],[1],[0],[1],1),[3]);", "", 4, 3), [[1.0, 2.0, 3.0, 0.5], [2.0, 3.0, 4.0, -2.0]]),
+    (source("return conv(x[0:3] as [1,3],x[3:4] as [1,1,1],[0],[1],[0],[1],1) as [3];", "", 4, 3), [[1.0, 2.0, 3.0, 0.5], [2.0, 3.0, 4.0, -2.0]]),
     (MEMORY, [[0.7, -0.2], [1.0, 2.0]]),
 ])
 def test_dynamic_batches_keep_sample_paths_and_gradients_independent(text, rows):
@@ -470,7 +470,7 @@ def test_zero_upstream_gradient_skips_singular_log_derivative():
 
 
 def test_matmul_backward_preserves_native_overflow_detection():
-    text = source("return reshape(matmul(reshape(x,[1,1]),reshape([2,-2],[1,2])),[2]);", output_width=2)
+    text = source("return ((x as [1,1]) @ ([2,-2] as [1,2])) as [2];", output_width=2)
     native(text, input=[1.0], gradient=[3e38, 3e38], error="nonfinite")
     model = wgt.loads(text, device="cpu")
     x = torch.tensor([1.0], requires_grad=True)

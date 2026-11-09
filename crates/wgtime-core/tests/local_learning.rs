@@ -374,7 +374,7 @@ fn integrate(current:f32[2])->f32[2] {
 }
 fn trace()->f32[2] { return snn.trace([1,2],[0,1],[0.5]); }
 fn hebbian()->f32[4] {
-    return reshape(plasticity.hebbian(reshape(weight,[2,2]),reshape([1,2],[2,1]),reshape([3,4],[2,1]),[0.1]),[4]);
+    return plasticity.hebbian(weight as [2,2],[1,2] as [2,1],[3,4] as [2,1],[0.1]) as [4];
 }
 fn oja()->f32[2] { return plasticity.oja([0.2,0.4],[1,2],[0.5],[0.1]); }
 "#,

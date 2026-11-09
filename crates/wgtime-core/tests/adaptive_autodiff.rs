@@ -261,7 +261,7 @@ output y: f32[1]
 fn forward(x) {
     let tensor: f32[sequence=2, heads=3, dim=4] = x;
     let reordered = permute(tensor,[dim,sequence,heads]);
-    let weights = reshape([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24],[4,2,3]);
+    let weights = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24] as [4,2,3];
     return (reordered * weights).mean;
 }
 "#;
@@ -367,7 +367,7 @@ parameter beta: f32[3] = [0.1,-0.2,0.3]
 fn forward(x) {
     let tokens: f32[sequence=2, hidden=3] = x;
     let normalized = layer_norm(tokens,gamma,beta,"hidden",0.0001);
-    let weights = reshape([1,2,3,4,5,6],[2,3]);
+    let weights = [1,2,3,4,5,6] as [2,3];
     return (normalized * weights).mean;
 }
 "#;

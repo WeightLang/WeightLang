@@ -37,7 +37,7 @@ fn attention_native_reference_and_shared_parameter_finite_differences() {
     let mut interpreted = session(SOURCE,false);
     close(&native.evaluate(&INPUT,10000).unwrap(),&interpreted.evaluate(&INPUT,10000).unwrap(),2e-7);
     let seed = [0.4,-0.8,0.2,0.6,-0.3,0.9];
-    let reused = SOURCE.replace("let k = matmul(tokens,projection);", "let k = q;");
+    let reused = SOURCE.replace("let k = tokens @ projection;", "let k = q;");
     let mut reused = session(&reused,true);
     let mut reused_pass = reused.forward(&INPUT,10000,1024*1024).unwrap();
     reused_pass.backward(&seed,&BTreeMap::new()).unwrap();
@@ -87,7 +87,7 @@ fn attention_training_descends_and_budget_failure_is_atomic() {
 }
 #[test]
 fn nonlast_axis_softmax_has_independent_groups_and_gradient() {
-    let source="wgt 0.5\nmodel Axis\ninput x:f32[6]\noutput y:f32[6]\nfn forward(x){return reshape(softmax(reshape(x,[2,3]),0),[6]);}\n";
+    let source="wgt 0.5\nmodel Axis\ninput x:f32[6]\noutput y:f32[6]\nfn forward(x){return softmax(x as [2,3],0) as [6];}\n";
     let input=[1.,2.,3.,3.,1.,-1.];let seed=[0.3,-0.4,0.8,0.2,0.9,-0.7];
     for native in [false,true] {
         let mut s=session(source,native);let y=s.evaluate(&input,100).unwrap();
@@ -103,7 +103,7 @@ fn nonlast_axis_softmax_has_independent_groups_and_gradient() {
 }
 #[test]
 fn tensor_shape_and_serialized_ir_contracts_are_strict() {
-    for expression in ["reshape(x,[2,2])","matmul(reshape(x,[2,3]),reshape(x,[2,3]))","reshape(x,[2,3])+reshape(x,[3,2])","softmax(reshape(x,[2,3]))","softmax(reshape(x,[2,3]),-1)","softmax(reshape(x,[2,3]),2)","transpose(x)","scale(x,reshape([2],[1,1]))"] {
+    for expression in ["x as [2,2]","(x as [2,3]) @ (x as [2,3])","(x as [2,3]) + (x as [3,2])","softmax(x as [2,3])","softmax(x as [2,3],-1)","softmax(x as [2,3],2)","x.T","scale(x,[2] as [1,1])"] {
         let source=format!("wgt 0.5\nmodel Invalid\ninput x:f32[6]\noutput y:f32[6]\nfn forward(x){{return {expression};}}\n");
         assert!(parse(&source).is_err(),"accepted {expression}");
     }

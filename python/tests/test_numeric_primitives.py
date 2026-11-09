@@ -89,7 +89,7 @@ fn reset() { v <- [0,0]; }
 
 
 def test_dynamic_scaling_keeps_model_axes_and_arbitrary_batch_axes():
-    model = wgt.loads(source("return reshape(scale(reshape(slice(x,0,4),[2,2]),slice(x,4,1)),[4]);", width=5, output=4), device="cpu")
+    model = wgt.loads(source("return scale(x[0:4] as [2,2],x[4:5]) as [4];", width=5, output=4), device="cpu")
     x = torch.arange(30, dtype=torch.float32).reshape(2, 3, 5).requires_grad_()
     actual = model(x)
     torch.testing.assert_close(actual, x[..., :4] * x[..., 4:])

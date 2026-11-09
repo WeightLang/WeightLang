@@ -5,6 +5,8 @@ description: 编写和验证本仓库当前 WGT 模型定义与 Rust 主程序�
 
 模型源码入口必须命名为 `model.wgt`。每个独立模型/训练示例一个目录，使用 `<模型或示例名>/model.wgt`，不要创建 `main.wgt`、`train.wgt` 或功能命名的模型入口。`fn main()` 是旧普通脚本的执行入口，纯模型定义不要求它。迁移或移动入口时同步命令、文档链接、测试引用及相对数据/保存路径；标准库模块和制品的 `source.wgt` 快照不改名。
 
+每次修改 WGT 语法、解析器、tensor 原语或 std 签名，都调用 `sync-wgt-examples` 技能同步所有现有示例：`.wgt` 模型/夹具、注释示例、文档 WGT 代码块、Rust/Python 内嵌源码与编辑器样例。更新 `scripts/check_example_syntax.cjs` 的旧语法模式，执行 `node scripts/check_example_syntax.cjs`、`node --test scripts/test_example_syntax.cjs` 和 `cargo test --locked -p wgt-language --test example_sources`。原有兼容性与负例测试保留旧形式并明确标识用途，不让过时正向示例混入。
+
 以 docs/reference.zh-CN.md、docs/differentiable-programs.md 和 Rust 实现为准；不是已发布功能承诺。Rust host 集成目标使用 edition 2024；WGT 语言版本仍以实际 parser 声明为准，不能因 Rust edition 将其改写为 WGT 版本。
 
 ## Tensor 合同维护

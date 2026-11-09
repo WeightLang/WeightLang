@@ -76,7 +76,7 @@ fn vector_contract_type_preservation_and_invalid_shapes() {
         assert_eq!(declared.evaluate(&[0.2,0.800001],1000).unwrap(),[0.2,0.800001]);
         for input in [[0.2,0.2],[-0.1,1.1]] { assert!(declared.evaluate(&input,1000).is_err()); }
     }
-    for body in ["reshape(x,[1,2]).probabilities", "softmax(reshape(x,[1,2]),1).probabilities"] {
+    for body in ["x as [1,2].probabilities", "softmax(x as [1,2],1).probabilities"] {
         let error=adaptive::parse(&vector(body,"probabilities")).unwrap_err();
         assert!(format!("{error:#}").contains("rank-1"),"{error:#}");
     }
