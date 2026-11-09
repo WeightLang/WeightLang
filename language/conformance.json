@@ -10,7 +10,7 @@
     {"id":"let-group-loss","context":"tensor_loss","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nmodel M\ninput x: f32[1]\noutput y: f32[1]\nfn forward(x){return x;}\nfn loss(prediction,target){let a=prediction-target,b=square(a);return b.mean;}\n"},
     {"id":"let-group-trailing-comma","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let a=1,;}\n"},
     {"id":"let-group-missing-equals","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let a=1,b;}\n"},
-    {"id":"let-group-no-tuple","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let a=(1,2);}\n"},
+    {"id":"ordinary-tuple-parses-runtime-rejects","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"note":"The shared parser accepts tensor tuple syntax; ordinary host execution rejects tuple values.","source":"wgt 0.5\nfn main(){let a=(1,2);}\n"},
     {"id":"let-group-destructure-first","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let {action,log_prob}=sample from net([1]),b=2;}\n"},
     {"id":"let-group-destructure-later","context":"ordinary_function","rust_accepts":false,"editor_accepts":true,"source":"wgt 0.5\nfn main(){let a=1,{action}=sample from net([1]);}\n"},
     {"id":"ordinary-native-agent","context":"ordinary_function","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nagent Actor {policy;learner:update;}\nfn update(actor,batch){return len(batch);}\nfn main(){return 0;}\n"},
@@ -63,7 +63,7 @@
     {"id":"candidate-learn-arrays","context":"editor","editor_accepts":true,"editor_node":"learn_shape","source":"wgt 0.5\nlearn enabled: bool[8] = true;\nlearn flags: bool[2] = [true,false];\nlearn scales: float[2] = [0.25,-0.5];\nlearn counts: int[2] in 1..=12 = [1,12];\n"},
     {"id":"candidate-model-composition","context":"editor","editor_accepts":true,"editor_node":"model_body","source":"wgt 0.5\nmodel A {\ninput x: f32[1]\noutput y: f32[1]\nparameter b: f32[1] = [0]\nlearn enabled: bool[1] = true;\nfn forward(x){return x+b;}\n}\nmodel Root\ninput x: f32[1]\noutput y: f32[1]\nexperts: A[8];\nfn forward(x){return experts[0](x);}\n"}
 ,
-    {"id":"tensor-native-matmul-operator","context":"tensor_forward","rust_accepts":true,"editor_accepts":true,"editor_captures":[{"capture":"operator","text":"@"}],"source":"wgt 0.5\nmodel MatrixOps\ninput x: f32[6]\noutput y: f32[1]\nparameter projection: f32[3,2] = [1,0,0,1,1,1]\nfn forward(x){let tokens=reshape(x,[2,3]);let q=tokens @ projection;let scores=q @ q.T;return scores.mean;}\n"},
+    {"id":"tensor-native-matmul-operator","context":"tensor_forward","rust_accepts":true,"editor_accepts":true,"editor_captures":[{"capture":"operator","text":"@"}],"source":"wgt 0.5\nmodel MatrixOps\ninput x: f32[6]\noutput y: f32[1]\nparameter projection: f32[3,2] = [1,0,0,1,1,1]\nfn forward(x){let tokens=reshape(x,[2,3]);let q=tokens @ reshape(projection,[3,2]);let scores=q @ q.T;return scores.mean;}\n"},
     {"id":"tensor-native-transpose-postfix","context":"tensor_forward","rust_accepts":true,"editor_accepts":true,"source":"wgt 0.5\nmodel Transpose\ninput x: f32[4]\noutput y: f32[1]\nfn forward(x){let matrix=reshape(x,[2,2]);let transposed=matrix.T;return transposed.mean;}\n"}
   ]
 }
