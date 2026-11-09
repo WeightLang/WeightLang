@@ -1,12 +1,12 @@
 [package]
 name = "wgtime-control"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 license = "MIT"
 description = "WeightLang compiled client control flow without a model execution core"
 
 [dependencies]
-wgtime = { path = "../wgtime" }
+wgtime = { workspace = true }
 anyhow = "1"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }

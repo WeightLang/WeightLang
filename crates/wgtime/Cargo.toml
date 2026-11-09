@@ -1,8 +1,10 @@
 [package]
 name = "wgtime"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/WeightLang/WeightLang"
+readme = "../../README.md"
 description = "Lightweight local client and wire contract for the wgtime execution service"
 
 [dependencies]

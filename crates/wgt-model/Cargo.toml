@@ -1,8 +1,10 @@
 [package]
 name = "wgt-model"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/WeightLang/WeightLang"
+readme = "../../README.md"
 description = "Typed Rust model definitions and clients for the wgtime service"
 
 [lib]
@@ -13,9 +15,9 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 libc = "0.2"
-wgtime = { path = "../wgtime" }
-wgt-language = { path = "../wgt-language" }
-wgt-model-macros = { path = "../wgt-model-macros" }
+wgtime = { workspace = true }
+wgt-language = { workspace = true }
+wgt-model-macros = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

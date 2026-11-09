@@ -1,6 +1,6 @@
 [package]
 name = "wgtime-service"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 license = "MIT"
 
@@ -15,9 +15,9 @@ name = "wgtime"
 path = "src/main.rs"
 
 [dependencies]
-wgtime = { path = "../wgtime" }
-wgt-language = { path = "../wgt-language" }
-wgtime-core = { path = "../wgtime-core", default-features = false }
+wgtime = { workspace = true }
+wgt-language = { workspace = true }
+wgtime-core = { workspace = true, default-features = false }
 anyhow = "1"
 serde_json = "1"
 libc = "0.2"

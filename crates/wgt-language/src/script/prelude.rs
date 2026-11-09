@@ -46,7 +46,7 @@ fn registry() -> &'static Registry {
         struct Catalog {
             entries: Vec<RegisteredEntry>,
         }
-        let catalog: Catalog = serde_json::from_str(include_str!("../../../../language/prelude.json"))
+        let catalog: Catalog = serde_json::from_str(include_str!("../../assets/prelude.json"))
             .expect("validated source prelude catalog");
         let mut registry = Registry {
             entries: Vec::with_capacity(catalog.entries.len()),

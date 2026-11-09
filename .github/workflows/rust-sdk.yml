@@ -1,0 +1,90 @@
+name: Rust SDK
+
+on:
+  workflow_call:
+    inputs:
+      release-version:
+        description: Artifact containing the prepared release manifests
+        type: string
+        default: ''
+      source-tree:
+        description: Exact Git tree of the prepared release candidate
+        type: string
+        default: ''
+  push:
+    branches: [main]
+    paths:
+      - 'crates/wgt-model/**'
+      - 'crates/wgt-model-macros/**'
+      - 'crates/wgt-language/**'
+      - 'crates/wgtime/**'
+      - 'crates/wgtime-core/**'
+      - 'crates/wgtime-control/**'
+      - 'crates/wgtime-service/**'
+      - 'language/**'
+      - 'std/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'scripts/test_rust_sdk_package.py'
+      - '.github/workflows/rust-sdk.yml'
+  pull_request:
+    paths:
+      - 'crates/wgt-model/**'
+      - 'crates/wgt-model-macros/**'
+      - 'crates/wgt-language/**'
+      - 'crates/wgtime/**'
+      - 'crates/wgtime-core/**'
+      - 'crates/wgtime-control/**'
+      - 'crates/wgtime-service/**'
+      - 'language/**'
+      - 'std/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'scripts/test_rust_sdk_package.py'
+      - '.github/workflows/rust-sdk.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-sdk-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        if: inputs.release-version != ''
+        with:
+          name: ${{ inputs.release-version }}
+      - name: Verify the exact release candidate
+        if: inputs.release-version != ''
+        env:
+          SOURCE_TREE: ${{ inputs.source-tree }}
+        run: |
+          git add Cargo.toml Cargo.lock crates/*/Cargo.toml python/pyproject.toml python/weightlang/__init__.py
+          test "$(git write-tree)" = "$SOURCE_TREE"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Package and compile the complete Rust SDK dependency closure
+        run: >-
+          cargo package --locked --allow-dirty
+          -p wgtime -p wgt-language -p wgt-model-macros -p wgt-model
+      - name: Build the matching native service
+        run: cargo build --locked -p wgtime-service --bin wgtime
+      - name: Verify installed crates with a real downstream application
+        run: python scripts/test_rust_sdk_package.py --daemon target/debug/wgtime
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-sdk
+          path: target/package/*.crate
+          if-no-files-found: error
