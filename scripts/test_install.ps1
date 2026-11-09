@@ -201,3 +201,6 @@ try {
     }
     Remove-Item -Recurse -Force $Root
 }
+
+# Expected native failures must not become the acceptance test's exit status.
+exit 0
