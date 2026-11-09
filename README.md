@@ -21,7 +21,7 @@ uv run --no-project python python/examples/mlp/train.py
 import torch
 import weightlang as wgt
 
-model = wgt.load("model.wgt")  # Available accelerator selected automatically
+model = wgt.load("model.wgt", device="auto")
 input_tensor = torch.zeros(1, *model.input_shape, device=next(model.parameters()).device)
 prediction = model(input_tensor)
 print(wgt.summary(model))
@@ -38,11 +38,17 @@ parameter identities; native differential tests check execution behavior. See th
 [Python SDK guide](docs/python-sdk.md) for installation, examples and supported
 operations. The native Rust/service path remains available below.
 
+SDK loading uses the model path and device argument supplied by the host. It
+does not read project `train`, `infer` or `runtime` settings automatically. A
+host that uses `wgt.toml` must read those settings and pass them to the SDK and
+PyTorch APIs.
+
 ## Train your first model
 
-Choose a template, edit its TOML settings, then train and run it. The PyTorch
+Choose a template, edit `wgt.toml`, then train and run it. The PyTorch
 templates use uv for Python and dependencies, PyTorch for optimization, and
-Transformers for the small language model.
+Transformers for the small language model. These recipes construct their models
+from TOML and Python; loading WGT source uses the SDK described above.
 
 These commands use the current source checkout. Install the CLI from the
 repository root and install [uv](https://docs.astral.sh/uv/getting-started/installation/):
@@ -57,21 +63,28 @@ wgt infer --prompt "Hello"
 
 The template includes sample text and automatically selects an available GPU,
 falling back to CPU. The first training command lets uv select a compatible
-PyTorch build and prepare `.venv` and `uv.lock`; no shell activation is needed. Change the
-layer count, width, attention heads, training steps and generation settings in
-`pyproject.toml`. Training outputs are kept in `weights/model/`.
+PyTorch build and prepare `.venv` and `uv.lock`; no shell activation is needed.
+Training outputs are kept in `weights/model/`.
+
+Model dimensions, training, inference and device settings live in `wgt.toml`.
+Python versions, libraries and uv settings stay in `pyproject.toml`; Rust
+applications use `Cargo.toml` for Rust dependencies. The PyTorch templates
+create the WGT and Python files, so changing the model does not require editing
+the Python dependency configuration.
 
 | Template | Use | Edit |
 | --- | --- | --- |
-| `tiny-lm` | Train a small GPT-style language model on local text | `pyproject.toml`, `data.txt` |
-| `mlp` | Learn a numerical mapping from a small CSV dataset | `pyproject.toml`, `data.csv` |
+| `tiny-lm` | Train a small GPT-style language model on local text | `wgt.toml`, `data.txt` |
+| `mlp` | Learn a numerical mapping from a small CSV dataset | `wgt.toml`, `data.csv` |
 | `native` | Define a WGT model for the Rust/service API | `model.wgt`, `wgt.toml` |
 
 Run `wgt templates` to list templates, or `wgt init --interactive` for a guided
 choice. `wgt init` without options keeps the native template. The language model
 is a learning example; useful language quality requires suitable data and
 training. See the [project quickstart](docs/project-quickstart.md) for configuration,
-environment management and the separate native/PyTorch execution paths.
+environment management and the separate native/PyTorch execution paths. Existing
+`[tool.wgt]` configurations in `pyproject.toml` remain supported as a complete
+alternative to `wgt.toml`; see the [migration steps](docs/project-quickstart.md#6-迁移旧项目配置).
 
 ## Native WGT models
 
@@ -152,6 +165,7 @@ The macros validate WGT during compilation and embed the WGT source; runtime
 construction parses it again. They do not embed static IR. Model imports support
 standard modules and nested local modules for file based definitions; see the
 [standard library](docs/standard-library.md) and [package guide](docs/packages.md).
+Declare the Rust dependency in the application's `Cargo.toml`:
 
 ```toml
 [dependencies]

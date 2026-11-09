@@ -1,23 +1,13 @@
 [project]
-name = "PROJECT_NAME"
-version = "0.1.0"
-requires-python = ">=3.11,<3.14"
-dependencies = ["torch>=2.6,<3", "transformers>=4.48,<5"]
-
-[tool.uv]
-package = false
-torch-backend = "auto" # wgt asks uv to select a compatible PyTorch build.
-
-[tool.wgt.project]
 module = "PROJECT_MODULE"
 edition = "0.5"
 
-[tool.wgt.python]
+[python]
 runner = "workflow.py"
 
 # Change these numbers to design a small GPT-2 architecture from scratch.
 # PyTorch/Transformers perform the computation; no pretrained model is fetched.
-[tool.wgt.model]
+[model]
 kind = "tiny-lm"
 hidden_size = 64
 layers = 2
@@ -25,10 +15,10 @@ heads = 4
 context_length = 128
 dropout = 0.0
 
-[tool.wgt.runtime]
+[runtime]
 device = "auto" # Prefer an available GPU; otherwise use CPU. Explicit devices override this.
 
-[tool.wgt.train]
+[train]
 data = "data.txt" # Your own UTF-8 text; the included text is only a toy corpus.
 steps = 100
 batch_size = 4
@@ -38,7 +28,7 @@ seed = 42
 output = "weights/model"
 log_every = 10
 
-[tool.wgt.infer]
+[infer]
 checkpoint = "weights/model"
 prompt = "WeightLang"
 max_new_tokens = 32 # Tokens here are UTF-8 bytes, not words.

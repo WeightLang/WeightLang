@@ -17,7 +17,9 @@ wgt -C native-model check
 weightc check native-model/model.wgt
 ```
 
-`wgt templates` 列出内置模板，`wgt init --interactive` 提供交互选择。Python 模板的架构、训练和推理参数位于标准 `pyproject.toml` 的 `[tool.wgt]` 中；`wgt check` 验证配置，`wgt train` 和 `wgt infer` 显式运行项目中的 Python host。`wgt run -- COMMAND ARGS` 通过 `uv run` 在项目环境中运行命令，例如 `wgt -C text-model run -- python -c "import torch; print(torch.__version__)"`。完整流程见[项目快速上手](project-quickstart.md)。
+`wgt templates` 列出内置模板，`wgt init --interactive` 提供交互选择。项目、模型配方、运行设备、训练和推理参数统一放在 `wgt.toml`；Python 模板还会生成只保存 Python/uv 设置的 `pyproject.toml`。Rust 应用的依赖继续放在 `Cargo.toml`。旧的 `[tool.wgt]` 配置仍可整份使用；同时提供两份 WGT 配置会报错，普通 `pyproject.toml` 可与 `wgt.toml` 共存。
+
+`wgt check` 验证配置，`wgt train` 和 `wgt infer` 执行 `[python].runner` 指定的 host。`wgt run -- COMMAND ARGS` 通过 `uv run` 在项目环境中运行命令，例如 `wgt -C text-model run -- python -c "import torch; print(torch.__version__)"`。CLI 用 `WGT_CONFIG_FILE` 向 host 传入所选 WGT 配置的绝对路径；模板中的相对数据和输出路径以配置目录为基准。显式命令行参数覆盖文件中的对应参数，可选参数缺省时使用模板默认值。完整流程与旧 runner 的迁移方式见[项目快速上手](project-quickstart.md)。
 
 Python 模板默认自动选择兼容的 PyTorch 构建与可用加速设备，无可用 GPU 时回退到 CPU。首次环境准备通过 uv 的后端探测记录标准包来源，后续依赖仍由 `uv.lock` 管理；`--device` 可覆盖运行设备，`wgt sync` 可重新选择自动管理的安装源。
 
@@ -25,14 +27,16 @@ Python 模板默认自动选择兼容的 PyTorch 构建与可用加速设备，�
 
 原生 WGT 模型源码入口必须命名为 `model.wgt`，自定义可视化样式为同目录的 `model.css`。
 每个独立模型/训练示例一个目录，用目录名区分功能；例如 `examples/native_training/supervised/model.wgt`。
-原生模板使用 `model.wgt`；PyTorch 模板使用 TOML 与 `workflow.py`，不会生成未参与计算的 WGT 文件。
+原生模板使用 `model.wgt`；PyTorch 模板使用 `wgt.toml` 中的模型配方与 `workflow.py`，不会生成未参与计算的 WGT 文件。
 CLI 对既有 `wgt.toml` 中显式配置的 `model.source` 保持兼容，但这不改变新建与维护模型的入口规范。
 
 ## 编译到 PyTorch
 
 `wgt compile model.wgt --target torch` 复用原生前端，向 stdout 输出版本化架构 JSON；`-o architecture.json` 写入新文件并拒绝覆盖。`wgt compile - --target torch` 从 stdin 读取源码。编译不会执行 forward、训练或准备 Python 环境。
 
-输出包含解析后的纯计算导入、接口、参数初值和计算图，可通过 [Python SDK](python-sdk.md) 的 `weightlang.from_ir` 或 `weightlang.load` 加载为 PyTorch 模型。目标接受无可变状态的直线计算图，未支持的状态、动态控制流与受约束 learn 参数会明确报错。
+输出包含解析后的纯计算导入、接口、参数与状态初值、子模型身份及完整模型 IR，可通过 [Python SDK](python-sdk.md) 的 `weightlang.from_ir` 或 `weightlang.load` 加载为 PyTorch 模型。目标支持顺序图、forward 程序及 typed operations，保留控制流、learn 约束和状态事务；非法模型与未知 IR 会明确报错。
+
+SDK 的加载接口使用显式传入的模型路径或架构数据以及设备参数，不隐式应用 `wgt.toml` 的训练、推理和设备设置。由 CLI 启动的 host 可读取 `WGT_CONFIG_FILE` 指向的文件；其他 host 显式选择配置文件，再将相应值传给 SDK 与 PyTorch。源码编译仍遵循编译器的导入和工具链查找规则。`tiny-lm` 和 `mlp` 模板仍通过自己的 TOML/Python 配方构造模型。
 
 ## 架构可视化
 

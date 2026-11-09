@@ -191,6 +191,8 @@ typed operations 遵循当前 WGT 的无自动微分合同：参数不参与 aut
 
 `compile`、`compile_source`、`load` 和 `loads` 可传 `compiler="/path/to/wgt"`、`timeout=30`。编译器选择依次为显式参数、`WGT_COMPILER`、PATH 上的 `wgt`。文件加载遵循模型所在项目的 `.wgt-version`，内联源码遵循调用目录的工具链选择。文件模型的相对纯计算模块导入按源文件位置解析，内联源码需使用标准模块或同文件 helper。
 
+SDK 使用调用时传入的模型与设备参数，不隐式应用 `wgt.toml` 中的 `train`、`infer`、`runtime` 配置或 `WGT_CONFIG_FILE`。使用统一项目配置的 Python 宿主需读取相关值，再传给 SDK、优化器与推理调用；Python 依赖与 uv 设置继续保存在 `pyproject.toml`。
+
 ## 保存模型与续训
 
 ```python
