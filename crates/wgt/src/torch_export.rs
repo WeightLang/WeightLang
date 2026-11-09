@@ -1,10 +1,11 @@
 //! Model-only bridge to PyTorch. The native frontend remains the sole WGT parser.
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use serde::Serialize;
 use std::{io::Write, path::Path};
 use wgt_language::{
-    adaptive::{Instruction, LearnDomain, Program},
+    adaptive::{ModuleSchema, Parameter, Program},
     model::{ModelDefinition, ModelInterface, ModelPlan, ParameterSchema},
+    operations::OperationSchema,
     source::Graph,
 };
 
@@ -16,9 +17,10 @@ pub const FORMAT: &str = "weightlang.torch.v1";
 pub struct Architecture {
     pub format: &'static str,
     pub name: String,
-    pub interface: ModelInterface,
+    pub interface: Option<ModelInterface>,
     pub parameters: Vec<ParameterSchema>,
     pub source: String,
+    pub modules: Vec<ModuleSchema>,
     #[serde(flatten)]
     pub plan: Plan,
 }
@@ -26,11 +28,34 @@ pub struct Architecture {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Plan {
-    Sequential { graph: Graph },
-    Forward { program: Program },
+    Sequential {
+        graph: Graph,
+        graph_parameters: Vec<Parameter>,
+    },
+    Forward {
+        program: Program,
+    },
+    Operations {
+        operations: Operations,
+    },
 }
 
-/// Resolve pure model imports and lower to a graph supported by the torch SDK.
+/// Typed entrypoints share one initialized storage set. Entry programs retain
+/// their native parameter schemas, whose data arrays are intentionally empty.
+#[derive(Serialize)]
+pub struct Operations {
+    pub parameters: Vec<Parameter>,
+    pub states: Vec<Parameter>,
+    pub entries: Vec<Operation>,
+}
+
+#[derive(Serialize)]
+pub struct Operation {
+    pub schema: OperationSchema,
+    pub program: Program,
+}
+
+/// Resolve pure model imports and lower to native model IR for the torch SDK.
 /// This copies declared initializers; it never executes forward or host code.
 pub fn compile(path: &Path) -> Result<Architecture> {
     let definition = ModelDefinition::from_file(path)
@@ -44,18 +69,33 @@ pub fn compile_source(source: &str) -> Result<Architecture> {
 }
 
 fn from_definition(definition: ModelDefinition) -> Result<Architecture> {
-    let interface = definition.interface().context(
-        "PyTorch export requires a single forward model; typed operations and persistent state are not supported",
-    )?.clone();
-    let plan = match definition.instantiate_plan()? {
-        ModelPlan::Graph(graph) => Plan::Sequential { graph },
+    let interface = definition.interface().cloned();
+    let (native_plan, modules) = definition.instantiate_plan_with_modules()?;
+    let plan = match native_plan {
+        ModelPlan::Graph(graph) => Plan::Sequential {
+            graph_parameters: graph.initial_parameters()?,
+            graph,
+        },
         ModelPlan::Forward(program) => {
-            validate_program(&program)?;
+            program.validate_tensor_contracts()?;
             Plan::Forward { program }
         }
-        ModelPlan::Operations(_) => {
-            anyhow::bail!("PyTorch export does not support typed operations or persistent state")
-        }
+        ModelPlan::Operations(plan) => Plan::Operations {
+            operations: Operations {
+                parameters: plan.parameters,
+                states: plan.states,
+                entries: plan
+                    .entries
+                    .into_iter()
+                    .map(|(schema, program)| {
+                        program
+                            .validate_tensor_contracts()
+                            .with_context(|| format!("invalid operation {}", schema.name))?;
+                        Ok(Operation { schema, program })
+                    })
+                    .collect::<Result<_>>()?,
+            },
+        },
     };
     Ok(Architecture {
         format: FORMAT,
@@ -63,43 +103,9 @@ fn from_definition(definition: ModelDefinition) -> Result<Architecture> {
         interface,
         parameters: definition.parameters().to_vec(),
         source: definition.source().to_owned(),
+        modules,
         plan,
     })
-}
-
-fn validate_program(program: &Program) -> Result<()> {
-    program.validate_tensor_contracts()?;
-    for parameter in &program.parameters {
-        ensure!(
-            matches!(&parameter.learn, None | Some(LearnDomain::Float)),
-            "PyTorch export does not support constrained learn parameter '{}'; use an ordinary float parameter with a Python optimizer",
-            parameter.name
-        );
-    }
-    for instruction in &program.instructions {
-        use Instruction::*;
-        ensure!(
-            !matches!(
-                instruction,
-                Write { .. }
-                    | MemoryAlloc { .. }
-                    | MemoryFree { .. }
-                    | MemoryRead { .. }
-                    | MemoryWrite { .. }
-                    | ResourceState { .. }
-                    | InferenceSkip { .. }
-                    | Branch { .. }
-                    | Jump { .. }
-                    | Label { .. }
-            ),
-            "PyTorch export does not support '{}' instructions; this target requires a pure forward graph without dynamic control flow or mutable state",
-            instruction.contract().name
-        );
-    }
-    if let Some(loss) = &program.loss {
-        validate_program(loss).context("PyTorch loss export")?;
-    }
-    Ok(())
 }
 
 /// Write only a new architecture file, publishing it after complete serialization.

@@ -32,7 +32,9 @@ wgt.save(model, "weights/demo/model.pt")
 Python owns data, training loops, inference and visualization. Saved SDK models
 and compiled JSON load without the compiler or a model service. SVG/PNG output
 requires the system Graphviz executable; Mermaid and DOT output use only PyTorch.
-This is the source SDK, with a tested pure-forward subset of WGT. See the
+The SDK supports WGT tensor programs, control flow, learned architecture parameters,
+and transactional typed operations. It retains native initialization and submodel
+parameter identities; native differential tests check execution behavior. See the
 [Python SDK guide](docs/python-sdk.md) for installation, examples and supported
 operations. The native Rust/service path remains available below.
 

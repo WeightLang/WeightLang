@@ -1,6 +1,8 @@
 //! WGT 0.5 compilation units: model declarations and ordinary functions coexist.
 //! Splitting preserves physical line numbers; comments and strings cannot close a function.
 use anyhow::{Context, Result, ensure};
+mod initialization;
+pub use initialization::initialization_random;
 
 pub struct Unit {
     pub declarations: String,

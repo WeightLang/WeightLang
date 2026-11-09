@@ -41,6 +41,8 @@ learn depth: int in 1..=12 = 6;
 
 STE 是训练代理梯度，不是 round 或阈值函数的数学真导数。硬前向值与连续可训练状态是两个不同概念：例如布尔前向只产生 true/false，但优化器仍更新连续 shadow。保存模型权重时保留 shadow，使离散参数能继续训练；参数元数据属于模型定义并须在定义解析时验证。
 
+[Python SDK](python-sdk.md#训练架构本身)保留这些 shadow、读取与投影规则。训练时创建普通 PyTorch 优化器，并调用 `wgt.bind_optimizer(model, optimizer)` 注册更新后投影；自定义损失使用 `model.loss(prediction, target)`。SDK 的原生差分测试对照 Rust 的 SGD、端点读取和约束更新结果。
+
 Rust `round` 的半整数按远离零处理，仅在读取 int 前向值时舍入，不会在优化器更新后额外 round shadow。bool shadow 保持在 `[0,1]`，且 `shadow >= 0.5` 前向为 true；字面量初值 `false` 映射为 shadow 0，`true` 映射为 shadow 1。float 路径使用通常的连续梯度，不称作 STE。
 
 ## 自定义损失示例

@@ -505,14 +505,7 @@ impl Trainer {
     }
 }
 
-/// Deterministic local PRNG; does not touch process-global random state.
-pub fn random(state: &mut u64) -> f64 {
-    *state = state.wrapping_add(0x9e3779b97f4a7c15);
-    let mut z = *state;
-    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-    ((z ^ (z >> 31)) >> 11) as f64 / ((1u64 << 53) as f64)
-}
+pub use wgt_language::source::initialization_random as random;
 
 pub fn mlp(widths: &[usize], activation: &str, seed: u64) -> Result<Model> {
     ensure!(

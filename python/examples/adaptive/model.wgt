@@ -1,0 +1,17 @@
+wgt 0.5
+model AdaptiveDepth
+# One scalar feature enters and leaves the model. This definition starts untrained.
+input x: f32[1]
+output y: f32[1]
+learn depth: int in 0..=3 = 1;
+frozen scale: f32[1] = [2]
+
+fn forward(x) {
+    # Every iteration preserves the feature shape and reuses the same fixed scale.
+    # Only the number of iterations is learned: x -> 2*x -> 4*x -> 8*x.
+    return repeat depth carrying h=x { h * scale };
+}
+
+fn loss(prediction, target) {
+    return 0.5 * square(prediction - target).mean;
+}

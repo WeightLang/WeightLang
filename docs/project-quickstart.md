@@ -170,7 +170,7 @@ cd native-model
 wgt check
 ```
 
-原生模型的训练和执行使用 [Rust API 与 `wgtime` 服务](../README.zh-CN.md#在-rust-中使用-wgt)。需要在 Python 中运行 `model.wgt` 时，使用 [Python SDK](python-sdk.md) 的 `weightlang.load("model.wgt", device="auto")`。SDK 复用 Rust 前端导出受支持的纯前向计算图，构造标准 PyTorch 模型；数据、损失函数和训练循环由 Python host 提供。
+原生模型的训练和执行使用 [Rust API 与 `wgtime` 服务](../README.zh-CN.md#在-rust-中使用-wgt)。需要在 Python 中运行 `model.wgt` 时，使用 [Python SDK](python-sdk.md) 的 `weightlang.load("model.wgt", device="auto")`。SDK 复用 Rust 前端导出顺序图、forward 程序或 typed operations，构造标准 PyTorch 模型，并保留控制流、learn 约束和状态事务。数据与训练循环由 Python host 提供；损失可由 Python 选择，也可通过 `model.loss()` 执行 WGT 中声明的损失。
 
 SDK 使用调用时传入的模型路径和设备参数，不隐式读取项目的 `train`、`infer`、`runtime` 配置或 `WGT_CONFIG_FILE`。自定义 host 若使用 `wgt.toml`，需要自行读取配置，并将相应值传给 SDK、优化器和推理代码。
 

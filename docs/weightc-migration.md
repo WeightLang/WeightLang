@@ -2,7 +2,7 @@
 
 `wgt` 和 `weightc` 使用 Rust 原生工具链，源码检查、编译和原生执行保持独立于 Python。
 可选的 [Python SDK](python-sdk.md) 位于 `python/`，通过 `wgt compile --target torch`
-复用原生前端，将纯前向 WGT 架构加载为 PyTorch 模型。SDK 提供普通 Python API，
+复用原生前端，将 WGT 模型架构加载为 PyTorch 模型。SDK 提供普通 Python API，
 训练循环与数据处理由 Python 宿主负责。`wgt init` 的 PyTorch 模板另由 uv 管理环境。
 
 ## 安装
@@ -60,7 +60,7 @@ sh scripts/package_wgt.sh --binary target/release/wgt --output dist/native-relea
 | `weightc compile SOURCE -o EXECUTABLE` | 通过 Rust/Cargo 生成本机程序，不自动训练或保存权重 |
 | `weightc legacy-build SOURCE [-o DIRECTORY] [--max-operations N]` | main 返回模型句柄，保存完整原生模型；N 默认 10000000 且须正数 |
 | `weightc build` | 原生 legacy-build 别名，不是历史源码 ZIP 打包命令 |
-| `wgt compile SOURCE --target torch [-o JSON]` | 为 Python SDK 导出纯前向模型架构，不执行计算 |
+| `wgt compile SOURCE --target torch [-o JSON]` | 为 Python SDK 导出顺序图、forward 或 typed operations 的模型 IR，不执行计算 |
 | `wgt run -- COMMAND ARGS` | 在项目的 uv 环境中运行宿主命令 |
 | `wgt sync` | 同步模型包与已配置的 uv 环境；`--no-env` 仅同步模型包 |
 

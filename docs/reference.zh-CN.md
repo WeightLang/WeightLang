@@ -36,7 +36,7 @@ assert_eq!(output, vec![6.0]);
 
 宏和定义解析只检查/构造定义，不执行模型；应用先调用 `Client::connect()`，再显式初始化并执行实例。训练与保存也由 Rust 代码显式请求，不会随定义加载自动发生。
 
-当前模型后端由 Rust 实现。模型纯张量逻辑模块还包括 `std/attention` 与 `std/numerics`，均须显式导入，导入路径仍待完整验收。完整图算子、参数化层工厂与多轴神经网络结构尚未全部迁入原生构造器；不支持的声明显式报错，不回退 Python。
+模型前端由 Rust 实现；运行可使用原生后端或[Python SDK 的 PyTorch 后端](python-sdk.md)。Python SDK 复用相同解析、IR、初始化和模型约束，支持 forward、控制流、工作内存、learn 参数及 typed 操作。模型纯张量逻辑模块还包括 `std/attention` 与 `std/numerics`，均须显式导入；具体导入与算子覆盖按后端验收记录确认。完整图算子、参数化层工厂与多轴神经网络结构尚未全部迁入原生构造器；不支持的声明显式报错。
 
 ## wgtime 服务边界
 

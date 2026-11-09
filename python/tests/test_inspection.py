@@ -36,6 +36,24 @@ def test_visualization_preserves_both_residual_edges():
     assert trace(model) is model
 
 
+def test_visualization_hides_diagnostic_buffers_without_changing_model_graph():
+    import os
+    from pathlib import Path
+    import weightlang as wgt
+
+    root = Path(__file__).resolve().parents[2]
+    compiler = os.environ.get("WGT_COMPILER", str(root / "target/debug/wgt"))
+    model = wgt.load(root / "python/examples/mlp/model.wgt", compiler=compiler, device="cpu")
+    for graph in (model, trace(nn.Sequential(model, nn.Sigmoid()))):
+        before = str(graph.graph)
+        assert "_wgt_gradient_anchor" in before
+        for format in ("mermaid", "dot"):
+            diagram = visualize(graph, format=format)
+            assert "_wgt_gradient_anchor" not in diagram
+            assert "hidden" in diagram and "prediction" in diagram
+        assert str(graph.graph) == before
+
+
 def test_trace_preserves_model_buffers_modes_rng_and_gradients():
     class Observable(nn.Module):
         def __init__(self):
