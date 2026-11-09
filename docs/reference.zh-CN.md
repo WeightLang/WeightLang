@@ -9,9 +9,11 @@
 
 ## Rust 主程序与 WGT 模型目标
 
-目标工作流由 Rust 主程序负责数据准备、I/O、调度与训练循环，WGT 定义模型结构、模型内部计算及可选的可微 loss。Rust 库包名为 `wgt-model`，crate 名为 `wgt`。`ModelDefinition::parse`、`ModelDefinition::from_file`、`model!` 与 `include_model!` 共用模型解析与定义；两个宏仅接受 Rust 字符串字面量，编译时复用同一 parser 检查并嵌入源码，运行时仍解析定义。模型模块导入在本地实现中包含 `std/activation`、`std/loss`、`std/attention` 和 `std/numerics`；文件入口还实现了相对路径纯计算模块及嵌套导入。模块导入和编译 forward 尚待完整行为验收，不能视为已支持或已发布能力。既有 forward 模型入口只接受单个 `f32` 向量；多输入 typed 操作已通过本地指定范围验收，尚未发布，见[模型操作](model-operations.md)。
+目标工作流由 Rust 主程序负责数据准备、I/O、调度与训练循环，WGT 定义模型结构、模型内部计算及可选的可微 loss。Rust 库包名为 `wgt-model`，crate 名为 `wgt`。`ModelDefinition::parse`、`ModelDefinition::from_file`、`model!` 与 `include_model!` 共用模型解析与定义；两个宏仅接受 Rust 字符串字面量，编译时复用同一 parser 检查并嵌入源码，运行时仍解析定义。模型模块导入包含 `std/activation`、`std/loss`、`std/attention` 和 `std/numerics`；文件入口还实现了相对路径纯计算模块及嵌套导入。模块导出、原生执行和真实服务分别验收，当前覆盖清单与命令见 [Rust SDK](rust-sdk.md)，不表示已经发布。既有 forward 模型入口只接受单个 `f32` 向量；多输入 typed 操作遵守独立合同，见[模型操作](model-operations.md)。
 
 模型执行、参数和优化器状态由唯一的机器级 `wgtime` 服务持有。定义解析、编译期检查和源码嵌入不连接服务或初始化模型；Rust 程序须先显式调用 `Client::connect()`，再请求初始化、训练或权重保存。当前 facade 提供 `Model::save_weights`，没有公共训练 checkpoint API。Rust facade 通过 IPC 使用服务端原生编译 forward；这不意味着旧脚本执行路径已全部删除。API 已在本地实现并通过定点验证，尚未发布；不代表更广泛的能力支持。完整签名与契约见 [Rust 后端契约](native-backend.md)。
+
+`wgt compile model.wgt --target rust [-o src/model.rs] [--crate-path wgt]` 导出可被 Rust `include!` 的自包含架构模块；源文件 `-` 表示 stdin，省略 `-o` 输出到 stdout，已有目标文件拒绝覆盖。生成的 `SOURCE` 和 `definition() -> wgt::Result<ModelDefinition>` 保留声明与纯计算 imports，定义构造仍调用同一前端。服务编译路径覆盖当前 44 个模型 IR 指令，包括普通写入、工作内存和资源查询；Rust `Model::forward` 成功后提交显式写入，执行失败回滚。数值、梯度、状态与实际生成代码的验收范围见 [Rust SDK](rust-sdk.md)。
 
 ```rust,ignore
 use wgt::{include_model, model, Client, InstanceOptions, ModelDefinition};

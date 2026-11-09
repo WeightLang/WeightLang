@@ -11,7 +11,7 @@ mod training;
 mod reload;
 pub mod optimization;
 pub mod transport;
-mod workspace;
+pub(crate) mod workspace;
 mod tensor;
 mod unary;
 use unary::Unary;
@@ -756,25 +756,65 @@ impl AdaptiveSession {
                 .map(|parameter| parameter.data.as_slice()).collect();
             let ops = &self.ops;
             let mut returned = None;
+            let mut written = vec![false; parameters.len()];
             let mut tape = tape;
             let traced = tape.is_some();
-            let result = compiled.run_with_hook(&self.registers[self.input], &parameters, max_steps, traced, &mut |index, value| {
-                let op = ops[index];
-                if let Op::Return(register) = op {
-                    returned = Some(register);
-                } else if let Some(tape) = tape.as_deref_mut() {
-                    tape.record(op, value)?;
-                }
-                Ok(())
-            });
+            let available = self.memory_limit - self.managed_bytes;
+            let result = compiled.run_with_resources(
+                &self.registers[self.input], &parameters, max_steps, available, traced,
+                &mut |index, value| {
+                    let op = *ops.get(index).context("compiled hook instruction out of bounds")?;
+                    match op {
+                        Op::Return(register) => returned = Some(register),
+                        Op::Write(parameter, register) => {
+                            if let Some(tape) = tape.as_deref_mut() {
+                                tape.write(parameter, register)?;
+                            }
+                            written[parameter] = true;
+                        }
+                        Op::MemoryAlloc(memory, ..) => {
+                            if let Some(tape) = tape.as_deref_mut() {
+                                tape.memory_allocate(memory, value)?;
+                            }
+                        }
+                        Op::MemoryWrite(memory, address, source) => {
+                            if let Some(tape) = tape.as_deref_mut() {
+                                tape.memory_write(memory, address, source, value)?;
+                            }
+                        }
+                        Op::MemoryFree(memory) => {
+                            if let Some(tape) = tape.as_deref_mut() {
+                                tape.memory_free(memory);
+                            }
+                        }
+                        _ => {
+                            if let Some(tape) = tape.as_deref_mut() {
+                                tape.record(op, value)?;
+                            }
+                        }
+                    }
+                    Ok(())
+                },
+            );
             self.steps = compiled.last_steps();
             let output = result?;
             let register = returned.context("compiled forward did not return")?;
+            // Generated code keeps candidate parameters in its admitted native
+            // workspace. Publish only after every instruction and tape callback
+            // succeeds; forward/evaluate then use the existing rollback buffer.
+            for (index, was_written) in written.iter().enumerate() {
+                if *was_written {
+                    let candidate = compiled.parameter_candidate(index)?;
+                    let parameter = &mut self.program.parameters[index].data;
+                    ensure!(candidate.len() == parameter.len(), "compiled parameter candidate shape mismatch");
+                    parameter.copy_from_slice(candidate);
+                }
+            }
             self.registers[register].resize(output.len(), 0.);
             self.registers[register].copy_from_slice(&output);
             self.compiled_forward_calls = self.compiled_forward_calls.saturating_add(1);
             if traced { self.compiled_tape_calls = self.compiled_tape_calls.saturating_add(1); }
-            return Ok((register, false));
+            return Ok((register, written.into_iter().any(|value| value)));
         }
         self.execute_slice(max_steps, tape, u64::MAX)?
             .context("unexpected execution suspension")
@@ -832,6 +872,9 @@ impl AdaptiveSession {
                 }
                 Op::MemoryFree(m) => {
                     self.workspace.free(m)?;
+                    if let Some(tape) = tape.as_deref_mut() {
+                        tape.memory_free(m);
+                    }
                 }
                 Op::MemoryRead(r, m, a) => {
                     self.ready(a)?;

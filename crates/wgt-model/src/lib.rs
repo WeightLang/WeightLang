@@ -1,7 +1,8 @@
 //! Rust owns application control; WGT defines model architecture and tensor computation.
 //! Definitions are pure data. Only explicit initialization connects them to service state.
 //! Clients and models use `Rc<RefCell<_>>` and are deliberately neither Send nor Sync.
-use anyhow::{ensure, Context, Result};
+use anyhow::{ensure, Context};
+pub use anyhow::Result;
 use std::{cell::RefCell, fs::OpenOptions, path::Path, rc::Rc};
 use wgtime::Request;
 pub use wgt_language::model::{ModelDefinition, ModelInterface, ParameterSchema};
@@ -66,7 +67,8 @@ impl Model {
     }
     /// Execution backend reported by the initialized service instance.
     pub fn backend(&self)->&str { &self.backend }
-    /// One finite f32 input vector; multi-input models are not supported in this slice.
+    /// Execute one finite f32 input vector and commit explicit forward writes on success.
+    /// Failed execution preserves parameters. Typed multi-input models use `call`.
     pub fn forward(&self, input:&[f32])->Result<Vec<f32>> {
         let interface=self.interface.as_ref().context("typed model requires an explicit named operation call")?;
         ensure!(input.len()==interface.input && input.iter().all(|n|n.is_finite()), "input must be a finite vector of width {}",interface.input);

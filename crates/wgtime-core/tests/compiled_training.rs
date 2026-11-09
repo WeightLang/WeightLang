@@ -74,10 +74,14 @@ fn compiled_custom_loss_training_matches_reference_update() {
 }
 
 #[test]
-fn compiled_initialization_rejects_unreplaced_stateful_operations() {
+fn compiled_initialization_keeps_state_private_until_a_successful_run() {
     let source = "wgt 0.5\nmodel Stateful\ninput x:f32[1]\noutput y:f32[1]\nparameter w:f32[1]=[0]\nfn forward(x){write(w,x);return x;}\n";
     let mut session = instance(source, false);
-    assert!(session.enable_compiled().is_err());
-    assert!(!session.is_compiled());
+    session.enable_compiled().unwrap();
+    assert!(session.is_compiled());
     assert_eq!(session.parameter("w").unwrap(), &[0.]);
+    assert_eq!(session.evaluate(&[2.], 100).unwrap(), vec![2.]);
+    assert_eq!(session.parameter("w").unwrap(), &[0.]);
+    assert_eq!(session.run(&[3.], 100).unwrap(), &[3.]);
+    assert_eq!(session.parameter("w").unwrap(), &[3.]);
 }

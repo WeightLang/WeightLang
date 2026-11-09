@@ -198,6 +198,20 @@ compiler to build a native shared library; a compiler free service deployment is
 not yet supported. See the [Rust backend contract](docs/native-backend.md) and
 [WGT source package guide](docs/packages.md) for current limits and boundaries.
 
+You can also export a self-contained Rust architecture module:
+
+```sh
+wgt compile model.wgt --target rust -o src/model.rs
+```
+
+Use `mod architecture { include!("model.rs"); }`, then pass
+`architecture::definition()?` to `Client::initialize`. The output embeds pure
+model imports and supports Graph, Forward and Operations definitions. Native
+execution covers all 44 current model IR instructions, including transactional
+forward writes and differentiable working memory. The generated module still
+uses the SDK and service; see the [Rust SDK guide](docs/rust-sdk.md) for usage,
+coverage tests and runtime requirements.
+
 ## Project scope
 
 The source language is WGT 0.5. See the [language reference](docs/reference.zh-CN.md),

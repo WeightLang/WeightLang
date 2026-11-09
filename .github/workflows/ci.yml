@@ -39,6 +39,7 @@ jobs:
         run: >-
           cargo test --locked --no-default-features -p wgtime-core
           --test compiled_forward --test compiled_training --test compiled_control_flow
+          --test compiled_instruction_coverage --test compiled_semantics
           --test unified_training --test custom_optimization --test operations
       - name: Check source execution regressions
         run: |
@@ -73,6 +74,8 @@ jobs:
           --test no_python_cli --test trainer_forwarding
       - name: Check automatic PyTorch backend preparation
         run: cargo test --locked -p weightlang-wgt --lib torch_backend::tests
+      - name: Check Rust model export and generated consumers
+        run: cargo test --locked -p weightlang-wgt --test rust_export
       - name: Check allocator instrumentation configuration
         run: cargo check --locked -p wgtime-service --features allocation-metrics
       - name: Check service lifecycle and transport

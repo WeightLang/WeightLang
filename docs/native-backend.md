@@ -12,15 +12,15 @@ Rust 控制应用、数据准备、I/O、调度和训练循环；WGT 只描述�
 
 ## 服务端 compiled forward
 
-新 Rust 模型入口在服务初始化时把固定 shape 模型 IR 生成为 C，再调用本机 `cc` 编译共享库。推理通过 `wgt_forward_v1` 单一原生入口执行固定控制流，不逐条分派 IR；这是服务侧即时 AOT，不是 Rust 宏直接生成机器码。初始化需要 Linux、可用 C 编译器和可写磁盘缓存；缺少工具、编译失败或超时明确报错，不回退 VM。
+新 Rust 模型入口在服务初始化时把固定 shape 模型 IR 生成为 C，再调用本机 `cc` 编译共享库。推理通过 `wgt_forward_v2` 单一原生入口执行固定控制流，不逐条分派 IR；这是服务侧即时 AOT，不是 Rust 宏直接生成机器码。初始化需要 Linux、可用 C 编译器和可写磁盘缓存；缺少工具、编译失败或超时明确报错，不回退 VM。
 
 入口 ABI 接收输入、当前参数指针表、工作区、输出、预算与可选 trace hook；参数独立于机器码，每次调用提供当前权重，因此训练或重新绑定权重不会复用旧值。代码仅由校验后的 IR、shape、有限常量生成，不拼接用户标识符或任意源码。编译使用独立私有临时目录，30 秒超时终止并回收子进程；已加载库以完整生成源码/ABI为进程内缓存键，最后实例释放后卸载并清理临时文件。默认缓存根为 `.cache/weightlang/compiled-forward`，可通过 `WGTIME_COMPILE_CACHE` 指定磁盘路径。
 
-首批覆盖 linear、逐元素运算、激活、归约、slice、softmax、gate/route，以及有预算的标签/分支/跳转。推理保留 gate/route 端点惰性求值；训练前向使用相同原生入口并启用 trace hook，记录实际张量结果供既有反向 tape 使用。反向传播仍遍历梯度 tape，不等同于 compiled backward。普通 forward 编译入口拒绝参数写入，工作内存指令尚未接入；typed 操作另经事务编译入口支持显式状态及参数写入，见下文。这些限制不应作为永久语言边界或广泛神经架构已覆盖的证明。
+编译入口覆盖当前 [tensor_contracts.json](../language/tensor_contracts.json) 的完整 44 指令集合，包括普通 `Write`、工作内存分配/读写/释放与 `ResourceState`。推理保留 gate/route 端点惰性求值；训练前向使用相同原生入口并启用 trace hook，记录实际张量、参数重绑定与工作内存版本供既有反向 tape 使用。反向传播仍遍历梯度 tape，不等同于 compiled backward。普通 Rust `Model::forward` 成功时提交显式写入，失败整体回滚；训练前向只使用快照，不提交临时写入。typed 操作继续经过无 AD 的事务执行路径，见下文。完整清单、使用方式和验收命令见 [Rust SDK](rust-sdk.md)。
 
 固定 shape 张量几何合同包含局部 `f32[axis=size,...]` 类型注解、命名轴、`reshape`、rank-2 `transpose` / `.T`、rank-2 `matmul` / `@`、rank-3 等 batch 的 `batch_matmul`、通用 `permute`、多轴 `softmax` 和有限有符号字面量 `scale`。注解可把相同元素数的一维向量直接绑定为多轴 Shape；命名轴在编译期检查收缩/归约/置换关系。实际使用这些几何算子时使用 adaptive IR v3；旧 adaptive IR v1/v2 不因 AST 中出现新 intrinsic 而全定义升级。参数 `read` 与裸参数引用始终为 flat vector；局部类型注解或 reshape 显式确定矩阵几何。原生 CPU interpreter 使用 base/offset/shape/strides TensorView；Matmul 与 BatchMatmul 直接读取 strided 输入，不复制数据。其他算子按需物化；AOT compiled-forward 当前仍采用物化回退。既有 Rust forward 服务入口只接受单个 f32 向量；forward 的矩阵结果须 reshape 或以同元素数向量注解满足返回接口。typed 操作多输入的本地验收范围见下文。完整签名、轴范围与 attention fixture 见[固定 shape 张量几何](tensor-geometry.md)。指定范围的本地验证已通过：core 7 suites / 30 tests、真实 service 集成一项及 macro fixture 编译一项。service 的 native-cpu attention 路径训练 100 步，MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训及资源释放。debug 单机 1000 次 evaluate 为 2.033213 ms（约 2.03 μs/次，含返回 Vec）；managed tensor 计量 1128 B（参数 96 B、tape 1056 B），charged work 98。这些是单次运行记录，不是 benchmark 优势、进程 RSS 或真实峰值内存。kernel 使用朴素 f64 累加而非 BLAS，并复用 AxisGroups；let k=q 已验证输出和梯度相同且 work 更少。当前无全局 CSE 或活跃区间复用，compiled workspace 各 register 常驻且 session 保留 reference buffers，不宣称内存最优。核心补充 IR 安全校验后仍需回归；未验证完整 Transformer、多头 attention、动态 batch 或 GPU 路径。
 
-本地 `compiled_forward`、`compiled_training`、`compiled_control_flow` 三个测试套件共 8 项通过，覆盖真实编译加载、当前权重、梯度、惰性分支、有限值、错误 shape 和预算。服务及 gates/iris 的 compiled 回归须另行验收，旧 VM 结果不能替代。
+`compiled_instruction_coverage` 将实际编译执行的指令与目录集合对应；`compiled_semantics` 检查状态、工作内存、梯度和预算。既有 `compiled_forward`、`compiled_training`、`compiled_control_flow` 继续检查编译加载、活参数和控制流。真实服务用例与生成 Rust 消费者另行执行，具体命令见 [Rust SDK 验证](rust-sdk.md#验证与边界)。
 
 ## 共享定义与 crate 边界
 
@@ -90,12 +90,14 @@ assert_eq!(output, vec![6.0]);
 
 ## 显式生命周期与训练
 
+CLI 还提供 `wgt compile model.wgt --target rust -o src/model.rs`，输出自包含架构模块供 Rust `include!` 使用。该入口与上述定义入口共享语义，公开 `SOURCE` 和返回 `wgt::Result<ModelDefinition>` 的 `definition()`；完整 imports 随源码嵌入。它不创建运行实例，详见 [Rust 导出入口](rust-sdk.md#导出入口)。
+
 | 当前接口或后续边界 | 必须满足的行为 |
 |---|---|
 | `Client::connect() -> Result<Client>`；`connect_to(&Path)` | 连接已有服务并验证当前 UID/协议；不隐式启动另一个执行核心 |
 | `Client::initialize(&ModelDefinition, InstanceOptions) -> Result<Model>` | 显式应用声明的初始化；options 含字节预算和可选 SGD/Adam；缺省预算 64 MiB、无优化器，状态是未训练 |
 | `Model::load_weights(&Path, Option<Optimizer>) -> Result<()>` | 显式向既有架构实例绑定 safetensors F32 权重；完整校验名称、shape、有限值、字节及内存预算；失败保持原实例，成功重置优化器；不训练、不保存文件 |
-| `Model::forward(&self, input: &[f32]) -> Result<Vec<f32>>` | 服务端执行并校验输入合同；首期返回拥有数据的结果，不承诺跨 IPC 的零分配或借用 core 缓冲 |
+| `Model::forward(&self, input: &[f32]) -> Result<Vec<f32>>` | 服务端执行并校验输入合同；成功提交显式 forward 写入，失败回滚；返回拥有数据的结果，不承诺跨 IPC 的零分配或借用 core 缓冲 |
 | 优化器选择 | 当前通过初始化或权重绑定显式选择 SGD/Adam，未提供单独 `configure_optimizer`；不得把加载权重当作恢复优化器 |
 | `Model::train(&self, inputs, Targets, TrainOptions) -> Result<f32>` | Rust 发起单步批训练，返回 loss；options 显式选择 loss、正有限学习率和可选正有限裁剪；服务执行原子更新，Rust 控制循环；不自动训练 |
 | `Model::save_weights(&Path) -> Result<()>` | 显式写入 safetensors，默认拒绝覆盖；本轮公共库未提供 checkpoint 保存/恢复 API，不把权重互通称为 PyTorch 完整续训兼容 |

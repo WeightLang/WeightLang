@@ -30,6 +30,12 @@ Python 模板默认自动选择兼容的 PyTorch 构建与可用加速设备，�
 原生模板使用 `model.wgt`；PyTorch 模板使用 `wgt.toml` 中的模型配方与 `workflow.py`，不会生成未参与计算的 WGT 文件。
 CLI 对既有 `wgt.toml` 中显式配置的 `model.source` 保持兼容，但这不改变新建与维护模型的入口规范。
 
+## 编译到 Rust
+
+`wgt compile model.wgt --target rust -o src/model.rs` 使用共享前端导出可被 Rust `include!` 的模型模块，公开 `SOURCE` 与 `definition()`。纯计算 imports 随输出嵌入；生成 Rust 应用运行时无需原始 WGT 文件。省略 `-o` 输出到 stdout，源文件 `-` 表示 stdin，已有输出文件拒绝覆盖；`--crate-path renamed_wgt` 可匹配 Cargo 中改名的 Rust SDK 依赖。
+
+导出不启动服务、不初始化实例、不训练。模型实际执行通过 `wgt-model` SDK 和 `wgtime` 原生服务；当前支持三种模型计划和完整的 44 指令集合。生成的模块仍会解析嵌入架构，服务初始化仍需要本机 C 编译器。完整示例、覆盖清单与边界见 [Rust SDK](rust-sdk.md)。
+
 ## 编译到 PyTorch
 
 `wgt compile model.wgt --target torch` 复用原生前端，向 stdout 输出版本化架构 JSON；`-o architecture.json` 写入新文件并拒绝覆盖。`wgt compile - --target torch` 从 stdin 读取源码。编译不会执行 forward、训练或准备 Python 环境。
