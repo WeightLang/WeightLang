@@ -21,6 +21,20 @@
       ]
     },
     {
+      "match": "\\b(native)\\s+(fn|intrinsic)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": {
+          "name": "keyword.control.wgt"
+        },
+        "2": {
+          "name": "storage.type.function.wgt"
+        },
+        "3": {
+          "name": "entity.name.function.wgt"
+        }
+      }
+    },
+    {
       "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
       "captures": {
         "1": {
@@ -32,21 +46,104 @@
       }
     },
     {
-      "name": "storage.type.function.wgt",
-      "match": "\\bnative\\s+(fn|intrinsic)\\b",
+      "match": "\\b(model|operators)\\s+([A-Za-z_][A-Za-z0-9_]*)",
       "captures": {
         "1": {
-          "name": "storage.type.function.wgt"
+          "name": "keyword.control.wgt"
+        },
+        "2": {
+          "name": "entity.name.type.wgt"
         }
       }
     },
     {
-      "match": "\\bnative\\s+(?:fn|intrinsic)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "name": "meta.tensor.shape.wgt",
+      "begin": "(\\bas)\\s*(\\[)",
+      "end": "\\]|(?=[;{}])",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.wgt"
+        },
+        "2": {
+          "name": "punctuation.wgt"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.wgt"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#shape"
+        }
+      ]
+    },
+    {
+      "name": "meta.tensor.shape.wgt",
+      "begin": "(\\b(?:f32|logits|probabilities))\\s*(\\[)",
+      "end": "\\]|(?=[;{}])",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.type.wgt"
+        },
+        "2": {
+          "name": "punctuation.wgt"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.wgt"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#shape"
+        }
+      ]
+    },
+    {
+      "match": "(\\.)(T|mean|probabilities)\\b(?!\\s*\\()",
       "captures": {
         "1": {
-          "name": "entity.name.function.wgt"
+          "name": "punctuation.wgt"
+        },
+        "2": {
+          "name": "support.variable.property.wgt"
         }
       }
+    },
+    {
+      "name": "meta.binding.tuple.wgt",
+      "begin": "(\\blet)\\s*(\\()",
+      "end": "\\)|(?=[;=])",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.wgt"
+        },
+        "2": {
+          "name": "punctuation.wgt"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.wgt"
+        }
+      },
+      "patterns": [
+        {
+          "name": "variable.other.wgt",
+          "match": "\\b[A-Za-z_]\\w*\\b"
+        },
+        {
+          "name": "punctuation.wgt",
+          "match": ","
+        },
+        {
+          "name": "comment.line.number-sign.wgt",
+          "match": "#.*$"
+        }
+      ]
     },
     {
       "name": "support.function.wgt",
@@ -62,7 +159,7 @@
     },
     {
       "name": "storage.type.wgt",
-      "match": "\\b(?:f32|logits|prob|probabilities)\\b"
+      "match": "\\b(?:bool|f32|float|int|logits|prob|probabilities)\\b"
     },
     {
       "name": "constant.language.wgt",
@@ -74,7 +171,7 @@
     },
     {
       "name": "constant.numeric.wgt",
-      "match": "(?<![\\w.])-?(?:\\d+\\.\\d*|\\.\\d+|\\d+)(?:[eE][-+]?\\d+)?(?![\\w.])"
+      "match": "(?<![\\w.])-?(?:\\d+\\.(?!\\.)\\d*|\\.\\d+|\\d+)(?:[eE][-+]?\\d+)?(?!\\w|\\.(?!\\.))"
     },
     {
       "name": "entity.name.function.wgt",
@@ -82,11 +179,37 @@
     },
     {
       "name": "keyword.operator.wgt",
-      "match": "<-|->|=>|\\*\\*|==|!=|<=|>=|&&|\\|\\||[<>=!+*/%@\\-]"
+      "match": "\\.\\.=|<-|->|=>|\\*\\*|==|!=|<=|>=|&&|\\|\\||[<>=!+*/%@\\-]"
     },
     {
       "name": "punctuation.wgt",
       "match": "[\\[\\](){},.:;]"
     }
-  ]
+  ],
+  "repository": {
+    "shape": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.wgt",
+          "match": "#.*$"
+        },
+        {
+          "name": "entity.name.label.wgt",
+          "match": "\\b[A-Za-z_]\\w*(?=\\s*=)"
+        },
+        {
+          "name": "constant.numeric.wgt",
+          "match": "(?<![\\w.])-?(?:\\d+\\.(?!\\.)\\d*|\\.\\d+|\\d+)(?:[eE][-+]?\\d+)?(?!\\w|\\.(?!\\.))"
+        },
+        {
+          "name": "keyword.operator.wgt",
+          "match": "="
+        },
+        {
+          "name": "punctuation.wgt",
+          "match": ","
+        }
+      ]
+    }
+  }
 }

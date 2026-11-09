@@ -7,7 +7,8 @@ syntax keyword wgtConstants @@constants_SPACE@@
 syntax keyword wgtTypes @@types_SPACE@@
 syntax match wgtNumber /\v<\d+(\.\d*)?([eE][+-]?\d+)?/
 syntax match wgtNumber /\v\.\d+([eE][+-]?\d+)?/
-syntax match wgtOperator /<-\|->\|[!<>=+*\/%&|@\-]/
+syntax match wgtOperator /\.\.=\|<-\|->\|=>\|\*\*\|[!<>=+*\/%&|@\-]/
+syntax match wgtProperty /\.\zs\%(T\|mean\|probabilities\)\>/
 syntax match wgtParameter /\<[A-Za-z_][A-Za-z0-9_]*\ze\s*=\%([^=]\|$\)/
 syntax region wgtString start=/"/ skip=/\\./ end=/"/ oneline
 syntax match wgtComment /#.*/
@@ -21,4 +22,5 @@ hi def link wgtString String
 hi def link wgtComment Comment
 hi def link wgtOperator Operator
 hi def link wgtParameter Identifier
+hi def link wgtProperty Special
 let b:current_syntax = "wgt"

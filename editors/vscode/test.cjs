@@ -46,6 +46,34 @@ const onig = require('vscode-oniguruma');
   for (const word of vocabulary.builtins) check(word + '(x);', word, 'support.function.wgt');
   for (const word of vocabulary.constants) check('return ' + word + ';', word, 'constant.language.wgt');
   check('fn forward(x) {', 'forward', 'entity.name.function.wgt');
+  check('native fn public_value(input);', 'public_value', 'entity.name.function.wgt');
+  check('native intrinsic sqrt(input);', 'sqrt', 'entity.name.function.wgt');
+  check('model SpikingCell', 'SpikingCell', 'entity.name.type.wgt');
+  check('operators plasticity', 'plasticity', 'entity.name.type.wgt');
+  for (const type of ['float', 'int', 'bool']) {
+    check(`learn gain: ${type}[2] = [0, 1];`, type, 'storage.type.wgt');
+  }
+  for (const shape of ['x as [rows=2, columns=3]', 'let x: f32[rows=2, columns=3] = input;']) {
+    check(shape, 'rows', 'entity.name.label.wgt');
+    check(shape, 'columns', 'entity.name.label.wgt');
+    check(shape, '3]', 'constant.numeric.wgt');
+  }
+  for (const postfix of ['T', 'mean', 'probabilities']) {
+    check(`let result = input.${postfix};`, postfix, 'support.variable.property.wgt');
+  }
+  for (const binding of ['next_voltage', 'spike']) {
+    check('let (next_voltage, spike) = snn.lif(v, x, leak, threshold);', binding, 'variable.other.wgt');
+  }
+  check('learn depth: int in 1..=12 = 6;', '1', 'constant.numeric.wgt');
+  check('learn depth: int in 1..=12 = 6;', '..=', 'keyword.operator.wgt');
+  const rangeTokens = grammar.tokenizeLine('1..=12', tm.INITIAL).tokens;
+  assert(rangeTokens.some(t => t.startIndex === 1 && t.endIndex === 4 && t.scopes.includes('keyword.operator.wgt')));
+  const shapeStart = grammar.tokenizeLine('let matrix = x as [', tm.INITIAL);
+  const shapeNext = grammar.tokenizeLine('  rows=2, columns=3];', shapeStart.ruleStack);
+  assert(shapeNext.tokens.some(t => t.scopes.includes('entity.name.label.wgt')), 'multiline shapes retain named axes');
+  const unfinishedShape = grammar.tokenizeLine('let matrix = x as [2, 3;', tm.INITIAL);
+  const recoveredShape = grammar.tokenizeLine('return relu(x);', unfinishedShape.ruleStack);
+  assert(!recoveredShape.tokens.some(t => t.scopes.includes('meta.tensor.shape.wgt')), 'broken shapes must stop at statement boundaries');
   for (const op of ['&&', '||', '!', '==', '!=', '<=', '>=']) check('if x ' + op + ' y {', op, 'keyword.operator.wgt');
   for (const mark of ['{', '}', ';']) check(mark, mark, 'punctuation.wgt');
   check(String.raw`return "escaped \"# still string"; # comment`, '# still', 'string.quoted.double.wgt');

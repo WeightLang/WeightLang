@@ -4,10 +4,11 @@ syntax keyword wgtKeywords blend repeat indexed carrying agent environment state
 syntax match wgtNativeDecl /\%(\<native\>\s\+\%(fn\|intrinsic\)\s\+\)\@<=\<[A-Za-z_][A-Za-z0-9_]*/
 syntax keyword wgtBuiltins append argmax argmin argsort batch bce_logits benchmark clip close column commit_gradients compress compute_budget compute_call compute_capabilities compute_host_status compute_register compute_scope compute_status compute_trace concat cosine_similarity cross_entropy cross_entropy_probs cumsum dependency device_status device_submit device_wait devices diff differentiate differentiate_at dot elu ema entropy execution_cancel execution_resume execution_start exp expm1 fma full gae gather gradient_snapshot hard_sigmoid hard_swish hf_dataset huber hypot js_divergence jsonl kl_divergence l2_normalize leaky_relu len linspace log log1p log_cosh log_softmax logsumexp mae max mean median metric min mlp moving_mean mse norm normalize_probabilities one_hot ones quantile random range reinforce release_gradient relu responses_cancel responses_next responses_restrict responses_scope responses_session responses_submit responses_usage reverse rsqrt seed sigmoid silu softmax softplus sort sqrt stddev sum temperature_softmax training_device training_status variance vector_slice wgsl_kernel wgsl_run zeros add avg_pool2d batch_matmul clip conv depth_gate detach div exp gate ge layer_norm linear log log_softmax matmul max_pool2d mean memory_alloc memory_free memory_read memory_write minimum mul permute positive read relu reshape resource_state route scale sigmoid slice softmax sqrt square sum tanh transpose write identity linear relu sigmoid tanh
 syntax keyword wgtConstants false null true
-syntax keyword wgtTypes f32 logits prob probabilities
+syntax keyword wgtTypes bool f32 float int logits prob probabilities
 syntax match wgtNumber /\v<\d+(\.\d*)?([eE][+-]?\d+)?/
 syntax match wgtNumber /\v\.\d+([eE][+-]?\d+)?/
-syntax match wgtOperator /<-\|->\|[!<>=+*\/%&|@\-]/
+syntax match wgtOperator /\.\.=\|<-\|->\|=>\|\*\*\|[!<>=+*\/%&|@\-]/
+syntax match wgtProperty /\.\zs\%(T\|mean\|probabilities\)\>/
 syntax match wgtParameter /\<[A-Za-z_][A-Za-z0-9_]*\ze\s*=\%([^=]\|$\)/
 syntax region wgtString start=/"/ skip=/\\./ end=/"/ oneline
 syntax match wgtComment /#.*/
@@ -21,4 +22,5 @@ hi def link wgtString String
 hi def link wgtComment Comment
 hi def link wgtOperator Operator
 hi def link wgtParameter Identifier
+hi def link wgtProperty Special
 let b:current_syntax = "wgt"

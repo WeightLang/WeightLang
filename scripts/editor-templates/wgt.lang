@@ -5,11 +5,11 @@
 <definitions><context id="wgt"><include>
 <context id="comment" class="comment" style-ref="def:comment" end-at-line-end="true"><start>#</start></context>
 <context id="string" class="string" style-ref="def:string" end-at-line-end="true"><start>"</start><end>"</end><include><context id="escape" style-ref="def:special-char"><match>\\.</match></context></include></context>
-<context id="native-declaration" style-ref="builtins"><match>\\bnative\\s+(?:fn|intrinsic)\\s+[A-Za-z_][A-Za-z0-9_]*</match></context>
+<context id="native-declaration" style-ref="builtins"><match>\bnative\s+(?:fn|intrinsic)\s+[A-Za-z_][A-Za-z0-9_]*</match></context>
 <context id="keywords" style-ref="keywords">@@keywords_TAGS@@</context>
 <context id="builtins" style-ref="builtins">@@builtins_TAGS@@@@intrinsics_TAGS@@@@layers_TAGS@@</context>
 <context id="types" style-ref="types">@@types_TAGS@@</context>
 <context id="constants" style-ref="def:boolean">@@constants_TAGS@@</context>
-<context id="operator" style-ref="def:operator"><match>&lt;-|-&gt;|[!&lt;&gt;=+*/%&amp;|@\-]</match></context>
+<context id="operator" style-ref="def:operator"><match>\.\.=|&lt;-|-&gt;|=&gt;|\*\*|[!&lt;&gt;=+*/%&amp;|@\-]</match></context>
 <context id="number" style-ref="def:decimal"><match>(?&lt;![\w.])-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?(?![\w.])</match></context>
 </include></context></definitions></language>

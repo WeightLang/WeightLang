@@ -223,7 +223,10 @@
     "tanh"
   ],
   "types": [
+    "bool",
     "f32",
+    "float",
+    "int",
     "logits",
     "prob",
     "probabilities"

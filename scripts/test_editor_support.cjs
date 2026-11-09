@@ -22,6 +22,8 @@ files.push(path.join(root, 'editors/vscode/media/example.wgt'),
   path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_control.wgt'));
 const operations = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_operations.wgt');
 files.push(operations);
+const tensorLearning = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/tensor_learning/model.wgt');
+files.push(tensorLearning);
 run('tree-sitter', ['parse', '--quiet', ...files], grammar);
 const operationsTree = run('tree-sitter', ['parse', operations], grammar);
 for (const node of ['state_declaration', 'tensor_type', 'function_declaration']) {
@@ -32,6 +34,15 @@ const operationsCaptures = run('tree-sitter', ['query', 'queries/highlights.scm'
 for (const [capture, text] of [['keyword', 'state'], ['variable', 'activity'], ['type.builtin', 'f32'], ['function', 'observe'], ['function', 'reset'], ['operator', '<-'], ['operator', '->']]) {
   assert(operationsCaptures.split('\n').some(line => line.includes(capture) && line.includes('`' + text + '`')),
     `${text}: missing ${capture} capture`);
+}
+const tensorCaptures = run('tree-sitter', ['query', 'queries/highlights.scm', tensorLearning], grammar);
+for (const [capture, text] of [
+  ['keyword', 'as'], ['operator', '@'], ['operator', '<-'],
+  ['variable.parameter', 'feature'], ['type.builtin', 'float'], ['type.builtin', 'bool'],
+  ['property', 'T'], ['property', 'mean'], ['property', 'probabilities'], ['function', 'snn.lif'],
+]) {
+  assert(tensorCaptures.split('\n').some(line => line.includes(capture) && line.includes('`' + text + '`')),
+    `${text}: missing modern tensor ${capture} capture`);
 }
 const sample = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/editor_current.wgt');
 const vocabulary = JSON.parse(fs.readFileSync(path.join(root, 'editors/vocabulary.json'), 'utf8'));

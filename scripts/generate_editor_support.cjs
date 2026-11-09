@@ -9,7 +9,8 @@ const vocabulary = {
   builtins: [...new Set(prelude.filter(e => e.kind === 'function' && e.contexts.includes('ordinary_function')).map(e => e.name))].sort(),
   intrinsics: [...new Set(prelude.filter(e => e.kind === 'intrinsic' && e.contexts.some(context => ['tensor', 'tensor_forward', 'tensor_loss'].includes(context))).map(e => e.name))].sort(),
   layers: [...new Set(prelude.filter(e => e.kind === 'layer').map(e => e.name))].sort(),
-  types: prelude.filter(e => e.kind === 'type').map(e => e.name).sort(),
+  // Learn domains are parsed as declaration types, not implicit prelude entries.
+  types: [...new Set([...prelude.filter(e => e.kind === 'type').map(e => e.name), 'float', 'int', 'bool'])].sort(),
   constants: prelude.filter(e => e.kind === 'constant').map(e => e.name).sort(),
 };
 let stale = false;
@@ -20,6 +21,7 @@ function write(file, text) {
 }
 const words = key => `\\b(?:${vocabulary[key].join('|')})\\b`;
 const captureNames = [...new Set([...vocabulary.builtins, ...vocabulary.intrinsics, ...vocabulary.layers])];
+const number = '(?<![\\w.])-?(?:\\d+\\.(?!\\.)\\d*|\\.\\d+|\\d+)(?:[eE][-+]?\\d+)?(?!\\w|\\.(?!\\.))';
 const grammar = {
   name: 'WeightLang', scopeName: 'source.wgt', fileTypes: ['wgt'],
   patterns: [
@@ -27,22 +29,51 @@ const grammar = {
     {name: 'string.quoted.double.wgt', begin: '"', end: '"|$', patterns: [
       {name: 'constant.character.escape.wgt', match: '\\\\(?:["\\\\/bfnrt]|u[0-9a-fA-F]{4})'},
     ]},
+    {match: '\\b(native)\\s+(fn|intrinsic)\\s+([A-Za-z_][A-Za-z0-9_]*)', captures: {
+      1: {name: 'keyword.control.wgt'}, 2: {name: 'storage.type.function.wgt'}, 3: {name: 'entity.name.function.wgt'},
+    }},
     {match: '\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)', captures: {
       1: {name: 'keyword.control.wgt'}, 2: {name: 'entity.name.function.wgt'},
     }},
-    {name: 'storage.type.function.wgt', match: '\\bnative\\s+(fn|intrinsic)\\b', captures: {1: {name: 'storage.type.function.wgt'}}},
-    {match: '\\bnative\\s+(?:fn|intrinsic)\\s+([A-Za-z_][A-Za-z0-9_]*)', captures: {1: {name: 'entity.name.function.wgt'}}},
+    {match: '\\b(model|operators)\\s+([A-Za-z_][A-Za-z0-9_]*)', captures: {
+      1: {name: 'keyword.control.wgt'}, 2: {name: 'entity.name.type.wgt'},
+    }},
+    {name: 'meta.tensor.shape.wgt', begin: '(\\bas)\\s*(\\[)', end: '\\]|(?=[;{}])',
+      beginCaptures: {1: {name: 'keyword.control.wgt'}, 2: {name: 'punctuation.wgt'}},
+      endCaptures: {0: {name: 'punctuation.wgt'}}, patterns: [{include: '#shape'}]},
+    {name: 'meta.tensor.shape.wgt', begin: '(\\b(?:f32|logits|probabilities))\\s*(\\[)', end: '\\]|(?=[;{}])',
+      beginCaptures: {1: {name: 'storage.type.wgt'}, 2: {name: 'punctuation.wgt'}},
+      endCaptures: {0: {name: 'punctuation.wgt'}}, patterns: [{include: '#shape'}]},
+    {match: '(\\.)(T|mean|probabilities)\\b(?!\\s*\\()', captures: {
+      1: {name: 'punctuation.wgt'}, 2: {name: 'support.variable.property.wgt'},
+    }},
+    {name: 'meta.binding.tuple.wgt', begin: '(\\blet)\\s*(\\()', end: '\\)|(?=[;=])',
+      beginCaptures: {1: {name: 'keyword.control.wgt'}, 2: {name: 'punctuation.wgt'}},
+      endCaptures: {0: {name: 'punctuation.wgt'}}, patterns: [
+        {name: 'variable.other.wgt', match: '\\b[A-Za-z_]\\w*\\b'},
+        {name: 'punctuation.wgt', match: ','},
+        {name: 'comment.line.number-sign.wgt', match: '#.*$'},
+      ]},
     {name: 'support.function.wgt', match: `(?<![\\w.])(?:${captureNames.join('|')})(?=\\s*\\()`},
     {name: 'keyword.control.wgt', match: words('keywords')},
     {name: 'invalid.deprecated.wgt', match: '\\b(?:fit|predict)\\b(?=\\s*\\()'},
     {name: 'storage.type.wgt', match: words('types')},
     {name: 'constant.language.wgt', match: words('constants')},
     {name: 'variable.parameter.wgt', match: '\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*=(?!=))'},
-    {name: 'constant.numeric.wgt', match: '(?<![\\w.])-?(?:\\d+\\.\\d*|\\.\\d+|\\d+)(?:[eE][-+]?\\d+)?(?![\\w.])'},
+    {name: 'constant.numeric.wgt', match: number},
     {name: 'entity.name.function.wgt', match: '\\b[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*(?=\\s*\\()'},
-    {name: 'keyword.operator.wgt', match: '<-|->|=>|\\*\\*|==|!=|<=|>=|&&|\\|\\||[<>=!+*/%@\\-]'},
+    {name: 'keyword.operator.wgt', match: '\\.\\.=|<-|->|=>|\\*\\*|==|!=|<=|>=|&&|\\|\\||[<>=!+*/%@\\-]'},
     {name: 'punctuation.wgt', match: '[\\[\\](){},.:;]'},
   ],
+  repository: {
+    shape: {patterns: [
+      {name: 'comment.line.number-sign.wgt', match: '#.*$'},
+      {name: 'entity.name.label.wgt', match: '\\b[A-Za-z_]\\w*(?=\\s*=)'},
+      {name: 'constant.numeric.wgt', match: number},
+      {name: 'keyword.operator.wgt', match: '='},
+      {name: 'punctuation.wgt', match: ','},
+    ]},
+  },
 };
 const xml = s => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 function plist(value) {

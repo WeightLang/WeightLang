@@ -9,11 +9,11 @@
 <contexts><context name="Normal" attribute="Normal" lineEndContext="#stay">
 <DetectChar char="#" attribute="Comment" context="Comment"/>
 <DetectChar char="&quot;" attribute="String" context="String"/>
-<RegExpr String="\\bnative\\s+(?:fn|intrinsic)\\s+[A-Za-z_][A-Za-z0-9_]*" attribute="builtins" context="#stay"/>
+<RegExpr String="\bnative\s+(?:fn|intrinsic)\s+[A-Za-z_][A-Za-z0-9_]*" attribute="builtins" context="#stay"/>
 <keyword String="keywords" attribute="keywords" context="#stay"/>
 <keyword String="builtins" attribute="builtins" context="#stay"/>
 <keyword String="constants" attribute="Number" context="#stay"/>
-<RegExpr String="&lt;-|-&gt;|[!&lt;&gt;=+*/%&amp;|@\-]" attribute="Operator" context="#stay"/>
+<RegExpr String="\.\.=|&lt;-|-&gt;|=&gt;|\*\*|[!&lt;&gt;=+*/%&amp;|@\-]" attribute="Operator" context="#stay"/>
 <keyword String="types" attribute="types" context="#stay"/>
 <RegExpr String="(?&lt;![\w.])-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?(?![\w.])" attribute="Number" context="#stay"/>
 </context>

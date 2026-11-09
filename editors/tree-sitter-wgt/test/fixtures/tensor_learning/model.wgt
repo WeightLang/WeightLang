@@ -1,0 +1,26 @@
+wgt 0.5
+model TensorLearning
+import snn from "std/snn"
+parameter weight: f32[2,2] = [1,0,0,1]
+state voltage: f32[2] = [0,0]
+learn leak: float in 0..=1 = 0.5;
+learn threshold: float > 0 = 1;
+learn enabled: bool = true;
+
+fn step(input: f32[2]) -> f32[2] {
+    # Rows are output neurons; columns contract with the two input features.
+    let matrix: f32[neuron=2, feature=2] = weight;
+    let current = (matrix @ (input as [feature=2, sample=1])) as [2];
+    # The helper returns a candidate state and a spike; <- commits only the state.
+    let (next_voltage, spike) = snn.lif(voltage, current, leak, threshold);
+    voltage <- next_voltage;
+    return spike;
+}
+
+fn swap_axes(x) {
+    return x as [2,2].T as [4];
+}
+
+fn describe(x) {
+    return (x.mean, x.probabilities);
+}
