@@ -4,16 +4,19 @@ WeightLang 的模板把创建项目、配置模型、训练和推理连成一个
 
 ## 1. 选择模板并训练
 
-本页对应当前仓库源码。在仓库根目录运行以下安装命令；Python 模板还需要安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)。
+本页对应当前仓库源码。在仓库根目录运行安装器，它会一起准备 uv、Rust/Cargo 与命令行工具，并配置 PATH。
 
 ```sh
-cargo install --locked --force --path crates/wgt --bin wgt --bin weightc
+sh install.sh
+. "${XDG_CONFIG_HOME:-$HOME/.config}/weightlang/env"
 wgt templates
 wgt init my-model --template tiny-lm
 cd my-model
 wgt train
 wgt infer --prompt "Hello"
 ```
+
+Windows 先运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`，打开新终端后从 `wgt templates` 开始执行。自定义安装路径见[安装说明](weightc-migration.md#安装)。
 
 首次 `wgt train` 会让 uv 选择 Python、创建项目内的 `.venv`、安装依赖并生成 `uv.lock`，随后开始训练。无需手动激活虚拟环境。模板包含演示数据，训练过程使用本地文件；安装 Python 和依赖时需要网络。
 

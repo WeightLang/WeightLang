@@ -41,6 +41,15 @@ jobs:
           sh -n install.sh
           python scripts/test_install.py
 
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Windows bootstrap, PATH and failure handling
+        shell: powershell
+        run: ./scripts/test_install.ps1
+
   clean-install:
     runs-on: ubuntu-latest
     timeout-minutes: 20

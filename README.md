@@ -4,6 +4,23 @@
 
 > **Express neural architectures clearly and elegantly.**
 
+## Install
+
+From the repository root, install uv, Rust/Cargo, `wgt` and `weightc` together:
+
+```sh
+sh install.sh
+. "${XDG_CONFIG_HOME:-$HOME/.config}/weightlang/env"
+```
+
+On Windows, run `powershell -ExecutionPolicy Bypass -File .\install.ps1` and
+open a new terminal. The installers reuse working tools, install missing ones
+from their official sources, and configure the user PATH. Rust uses the minimal
+stable toolchain on a fresh installation. Source compilation also needs a system
+linker: Xcode Command Line Tools on macOS, a C/C++ build toolchain on Linux, or
+Visual Studio Build Tools with the C++ workload and Windows SDK on Windows.
+See [installation options](docs/weightc-migration.md#安装) for custom paths and tags.
+
 ## Use WGT architectures in PyTorch
 
 Write the parameters and forward computation in `model.wgt`, then import a
@@ -11,7 +28,6 @@ standard `torch.nn.Module` from Python. The SDK reuses the Rust compiler and
 PyTorch FX, autograd, optimizers, and model inspection tools.
 
 ```sh
-cargo install --locked --force --path crates/wgt --bin wgt
 uv venv
 uv pip install -e './python[visualize]'
 uv run --no-project python python/examples/mlp/train.py
@@ -50,11 +66,9 @@ templates use uv for Python and dependencies, PyTorch for optimization, and
 Transformers for the small language model. These recipes construct their models
 from TOML and Python; loading WGT source uses the SDK described above.
 
-These commands use the current source checkout. Install the CLI from the
-repository root and install [uv](https://docs.astral.sh/uv/getting-started/installation/):
+After running the installer above, create and train a project:
 
 ```sh
-cargo install --locked --force --path crates/wgt --bin wgt --bin weightc
 wgt init my-model --template tiny-lm
 cd my-model
 wgt train

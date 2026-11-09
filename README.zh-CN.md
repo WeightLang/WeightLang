@@ -4,12 +4,25 @@
 
 > **优雅地描述神经网络的内部架构。**
 
+## 安装
+
+在仓库根目录一次安装 uv、Rust/Cargo、`wgt` 和 `weightc`：
+
+```sh
+sh install.sh
+. "${XDG_CONFIG_HOME:-$HOME/.config}/weightlang/env"
+```
+
+Windows 运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`，然后打开新终端。
+安装器复用已有的可用工具，从官方来源补齐缺失工具，并配置用户 PATH；全新 Rust 安装使用 stable 最小工具链。
+源码编译还需要系统链接器：macOS 使用 Xcode Command Line Tools，Linux 使用 C/C++ 构建工具链，Windows 使用包含 C++ 工作负载和 Windows SDK 的 Visual Studio Build Tools。
+自定义路径、版本 tag 与 shell 配置见[安装说明](docs/weightc-migration.md#安装)。
+
 ## 在 PyTorch 中导入 WGT 架构
 
 用 `model.wgt` 描述参数和前向计算，Python 加载后得到标准 `torch.nn.Module`。SDK 复用 Rust 编译器、PyTorch FX、自动求导、优化器及模型查看工具。
 
 ```sh
-cargo install --locked --force --path crates/wgt --bin wgt
 uv venv
 uv pip install -e './python[visualize]'
 uv run --no-project python python/examples/mlp/train.py
@@ -35,10 +48,9 @@ SDK 加载使用 host 传入的模型路径和设备参数，不会自动读取�
 
 选一个模板，修改 `wgt.toml` 参数，就可以训练并试用模型。Python 环境和依赖交给 uv，优化计算复用 PyTorch，小型语言模型复用 Transformers。这些模板通过 TOML 与 Python 构造模型；WGT 源码加载使用上面的 SDK 入口。
 
-以下命令对应当前源码。在仓库根目录安装命令行工具，并安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)：
+完成上面的安装后，创建并训练项目：
 
 ```sh
-cargo install --locked --force --path crates/wgt --bin wgt --bin weightc
 wgt init my-model --template tiny-lm
 cd my-model
 wgt train

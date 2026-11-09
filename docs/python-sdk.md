@@ -9,14 +9,15 @@ WeightLang 描述模型内部的参数、张量计算、分支、循环和状态
 在当前源码仓库根目录执行：
 
 ```sh
-cargo install --locked --force --path crates/wgt --bin wgt
+sh install.sh
+. "${XDG_CONFIG_HOME:-$HOME/.config}/weightlang/env"
 uv venv
 uv pip install -e './python[visualize]'
 ```
 
-需要 Python 3.10+、PyTorch 2.5+。`visualize` 是可选依赖组，提供 torchinfo、NumPy 和 Graphviz 的 Python 包；仅加载、训练和导出 Mermaid/DOT 时可改为 `uv pip install -e ./python`。SVG/PNG 还需要系统 Graphviz 的 `dot` 程序，例如 Debian/Ubuntu 的 `graphviz` 软件包。
+安装器自动准备 uv、Rust/Cargo 和原生编译器；Windows 使用 `powershell -ExecutionPolicy Bypass -File .\install.ps1`，打开新终端后再运行 uv 命令。SDK 与 PyTorch 装入项目的 `.venv`。需要 Python 3.10+、PyTorch 2.5+。`visualize` 是可选依赖组，提供 torchinfo、NumPy 和 Graphviz 的 Python 包；仅加载、训练和导出 Mermaid/DOT 时可改为 `uv pip install -e ./python`。SVG/PNG 还需要系统 Graphviz 的 `dot` 程序，例如 Debian/Ubuntu 的 `graphviz` 软件包。
 
-SDK 当前版本为 0.2.0，从源码安装，尚未由本次开发发布到 PyPI。编译器与 Python 包应来自同一源码版本，以获得完整指令、原生初始化值和子模型元数据。已有项目可通过 uv 安装 Git 仓库的 `python` 子目录，或安装上述本地目录。
+上述命令安装当前源码版本。编译器与 Python 包应来自同一源码版本，以获得完整指令、原生初始化值和子模型元数据。已有项目可通过 uv 安装 Git 仓库的 `python` 子目录，或安装上述本地目录。已发布版本的 Python 与 Rust SDK 安装方式见[联合发布说明](releases.md)。
 
 PyTorch 的 CPU/CUDA 等安装选择继续使用 [PyTorch 安装说明](https://pytorch.org/get-started/locally/)与 [uv 的 PyTorch 集成](https://docs.astral.sh/uv/guides/integration/pytorch/)。SDK 使用已安装的 PyTorch，不下载模型、驱动或运行服务。
 

@@ -92,6 +92,7 @@ fn native_distribution_limits_python_to_host_and_build_tools() {
                     assert!(
                         [
                             "crates/wgt/templates/workflow.py",
+                            "scripts/test_install.py",
                             "scripts/test_starter_workflows.py",
                             "scripts/check_python_dist.py",
                             "scripts/smoke_python_sdk.py",
