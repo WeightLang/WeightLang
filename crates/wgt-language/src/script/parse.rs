@@ -1138,6 +1138,12 @@ impl Parser {
         };
         loop {
             ensure!(left.height() <= 128, "expression tree depth exceeds 128");
+            if self.take("as") {
+                self.expect("[")?;
+                let dimensions = self.arguments("]")?;
+                left = Expr::BuiltinCall("reshape".into(), vec![left, Expr::List(dimensions)]);
+                continue;
+            }
             if self.take("(") {
                 left = Expr::Invoke(Box::new(left), self.arguments(")")?);
                 continue;

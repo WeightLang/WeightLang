@@ -121,6 +121,7 @@ CASES = [
     pytest.param(source("return layer_norm(x,[1,1],[0,0],0,0.0001);", input_width=2, output_width=2), [1e20, -1e20], {}, id="layer-norm-wide-variance"),
     pytest.param(source("return linear(x,w,b);", "parameter w:f32[1,2]=[1,1]\nparameter b:f32[1]=[1]", 2, 1), [1e8, -1e8], {}, id="linear-bias-first"),
     pytest.param(source("return reshape(matmul(reshape(x,[1,2]),reshape(w,[2,1])),[1]);", "parameter w:f32[2,1]=[2,-2]", 2, 1), [3e38, 3e38], {}, id="matmul-wide-products"),
+    pytest.param(source("return (x as [2,3] @ w as [2,3].T) as [4];", "parameter w:f32[2,3]=[1,2,3,-1,0,2]", 6, 4), [1., 2., 3., 4., 5., 6.], {}, id="shape-postfix-matmul-transpose"),
     pytest.param(source("return reshape(conv(reshape(x,[1,2]),reshape(w,[1,1,2]),[0],[1],[0],[1],1),[1]);", "parameter w:f32[1,1,2]=[2,-2]", 2, 1), [3e38, 3e38], {}, id="conv-wide-products"),
     pytest.param(source("return reshape(avg_pool2d(reshape(x,[1,2,2]),[2,2],[2,2]),[1]);", input_width=4), [3e38] * 4, {}, id="pool-wide-accumulation"),
 ]
@@ -157,6 +158,53 @@ def compare_forward(text, inputs, bindings=None, gradient=None):
 @pytest.mark.parametrize("text,inputs,bindings", CASES)
 def test_forward_and_gradients_match_native(text, inputs, bindings):
     compare_forward(text, inputs, bindings)
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["forward", "typed-forward"])
+def test_shape_postfix_in_imported_ff_matches_reshape(tmp_path, typed):
+    # Use the real standard-library formula through a file-relative import.
+    (tmp_path / "ff.wgt").write_text((ROOT / "std/ff.wgt").read_text(), encoding="utf-8")
+    signature = "input:f32[2]) -> f32[2]" if typed else "input)"
+    ports = "" if typed else "input input:f32[2]\noutput output:f32[2]\n"
+    text = f"""wgt 0.5
+model ShapedFF
+import ff from "./ff.wgt"
+{ports}parameter weight:f32[2,2]=[1,2,-1,1]
+parameter bias:f32[2,1]=[0.5,0.25]
+fn forward({signature} {{
+    # Two output rows contract two input features; bias has one column.
+    let activity = ff.dense_relu(weight as [2,2], bias as [2,1], input as [2,1]);
+    return activity as [2];
+}}
+"""
+    legacy = (text.replace("weight as [2,2]", "reshape(weight,[2,2])")
+              .replace("bias as [2,1]", "reshape(bias,[2,1])")
+              .replace("input as [2,1]", "reshape(input,[2,1])")
+              .replace("activity as [2]", "reshape(activity,[2])"))
+    path = tmp_path / "model.wgt"
+    path.write_text(legacy, encoding="utf-8")
+    resolved = wgt.compile(path)["source"]
+    inputs = [2., 3.]
+    if typed:
+        expected = native(resolved, calls=[{"name": "forward", "inputs": [inputs]}])["results"][0]
+    else:
+        expected = native(resolved, input=inputs)
+
+    path.write_text(text, encoding="utf-8")
+    model = wgt.load(path, device="cpu")
+    x = torch.tensor(inputs, requires_grad=not typed)
+    output = model(x)
+    torch.testing.assert_close(output, torch.tensor([8.5, 1.25]), rtol=0, atol=0)
+    torch.testing.assert_close(output, torch.tensor(expected["output"]), rtol=0, atol=0)
+    if typed:
+        assert not output.requires_grad
+        assert all(parameter.grad is None for parameter in model.parameters())
+    else:
+        output.sum().backward()
+        torch.testing.assert_close(x.grad, torch.tensor(expected["input_gradient"]), rtol=0, atol=0)
+        for name, key in model.parameter_names.items():
+            gradient = model.get_parameter(key).grad.flatten()
+            torch.testing.assert_close(gradient, torch.tensor(expected["gradients"][name]), rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("name,width", [
