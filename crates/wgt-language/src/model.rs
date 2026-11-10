@@ -53,6 +53,18 @@ pub enum ModelPlan {
     Operations(crate::operations::OperationsPlan),
 }
 impl ModelDefinition {
+    /// Bind named dimensions before validating a reusable model definition.
+    pub fn parse_with_dimensions(text: &str, dimensions: &crate::dimensions::Dimensions) -> Result<Self> {
+        Self::parse(&crate::dimensions::specialize(text, dimensions)?)
+    }
+    /// File imports remain relative to the original file; dimensions are bound
+    /// only in that file, not injected into separately imported libraries.
+    pub fn from_file_with_dimensions(path: impl AsRef<Path>, dimensions: &crate::dimensions::Dimensions) -> Result<Self> {
+        let path = path.as_ref();
+        let text = crate::dimensions::specialize(&crate::model_modules::read(path)?, dimensions)?;
+        let (source, _) = crate::model_modules::resolve(&text, Some(path))?;
+        Self::parse_resolved(&source)
+    }
     pub fn parse(text: &str) -> Result<Self> {
         let (source, _) = crate::model_modules::resolve(text, None)?;
         Self::parse_resolved(&source)

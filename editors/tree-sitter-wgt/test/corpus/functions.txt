@@ -270,7 +270,7 @@ fn main() {
             (number)))))))
 
 ==================
-examples/self_modifying/model.wgt
+Legacy compatibility: read/write in examples/self_modifying/model.wgt
 ==================
 wgt 0.5
 # 所有模型共享同一版本头和端口声明。本例系数为手工初始化，未训练。

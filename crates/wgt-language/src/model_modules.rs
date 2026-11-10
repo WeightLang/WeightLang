@@ -59,6 +59,9 @@ pub(crate) fn resolve_with_overlays(
     file: Option<&Path>,
     overlays: &BTreeMap<PathBuf, String>,
 ) -> Result<(String, Vec<PathBuf>)> {
+    let specialized = crate::dimensions::specialize(text, &Default::default())?;
+    let normalized = crate::model_syntax::normalize(&specialized)?;
+    let text = normalized.as_str();
     ensure!(text.len() <= LIMIT, "model source exceeds 1 MiB");
     let root = file.map(source_path).transpose()?;
     let boundary = root
@@ -282,7 +285,7 @@ fn rewrite_function(function: &mut Function, calls: &HashMap<String, String>) {
     }
     rewrite(&mut function.body,calls);
 }
-fn emit_function(out: &mut String, name: &str, function: &Function) -> Result<()> {
+pub(crate) fn emit_function(out: &mut String, name: &str, function: &Function) -> Result<()> {
     ensure!(
         !function.is_async,
         "model modules cannot contain async functions"

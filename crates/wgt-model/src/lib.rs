@@ -5,6 +5,7 @@ use anyhow::{ensure, Context};
 pub use anyhow::Result;
 use std::{cell::RefCell, fs::OpenOptions, path::Path, rc::Rc};
 use wgtime::Request;
+pub use wgt_language::dimensions::Dimensions;
 pub use wgt_language::model::{ModelDefinition, ModelInterface, ParameterSchema};
 pub use wgt_model_macros::{model, include_model};
 pub use wgt_language::operations::{ArgumentSchema, Effects, OperationSchema, StateSchema};

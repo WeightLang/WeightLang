@@ -28,3 +28,9 @@ test('requires an explicit initialization algorithm in active examples', () => {
   assert.deepEqual(sourceProblems('init weights=xavier_uniform(42) bias=zeros()'), []);
   assert.deepEqual(markdownProblems('Legacy `init seed=42` remains compatible.\n```wgt\ninit seed=42\n```'), [3]);
 });
+
+
+test('canonical model reads and updates have one spelling', () => {
+  assert.deepEqual(sourceProblems('let old = read(memory);\nwrite(memory, next);'), [1, 2]);
+  assert.deepEqual(sourceProblems('let old = memory;\nmemory <- next as [1,1];'), []);
+});

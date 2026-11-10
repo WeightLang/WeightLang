@@ -58,14 +58,22 @@ pub struct Operation {
 /// Resolve pure model imports and lower to native model IR for the torch SDK.
 /// This copies declared initializers; it never executes forward or host code.
 pub fn compile(path: &Path) -> Result<Architecture> {
-    let definition = ModelDefinition::from_file(path)
+    compile_with_dimensions(path, &Default::default())
+}
+
+pub fn compile_with_dimensions(path: &Path, dimensions: &wgt_language::dimensions::Dimensions) -> Result<Architecture> {
+    let definition = ModelDefinition::from_file_with_dimensions(path, dimensions)
         .with_context(|| format!("invalid model definition {}", path.display()))?;
     from_definition(definition)
 }
 
 /// Compile an in-memory definition; relative imports require the file entrypoint.
 pub fn compile_source(source: &str) -> Result<Architecture> {
-    from_definition(ModelDefinition::parse(source).context("invalid model definition")?)
+    compile_source_with_dimensions(source, &Default::default())
+}
+
+pub fn compile_source_with_dimensions(source: &str, dimensions: &wgt_language::dimensions::Dimensions) -> Result<Architecture> {
+    from_definition(ModelDefinition::parse_with_dimensions(source, dimensions).context("invalid model definition")?)
 }
 
 fn from_definition(definition: ModelDefinition) -> Result<Architecture> {

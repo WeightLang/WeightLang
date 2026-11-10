@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "source_edition": "0.5",
-  "release_status": "unreleased",
+  "release_status": "0.5.2 toolkit; source edition remains 0.5",
   "scope": "Tested context boundaries, not an exhaustive builtin or grammar specification",
   "domains": {
     "source": {"authority": ["crates/wgt-language/src/source.rs", "crates/wgt-language/src/script/parse.rs", "crates/wgt-language/src/adaptive/source.rs", "crates/wgt-language/src/initializer.rs"]},
@@ -31,5 +31,7 @@
   "conformance": "language/conformance.json",
   "initialization": {"default": null, "unbound": "omitted parameter/frozen/learn initializer or explicit external; definitions may compile but complete binding required before execution", "sequential": "init weights=EXPRESSION bias=EXPRESSION; both clauses required; generators/expression combinations only, no custom helpers; external or omitted init stays unbound", "restore": "exact complete parameter bindings skip all parameter recipes; state remains separate", "random": "explicit seed; sequential graph continues matching seed streams in declaration order; independent parameter recipes with same seed/shape produce same values", "compatibility": "historical model-level seed syntax is read for compatibility only; active examples name algorithms", "documentation": "docs/initialization.md"},
   "weight_lifecycle": {"status": "locally implemented; unreleased", "format": "weightlang.weights.v1", "storage": "immutable finite dense F32; learn shadows and probability storage preserved without rounding", "revision": "SHA-256 of exact safetensors payload bytes", "reference": "fixed revision and complete logical parameter name; not live tying or service CAS", "plan": "one complete tensor source per target; exact base inheritance and explicit at-most-once replacement; no-base migration enumerates all targets", "preview": "no callbacks; missing targets fail before materialization", "restore": "new Rust Client.load_weights/load_snapshot or Python restore; no parameter initializer fallback; state separately initialized", "limits": {"payload_bytes": 67108864, "manifest_bytes": 1048576}, "documentation": "docs/weights.md"},
+  "construction_dimensions": {"since_toolkit":"0.5.2","source_edition":"0.5","declaration":"dim N = 2 or dim N","binding":"construction-time only, exact known names, 1..16384","scope":"source file including inline submodels; imported libraries independent","documentation":"docs/model-language.md"},
+  "signature_training": {"since_toolkit":"0.5.2","selection":"typed forward plus declared loss","inputs":"one f32[N] vector","output":"one f32[M] vector","loss":"prediction f32[M], target f32[T], return f32[1]","effects":"pure forward; no root state/ports/layer","typed_without_loss":"existing no-autograd operations unchanged","documentation":"docs/model-language.md"},
   "formatting": {"commands": ["wgt format", "wgt fmt"], "shared": "crates/wgt-language/src/format.rs", "check": "no writes; nonzero when differences exist", "stdin": "-", "validation": "shared frontend before and after; preserve token spellings/comments/strings/declaration order; invalid source is not written", "lsp": "textDocument/formatting", "documentation": "docs/format.md"}
 }

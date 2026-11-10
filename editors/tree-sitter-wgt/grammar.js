@@ -17,7 +17,7 @@ module.exports = grammar({
       seq('learn', field('name', $.identifier), ':', 'float', optional($.learn_shape), 'in', field('lower_bound', $.learn_bound), '..=', field('upper_bound', $.learn_bound), '=', field('initializer', choice($.number, $.array)), ';'),
       seq('learn', field('name', $.identifier), ':', 'int', optional($.learn_shape), 'in', field('lower_bound', $.learn_bound), '..=', field('upper_bound', $.learn_bound), '=', field('initializer', choice($.number, $.array)), ';'),
       seq('learn', field('name', $.identifier), ':', 'bool', optional($.learn_shape), '=', field('initializer', choice($.literal, $.array)), ';')),
-    learn_shape: $ => seq('[', field('width', $.number), ']'),
+    learn_shape: $ => seq('[', field('width', choice($.number, $.identifier)), ']'),
     module_declaration: $ => seq('module', field('name', $.identifier)),
     prelude_declaration: $ => seq('prelude', 'native', field('version', $.number), ';'),
     instance_declaration: $ => seq(choice('agent', 'environment'), field('name', $.identifier), repeat($._newline), $.body),

@@ -62,6 +62,8 @@ wgt compile model.wgt --target rust --crate-path renamed_wgt -o src/model.rs
 
 导出物保存自包含架构源码；调用 `definition()` 时仍由共享前端解析定义。声明的初始化方式和 seed 随架构保留，服务初始化才创建实际参数。导出不生成训练权重，也不执行 forward。架构变更后需重新导出并重新编译 Rust 应用。
 
+0.5.2 增加 `wgt::Dimensions`（`BTreeMap<String, usize>`）及 `ModelDefinition::parse_with_dimensions(source, &dimensions)` / `from_file_with_dimensions(path, &dimensions)`，用于在检查前绑定源码顶层 `dim`。默认入口使用声明默认值；显式绑定不初始化或训练。完整限制和可训练签名见[模型语言](model-language.md)。
+
 直接嵌入模型的既有方式仍可用：`wgt::model!("...")`、`wgt::include_model!("model.wgt")`、`ModelDefinition::parse(source)` 和 `ModelDefinition::from_file(path)`。它们和 Rust 导出使用同一个模型前端，详细签名见[后端契约](native-backend.md#三种-rust-入口)。
 
 ## 当前模型覆盖范围

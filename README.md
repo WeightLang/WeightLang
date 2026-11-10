@@ -265,3 +265,5 @@ see the standard library guide for their shape and gradient contracts. Complete 
 belong in `weights/`.
 
 [MIT license](LICENSE).
+
+模型语言 0.5.2 扩展：[构造时命名维度、签名式 forward/loss 与兼容边界](docs/model-language.md)。

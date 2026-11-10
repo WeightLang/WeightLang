@@ -15,6 +15,8 @@ fn forward(x){return x+x;}
     assert_eq!(inline.interface().unwrap().input,1);
     assert_eq!(file.interface().unwrap().output,1);
     assert!(ModelDefinition::parse(SOURCE).is_ok());
+    let dimensioned = wgt::include_model!("../../examples/native_training/signature_dimensions/model.wgt");
+    assert_eq!(dimensioned.interface().unwrap().input, 2);
 }
 
 #[test]
@@ -180,4 +182,19 @@ fn forward(x){return x+x;}
     let output=Command::new(target.join("debug/wgt-model-runtime-consumer")).env("WGTIME_ENDPOINT",&endpoint).env("PATH","/nonexistent").current_dir(consumer.path()).output().unwrap();
     assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
     assert_eq!(String::from_utf8(output.stdout).unwrap().trim(),"[6]");
+}
+
+#[test]
+#[ignore="requires prebuilt WGTIME_TEST_DAEMON; isolated real service"]
+fn signature_dimensions_execute_and_train_through_the_real_service() {
+    let service = support::Service::start().unwrap();
+    let client = service.client().unwrap();
+    let source = include_str!("../../../examples/native_training/signature_dimensions/model.wgt");
+    let definition = ModelDefinition::parse_with_dimensions(source, &std::collections::BTreeMap::from([("N".into(), 3)])).unwrap();
+    let model = client.initialize(&definition, InstanceOptions { optimizer: Some(Optimizer::Sgd), ..Default::default() }).unwrap();
+    assert_eq!(model.forward(&[1.,1.,1.]).unwrap(), [1.,1.,1.]);
+    model.train(&[vec![1.,1.,1.]], Targets::Values(&[vec![0.,0.,0.]]), TrainOptions { rate:0.1, loss:Loss::Custom, clip:None }).unwrap();
+    for value in model.forward(&[1.,1.,1.]).unwrap() { assert!((value - (1. - 0.1 * 4. / 3.)).abs() < 1e-6); }
+    model.close().unwrap();
+    assert_eq!(client.stats().unwrap()["sessions"], 0);
 }

@@ -6,6 +6,8 @@ use anyhow::{Context, Result, bail, ensure};
 use std::collections::{HashMap, HashSet};
 
 pub fn parse(source: &str) -> Result<Program> {
+    let normalized = crate::model_syntax::normalize(source)?;
+    let source = normalized.as_str();
     let unit = crate::source::split(source)?;
     let functions = crate::script::parse::parse_functions(&unit.functions)?;
     parse_with_functions(source, &functions)
@@ -13,6 +15,8 @@ pub fn parse(source: &str) -> Result<Program> {
 /// Lower with the same parser while retaining source-level module identities.
 /// The metadata does not alter instructions, parameter ordering or initialization.
 pub fn parse_with_metadata(source: &str) -> Result<(Program, Vec<ModuleSchema>)> {
+    let normalized = crate::model_syntax::normalize(source)?;
+    let source = normalized.as_str();
     let unit = crate::source::split(source)?;
     let functions = crate::script::parse::parse_functions(&unit.functions)?;
     parse_definition_with_metadata(source, &functions, true)

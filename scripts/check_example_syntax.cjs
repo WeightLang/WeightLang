@@ -4,8 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const obsoleteSyntax = /\b(?:reshape|matmul|transpose)\s*\(|\binit\s+seed\s*=/;
-const ignoredDirectories = new Set(['.git', '.cache', '.venv', 'node_modules', 'target', 'weights']);
+const obsoleteSyntax = /\b(?:reshape|matmul|transpose)\s*\(|\binit\s+seed\s*=|\b(?:read|write)\s*\(/;
+const ignoredDirectories = new Set(['.git', '.cache', '.venv', 'node_modules', 'target', 'weights', 'dist', 'build']);
 
 function files(directory) {
   if (!fs.existsSync(directory)) return [];
@@ -48,7 +48,7 @@ function collectProblems() {
     const relative = path.relative(root, file).replaceAll(path.sep, '/');
     const content = fs.readFileSync(file, 'utf8');
     const lines = file.endsWith('.wgt') ? sourceProblems(content) : markdownProblems(content);
-    for (const line of lines) problems.push(`${relative}:${line}: use tensor as [...], @/.T and explicit init weights=... bias=... in examples`);
+    for (const line of lines) problems.push(`${relative}:${line}: use tensor as [...], @/.T and explicit initialization and direct parameter reads / <- updates in examples`);
     if (file.endsWith('.wgt') && /^(?:examples|python\/examples|packages)\//.test(relative) &&
         path.basename(file) !== 'model.wgt') {
       problems.push(`${relative}: independent example entrypoint must be named model.wgt`);

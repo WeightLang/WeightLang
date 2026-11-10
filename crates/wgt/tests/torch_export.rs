@@ -497,3 +497,25 @@ fn checking_and_packaging_validation_never_run_initializers() {
     }
     assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
 }
+
+#[test]
+fn cli_dimension_binding_is_checked_and_both_export_targets_are_concrete() {
+    let scratch = tempfile::tempdir().unwrap();
+    let source = scratch.path().join("model.wgt");
+    fs::write(&source, include_str!("../../../examples/native_training/signature_dimensions/model.wgt")).unwrap();
+    let checked = cli(scratch.path()).args(["check", source.to_str().unwrap(), "--dim", "N=3"]).output().unwrap();
+    assert!(checked.status.success(), "{}", String::from_utf8_lossy(&checked.stderr));
+    for target in ["torch", "rust"] {
+        let output = cli(scratch.path()).args(["compile", source.to_str().unwrap(), "--target", target, "--dim", "N=3"]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        if target == "torch" {
+            let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(json["interface"]["input"], 3);
+            assert_eq!(json["interface"]["output"], 3);
+        } else { assert!(String::from_utf8_lossy(&output.stdout).contains("f32[3]")); }
+    }
+    for args in [vec!["--dim", "TYPO=2"], vec!["--dim", "N=0"], vec!["--dim", "N=2", "--dim", "N=3"]] {
+        let output = cli(scratch.path()).args(["check", source.to_str().unwrap()]).args(args).output().unwrap();
+        assert!(!output.status.success());
+    }
+}

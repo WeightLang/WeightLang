@@ -20,6 +20,7 @@ files.push(path.join(root, 'editors/vscode/media/example.wgt'),
   path.join(root, 'editors/tree-sitter-wgt/test/fixtures/editor_current.wgt'),
   path.join(root, 'editors/tree-sitter-wgt/test/fixtures/forward.wgt'),
   path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_control.wgt'));
+files.push(path.join(root, 'examples/native_training/signature_dimensions/model.wgt'));
 const operations = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_operations.wgt');
 files.push(operations);
 const tensorLearning = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/tensor_learning/model.wgt');
@@ -47,7 +48,7 @@ for (const [capture, text] of [
 const sample = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/editor_current.wgt');
 const vocabulary = JSON.parse(fs.readFileSync(path.join(root, 'editors/vocabulary.json'), 'utf8'));
 assert(vocabulary.keywords.includes('against'), 'against must be highlighted as a training keyword');
-for (const keyword of ['blend', 'repeat', 'indexed', 'carrying', 'as']) {
+for (const keyword of ['blend', 'repeat', 'indexed', 'carrying', 'as', 'dim']) {
   assert(vocabulary.keywords.includes(keyword), `${keyword} must be highlighted as a model expression keyword`);
 }
 const candidate = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_control.wgt');

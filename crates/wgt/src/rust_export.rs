@@ -11,8 +11,12 @@ pub const DEFAULT_CRATE_PATH: &str = "::wgt";
 /// Validate a file and embed its complete pure model dependency closure.
 /// This does not materialize parameters, evaluate forward, or contact a service.
 pub fn compile(path: &Path, crate_path: &str) -> Result<String> {
+    compile_with_dimensions(path, crate_path, &Default::default())
+}
+
+pub fn compile_with_dimensions(path: &Path, crate_path: &str, dimensions: &wgt_language::dimensions::Dimensions) -> Result<String> {
     validate_crate_path(crate_path)?;
-    let definition = ModelDefinition::from_file(path)
+    let definition = ModelDefinition::from_file_with_dimensions(path, dimensions)
         .with_context(|| format!("invalid model definition {}", path.display()))?;
     Ok(render(&definition, crate_path))
 }
@@ -20,8 +24,12 @@ pub fn compile(path: &Path, crate_path: &str) -> Result<String> {
 /// Validate and embed an in-memory definition. Relative imports require a file;
 /// standard pure model imports are resolved by the shared frontend in both modes.
 pub fn compile_source(source: &str, crate_path: &str) -> Result<String> {
+    compile_source_with_dimensions(source, crate_path, &Default::default())
+}
+
+pub fn compile_source_with_dimensions(source: &str, crate_path: &str, dimensions: &wgt_language::dimensions::Dimensions) -> Result<String> {
     validate_crate_path(crate_path)?;
-    let definition = ModelDefinition::parse(source).context("invalid model definition")?;
+    let definition = ModelDefinition::parse_with_dimensions(source, dimensions).context("invalid model definition")?;
     Ok(render(&definition, crate_path))
 }
 

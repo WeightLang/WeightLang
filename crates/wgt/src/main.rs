@@ -171,7 +171,11 @@ enum Cmd {
     /// Print project metadata as JSON
     Metadata,
     /// Strictly parse and validate a WGT model definition without initializing it
-    Check { source: Option<PathBuf> },
+    Check { source: Option<PathBuf>,
+        /// Bind a declared model dimension (repeatable NAME=VALUE)
+        #[arg(long = "dim")]
+        dimensions: Vec<String>,
+    },
     /// Format project WGT sources, explicit files, or stdin (-); never executes models
     #[command(visible_alias = "fmt")]
     Format {
@@ -194,6 +198,9 @@ enum Cmd {
         /// Rust facade dependency path, for example renamed_wgt (default: ::wgt)
         #[arg(long)]
         crate_path: Option<String>,
+        /// Bind a declared model dimension (repeatable NAME=VALUE)
+        #[arg(long = "dim")]
+        dimensions: Vec<String>,
     },
     /// Copy a verified native build into a new directory package (not ZIP; never trains)
     Package {
@@ -356,12 +363,13 @@ fn execute(cli: Cli) -> Result<u8> {
         return weightlang_wgt::format::run(&base, sources, *check);
     }
     // Checking must return before toolchain dispatch or dependency preparation.
-    if let Cmd::Check { source } = &command {
+    if let Cmd::Check { source, dimensions } = &command {
         let project = manifest::project(&base).unwrap_or_else(|_| base.clone());
         let path = if let Some(source) = source {
             base.join(source)
         } else if let Some(config) = manifest::ProjectConfig::read(&project)? {
             if config.python.is_some() {
+                ensure!(dimensions.is_empty(), "--dim requires an explicit WGT source, not a Python starter configuration");
                 python_env::check(&config)?;
                 println!(
                     "ok: Python starter configuration; no downloads, initialization or execution"
@@ -376,7 +384,7 @@ fn execute(cli: Cli) -> Result<u8> {
         } else {
             base.join("model.wgt")
         };
-        wgt_language::model::ModelDefinition::from_file(&path)
+        wgt_language::model::ModelDefinition::from_file_with_dimensions(&path, &dimension_bindings(dimensions)?)
             .with_context(|| format!("invalid model definition {}", path.display()))?;
         println!("ok: WGT model definition; no initialization or execution");
         return Ok(0);
@@ -388,7 +396,9 @@ fn execute(cli: Cli) -> Result<u8> {
             target,
             output,
             crate_path,
+            dimensions,
         } => {
+            let dimensions = dimension_bindings(dimensions)?;
             ensure!(
                 *target == CompileTarget::Rust || crate_path.is_none(),
                 "--crate-path is only supported with --target rust"
@@ -406,9 +416,9 @@ fn execute(cli: Cli) -> Result<u8> {
             match target {
                 CompileTarget::Torch => {
                     let architecture = if let Some(text) = text {
-                        weightlang_wgt::torch_export::compile_source(&text)?
+                        weightlang_wgt::torch_export::compile_source_with_dimensions(&text, &dimensions)?
                     } else {
-                        weightlang_wgt::torch_export::compile(&base.join(source))?
+                        weightlang_wgt::torch_export::compile_with_dimensions(&base.join(source), &dimensions)?
                     };
                     if let Some(output) = output {
                         weightlang_wgt::torch_export::write(&architecture, &base.join(output))?;
@@ -421,9 +431,9 @@ fn execute(cli: Cli) -> Result<u8> {
                         .as_deref()
                         .unwrap_or(weightlang_wgt::rust_export::DEFAULT_CRATE_PATH);
                     let module = if let Some(text) = text {
-                        weightlang_wgt::rust_export::compile_source(&text, crate_path)?
+                        weightlang_wgt::rust_export::compile_source_with_dimensions(&text, crate_path, &dimensions)?
                     } else {
-                        weightlang_wgt::rust_export::compile(&base.join(source), crate_path)?
+                        weightlang_wgt::rust_export::compile_with_dimensions(&base.join(source), crate_path, &dimensions)?
                     };
                     if let Some(output) = output {
                         weightlang_wgt::rust_export::write(&module, &base.join(output))?;
@@ -1178,4 +1188,14 @@ fn open_browser(path: &Path) -> Result<()> {
         path.display()
     );
     Ok(())
+}
+
+fn dimension_bindings(values: &[String]) -> Result<wgt_language::dimensions::Dimensions> {
+    let mut bindings = wgt_language::dimensions::Dimensions::new();
+    for value in values {
+        let (name, value) = value.split_once('=').context("--dim requires NAME=VALUE")?;
+        let value = value.parse::<usize>().context("--dim requires a positive integer")?;
+        ensure!(bindings.insert(name.to_owned(), value).is_none(), "duplicate dimension binding: {name}");
+    }
+    Ok(bindings)
 }

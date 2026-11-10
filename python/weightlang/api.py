@@ -51,9 +51,10 @@ def loads(
     dtype: torch.dtype | None = None,
     compiler: str | os.PathLike[str] | None = None,
     timeout: float = 30,
+    dimensions: dict[str, int] | None = None,
 ) -> nn.Module:
     """Compile inline WGT and initialize an ordinary, trainable PyTorch module."""
-    return from_ir(compile_source(source, compiler=compiler, timeout=timeout), device=device, dtype=dtype)
+    return from_ir(compile_source(source, compiler=compiler, timeout=timeout, dimensions=dimensions), device=device, dtype=dtype)
 
 
 def load(
@@ -63,6 +64,7 @@ def load(
     dtype: torch.dtype | None = None,
     compiler: str | os.PathLike[str] | None = None,
     timeout: float = 30,
+    dimensions: dict[str, int] | None = None,
 ) -> nn.Module:
     """Load .wgt source, compiled .json, or a .pt/.pth model saved by save().
 
@@ -74,7 +76,9 @@ def load(
     path = Path(path).expanduser()
     suffix = path.suffix.lower()
     if suffix == ".wgt":
-        return from_ir(compile(path, compiler=compiler, timeout=timeout), device=device, dtype=dtype)
+        return from_ir(compile(path, compiler=compiler, timeout=timeout, dimensions=dimensions), device=device, dtype=dtype)
+    if dimensions:
+        raise ValueError("dimensions only apply to WGT source, not compiled or saved models")
     if suffix == ".json":
         with path.open(encoding="utf-8") as stream:
             return from_ir(json.load(stream), device=device, dtype=dtype)

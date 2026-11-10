@@ -515,3 +515,16 @@ def test_concurrent_program_transactions_do_not_lose_updates():
     torch.testing.assert_close(model.get_parameter(model.parameter_names["count"]), torch.tensor([32.0]))
     assert sorted(output.item() for output in outputs) == list(range(1, 33))
     assert model.revision == 32
+
+
+def test_signature_dimensions_match_native_training():
+    text = (ROOT / "examples/native_training/signature_dimensions/model.wgt").read_text()
+    for width in (2, 3):
+        source_text = text.replace("dim N = 2", f"dim N = {width}")
+        model = wgt.loads(source_text, device="cpu")
+        x = torch.ones(width)
+        expected = native(source_text, mode="train", inputs=[[1.] * width], targets=[[0.] * width], rate=0.1, steps=1)
+        model.loss(model(x), torch.zeros(width)).backward()
+        torch.optim.SGD(model.parameters(), lr=0.1).step()
+        for name, value in expected["parameters"].items():
+            torch.testing.assert_close(model.get_parameter(model.parameter_names[name]).flatten(), torch.tensor(value))

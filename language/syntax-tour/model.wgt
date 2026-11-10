@@ -72,7 +72,7 @@ fn forward(x) {
     # linear 要求原始参数名，w:[2,2]、bias:[2]，结果:[2]。
     # read 与直接参数引用均读当前值；复制 local 不会创建新的可训练参数。
     let projected = linear(x, w, bias), baseline = mean(projected);
-    let transformed = scaled_average(projected, read(gain));
+    let transformed = scaled_average(projected, gain);
     # 两条路均为 [1]；blend 的权重显式相加为 1，因此是互补加权平均。
     let mixed = blend {
         p => transformed;
@@ -96,7 +96,7 @@ fn loss(prediction, target) {
 # input NAME:f32[N] 仅一个；output NAME:f32[M]、logits[M] 或 probabilities[M]。
 # 端口宽度 1..16384；参数 shape 为 1..8 个正整数轴，初始化扁平有限 f32，
 # 单参数和模型总参数最多 16777216 个元素；顺序 layer 构造另有 400 万上限。
-# parameter/frozen 必须显式给初值；forward 模型不写 init seed，也不混用 layer。
+# parameter/frozen 可给配方或等待外部完整绑定；不隐式随机初始化。
 # 普通 f32 权重无 [0,1] 或布尔限制；bool 学习参数用 learn，不用 parameter b:bool。
 # target NAME:f32[N] 必须与 loss 第二参数名一致；省略则目标宽度等于输出宽度。
 # target 不增加 forward 输入，不改变内置 MSE 的目标合同。
@@ -106,7 +106,7 @@ fn loss(prediction, target) {
 # x、局部名、参数名、read(parameter)：读取定长张量，参数读取按扁平向量处理。
 # [1, -2, 3e-2]：非空有限数字向量，宽度 1..16384；不是嵌套张量或动态列表。
 # (expr)、-x、a+b、a-b、a*b、add(a,b)、mul(a,b)：后四者须等长，无标量广播。
-# 不支持张量 a/b、%、比较、&&、||、!；数字裸常量不能充当张量，使用 [2]。
+# 同形张量 a/b 已支持；不隐式广播。数字张量字面量使用 [2]。
 # linear(x,w[,b])：x:[I]，参数 w:[O,I]，可选参数 b:[O]，返回 [O]。
 # w/b 必须为原始普通 f32 参数名；局部张量、prob、learn 不能直接充当 w/b。
 # relu(x)、tanh(x)、sigmoid(x)、square(x)、exp(x)、log(x)：[N] -> [N]。
@@ -138,7 +138,7 @@ fn loss(prediction, target) {
 # parameter b: f32[2] = [0,0]
 # fn forward(x) {
 #     let affine = linear(x,w,b), no_bias = linear(x,w);
-#     let copied = read(b), shifted = add(affine, [1,1]);
+#     let copied = b, shifted = add(affine, [1,1]);
 #     let r = relu(shifted), t = tanh(no_bias), s = sigmoid(x);
 #     let product = mul(r,s), difference = product-t, negative = -difference;
 #     let finite = clip(negative,-4,4), smallest = minimum(finite,copied);
@@ -195,7 +195,7 @@ fn loss(prediction, target) {
 # 不可捕获模型参数/调用者局部；参数须显式传入。调用按左到右求实参一次。
 # helper 可组合上面纯运算，但不能使用 read/write/linear/positive/depth_gate/工作内存。
 # 调用链最多 32 层，每个 forward/loss 最多 1024 次 helper 展开。
-# 当前 std 纯模型库只有这两个，必须 import，不自动注入：
+# 下列为 activation/loss 示例；std 还含 attention、numerics、initialization、snn、plasticity、ff。必须显式 import。
 # activation.swish(x) -> x*sigmoid(x)
 # activation.swiglu(gate,value) -> swish(gate)*value
 # activation.squared_relu(x) -> square(relu(x))
@@ -261,7 +261,7 @@ fn loss(prediction, target) {
 # output y: f32[1]
 # parameter state: f32[1] = [0]
 # fn forward(x) {
-#     let result = read(state), remaining = [2];
+#     let result = state, remaining = [2];
 #     while positive(remaining) {
 #         remaining = remaining - [1];
 #         if positive(x) {
@@ -271,7 +271,7 @@ fn loss(prediction, target) {
 #             break;
 #         }
 #     }
-#     write(state,result);
+#     state <- result;
 #     return result;
 # }
 # T07 END
@@ -598,3 +598,9 @@ fn loss(prediction, target) {
 # T12：独立完整模型展示数组参数、子模型数组及 repeat；新组合尚待行为验收。
 # P01：有意非运行设计说明，没有现行模型语法保证。
 # 不要将各编号连成一个文件，也不要把注释中的旧宿主索引当成可执行模型。
+
+# 17 0.5.2 推荐扩展：构造时命名维度、签名式可微模型
+# 完整可运行源码：examples/native_training/signature_dimensions/model.wgt。
+# dim N = 2 提供显式默认值；dim N 要求宿主 --dim N=3 或 dimensions 绑定。
+# 带 fn loss 的 typed forward 可训练，首期一个向量输入/输出；不混用根级端口或 state。
+# 无 loss 的 typed 操作保持无 AD；这不是所有模型入口已完全合一。

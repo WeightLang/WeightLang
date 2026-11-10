@@ -9,6 +9,14 @@ description: 编写和验证本仓库当前 WGT 模型定义与 Rust 主程序�
 
 以 docs/reference.zh-CN.md、docs/differentiable-programs.md 和 Rust 实现为准；不是已发布功能承诺。Rust host 集成目标使用 edition 2024；WGT 语言版本仍以实际 parser 声明为准，不能因 Rust edition 将其改写为 WGT 版本。
 
+## 0.5.2 模型语法收敛
+
+使用 docs/model-language.md 的完整合同：顶层 `dim N = 2` 或 `dim N`，通过 Rust `ModelDefinition::parse_with_dimensions` / `from_file_with_dimensions`、CLI `--dim`、Python compile/compile_source/load/loads 的 `dimensions` 绑定。名称大写、值 1..16384，未知/缺项/重复/越界拒绝；不改字符串、注释或导入库。绑定后定义固定尺寸，不能在保存模型上覆盖 shape。
+
+带 loss 的 `fn forward(x: f32[N]) -> f32[M]` 支持原生/Python 可微训练，loss 两参、预测宽度匹配 M、返回 f32[1]，target 可独立宽度。首期仅单向量，不能混 root ports/state/layer 或额外 typed 入口，typed forward 禁止更新。无 loss 的 typed 操作继续无 AD；不能宣称完全统一接口。完整示例 examples/native_training/signature_dimensions/model.wgt。
+
+新例子直接读参数名，用 `<-` 更新且精确匹配 shape；旧 read/write 留作兼容测试。旧 layer、mix/blend、prob/learn 和 host parser 未删除，不改变旧梯度语义。验证 language model_syntax、core signature_dimensions、真实 service signature_dimensions 与 Python API/native parity；不要把待实现的动态 shape、多输出端口、mask 或跨状态 AD 写成支持。
+
 ## 编辑器与语言服务器
 
 使用 `wgt lsp` 为编辑器提供 stdio 服务，配置与形状示例见 [LSP](../../../docs/lsp.md)。维护提示时复用 `wgt_language::ide` 的原生分析，词法索引只处理签名、补全和导航；通过模型验证后再显示中间形状与参数量。区分函数实参数量、可训练/冻结参数元素和状态元素；保留未保存依赖缓冲区及 UTF-16 位置语义。更新服务时运行 `cargo test -p weightlang-wgt --lib lsp::` 和 `cargo test -p weightlang-wgt --test lsp`，更新高亮/客户端时按 [编辑器验证](../../../docs/editors.md#维护与验证) 执行。不要把源码实现写成已发布版本，或将当前文件重命名描述为工作区重构。

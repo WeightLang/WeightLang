@@ -48,6 +48,8 @@ pub fn split(source: &str) -> Result<Unit> {
         source.len() <= 4 * 1024 * 1024,
         "WGT source exceeds 4 MiB limit"
     );
+    let specialized = crate::dimensions::specialize(source, &Default::default())?;
+    let source = specialized.as_str();
     let mut declarations = Vec::new();
     let mut functions = Vec::new();
     let mut header = false;

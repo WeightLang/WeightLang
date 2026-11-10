@@ -35,12 +35,17 @@ def _compile(
     text: str | None,
     compiler: str | os.PathLike[str] | None,
     timeout: float,
+    dimensions: dict[str, int] | None,
     directory: Path | None = None,
 ) -> dict[str, Any]:
     command = [_compiler(compiler)]
     if directory is not None:
         command.extend(["-C", str(directory)])
     command.extend(["compile", source, "--target", "torch"])
+    for name, value in (dimensions or {}).items():
+        if not isinstance(name, str) or type(value) is not int or not 1 <= value <= 16384:
+            raise ValueError("dimensions must map declared names to integers in 1..=16384")
+        command.extend(["--dim", f"{name}={value}"])
     try:
         result = subprocess.run(
             command, input=text, capture_output=True, text=True, encoding="utf-8",
@@ -65,6 +70,7 @@ def compile(
     *,
     compiler: str | os.PathLike[str] | None = None,
     timeout: float = 30,
+    dimensions: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Compile a model.wgt file to portable JSON data without executing forward.
 
@@ -74,7 +80,7 @@ def compile(
     source = Path(path).expanduser().resolve(strict=True)
     if not source.is_file():
         raise ValueError(f"Expected a WGT source file: {source}")
-    return _compile(str(source), text=None, compiler=compiler, timeout=timeout, directory=source.parent)
+    return _compile(str(source), text=None, compiler=compiler, timeout=timeout, dimensions=dimensions, directory=source.parent)
 
 
 def compile_source(
@@ -82,8 +88,9 @@ def compile_source(
     *,
     compiler: str | os.PathLike[str] | None = None,
     timeout: float = 30,
+    dimensions: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Compile inline WGT source through stdin. Use compile(path) for local imports."""
     if not isinstance(source, str):
         raise TypeError("source must be a WGT source string")
-    return _compile("-", text=source, compiler=compiler, timeout=timeout)
+    return _compile("-", text=source, compiler=compiler, timeout=timeout, dimensions=dimensions)

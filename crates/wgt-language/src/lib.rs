@@ -8,6 +8,8 @@ pub mod weight_artifact;
 pub mod model;
 pub mod operations;
 pub mod initializer;
+pub mod dimensions;
+mod model_syntax;
 mod model_modules;
 
 pub mod ide;

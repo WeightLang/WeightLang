@@ -174,3 +174,35 @@ def test_transformer_forward_and_gradients_match_pytorch(compiler):
     torch.testing.assert_close(actual_input.grad, reference_input.grad, atol=3e-6, rtol=2e-4)
     for name, attribute in model.parameter_names.items():
         torch.testing.assert_close(named[attribute].grad, weights[name].grad, atol=3e-6, rtol=2e-4)
+
+
+def test_named_dimensions_signature_loss_and_roundtrip(compiler, tmp_path):
+    source_file = ROOT / "examples/native_training/signature_dimensions/model.wgt"
+    model = wgt.load(source_file, dimensions={"N": 3}, device="cpu")
+    x = torch.ones(3, requires_grad=True)
+    torch.testing.assert_close(model(x), x)
+    loss = model.loss(model(x), torch.zeros(3))
+    loss.backward()
+    torch.testing.assert_close(x.grad, torch.full_like(x, 1 / 3))
+    torch.optim.SGD(model.parameters(), lr=0.1).step()
+    expected = torch.full_like(x, 1 - 0.1 * 4 / 3)
+    torch.testing.assert_close(model(x), expected)
+    path = tmp_path / "model.pt"
+    wgt.save(model, path)
+    torch.testing.assert_close(wgt.load(path, device="cpu")(x), expected)
+    with pytest.raises(ValueError, match="only apply to WGT"):
+        wgt.load(path, dimensions={"N": 2})
+    text = source_file.read_text().replace("dim N = 2", "dim N")
+    inline = wgt.loads(text, dimensions={"N": 4}, device="cpu")
+    torch.testing.assert_close(inline(torch.ones(4)), torch.ones(4))
+    for bindings in ({"TYPO": 2}, {"N": 0}, {"N": True}):
+        with pytest.raises((ValueError, wgt.CompilationError)):
+            wgt.loads(text, dimensions=bindings, device="cpu")
+
+
+def test_dimensioned_file_import_keeps_library_dimensions_independent(compiler, tmp_path):
+    source = (ROOT / "examples/native_training/signature_dimensions/model.wgt").read_text()
+    (tmp_path / "ops.wgt").write_text('wgt 0.5\ndim N = 7\noperators Local\nfn widen_value(x){return N * x;}\n')
+    (tmp_path / "model.wgt").write_text(source.replace("model Projection", 'import ops from "./ops.wgt"\nmodel Projection').replace("return linear(x, weight, bias);", "return ops.widen_value(linear(x, weight, bias));"))
+    model = wgt.load(tmp_path / "model.wgt", dimensions={"N": 3}, device="cpu")
+    torch.testing.assert_close(model(torch.ones(3)), torch.full((3,), 7.))

@@ -1,5 +1,7 @@
 # 固定 shape 张量几何与多轴 attention
 
+0.5.2 的命名维度绑定、签名式 forward/loss 以及兼容限制见[模型语言](model-language.md)。维度在构造时固定，不改变当前执行 dtype、batch 或状态求导合同。
+
 > **状态：指定范围已在本地验证，尚未发布。** 最终 IR 安全校验后 core 7 suites / 30 tests、真实 service 集成 1 项、macro fixture 编译 1 项通过。范围限于本固定 shape attention fixture，不代表完整 Transformer、多头 attention、动态 batch 或 GPU 路径。
 
 ## attention 本地验证记录
