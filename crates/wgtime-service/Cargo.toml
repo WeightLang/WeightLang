@@ -21,3 +21,4 @@ wgtime-core = { workspace = true, default-features = false }
 anyhow = "1"
 serde_json = "1"
 libc = "0.2"
+sha2 = "0.10"

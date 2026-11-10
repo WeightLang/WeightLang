@@ -34,7 +34,7 @@ fn every_current_model_example_passes_the_shared_frontend() {
             continue;
         }
         let result = ModelDefinition::from_file(&path)
-            .and_then(|model| model.instantiate_plan().map(|_| ()));
+            .and_then(|model| model.compile_plan_with_modules().map(|_| ()));
         if let Err(error) = result {
             failures.push(format!("{}: {error:#}", path.display()));
         }

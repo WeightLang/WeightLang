@@ -30,6 +30,10 @@ Python 模板默认自动选择兼容的 PyTorch 构建与可用加速设备，�
 原生模板使用 `model.wgt`；PyTorch 模板使用 `wgt.toml` 中的模型配方与 `workflow.py`，不会生成未参与计算的 WGT 文件。
 CLI 对既有 `wgt.toml` 中显式配置的 `model.source` 保持兼容，但这不改变新建与维护模型的入口规范。
 
+## 格式化源码
+
+`wgt format`（别名 `wgt fmt`）递归规整项目内 `.wgt`，默认排除权重、构建、缓存、依赖和隐藏目录。`wgt format model.wgt` 选择显式文件，`wgt format --check` 只检查并在存在差异时返回非零；`wgt format -` 从 stdin 读取并输出格式化文本。它与 LSP 共用 token 保留式 formatter，保留注释、字符串、数字拼写和声明顺序，验证失败的源码不写入；不会初始化参数或升级历史语法。完整范围、退出码与排除规则见[源码格式化](format.md)。
+
 ## 编译到 Rust
 
 `wgt compile model.wgt --target rust -o src/model.rs` 使用共享前端导出可被 Rust `include!` 的模型模块，公开 `SOURCE` 与 `definition()`。纯计算 imports 随输出嵌入；生成 Rust 应用运行时无需原始 WGT 文件。省略 `-o` 输出到 stdout，源文件 `-` 表示 stdin，已有输出文件拒绝覆盖；`--crate-path renamed_wgt` 可匹配 Cargo 中改名的 Rust SDK 依赖。
@@ -38,9 +42,11 @@ CLI 对既有 `wgt.toml` 中显式配置的 `model.source` 保持兼容，但这
 
 ## 编译到 PyTorch
 
-`wgt compile model.wgt --target torch` 复用原生前端，向 stdout 输出版本化架构 JSON；`-o architecture.json` 写入新文件并拒绝覆盖。`wgt compile - --target torch` 从 stdin 读取源码。编译不会执行 forward、训练或准备 Python 环境。
+`wgt compile model.wgt --target torch` 复用原生前端，向 stdout 输出版本化架构 JSON；`-o architecture.json` 写入新文件并拒绝覆盖。`wgt compile - --target torch` 从 stdin 读取源码。编译不会物化初始化配方、执行 forward、训练或准备 Python 环境。未绑定参数可编译，实例化时必须得到完整外部权重。
 
-输出包含解析后的纯计算导入、接口、参数与状态初值、子模型身份及完整模型 IR，可通过 [Python SDK](python-sdk.md) 的 `weightlang.from_ir` 或 `weightlang.load` 加载为 PyTorch 模型。目标支持顺序图、forward 程序及 typed operations，保留控制流、learn 约束和状态事务；非法模型与未知 IR 会明确报错。
+输出包含解析后的纯计算导入、接口、参数与状态的初始化配方、子模型身份及完整模型 IR，可通过 [Python SDK](python-sdk.md) 的 `weightlang.from_ir` 或 `weightlang.load` 加载为 PyTorch 模型。目标支持顺序图、forward 程序及 typed operations，保留控制流、learn 约束和状态事务；非法模型与未知 IR 会明确报错。
+
+`from_ir` 明确执行声明配方；`weightlang.restore(definition, weights)` 从完整 `WeightSet` 直接绑定参数，跳过参数配方，状态单独初始化。合并和迁移使用宿主 `Plan`，没有隐式补值或独立的权重操作 CLI；详见[权重快照与迁移](weights.md)。
 
 SDK 的加载接口使用显式传入的模型路径或架构数据以及设备参数，不隐式应用 `wgt.toml` 的训练、推理和设备设置。由 CLI 启动的 host 可读取 `WGT_CONFIG_FILE` 指向的文件；其他 host 显式选择配置文件，再将相应值传给 SDK 与 PyTorch。源码编译仍遵循编译器的导入和工具链查找规则。`tiny-lm` 和 `mlp` 模板仍通过自己的 TOML/Python 配方构造模型。
 

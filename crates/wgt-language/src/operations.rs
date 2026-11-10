@@ -52,6 +52,7 @@ pub(crate) fn analyze(text: &str) -> Result<(OperationsPlan, adaptive::InferredT
 fn lower_with_types(text: &str, materialize: bool, collect_types: bool) -> Result<(OperationsPlan, adaptive::InferredTypes)> {
     let flat = composition::flatten(text)?;
     let functions = flat.functions;
+    let initialization_helpers = crate::initializer::helpers(&flat.declarations, &functions)?;
     ensure!(
         !text.contains("wgt_operation_input") && !text.contains("wgt_operation_output"),
         "reserved operation compiler name"
@@ -74,9 +75,7 @@ fn lower_with_types(text: &str, materialize: bool, collect_types: bool) -> Resul
                 script::operators::identifier(name) && state_names.insert(name.to_owned()),
                 "duplicate or invalid state name"
             );
-            let (ty, _) = rest
-                .split_once('=')
-                .context("state requires an explicit initializer")?;
+            let ty = rest.split_once('=').map_or(rest, |(ty, _)| ty);
             crate::source::vector_port(&format!("{name}: {}", ty.trim()))?;
             declarations.push_str(&format!("parameter {body}\n"));
         } else {
@@ -94,6 +93,10 @@ fn lower_with_types(text: &str, materialize: bool, collect_types: bool) -> Resul
     let mut inferred = adaptive::InferredTypes::new();
     let mut storage = None;
     for (name, function) in functions.iter().collect::<BTreeMap<_, _>>() {
+        if initialization_helpers.contains(name) && function.signature.is_none() {
+            script::operators::validate(name, &functions, &mut Vec::new())?;
+            continue;
+        }
         ensure!(
             !function.is_async && name != "main" && !name.starts_with("__"),
             "model operation cannot be an application/async/internal entrypoint"
@@ -314,6 +317,7 @@ impl OperationsPlan {
                 name: p.name.clone(),
                 shape: p.shape.clone(),
                 frozen: p.frozen,
+                probability: p.probability,
                 learn: p.learn.clone(),
                 candidate_updatable: !p.frozen && !p.probability,
             })

@@ -8,7 +8,7 @@ Rust 控制应用、数据准备、I/O、调度和训练循环；WGT 只描述�
 
 当前源码已拆成 `wgt-language` 静态解析库、`wgtime-core` 执行库、`wgtime` IPC 协议及客户端、`wgtime-control` 脚本客户端和 `wgtime-service` 服务。生产 CLI 不依赖 core，旧脚本控制路径仍保留在源码中，不能将其视为新模型 API。下文区分已实现的静态定义/宏与正在接入验收的 Rust 客户端接口；均不是已发布能力，验证状态见下文。
 
-可复用入口是 `wgt_language::source::{split,graph}`、`adaptive::{parse,parse_with_functions}` 和共用函数 AST。当前 `adaptive::Program` 已包含参数 `data`，`source::Graph` 包含初始化 seed；它们是 lowering 产物，不能直接等同于不持有运行权重的模型定义。`ModelDefinition` 必须把结构、参数 schema 和初始化说明，与服务中的已初始化/已加载实例区分开。
+可复用入口是 `wgt_language::source::{split,graph}`、`adaptive::{parse,parse_with_functions}` 和共用函数 AST。静态 lowering 的参数保存初始化 recipe 或未绑定标记，`data` 在需要物化时才填充；兼容 IR 仍可能带显式数据。`ModelDefinition` 把结构、参数 schema 和初始化说明，与服务中的已初始化/已加载实例区分开。检查、编译及导出不抽样，不执行 recipe；完整权重绑定跳过参数配方。
 
 ## 服务端 compiled forward
 
@@ -36,15 +36,15 @@ Rust 控制应用、数据准备、I/O、调度和训练循环；WGT 只描述�
 
 `ModelDefinition::interface()` 现返回 `Option<&ModelInterface>`：旧 forward/顺序模型为 `Some`，typed 操作模型为 `None`；旧调用方须显式处理缺失接口。typed 操作的执行及服务 API 已通过下述本地定向测试，不能以定义解析推断任意模型均可执行。
 
-`ModelDefinition::parse(source: &str) -> Result<Self>` 与 `ModelDefinition::from_file(path: impl AsRef<Path>) -> Result<Self>` 已在 language 库实现并通过定点测试。二者只解析和检查；字符串入口支持 `std/activation`、`std/loss` 纯张量逻辑模块，文件入口另支持相对文件的 `./` 计算模块及嵌套导入。解析将依赖闭合为自包含源码；服务端可重新验证而不读取客户端目录。不提供宿主模块或包注册表查找。新增导入行为的定点验收状态单独记录，不能由原有无 import 测试推断。源码上限 1 MiB，单个参数和模型总参数上限 16,777,216 个元素，shape 为 1..8 个正整数轴；乘法溢出、长度不匹配和非有限初始化值均拒绝。参数初始化列表以流式方式检查，不在定义中构造权重向量。模型专用入口复用现有 parser，但拒绝 `fn main`、agent/environment、应用 I/O、tasks、训练/保存语句和宿主控制函数；允许模型 forward/loss 及现 lowering 能接受的纯张量辅助函数。不得仅解析成功就声称 forward 已执行。
+`ModelDefinition::parse(source: &str) -> Result<Self>` 与 `ModelDefinition::from_file(path: impl AsRef<Path>) -> Result<Self>` 已在 language 库实现并通过定点测试。二者只解析和检查；字符串入口支持 `std/activation`、`std/loss` 纯张量逻辑模块，文件入口另支持相对文件的 `./` 计算模块及嵌套导入。解析将依赖闭合为自包含源码；服务端可重新验证而不读取客户端目录。不提供宿主模块或包注册表查找。新增导入行为的定点验收状态单独记录，不能由原有无 import 测试推断。源码上限 1 MiB，单个参数和一般模型总参数上限 16,777,216 个元素（顺序 layer 源码另限 4,000,000），shape 为 1..8 个正整数轴；乘法溢出、长度不匹配和非有限初始化值均拒绝。初始化表达式通过共享函数 parser 转成纯配方；定义检查不执行张量生成器。源码可带显式列表或无初值声明，尚未绑定的参数不会阻止编译，但会阻止未提供完整权重的实例化。模型专用入口复用现有 parser，但拒绝 `fn main`、agent/environment、应用 I/O、tasks、训练/保存语句和宿主控制函数；允许模型 forward/loss 及现 lowering 能接受的纯张量辅助函数。不得仅解析成功就声称 forward 已执行。
 
 ## 多入口操作
 
 本地指定范围已验收，尚未发布：core 7 个 suite 共 31 项通过，含预算写后回滚、两次 state 写后读与参数混合更新、零存储及仅 void 入口、非法混合参数和局部变量 `<-` 的拒绝；typed import roundtrip 1/1。最终 daemon 重建后真实 IPC 5/5 通过（operations 1、既有 service 1、CNN 1D/2D/3D 共 3 项），覆盖状态演化、实例隔离、reset、混合更新回滚、外部搜索、权重与状态分离、策略及优化器处理。language 与 model 常规测试 16 项通过、8 项 ignored，相关服务测试单独执行。workspace all-targets 检查、typed `model!` 宏编译和完整示例解析均通过；解析本身不证明执行。完整记录见[模型操作验收状态](model-operations.md#验收状态)。
 
-一份实例的 typed 入口共享参数和独立的状态存储；每个参数为固定 `f32[N]`（N=1..16384），单次入口总输入宽度不超过 16384，返回 `f32[N]` 或 void。入口可无参数，例如 `fn reset() {}`。操作模式不使用根级 input/output/target，不能声明 loss、子模型或互调操作。`state name: f32[N] = [有限数值, ...]` 的分号可选；`name <- expression;` 的目标须是裸状态或参数名且分号必填。
+一份实例的 typed 入口共享参数和独立的状态存储；每个参数为固定 `f32[N]`（N=1..16384），单次入口总输入宽度不超过 16384，返回 `f32[N]` 或 void。入口可无参数，例如 `fn reset() {}`。操作模式不使用根级 input/output/target，不能声明 loss；支持具名操作互调、有状态子模型及实例数组。`state name: f32[N] = RECIPE` 的分号可选，未初始化 state 只可检查定义，实例化时仍须有配方；`name <- expression;` 的目标须是裸状态或参数名且分号必填。
 
-模型定义存在 typed 函数签名或 `state` 声明，或没有 `forward` 但存在无参函数时，进入操作模式。无参且无返回类型标注的函数视为 void 入口，不能作为返回值纯 helper；`fn constant() { return [1]; }` 会被拒绝。有返回值的无参入口须显式写返回类型，例如 `fn observe() -> f32[1] { ... }`。纯 helper 须至少有一个无类型标注参数，并遵守纯张量限制。
+模型定义存在 typed 函数签名或 `state` 声明，或没有 `forward` 但存在无参函数时，进入操作模式。无参且无返回类型标注的普通操作视为 void 入口，不能从该入口返回张量。有返回值的无参入口须显式写返回类型，例如 `fn observe() -> f32[1] { ... }`。纯 tensor helper 须至少有一个无类型标注参数，并遵守纯张量限制；被初始化配方引用的纯 helper 可以无参，不作为 typed 入口。
 
 调用内写后读看到候选值，执行及校验成功后原子提交，失败保持原参数和状态；普通权重只含参数，不保存状态。原生执行不使用 VM，typed 操作不支持 AD。参数候选拒绝 frozen/probability 参数，bool/int 候选必须严格离散。候选更新不提供 CAS（比较版本后提交）或状态 snapshot，revision 仅在服务响应中返回，不能据此承诺拒绝过期候选。`update_parameters` 成功后清空旧 forward 优化器，失败保持原状态；需要继续训练时须通过 `load_weights` 显式选回优化器。typed 操作不支持优化器或 AD，加载权重保留 state。`train_with_policy` 以单个 `TrainStepWithPolicy` 请求原子完成策略检查与训练，不持久设置策略。旧 forward 的训练策略边界见[模型操作](model-operations.md)。
 
@@ -92,11 +92,14 @@ assert_eq!(output, vec![6.0]);
 
 CLI 还提供 `wgt compile model.wgt --target rust -o src/model.rs`，输出自包含架构模块供 Rust `include!` 使用。该入口与上述定义入口共享语义，公开 `SOURCE` 和返回 `wgt::Result<ModelDefinition>` 的 `definition()`；完整 imports 随源码嵌入。它不创建运行实例，详见 [Rust 导出入口](rust-sdk.md#导出入口)。
 
-| 当前接口或后续边界 | 必须满足的行为 |
+| 当前接口 | 必须满足的行为 |
 |---|---|
 | `Client::connect() -> Result<Client>`；`connect_to(&Path)` | 连接已有服务并验证当前 UID/协议；不隐式启动另一个执行核心 |
-| `Client::initialize(&ModelDefinition, InstanceOptions) -> Result<Model>` | 显式应用声明的初始化；options 含字节预算和可选 SGD/Adam；缺省预算 64 MiB、无优化器，状态是未训练 |
-| `Model::load_weights(&Path, Option<Optimizer>) -> Result<()>` | 显式向既有架构实例绑定 safetensors F32 权重；完整校验名称、shape、有限值、字节及内存预算；失败保持原实例，成功重置优化器；不训练、不保存文件 |
+| `Client::initialize(&ModelDefinition, InstanceOptions) -> Result<Model>` | 执行声明的参数与 state 配方；未绑定项报错；options 含字节预算和可选 SGD/Adam，缺省预算 64 MiB、无优化器 |
+| `Client::load_weights(&ModelDefinition, &Path, InstanceOptions) -> Result<Model>` | 完整 safetensors 直接构造新实例，跳过所有参数配方；首次绑定允许外部 frozen，state 仍按配方初始化 |
+| `Client::load_snapshot(&ModelDefinition, &Path, Option<&str>, InstanceOptions) -> Result<Model>` | 读取 manifest 快照，可固定 revision；服务校验同一 payload 摘要后直接绑定，参数规则同上 |
+| `Model::load_weights(&Path, Option<Optimizer>) -> Result<()>` | 向既有实例绑定完整 F32 权重，检查名称、shape、值域及预算，frozen 必须等于当前值；保留句柄与 state，成功重置优化器，失败保持原实例 |
+| `Model::snapshot() -> Result<weights::WeightSet>` | 捕获不可变参数值与原始 learn shadow；不含 state 或优化器 |
 | `Model::forward(&self, input: &[f32]) -> Result<Vec<f32>>` | 服务端执行并校验输入合同；成功提交显式 forward 写入，失败回滚；返回拥有数据的结果，不承诺跨 IPC 的零分配或借用 core 缓冲 |
 | 优化器选择 | 当前通过初始化或权重绑定显式选择 SGD/Adam，未提供单独 `configure_optimizer`；不得把加载权重当作恢复优化器 |
 | `Model::train(&self, inputs, Targets, TrainOptions) -> Result<f32>` | Rust 发起单步批训练，返回 loss；options 显式选择 loss、正有限学习率和可选正有限裁剪；服务执行原子更新，Rust 控制循环；不自动训练 |
@@ -104,7 +107,13 @@ CLI 还提供 `wgt compile model.wgt --target rust -o src/model.rs`，输出自�
 
 `Model` 是绑定连接的 lease，不提供无说明的深拷贝；显式关闭和连接断开释放实例，服务重启使旧句柄失效。首期不自动重连并重建有状态实例。训练输入首期对应已有 `Vec<Vec<f32>>` 批，目标通过 typed enum 区分 MSE 向量、交叉熵类别和声明 loss target，公共 API 不要求用户手填 JSON。无优化器实例调用训练必须报错；失败更新不能改变参数、优化器或步数。是否共享/克隆模型须后续单独设计，不能把定义复用等同于可变状态共享。
 
-现有 `CreateGraph` 只接受 SGD/Adam，`CreateTrainingProgram` 会在构造时设置优化器；`LoadFd`/`BindWeightsFd` 也不是定义与权重原子创建的完整替代。本轮服务通过定义创建请求实现无优化器初始化，权重绑定沿用有界 FD；单独从定义与权重原子创建实例、显式独立 optimizer 配置尚非本轮公共接口。所有者校验、预算与失联清理仍适用。服务负责最终校验，不能信任宏已检查过来源。
+服务使用 `InitializeDefinition` 进行配方初始化，使用 `InitializeWeightsFd` 直接从定义与完整权重创建实例；`BindWeightsFd` 只更新既有实例。参数与 state 均先校验，再注册新实例，失败不留下可用句柄。所有者校验、预算与失联清理仍适用；服务重新解析定义并检查 payload，不能信任宏已检查过来源。独立 optimizer 配置仍未提供。
+
+## 权重快照与离线计划
+
+`wgt::weights::{Tensor, WeightSet, WeightRef, Plan}` 在宿主中操作完整参数值，不创建服务实例。`WeightSet` 是有限 F32 的不可变快照，revision 固定 safetensors 字节；`WeightRef` 引用 revision 与完整参数名。`Plan::from_base` 显式继承完整匹配快照，再用 `replace` 选择例外；新架构用 `Plan::new` 显式复制、变换和初始化每个目标。
+
+`preview` 不执行回调，缺项在 build 调用任何初始化器前失败；`initialize_declared` 只选择指定参数的 WGT 配方。快照保存 learn 的连续 shadow，payload 上限 64 MiB、manifest 上限 1 MiB；新增快照不覆盖原目录。Rust tensor 操作、来源记录、迁移与 restore 完整示例见[权重快照与迁移](weights.md)。当前实现不提供自动重命名、部分加载或稳定参数身份协议。
 
 ## 实现与验收分工
 
@@ -144,7 +153,7 @@ WGT 0.5 模型构造器当前不支持 share 声明。
 linear 节点字段为 `op=linear, weight=NAME, bias=NAME|null`；bias 可以省略，表示无偏置。
 权重必须为 `[out,current_width]`，bias 必须为 `[out]`。
 其余节点只有 op。严格拒绝未知算子和字段。
-完整的模型及断点保存流程见 [checkpoint/model.wgt](../examples/native_training/checkpoint/model.wgt)；须显式执行脚本后才会创建 model.json。
+Rust 宿主的参数保存与恢复见[权重快照](weights.md)；模型定义不隐式创建制品。这里的 IR 存储形式不增加源码语法或 checkpoint 合同。
 
 ## 内存与生命周期契约
 

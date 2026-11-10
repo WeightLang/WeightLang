@@ -858,7 +858,7 @@ where
             options.operation.is_none() || options.operation.as_deref() == Some("forward"),
             "single-forward models have only the forward evaluation entrypoint"
         );
-        if let ModelPlan::Forward(program) = definition.instantiate_plan()? {
+        if let ModelPlan::Forward(program) = definition.compile_plan_with_modules()?.0 {
             ensure!(
                 !program
                     .instructions
@@ -907,10 +907,11 @@ where
         let parameters = schema.candidate_parameters(candidate)?;
         let mut mean = 0.;
         for (episode, &seed) in options.episode_seeds.iter().enumerate() {
-            let model = client.initialize(definition, options.instance)?;
-            if let Some(weights) = &options.initial_weights {
-                model.load_weights(weights, None)?;
-            }
+            let model = if let Some(weights) = &options.initial_weights {
+                client.load_weights(definition, weights, options.instance)?
+            } else {
+                client.initialize(definition, options.instance)?
+            };
             schema.check_fixed_baseline(&model)?;
             model.update_parameters(&parameters)?;
             if let Some(reset) = &options.reset_operation {

@@ -105,6 +105,7 @@ impl CompiledForward {
                 name: p.name.clone(),
                 shape: p.shape.clone(),
                 data: data.clone(),
+                initializer: None,
                 frozen: p.frozen,
                 probability: false,
                 learn: None,

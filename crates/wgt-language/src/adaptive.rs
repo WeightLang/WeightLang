@@ -6,6 +6,7 @@ pub use contracts::{OperatorContract, OPERATOR_CONTRACTS};
 pub use conv::{ConvGeometry, Pool2dGeometry};
 pub use source::{parse, parse_with_functions, parse_with_metadata};
 pub(crate) use source::{validate_definition, lower_operation, analyze_definition};
+pub(crate) use source::compile_with_metadata;
 pub(crate) type InferredTypes = std::collections::BTreeMap<
     String, std::collections::BTreeMap<String, crate::tensor::TensorType>,
 >;
@@ -49,6 +50,9 @@ pub struct Parameter {
     pub name: String,
     pub shape: Vec<usize>,
     pub data: Vec<f32>,
+    /// A checked initialization recipe, independent of the currently bound data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initializer: Option<crate::initializer::Recipe>,
     #[serde(default)]
     pub frozen: bool,
     /// Trainable probabilities store logits; frozen probabilities store exact values.

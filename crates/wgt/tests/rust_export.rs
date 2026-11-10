@@ -8,7 +8,7 @@ use std::{
 use weightlang_wgt::rust_export::{self, DEFAULT_CRATE_PATH};
 use wgt_language::model::{ModelDefinition, ModelPlan};
 
-const GRAPH: &str = "wgt 0.5\nmodel Classifier\ninput x:f32[2]\noutput y:f32[1]\nlayer hidden:linear(3)\nlayer activation:relu\nlayer output:linear(1,bias=0)\ninit seed=7\n";
+const GRAPH: &str = "wgt 0.5\nmodel Classifier\ninput x:f32[2]\noutput y:f32[1]\nlayer hidden:linear(3)\nlayer activation:relu\nlayer output:linear(1,bias=0)\ninit weights=xavier_uniform(7) bias=zeros()\n";
 const FORWARD: &str = "wgt 0.5\nmodel Adaptive\ninput x:f32[1]\noutput y:f32[1]\nlearn depth:int in 0..=3=1;\nfrozen scale:f32[1]=[2]\nfn forward(x) { return repeat depth carrying h=x { h*scale }; }\nfn loss(prediction,target) { return 0.5*square(prediction-target).mean; }\n";
 const OPERATIONS: &str = "wgt 0.5\nmodel Stateful\nparameter gain:f32[1]=[2]\nstate value:f32[1]=[0];\nfn observe() -> f32[1] { return value; }\nfn accumulate(x:f32[1],y:f32[1]) -> f32[1] { value <- value+x+y; gain <- gain+x; return value*gain; }\nfn reset() { value <- [0]; }\n";
 const SCALE: &str = "wgt 0.5\nmodel Scale\ninput x:f32[2]\noutput y:f32[2]\nparameter gain:f32[2]=[2,3]\nfn forward(x) { return x*gain; }\n";

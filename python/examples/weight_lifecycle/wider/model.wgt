@@ -1,0 +1,15 @@
+wgt 0.5
+model WiderInput
+input x: f32[3]
+output y: f32[2]
+# A new input coordinate adds one row; old rows retain their original meaning.
+parameter first: f32[3, 2]
+parameter second: f32[2, 2]
+# This renamed parameter is explicitly mapped from the old bias by the host.
+parameter offset: f32[2]
+# New per-output gains are initialized explicitly, independently of old values.
+parameter gain: f32[2]
+fn forward(x) {
+    let hidden = (x as [1, 3]) @ (first as [3, 2]);
+    return ((hidden @ (second as [2, 2])) as [2] + offset) * gain;
+}

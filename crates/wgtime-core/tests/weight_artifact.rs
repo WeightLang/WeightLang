@@ -57,3 +57,66 @@ fn main(){let net=Probe("adam");let alias=net;save weights net to "weights.safet
     assert!(wgtime_core::script::parse("wgt 0.5\nfn main(){let net=0;reload weights net from \"x\";}").is_err());
     assert!(wgtime_core::script::parse("wgt 0.5\nfn main(){return load weights from \"x\";}").is_err());
 }
+
+#[test]
+fn adaptive_weight_binding_preserves_frozen_values_and_rejects_atomically() {
+    use wgtime_core::adaptive::{self, AdaptiveSession};
+    const MEMORY: usize = 1024 * 1024;
+    let source = "wgt 0.5\nmodel Frozen\ninput x:f32[1]\noutput y:f32[1]\nparameter gain:f32[1]=[2]\nfrozen fixed:f32[1]=[3]\nfn forward(x){return x*gain+fixed;}\n";
+    for compiled in [false, true] {
+        let mut model = AdaptiveSession::prepare(adaptive::parse(source).unwrap(), MEMORY).unwrap();
+        if compiled { model.enable_compiled().unwrap(); }
+        model.set_optimizer(Optimizer::Adam).unwrap();
+        model.train_step(&[vec![1.]], Objective::Mse(&[vec![0.]]), 0.03, &mut 100_000, MEMORY).unwrap();
+        let before = model.checkpoint_bytes_bounded(MEMORY).unwrap();
+        let revision = model.revision();
+        let artifact = |fixed| weight_artifact::encode(&[
+            ("gain".into(), vec![1], vec![7.]),
+            ("fixed".into(), vec![1], vec![fixed]),
+        ], MEMORY).unwrap();
+        let error = model.bind_weights(&artifact(4.), "sgd").unwrap_err();
+        assert!(error.to_string().contains("frozen"));
+        assert_eq!(model.checkpoint_bytes_bounded(MEMORY).unwrap(), before);
+        assert_eq!(model.revision(), revision);
+        model.bind_weights(&artifact(3.), "sgd").unwrap();
+        assert_eq!(model.parameter("gain").unwrap(), [7.]);
+        assert_eq!(model.parameter("fixed").unwrap(), [3.]);
+        assert_eq!(model.run(&[2.], 100_000).unwrap(), [17.]);
+        assert_eq!(model.is_compiled(), compiled);
+        let state: serde_json::Value = serde_json::from_slice(&model.checkpoint_bytes_bounded(MEMORY).unwrap()).unwrap();
+        assert_eq!(state["optimizer"]["optimizer"], "sgd");
+        assert_eq!(state["optimizer"]["steps"], 0);
+    }
+}
+
+#[test]
+fn trainer_weight_binding_preserves_frozen_values_and_optimizer_on_rejection() {
+    use wgtime_core::{Parameter, Value};
+    const MEMORY: usize = 1024 * 1024;
+    for through_alias in [false, true] {
+        let mut definition = mlp(&[1,1], "identity", 7).unwrap();
+        definition.parameters[1].frozen = !through_alias;
+        definition.parameters[1].value = Value::Resident { data: vec![3.] };
+        if through_alias {
+            definition.parameters.push(Parameter {
+                name: "frozen_bias".into(), shape: vec![1], frozen: true,
+                value: Value::View { source: "layer0.bias".into(), start: 0 },
+            });
+        }
+        let mut model = Trainer::new(definition, Path::new("."), MEMORY, Optimizer::Adam).unwrap();
+        model.step(&[vec![1.]], Objective::Mse(&[vec![0.]]), 0.03).unwrap();
+        let before = model.checkpoint_bytes_bounded(MEMORY).unwrap();
+        let artifact = |fixed| weight_artifact::encode(&[
+            ("layer0.weight".into(), vec![1,1], vec![7.]),
+            ("layer0.bias".into(), vec![1], vec![fixed]),
+        ], MEMORY).unwrap();
+        let error = model.bind_weights(&artifact(4.), "sgd").unwrap_err();
+        assert!(error.to_string().contains("frozen"));
+        assert_eq!(model.checkpoint_bytes_bounded(MEMORY).unwrap(), before);
+        model.bind_weights(&artifact(3.), "sgd").unwrap();
+        assert_eq!(model.weights_bytes(MEMORY).unwrap(), artifact(3.));
+        let state: serde_json::Value = serde_json::from_slice(&model.checkpoint_bytes_bounded(MEMORY).unwrap()).unwrap();
+        assert_eq!(state["optimizer"], "sgd");
+        assert_eq!(state["steps"], 0);
+    }
+}

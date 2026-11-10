@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const obsoleteShapeCall = /\b(?:reshape|matmul|transpose)\s*\(/;
+const obsoleteSyntax = /\b(?:reshape|matmul|transpose)\s*\(|\binit\s+seed\s*=/;
 const ignoredDirectories = new Set(['.git', '.cache', '.venv', 'node_modules', 'target', 'weights']);
 
 function files(directory) {
@@ -21,10 +21,10 @@ function sourceProblems(content) {
   return content.split(/\r?\n/).flatMap((line, index) => {
     const trimmed = line.trimStart();
     // Prose may explain supported compatibility spellings. Commented-out code is still an example.
-    if (trimmed.startsWith('#') && !/^#\s*(?:let\b|return\b|fn\b|[\w.]+\s*<-)/.test(trimmed)) {
+    if (trimmed.startsWith('#') && !/^#\s*(?:let\b|return\b|fn\b|init\b|[\w.]+\s*<-)/.test(trimmed)) {
       return [];
     }
-    return obsoleteShapeCall.test(line) ? [index + 1] : [];
+    return obsoleteSyntax.test(line) ? [index + 1] : [];
   });
 }
 
@@ -37,7 +37,7 @@ function markdownProblems(content) {
       else inWgtBlock = /^(?:wgt|weightlang)$/i.test(fence[2] || '');
       return [];
     }
-    return inWgtBlock && obsoleteShapeCall.test(line) ? [index + 1] : [];
+    return inWgtBlock && obsoleteSyntax.test(line) ? [index + 1] : [];
   });
 }
 
@@ -48,7 +48,7 @@ function collectProblems() {
     const relative = path.relative(root, file).replaceAll(path.sep, '/');
     const content = fs.readFileSync(file, 'utf8');
     const lines = file.endsWith('.wgt') ? sourceProblems(content) : markdownProblems(content);
-    for (const line of lines) problems.push(`${relative}:${line}: use tensor as [...] and @/.T in examples`);
+    for (const line of lines) problems.push(`${relative}:${line}: use tensor as [...], @/.T and explicit init weights=... bias=... in examples`);
     if (file.endsWith('.wgt') && /^(?:examples|python\/examples|packages)\//.test(relative) &&
         path.basename(file) !== 'model.wgt') {
       problems.push(`${relative}: independent example entrypoint must be named model.wgt`);

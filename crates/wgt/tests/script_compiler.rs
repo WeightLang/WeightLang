@@ -215,7 +215,7 @@ fn unified_model_and_forward_match_in_native_executables() {
     for (name, text) in [
         (
             "graph",
-            "wgt 0.5\nmodel Net\ninput x:f32[1]\noutput y:f32[1]\nlayer fc:linear(out=1)\ninit seed=7\nfn main(){let m=Net(\"sgd\");for i in range(0,100){train m on [[0],[1]] against [[1],[3]] {rate:0.05;loss:mse;};}return m([1]);}",
+            "wgt 0.5\nmodel Net\ninput x:f32[1]\noutput y:f32[1]\nlayer fc:linear(out=1)\ninit weights=xavier_uniform(7) bias=zeros()\nfn main(){let m=Net(\"sgd\");for i in range(0,100){train m on [[0],[1]] against [[1],[3]] {rate:0.05;loss:mse;};}return m([1]);}",
         ),
         (
             "forward",

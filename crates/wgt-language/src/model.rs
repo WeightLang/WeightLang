@@ -2,7 +2,7 @@
 use crate::{adaptive, categorical::VectorType, script, source};
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 const MAX_PARAMETER_ELEMENTS: usize = 16 * 1024 * 1024;
@@ -19,6 +19,8 @@ pub struct ParameterSchema {
     pub name: String,
     pub shape: Vec<usize>,
     pub frozen: bool,
+    #[serde(default)]
+    pub probability: bool,
     pub learn: Option<adaptive::LearnDomain>,
     /// Eligible for atomic external candidate updates; independent of AD support.
     /// Older schemas default to false rather than accidentally evolving frozen/prob storage.
@@ -91,7 +93,7 @@ impl ModelDefinition {
                 let count = validate_shape(&p.shape)?;
                 total = total.checked_add(count).context("parameter size overflow")?;
                 ensure!(total <= MAX_PARAMETER_ELEMENTS, "model parameter element limit exceeded");
-                Ok(ParameterSchema { name:p.name, shape:p.shape, frozen:p.frozen, learn:p.learn, candidate_updatable:!p.frozen && !p.probability })
+                Ok(ParameterSchema { name:p.name, shape:p.shape, frozen:p.frozen, probability:p.probability, learn:p.learn, candidate_updatable:!p.frozen && !p.probability })
             }).collect::<Result<Vec<_>>>()?;
             (ModelInterface {input,output,output_type,target}, parameters)
         } else {
@@ -105,7 +107,7 @@ impl ModelDefinition {
                         .chain(layer.bias.then(||(format!("{}.bias",layer.name),vec![layer.output]))) {
                         total=total.checked_add(validate_shape(&shape)?).context("parameter size overflow")?;
                         ensure!(total <= MAX_PARAMETER_ELEMENTS, "model parameter element limit exceeded");
-                        parameters.push(ParameterSchema{name,shape,frozen:false,learn:None,candidate_updatable:true});
+                        parameters.push(ParameterSchema{name,shape,frozen:false,probability:false,learn:None,candidate_updatable:true});
                     }
                 }
             }
@@ -141,17 +143,93 @@ impl ModelDefinition {
     /// Instantiate the same native plan and retain source-level submodule identities.
     /// This performs no forward evaluation or service interaction.
     pub fn instantiate_plan_with_modules(&self) -> Result<(ModelPlan, Vec<adaptive::ModuleSchema>)> {
+        let (mut plan, modules) = self.compile_plan_with_modules()?;
+        materialize_plan(&mut plan, None)?;
+        Ok((plan, modules))
+    }
+    /// Lower architecture and initializer recipes without generating weights.
+    pub fn compile_plan_with_modules(&self) -> Result<(ModelPlan, Vec<adaptive::ModuleSchema>)> {
         let unit = source::split(&self.source)?;
         let functions = script::parse::parse_functions(&unit.functions)?;
         if !self.operations.is_empty() {
-            Ok((ModelPlan::Operations(crate::operations::lower(&self.source, true)?), Vec::new()))
+            Ok((ModelPlan::Operations(crate::operations::lower(&self.source, false)?), Vec::new()))
         } else if functions.contains_key("forward") {
-            let (program, modules) = adaptive::parse_with_metadata(&self.source)?;
+            let (program, modules) = adaptive::compile_with_metadata(&self.source)?;
             Ok((ModelPlan::Forward(program), modules))
         } else {
-            Ok((ModelPlan::Graph(source::graph(&self.source)?.1), Vec::new()))
+            let mut graph = source::graph(&self.source)?.1;
+            graph.parameters = Some(graph.parameter_definitions()?);
+            Ok((ModelPlan::Graph(graph), Vec::new()))
         }
     }
+    /// Complete external parameter bindings bypass every parameter initializer.
+    /// State recipes remain independent and are explicitly initialized once.
+    pub fn instantiate_plan_with_bindings(&self, bindings: &BTreeMap<String, Vec<f32>>) -> Result<ModelPlan> {
+        ensure!(bindings.len() == self.parameters.len(), "weight binding parameter key set mismatch");
+        for schema in &self.parameters {
+            schema.validate_values(bindings.get(&schema.name).with_context(|| format!("missing weight binding: {}", schema.name))?)?;
+        }
+        let (mut plan, _) = self.compile_plan_with_modules()?;
+        materialize_plan(&mut plan, Some(bindings))?;
+        Ok(plan)
+    }
+    /// Retrieve one declared recipe; unrelated parameter initializers never run.
+    pub fn parameter_initializer(&self, name: &str) -> Result<crate::initializer::Recipe> {
+        let (plan, _) = self.compile_plan_with_modules()?;
+        let parameters = match plan {
+            ModelPlan::Graph(graph) => graph.parameter_definitions()?,
+            ModelPlan::Forward(program) => program.parameters,
+            ModelPlan::Operations(plan) => plan.parameters,
+        };
+        parameters.into_iter().find(|p| p.name == name)
+            .with_context(|| format!("unknown declared parameter: {name}"))?
+            .initializer.context("parameter has no initializer recipe")
+    }
+    pub fn initialize_parameter(&self, name: &str) -> Result<Vec<f32>> {
+        let schema = self.parameters.iter().find(|p| p.name == name).context("unknown declared parameter")?;
+        let values = self.parameter_initializer(name)?.materialize(&schema.shape)?;
+        schema.validate_values(&values)?;
+        Ok(values)
+    }
+}
+
+impl ParameterSchema {
+    /// Validate storage-domain values. Discrete learn shadows remain continuous;
+    /// no rounding, projection or implicit logit/probability conversion occurs.
+    pub fn validate_values(&self, values: &[f32]) -> Result<()> {
+        ensure!(validate_shape(&self.shape)? == values.len(), "weight binding shape mismatch: {}", self.name);
+        ensure!(values.iter().all(|v| v.is_finite()), "nonfinite weight binding: {}", self.name);
+        for value in values {
+            if let Some(domain) = &self.learn { domain.validate(*value).with_context(|| format!("parameter {}", self.name))?; }
+            if self.probability && self.frozen { ensure!((0. ..=1.).contains(value), "frozen probability binding outside [0,1]: {}", self.name); }
+        }
+        Ok(())
+    }
+}
+
+fn materialize_plan(plan: &mut ModelPlan, bindings: Option<&BTreeMap<String, Vec<f32>>>) -> Result<()> {
+    fn fill(parameter: &mut adaptive::Parameter, bindings: Option<&BTreeMap<String, Vec<f32>>>) -> Result<()> {
+        parameter.data = if let Some(bindings) = bindings {
+            bindings.get(&parameter.name).with_context(|| format!("missing weight binding: {}", parameter.name))?.clone()
+        } else {
+            parameter.initializer.as_ref().context("missing initializer recipe")?
+                .materialize(&parameter.shape).with_context(|| format!("parameter {}", parameter.name))?
+        };
+        ParameterSchema { name: parameter.name.clone(), shape: parameter.shape.clone(), frozen: parameter.frozen, probability: parameter.probability, learn: parameter.learn.clone(), candidate_updatable: !parameter.frozen && !parameter.probability }.validate_values(&parameter.data)
+    }
+    match plan {
+        ModelPlan::Graph(graph) => {
+            let mut parameters = graph.parameter_definitions()?;
+            for p in &mut parameters { fill(p, bindings)?; }
+            graph.parameters = Some(parameters);
+        },
+        ModelPlan::Forward(program) => { for p in &mut program.parameters { fill(p, bindings)?; } },
+        ModelPlan::Operations(plan) => {
+            for p in &mut plan.parameters { fill(p, bindings)?; }
+            for p in &mut plan.states { fill(p, None)?; }
+        },
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_shape(shape: &[usize]) -> Result<usize> {
@@ -172,33 +250,4 @@ mod tests {
         let initialized=crate::adaptive::parse(source).unwrap();
         assert_eq!(initialized.parameters[0].data,vec![2.]);
     }
-}
-
-// Stream the flat initializer during validation; never allocate a weight vector in parse/macros.
-pub(crate) fn validate_initializer(text: &str, count: usize, materialize: bool) -> Result<Vec<f32>> {
-    use serde::de::{DeserializeSeed, SeqAccess, Visitor};
-    struct Initializer { count: usize, materialize: bool }
-    impl<'de> Visitor<'de> for Initializer {
-        type Value=Vec<f32>;
-        fn expecting(&self,f:&mut std::fmt::Formatter)->std::fmt::Result { f.write_str("a flat finite f32 initializer") }
-        fn visit_seq<A:SeqAccess<'de>>(self,mut seq:A)->std::result::Result<Self::Value,A::Error> {
-            let mut values=Vec::new();
-            let mut actual=0usize;
-            while let Some(value)=seq.next_element::<f32>()? {
-                if !value.is_finite() || actual >= self.count { return Err(serde::de::Error::custom("invalid initializer value or length")); }
-                actual+=1;
-                if self.materialize {values.push(value);}
-            }
-            if actual!=self.count {return Err(serde::de::Error::custom("initializer length does not match shape"));}
-            Ok(values)
-        }
-    }
-    impl<'de> DeserializeSeed<'de> for Initializer {
-        type Value=Vec<f32>;
-        fn deserialize<D:serde::Deserializer<'de>>(self,deserializer:D)->std::result::Result<Self::Value,D::Error> {deserializer.deserialize_seq(self)}
-    }
-    let mut decoder=serde_json::Deserializer::from_str(text);
-    let values=Initializer{count,materialize}.deserialize(&mut decoder)?;
-    decoder.end()?;
-    Ok(values)
 }

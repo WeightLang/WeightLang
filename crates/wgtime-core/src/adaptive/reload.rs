@@ -28,6 +28,9 @@ impl AdaptiveSession {
         self.ensure_idle()?;
         let schema = self.program.parameters.iter().map(|p| (p.name.clone(), p.shape.clone())).collect::<Vec<_>>();
         let values = crate::weight_artifact::decode(&schema, bytes, 64 * 1024 * 1024)?;
+        for (parameter, data) in self.program.parameters.iter().zip(&values) {
+            ensure!(!parameter.frozen || parameter.data == *data, "cannot replace frozen parameter: {}", parameter.name);
+        }
         let mut program = self.program.clone();
         for (parameter, data) in program.parameters.iter_mut().zip(values) { parameter.data = data; }
         let mut candidate = Self::prepare(program, self.memory_limit)?;
@@ -88,6 +91,7 @@ mod tests {
                     name: "w".into(),
                     shape: vec![1],
                     data: vec![data],
+                    initializer: None,
                     frozen: false,
                     probability: false,
                     learn: None,

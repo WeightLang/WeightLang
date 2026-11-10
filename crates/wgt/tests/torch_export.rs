@@ -12,11 +12,18 @@ use wgt_language::{
     model::{ModelDefinition, ModelPlan},
 };
 
+// Legacy source-snapshot fixture: bit-for-bit seeded initialization compatibility.
 const SEQUENTIAL: &str = "wgt 0.5\nmodel Classifier\ninput x: f32[2]\noutput y: f32[1]\nlayer hidden: linear(3)\nlayer activation: relu\nlayer output: linear(1,bias=0)\ninit seed=7\n";
 const FORWARD: &str = "wgt 0.5\nmodel Scale\ninput x: f32[2]\noutput y: f32[2]\nparameter gain: f32[2] = [2,3]\nfn forward(x) { return x * gain; }\n";
 
 fn compile(source: &str) -> Value {
     serde_json::to_value(torch_export::compile_source(source).unwrap()).unwrap()
+}
+
+fn initial(parameter: &Value) -> Vec<f32> {
+    let parameter: wgt_language::adaptive::Parameter = serde_json::from_value(parameter.clone()).unwrap();
+    assert!(parameter.data.is_empty(), "compilation must not generate parameter data");
+    parameter.initializer.unwrap().materialize(&parameter.shape).unwrap()
 }
 
 fn cli(directory: &Path) -> Command {
@@ -62,7 +69,7 @@ fn sequential_initializers_match_native_weights_bit_for_bit() {
             let wgtime_core::Value::Resident { data } = parameter.value else {
                 panic!("resident initializer")
             };
-            let actual: Vec<f32> = serde_json::from_value(exported["data"].clone()).unwrap();
+            let actual: Vec<f32> = initial(exported);
             assert_eq!(
                 actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
                 data.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
@@ -72,7 +79,7 @@ fn sequential_initializers_match_native_weights_bit_for_bit() {
     // Fixed native reference guards the initializer extraction itself, independent
     // of the two callers sharing its implementation.
     let first: Vec<f32> =
-        serde_json::from_value(compile(SEQUENTIAL)["graph_parameters"][0]["data"].clone()).unwrap();
+        initial(&compile(SEQUENTIAL)["graph_parameters"][0]);
     assert_eq!(
         first
             .iter()
@@ -107,13 +114,15 @@ fn forward(x) { return blocks[0](blocks[0](x))+blocks[1](x); }
             {"path":"blocks[1]","model":"Block","input":1,"output":1,"parameters":{"weight":"blocks_1_weight"}},
         ])
     );
-    let program: wgt_language::adaptive::Program =
+    let mut program: wgt_language::adaptive::Program =
         serde_json::from_value(architecture["program"].clone()).unwrap();
     assert_eq!(program.parameters.len(), 2);
-    assert_eq!(
-        serde_json::to_value(wgt_language::adaptive::parse(source).unwrap()).unwrap(),
-        architecture["program"]
-    );
+    let mut native_program = wgt_language::adaptive::parse(source).unwrap();
+    for parameter in &mut native_program.parameters { parameter.data.clear(); }
+    assert_eq!(serde_json::to_value(native_program).unwrap(), architecture["program"]);
+    for parameter in &mut program.parameters {
+        parameter.data = parameter.initializer.as_ref().unwrap().materialize(&parameter.shape).unwrap();
+    }
     let mut native = wgtime_core::adaptive::AdaptiveSession::prepare(program, 65536).unwrap();
     assert_eq!(native.run(&[2.], 1000).unwrap(), [12.]);
 }
@@ -123,8 +132,8 @@ fn forward_export_has_native_ir_and_declared_values_without_execution() {
     let architecture = compile(FORWARD);
     assert_eq!(architecture["kind"], "forward");
     assert_eq!(
-        architecture["program"]["parameters"][0]["data"],
-        json!([2., 3.])
+        initial(&architecture["program"]["parameters"][0]),
+        vec![2., 3.]
     );
     assert_eq!(architecture["program"]["registers"][0]["shape"], json!([2]));
     assert_eq!(architecture["program"]["input"], "x");
@@ -166,9 +175,7 @@ fn source_compilation_keeps_loss_frozen_and_float_parameters() {
 fn probability_initializers_keep_one_explicit_sigmoid_and_frozen_values() {
     let source = "wgt 0.5\nmodel Probability\ninput x: f32[1]\noutput y: f32[1]\nparameter p: prob = 0.25\nfn forward(x) { return x * p; }\n";
     let architecture = compile(source);
-    let value = architecture["program"]["parameters"][0]["data"][0]
-        .as_f64()
-        .unwrap();
+    let value = initial(&architecture["program"]["parameters"][0])[0] as f64;
     assert!((value - (1.0_f64 / 3.0).ln()).abs() < 1e-6);
     let sigmoids = |program: &Value| {
         program["instructions"]
@@ -180,7 +187,7 @@ fn probability_initializers_keep_one_explicit_sigmoid_and_frozen_values() {
     };
     assert_eq!(sigmoids(&architecture["program"]), 1);
     let frozen = compile(&source.replace("parameter p", "frozen p"));
-    assert_eq!(frozen["program"]["parameters"][0]["data"], json!([0.25]));
+    assert_eq!(initial(&frozen["program"]["parameters"][0]), [0.25]);
     assert_eq!(sigmoids(&frozen["program"]), 0);
 }
 
@@ -285,9 +292,9 @@ fn forward(x) {
 }
 "#;
     let architecture = compile(source);
-    let ModelPlan::Forward(program) = ModelDefinition::parse(source)
+    let (ModelPlan::Forward(program), _) = ModelDefinition::parse(source)
         .unwrap()
-        .instantiate_plan()
+        .compile_plan_with_modules()
         .unwrap()
     else {
         panic!("forward plan")
@@ -331,8 +338,8 @@ fn constrained_learn_metadata_and_shadows_survive_export() {
         json!({"kind":"bounded","low":-1.,"high":3.})
     );
     assert_eq!(parameters[2]["learn"], json!({"kind":"positive","low":0.}));
-    assert_eq!(parameters[3]["data"], json!([2.]));
-    assert_eq!(parameters[4]["data"], json!([1.]));
+    assert_eq!(initial(&parameters[3]), [2.]);
+    assert_eq!(initial(&parameters[4]), [1.]);
 }
 
 #[test]
@@ -356,8 +363,8 @@ fn reset() { value <- [0]; }
     assert!(architecture["interface"].is_null());
     assert_eq!(architecture["parameters"].as_array().unwrap().len(), 3);
     assert_eq!(
-        architecture["operations"]["parameters"][0]["data"],
-        json!([2.])
+        initial(&architecture["operations"]["parameters"][0]),
+        vec![2.]
     );
     assert_eq!(architecture["operations"]["parameters"][1]["frozen"], true);
     assert_eq!(
@@ -365,7 +372,7 @@ fn reset() { value <- [0]; }
         "int"
     );
     assert_eq!(architecture["operations"]["states"][0]["name"], "value");
-    assert_eq!(architecture["operations"]["states"][0]["data"], json!([0.]));
+    assert_eq!(initial(&architecture["operations"]["states"][0]), [0.]);
     let entries = architecture["operations"]["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 3);
     assert_eq!(entries[0]["schema"]["name"], "accumulate");
@@ -443,8 +450,8 @@ fn cli_accepts_stdin_and_preserves_existing_output() {
     );
     let architecture: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(
-        architecture["program"]["parameters"][0]["data"],
-        json!([2., 3.])
+        initial(&architecture["program"]["parameters"][0]),
+        vec![2., 3.]
     );
 
     fs::write(directory.path().join("model.wgt"), FORWARD).unwrap();
@@ -470,4 +477,23 @@ fn cli_accepts_stdin_and_preserves_existing_output() {
         fs::read(directory.path().join("architecture.json")).unwrap(),
         initial
     );
+}
+
+#[test]
+fn checking_and_packaging_validation_never_run_initializers() {
+    let directory = tempfile::tempdir().unwrap();
+    for initial in ["sqrt(full(-1))", "external"] {
+        let source = FORWARD.replace("[2,3]", initial);
+        let path = directory.path().join("model.wgt");
+        fs::write(&path, &source).unwrap();
+        let output = cli(directory.path()).args(["check", "model.wgt"]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        weightlang_wgt::source_check::check_file(&path).unwrap();
+        assert!(ModelDefinition::parse(&source).unwrap().instantiate_plan().is_err());
+        // Legacy application validation shares the static boundary, while its
+        // execution parser retains the explicit constructor behavior.
+        fs::write(&path, format!("{source}\nfn main() {{return 0;}}\n")).unwrap();
+        weightlang_wgt::source_check::check_file(&path).unwrap();
+    }
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
 }

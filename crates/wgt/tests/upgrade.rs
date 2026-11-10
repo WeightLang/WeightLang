@@ -9,7 +9,7 @@ use weightlang_wgt::{
     upgrade::{self, Candidate},
 };
 
-const SOURCE: &[u8] = b"wgt 0.5\nmodel demo\ninput x: f32[1]\noutput y: f32[1]\nlayer fc: linear(in=1, out=1)\ninit seed=1\n";
+const SOURCE: &[u8] = b"wgt 0.5\nmodel demo\ninput x: f32[1]\noutput y: f32[1]\nlayer fc: linear(in=1, out=1)\ninit weights=xavier_uniform(1) bias=zeros()\n";
 const COMMIT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 struct Packages {
     broken: bool,

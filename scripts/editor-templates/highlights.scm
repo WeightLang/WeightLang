@@ -46,7 +46,7 @@
 ";" @punctuation.delimiter
 (function_declaration name: (identifier) @function)
 (call function: (qualified_name) @function)
-(call function: (qualified_name) @function.builtin (#any-of? @function.builtin @@builtins_QUOTED@@ @@intrinsics_QUOTED@@ @@layers_QUOTED@@))
+(call function: (qualified_name) @function.builtin (#any-of? @function.builtin @@builtins_QUOTED@@ @@intrinsics_QUOTED@@ @@initializers_QUOTED@@ @@layers_QUOTED@@))
 (layer_declaration (qualified_name (identifier) @function.builtin) (#any-of? @function.builtin @@layers_QUOTED@@))
 (native_declaration name: (identifier) @function.builtin (#any-of? @function.builtin @@intrinsics_QUOTED@@))
 (parameter name: (identifier) @variable.parameter)

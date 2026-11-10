@@ -18,6 +18,7 @@ from torch import fx, nn
 from torch.nn import functional as F
 
 from . import ops
+from .initialization import checked_bindings, materialize
 
 
 _MAX_ELEMENTS = 16_777_216
@@ -98,7 +99,8 @@ def _initialization_random(seed: int):
         yield ((value ^ (value >> 31)) >> 11) / 2**53
 
 
-def register_storage(root: nn.Module, specs: list[dict], modules: list[dict] | None = None) -> dict[str, str]:
+def register_storage(root: nn.Module, specs: list[dict], modules: list[dict] | None = None,
+                     bindings: dict[str, torch.Tensor] | None = None, *, schema_only: bool = False) -> dict[str, str]:
     """Register native storage once, restoring compiler-described submodules."""
     owners: dict[str, tuple[nn.Module, str, str]] = {}
     containers: dict[str, tuple[str, nn.ModuleList]] = {}
@@ -129,7 +131,7 @@ def register_storage(root: nn.Module, specs: list[dict], modules: list[dict] | N
         owner, local, prefix = owners.get(original, (root, original, ""))
         attribute = _attribute(owner, local, "parameter")
         shape = _shape(spec["shape"], f"parameter {original}")
-        value = _tensor(spec["data"], shape, f"parameter {original}")
+        value = materialize(spec, bindings, schema_only=schema_only)
         owner.register_parameter(attribute, nn.Parameter(value, requires_grad=not spec.get("frozen", False)))
         names[original] = prefix + attribute
     if owners.keys() - names.keys():
@@ -169,7 +171,8 @@ class WeightLangGraphModule(fx.GraphModule):
 
 
 class _Builder:
-    def __init__(self, input_shape: tuple[int, ...]):
+    def __init__(self, input_shape: tuple[int, ...], bindings: dict[str, torch.Tensor] | None = None,
+                 *, schema_only: bool = False):
         self.root = nn.Module()
         self.root.register_buffer("_wgt_gradient_anchor", torch.zeros((), requires_grad=True), persistent=False)
         self.graph = fx.Graph()
@@ -185,6 +188,8 @@ class _Builder:
         self.values: dict[str, fx.Node] = {}
         self.batched: dict[str, bool] = {}
         self.parameters: dict[str, tuple[dict[str, Any], fx.Node]] = {}
+        self.bindings = bindings
+        self.schema_only = schema_only
 
     @property
     def batch_shape(self) -> fx.Node:
@@ -244,8 +249,9 @@ class _Builder:
         if type(seed) is not int or not 0 <= seed < 2**64:
             raise ValueError("graph seed must be an unsigned 64-bit integer")
         generator = _initialization_random(seed)
-        initializers = {spec["name"]: spec for spec in definition.get("graph_parameters", [])}
-        if len(initializers) != len(definition.get("graph_parameters", [])):
+        declared = definition.get("graph_parameters", plan.get("parameters") or [])
+        initializers = {spec["name"]: spec for spec in declared}
+        if len(initializers) != len(declared):
             raise ValueError("duplicate native graph initializer")
         used_initializers = set()
         if not isinstance(plan["layers"], list) or not plan["layers"]:
@@ -265,16 +271,22 @@ class _Builder:
                 count += width * output + (output if layer["bias"] else 0)
                 if count > _MAX_ELEMENTS:
                     raise ValueError("model parameter element limit exceeded")
-                # Meta construction avoids consuming the caller's RNG.
-                module = ops.Linear(width, output, bias=layer["bias"], device="meta")
-                if "graph_parameters" in definition:
+                # Register the Linear layout without calling nn.Linear's random
+                # reset_parameters, including during checkpoint schema recovery.
+                module = ops.Linear.__new__(ops.Linear)
+                nn.Module.__init__(module)
+                module.in_features, module.out_features = width, output
+                module.register_parameter("weight", None)
+                module.register_parameter("bias", None)
+                if "graph_parameters" in definition or plan.get("parameters") is not None or self.bindings is not None or self.schema_only:
                     for part, shape in [("weight", (output, width)), *(([("bias", (output,))]) if layer["bias"] else [])]:
                         key = f"{name}.{part}"
-                        spec = initializers[key]
+                        spec = initializers.get(key, {"name": key, "shape": list(shape)})
                         if tuple(spec["shape"]) != shape:
                             raise ValueError("native graph initializer shape mismatch")
-                        setattr(module, part, nn.Parameter(_tensor(spec["data"], shape, key)))
-                        used_initializers.add(key)
+                        setattr(module, part, nn.Parameter(materialize(spec, self.bindings, schema_only=self.schema_only), requires_grad=not spec.get("frozen", False)))
+                        if key in initializers:
+                            used_initializers.add(key)
                 else:
                     # Older v1 exports stored a seed only. Reproduce the native
                     # initializer instead of substituting PyTorch's RNG stream.
@@ -321,7 +333,8 @@ class _Builder:
         if self.shapes.get(input_name) != (definition["interface"]["input"],):
             raise ValueError("forward input does not match model interface")
         self.values[input_name], self.batched[input_name] = self.input, True
-        self.parameter_names = register_storage(self.root, program["parameters"], definition.get("modules"))
+        self.parameter_names = register_storage(self.root, program["parameters"], definition.get("modules"), self.bindings,
+                                                schema_only=self.schema_only)
         count = 0
         for parameter in program["parameters"]:
             name = parameter["name"]
@@ -522,20 +535,23 @@ class _Builder:
         return tuple(value)
 
 
-def build_module(definition: dict[str, Any]) -> nn.Module:
+def build_module(definition: dict[str, Any], *, bindings: dict[str, torch.Tensor] | None = None,
+                 _schema_only: bool = False) -> nn.Module:
     """Instantiate a compiler export on CPU, using float32 PyTorch parameters."""
     if not isinstance(definition, dict) or definition.get("format") != "weightlang.torch.v1":
         raise ValueError("expected a weightlang.torch.v1 compiler export")
+    if bindings is not None:
+        bindings = checked_bindings(definition, bindings)
     try:
         if definition["kind"] == "operations":
             from .operations import OperationsModule
-            return OperationsModule(definition)
+            return OperationsModule(definition, bindings=bindings, _schema_only=_schema_only)
         interface = definition["interface"]
         shape = (_positive(interface["input"], "input width", 16384),)
         _positive(interface["output"], "output width", 16384)
         if interface.get("output_type", "f32") not in ("f32", "logits", "probabilities"):
             raise ValueError("unknown model output type")
-        builder = _Builder(shape)
+        builder = _Builder(shape, bindings, schema_only=_schema_only)
         if definition["kind"] == "sequential":
             return builder.sequential(definition)
         if definition["kind"] == "forward":
@@ -545,14 +561,14 @@ def build_module(definition: dict[str, Any]) -> nn.Module:
             instructions = definition["program"]["instructions"]
             if any(item["op"] in _UNSUPPORTED or (item["op"] == "return" and index != len(instructions) - 1)
                    for index, item in enumerate(instructions)):
-                return ProgramModule(definition)
+                return ProgramModule(definition, bindings=bindings, _schema_only=_schema_only)
             if any(spec.get("learn", {"kind": "float"}) not in (None, {"kind": "float"})
                    for spec in definition["program"]["parameters"]):
-                return ProgramModule(definition)
+                return ProgramModule(definition, bindings=bindings, _schema_only=_schema_only)
             try:
                 return builder.forward(definition)
             except NotImplementedError:
-                return ProgramModule(definition)
+                return ProgramModule(definition, bindings=bindings, _schema_only=_schema_only)
         raise ValueError(f"unsupported model plan {definition['kind']!r}")
     except (KeyError, TypeError, IndexError) as error:
         raise ValueError(f"malformed WeightLang compiler export: {error}") from error

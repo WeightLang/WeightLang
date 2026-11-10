@@ -6,7 +6,7 @@ model Regression
 input x: f32[1]
 output y: f32[1]
 layer result: linear(in=1,out=1)
-init seed=42
+init weights=xavier_uniform(42) bias=zeros()
 ";
 
 #[test]

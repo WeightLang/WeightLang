@@ -59,7 +59,7 @@ fn forward(x){return activation.squared_relu(x);}
     assert_eq!(activated.forward(&[-3.]).unwrap(),vec![0.]);
     assert_eq!(activated.forward(&[3.]).unwrap(),vec![9.]);
     activated.close().unwrap();
-    let sequential=ModelDefinition::parse("wgt 0.5\nmodel Dense\ninput x:f32[1]\noutput y:f32[1]\nlayer dense: linear(1)\ninit seed=7\n").unwrap();
+    let sequential=ModelDefinition::parse("wgt 0.5\nmodel Dense\ninput x:f32[1]\noutput y:f32[1]\nlayer dense: linear(1)\ninit weights=xavier_uniform(7) bias=zeros()\n").unwrap();
     let inference=client.initialize(&sequential,InstanceOptions::default()).unwrap();
     let before=inference.forward(&[1.]).unwrap();
     assert!(inference.train(&[vec![1.]],Targets::Values(&[vec![0.]]),TrainOptions{rate:0.1,loss:Loss::Mse,clip:None}).is_err());

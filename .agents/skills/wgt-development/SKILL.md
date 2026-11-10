@@ -13,6 +13,18 @@ description: 编写和验证本仓库当前 WGT 模型定义与 Rust 主程序�
 
 使用 `wgt lsp` 为编辑器提供 stdio 服务，配置与形状示例见 [LSP](../../../docs/lsp.md)。维护提示时复用 `wgt_language::ide` 的原生分析，词法索引只处理签名、补全和导航；通过模型验证后再显示中间形状与参数量。区分函数实参数量、可训练/冻结参数元素和状态元素；保留未保存依赖缓冲区及 UTF-16 位置语义。更新服务时运行 `cargo test -p weightlang-wgt --lib lsp::` 和 `cargo test -p weightlang-wgt --test lsp`，更新高亮/客户端时按 [编辑器验证](../../../docs/editors.md#维护与验证) 执行。不要把源码实现写成已发布版本，或将当前文件重命名描述为工作区重构。
 
+## 显式初始化、权重计划与格式化
+
+把定义检查与物化分开：`ModelDefinition`、`check`、`compile` 只保留 recipe，不抽样或连接服务。新源码不得写旧模型级 seed 指令；顺序模型明确写 `init weights=xavier_uniform(7) bias=zeros()`，两项都必填，或者省略整条 init 等待外部绑定。`parameter` / `frozen` / `learn` 无初值或 `external` 不补零、不默认随机；state 无初值也只能通过 schema，创建实例时必须有状态配方。
+
+复用共享函数 AST 实现初始化。生成器 `zeros`、`ones`、`full`、`eye`、`uniform`、`xavier_uniform` 只属于 `initializer` kind/context，支持显式首参 shape，否则使用目标声明形状；不要登记成 tensor forward 原语。纯 helper 只用不可变 let 和最终 return，不捕获模型参数、不做 I/O。标准配方显式 import `std/initialization`。顺序模型同 seed 按声明顺序续接流，独立 parameter 的同 seed/shape 给相同数值；不要声称已经有稳定 ID 随机拆流或任意后端逐位一致。
+
+选择正确的实例入口：Rust `Client::initialize` / Python `from_ir` 执行声明配方；Rust `Client::load_weights` / `load_snapshot` / Python `restore` 完整绑定参数并跳过参数配方，state 另行初始化。新实例允许外部 frozen；既有 Rust `Model::load_weights` 必须保持 frozen 值，成功保留 state 并重置优化器。Python SDK `.pt` 恢复直接绑定保存的参数和状态，不先运行配方。缺项、未知项、shape、F32 和域不匹配均报错，不回退到初始化。
+
+使用不可变 `WeightSet` 和固定 revision+完整参数名的 `WeightRef`。`Plan(base)` 继承完整匹配值，再显式 replace，重复绑定/重复替换报错；迁移用无 base 计划枚举 copy、concat/完整张量和新增初始化。preview 不调用回调，缺项必须在任一回调前失败；宿主算法保持纯粹。保存 bool/int 连续 shadow、概率 logit，不先取整。payload/manifest 限额为 64 MiB/1 MiB，不把参数快照当成 state/optimizer checkpoint、live tie 或 service CAS。完整签名与例子见 [初始化](../../../docs/initialization.md)和[权重](../../../docs/weights.md)。
+
+用 `wgt format` / `wgt fmt` 规整源码，用 `--check` 验证幂等且不写文件；stdin 为 `-`。CLI/LSP 共享保留 token 的 formatter；保留注释、字符串、数字拼写和声明顺序，不通过格式化升级历史语法。维护时跑 `wgt-language --test format` 与 CLI/LSP 的定点测试。初始化和绑定变化跑 `wgt-language --test initializers`、`wgt-model --test weights` 及 Python `test_weights.py`；服务状态和恢复另跑真实 IPC 用例，进程内测试不能代替连接验证。
+
 ## Tensor 合同维护
 
 固定 Shape/DType/命名轴和 stride 元数据共用 `wgt_language::tensor`，详见 [Tensor Contract](../../../docs/tensor-contract.md)。源定义和未信任 IR 都经过 `Program::validate_tensor_contracts`；保留 IR v1/v2/v3 的线格式和 f32 执行边界。新增 Instruction 必须同步 `language/tensor_contracts.json`，运行 `node scripts/check_tensor_contracts.cjs --write` 后再运行不带参数的检查，补齐源级正反例、CPU 数值和 VJP 测试。不能把 metadata dtype、可读重叠 view 或制品 graph 原语当作通用执行能力。
@@ -27,7 +39,7 @@ gate/route 的同形概率张量也参与轴名合并与冲突检查；route 两
 
 Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT 与 `std/` 聚焦可复用模型架构及模型内部参数/张量流、子模块、分支、循环和状态，并可定义可微 loss。旧通用 WGT 宿主脚本架构正在退出，不新建宿主控制脚本，也不将其描述为持续支持方向；这不表示现有代码已经删除。
 
-当前 `crates/wgt/src/main.rs::Cmd` 没有内置 run、script 或 test，不能生成 `wgt run` / `wgt test` 操作指引。源码静态检查用 `wgt check`；模型行为通过 Rust 测试与真实服务验证。`weightc compile` 和 `compile-client` 当前共用 `client_compiler`，只接受已迁移的构造；core 解释器和旧 codegen 的支持不能证明该客户端编译器支持。后文普通脚本内置函数仅描述兼容层，不能代替 Rust facade 的 API 契约。
+当前 `wgt run -- COMMAND ARGS` 是 uv Python 项目宿主入口，不执行 WGT 脚本；`crates/wgt/src/main.rs::Cmd` 没有内置 script 或 test，不生成 `wgt test` 指引。源码静态检查用 `wgt check`；模型行为通过 Rust 测试与真实服务验证。`weightc compile` 和 `compile-client` 当前共用 `client_compiler`，只接受已迁移的构造；core 解释器和旧 codegen 的支持不能证明该客户端编译器支持。后文普通脚本内置函数仅描述兼容层，不能代替 Rust facade 的 API 契约。
 
 `wgt-model` facade 的 Rust 库名为 `wgt`，当前提供 `model!`、`include_model!` 字符串宏以及 `ModelDefinition::parse`、`ModelDefinition::from_file`。内嵌源码、编译期文件和运行期文件入口共享模型定义解析语义。上述能力已在本地实现并通过定点验证，尚未发布。不要把 Rust 宏形式加入 WGT 语法说明，也不要用解析成功推断 forward 已执行；宏和定义解析只构造/检查定义，不连接服务、不执行模型。
 
@@ -37,7 +49,7 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 
 本地指定范围已验收：core 7 suite 共 31 项、typed import roundtrip 1/1；覆盖状态演化与隔离、reset、预算写后回滚、两次状态写后读及参数混合更新、零存储及仅 void 操作、混合参数与局部变量 `<-` 拒绝、外部搜索、权重与状态分离、策略及优化器处理。最终 daemon 重建后真实 IPC 5/5（operations 1、既有 service 1、CNN 3）；language 与 model 常规测试 16 项通过、8 项 ignored，相关服务测试单独执行。workspace all-targets、typed `model!` 宏编译和完整示例解析均通过；解析不证明执行，不能说全仓验收或已发布。合同见 [docs/model-operations.md](../../../docs/model-operations.md)。每个 typed 参数为 `f32[N]`，N=1..16384，各参数宽度总和不超过 16384；返回 `f32[N]` 或省略表示 void，`fn reset() {}` 合法。状态声明 `state name: f32[N] = [有限数值, ...]` 可省末尾分号；`name <- expression;` 必须以裸状态或参数名为目标且分号必填。typed 模式不用根级 input/output/target，不支持 loss；已支持具名操作互调、有状态子模型和实例数组，子调用共享整次事务；typed forward 禁止任何传递写入。
 
-模型定义出现 typed 签名或 `state`，或没有 `forward` 但有无参函数时进入操作模式。无参且无返回类型的函数是 void 入口，不是 helper，不能返回张量；无参返回值入口须显式标注如 `fn observe() -> f32[1] { ... }`。纯 helper 须至少有一个无类型标注参数。
+模型定义出现 typed 签名或 `state`，或没有 `forward` 但有无参函数时进入操作模式。无参且无返回类型的函数是 void 入口，不是 helper，不能返回张量；无参返回值入口须显式标注如 `fn observe() -> f32[1] { ... }`。纯 tensor helper 须至少有一个无类型标注参数；被初始化配方引用的纯 helper 可为无参，不作为 typed 入口。
 
 同实例各入口共享参数及独立状态，调用内写后读看到候选，成功原子提交、失败保持原值；普通权重不保存状态。服务侧原生执行、无 VM，typed 操作无 AD、无跨状态求导。旧 forward 的 `train_with_policy` 中 ContinuousOnly 遇到模型任意 learn bool/int 即拒绝，StraightThrough 使用 STE，旧 train 保留 STE。`ModelDefinition::interface()` 现为 Option，旧调用须显式处理缺失值；`call`、`operations`、`parameters`、`state`、`update_parameters`、`train_with_policy` 签名见 [Rust 后端](../../../docs/native-backend.md#多入口操作)；策略检查与训练由单个 `TrainStepWithPolicy` 请求原子处理，不持久设置策略。参数候选拒绝 frozen/probability 参数，bool/int 候选必须严格离散。候选更新无 CAS、无状态 snapshot/checkpoint，revision 仅在服务响应中返回，不承诺拒绝过期候选或断线 exactly-once；`update_parameters` 成功清空旧 forward optimizer，失败保持原状态，重新训练需通过 `load_weights` 显式选回。typed 操作无 optimizer，权重加载保留 state。
 
@@ -49,7 +61,7 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 
 顶层模型定义支持标量及固定长度数组 `learn`。core 定点五组共 33/33 通过（adaptive、compiled_forward、control 10、std 5、learn 6），另有 architecture 6/6 和 conv 3/3 通过；真实 service 的 conv 3 项和 architecture 1 项通过，覆盖训练、权重恢复续训和释放；真实 control facade 1/1 已覆盖 native-cpu 子模型、三种 learn 数组、indexed repeat、if、blend 与半平方 loss 的训练、权重回载、续训一致和释放归零；矩阵分支正反例及 5→5.5 已通过。此前 daemon 的标量路径验证不自动扩展到新语法；这是局部验证，不等于全仓验收或已发布。语法和边界见 [docs/learnable-architecture-parameters.md](../../../docs/learnable-architecture-parameters.md)。
 
-`learn` 每项独占一行且以分号结束：float 无界、float 闭区间、float 严格下界、bool 字面量及有界 int；类型名后紧跟 `[N]`（1..16384），例如 `int[2] in 0..=3`；不能写在范围末尾，此语法及错误形式的拒绝均已实现并通过测试，syntax-tour T12 已解析通过。标量初值填充或等长列表逐项初始化。float 在 SGD/Adam 更新后投影；int/bool 使用连续 shadow，硬读取并以 identity STE 反传。读取形状为 f32[1] 或 f32[N]，索引须编译期确定；不能直接作为 linear 原始参数或被 write，`choice` 不支持。
+`learn` 每项独占一行且以分号结束：float 无界、float 闭区间、float 严格下界、bool 字面量及有界 int；类型名后紧跟 `[N]`（1..16384），例如 `int[2] in 0..=3`；不能写在范围末尾，此语法及错误形式的拒绝均已实现并通过测试，syntax-tour T12 已解析通过。显式标量初值填充或等长列表逐项初始化，也可写纯配方；省略初值等待外部完整绑定。float 在 SGD/Adam 更新后投影；int/bool 使用连续 shadow，硬读取并以 identity STE 反传。读取形状为 f32[1] 或 f32[N]，索引须编译期确定；不能直接作为 linear 原始参数或被 write，`choice` 不支持。
 
 `repeat depth [indexed i] carrying h=initial { body }` 以常量或范围落在 0..=256 的 learn int 作深度，逐轮传递同形状态；indexed i 为零基编译期索引，必须与 carrying 状态名不同。学习深度训练时全部候选计算并以 STE 传梯度，推理跳过未启用的内联候选；一般动态循环不因此可微。`model A { ... }` 定义子模型，根模型仍写 `model Root`；`blocks: A[2];` 中不同索引参数独立、同一索引共享，实例索引只接受编译期常量或 repeat 索引。子模型调用的输入和结果须符合其声明的输入、输出合同；旧普通 forward 子模型仍限不可变 let 和最终 return；typed 操作模型支持有状态嵌套组合、直接具名调用和静态实例数组，子模型 loss 仍拒绝。
 
@@ -63,10 +75,10 @@ Rust 应用负责数据准备、I/O、调度、服务连接和训练循环；WGT
 连续声明 `let a=expr, b=expr;` 在共用 parser 展开为原有 Stmt::Let 序列；从左到右各求值一次，后项可引用前项，无整组回滚。host/async/forward/loss 继承原有作用域和重名规则；纯 operator 在支持它的工作区同样展开。嵌套调用/列表/record 的逗号不分隔声明；模型纯函数另支持 2..16 项扁平张量元组与 `let (a,b)=helper(...);`，元组绑定不可重定义、分支内新绑定不可逃逸，不进入服务 ABI；普通宿主脚本仍不支持张量元组。sample 解构及 collect/learn 须独立声明。完整例子 crates/wgtime-core/tests/continuous_let.rs；验证 tests/continuous_let.rs 与真实 AOT。
 函数共用 parser 不表示普通 fn 与 tensor forward/loss 语义相同；模型声明独立解析。
 language/primitive_specs.json 是制品 graph 原语域，不是源码内置表。编辑器容错不证明源码有效。
-在 language/prelude.json 维护原生函数、张量 intrinsic、语法、类型、常量与内部接口的统一内部目录；同步纯 helper 的 operator_arity 和需要保留的名称标记，不在 parser 或生成器另写名单。
+在 language/prelude.json 维护原生函数、张量 intrinsic、初始化专用 initializer、语法、类型、常量与内部接口的统一内部目录；同步纯 helper 的 operator_arity 和需要保留的名称标记，不在 parser 或生成器另写名单。
 修改后运行 node scripts/check_prelude.cjs、node scripts/test_prelude.cjs 和 node scripts/generate_editor_support.cjs，再用 --check 验证编辑器资产同步。
 构建检查目录结构，Node 检查实现集合、签名及默认值；原生声明不能写在普通源码中。旧 std/prelude.wgt 已移除，不恢复其生成链。完整契约见 docs/prelude.md。
-普通函数与 tensor 上下文分开登记，不自动引入 std 模块。
+普通函数、tensor 与 initializer 上下文分开登记，不自动引入 std 模块；initializer 的两个 overload 明确区分目标形状与显式首参 shape。
 原生异步第一阶段见 docs/async-tasks.md 与 crates/wgtime-core/tests/async_tasks.rs：async fn调用冷future，tasks作用域spawn、await只等目标并轮询兄弟任务，作用域join/取消并等待在途IO清理。
 仅纯数据参数/返回值，嵌套async await可用；拒绝嵌套tasks、async内spawn/tasks、模型等资源参数/返回、host/compute活跃上下文。await net(x)没有异步模型执行路径，不能宣称支持。
 资源预算见 docs/compute-budget.md：WGT_HOST_POLICY 单次解析，权限/HTTP/状态共用资源初始化前固定的绝对截止时间；子scope只收紧，错误退出恢复原父deadline与上限但不退已消费额度。HTTP仅固定授权端点GET，不跟重定向、不带环境代理/认证，剩余不足1ms拒绝；不提供POST/SSE/共享异步网络账本或完整沙箱。真实AOT验证用 crates/wgt/tests/resource_execution.rs，不能用compiled::run替代生成二进制。

@@ -68,6 +68,13 @@ assert(/type[^\n]*`A`/.test(candidateCaptures), 'instance model type must be hig
 assert(!vocabulary.builtins.includes('fit') && !vocabulary.builtins.includes('predict'), 'removed APIs must not be listed as builtins');
 assert(vocabulary.intrinsics.includes('linear') || vocabulary.layers.includes('linear'), 'linear must be highlighted in its supported context');
 assert(!vocabulary.builtins.some(name => name.startsWith('__')), 'internal implementation names must not be public builtins');
+assert.deepEqual(vocabulary.initializers, ['eye', 'full', 'ones', 'uniform', 'xavier_uniform', 'zeros']);
+assert(!vocabulary.initializers.some(name => vocabulary.intrinsics.includes(name)), 'initializer generators must not become forward intrinsics');
+const initializationCaptures = run('tree-sitter', ['query', 'queries/highlights.scm', path.join(root, 'editors/vscode/media/example.wgt')], grammar);
+for (const name of ['xavier_uniform', 'zeros']) {
+  assert(initializationCaptures.split('\n').some(line => line.includes('function.builtin') && line.includes('`' + name + '`')),
+    `${name}: missing initializer call capture`);
+}
 for (const query of ['highlights', 'outline', 'indents', 'brackets']) {
   const captures = run('tree-sitter', ['query', `queries/${query}.scm`, sample], grammar);
   assert(captures.includes('capture:'), `${query}: no captures`);

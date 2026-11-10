@@ -215,6 +215,14 @@
     "transpose",
     "write"
   ],
+  "initializers": [
+    "eye",
+    "full",
+    "ones",
+    "uniform",
+    "xavier_uniform",
+    "zeros"
+  ],
   "layers": [
     "identity",
     "linear",

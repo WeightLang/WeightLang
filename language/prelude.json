@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "source_edition": "0.5",
-  "scope": "Implicit source functions, intrinsics, constants and declaration types. No std modules are imported. Contexts are separate contracts; ordinary functions are shared by interpreter and AOT. Parameters are required unless defaults explicitly say otherwise.",
+  "scope": "Context-specific source functions, tensor intrinsics, initializer generators, constants and declaration types. No std modules are imported. Ordinary functions, forward tensors and initialization recipes have separate contracts. Parameters are required unless an overload or default explicitly says otherwise.",
   "entries": [
     {
       "name": "responses_scope",
@@ -2882,6 +2882,157 @@
         "min": 1,
         "max": 1
       }
+    },
+    {
+      "name": "zeros",
+      "kind": "initializer",
+      "contexts": [
+        "initializer"
+      ],
+      "signature": "zeros() / zeros(shape)",
+      "overloads": [
+        [],
+        [
+          "shape"
+        ]
+      ],
+      "purpose": "Generate an all-zero F32 initialization recipe.",
+      "implementation": "crates/wgt-language/src/initializer.rs",
+      "documentation": "docs/initialization.md",
+      "defaults": {},
+      "arity": {
+        "min": 0,
+        "max": 1
+      },
+      "shape": "Optional first argument is an explicit dimension list; otherwise the declared target shape is used."
+    },
+    {
+      "name": "ones",
+      "kind": "initializer",
+      "contexts": [
+        "initializer"
+      ],
+      "signature": "ones() / ones(shape)",
+      "overloads": [
+        [],
+        [
+          "shape"
+        ]
+      ],
+      "purpose": "Generate an all-one F32 initialization recipe.",
+      "implementation": "crates/wgt-language/src/initializer.rs",
+      "documentation": "docs/initialization.md",
+      "defaults": {},
+      "arity": {
+        "min": 0,
+        "max": 1
+      },
+      "shape": "Optional first argument is an explicit dimension list; otherwise the declared target shape is used."
+    },
+    {
+      "name": "full",
+      "kind": "initializer",
+      "contexts": [
+        "initializer"
+      ],
+      "signature": "full(value) / full(shape, value)",
+      "overloads": [
+        [
+          "value"
+        ],
+        [
+          "shape",
+          "value"
+        ]
+      ],
+      "purpose": "Fill a target shape with an explicit finite scalar.",
+      "implementation": "crates/wgt-language/src/initializer.rs",
+      "documentation": "docs/initialization.md",
+      "defaults": {},
+      "arity": {
+        "min": 1,
+        "max": 2
+      },
+      "shape": "Optional first argument is an explicit dimension list; otherwise the declared target shape is used."
+    },
+    {
+      "name": "eye",
+      "kind": "initializer",
+      "contexts": [
+        "initializer"
+      ],
+      "signature": "eye() / eye(shape)",
+      "overloads": [
+        [],
+        [
+          "shape"
+        ]
+      ],
+      "purpose": "Generate a rank-2 identity initialization recipe.",
+      "implementation": "crates/wgt-language/src/initializer.rs",
+      "documentation": "docs/initialization.md",
+      "defaults": {},
+      "arity": {
+        "min": 0,
+        "max": 1
+      },
+      "shape": "Optional first argument is an explicit dimension list; otherwise the declared target shape is used."
+    },
+    {
+      "name": "uniform",
+      "kind": "initializer",
+      "contexts": [
+        "initializer"
+      ],
+      "signature": "uniform(seed, low, high) / uniform(shape, seed, low, high)",
+      "overloads": [
+        [
+          "seed",
+          "low",
+          "high"
+        ],
+        [
+          "shape",
+          "seed",
+          "low",
+          "high"
+        ]
+      ],
+      "purpose": "Generate a seeded uniform recipe with explicit finite low < high.",
+      "implementation": "crates/wgt-language/src/initializer.rs",
+      "documentation": "docs/initialization.md",
+      "defaults": {},
+      "arity": {
+        "min": 3,
+        "max": 4
+      },
+      "shape": "Optional first argument is an explicit dimension list; otherwise the declared target shape is used."
+    },
+    {
+      "name": "xavier_uniform",
+      "kind": "initializer",
+      "contexts": [
+        "initializer"
+      ],
+      "signature": "xavier_uniform(seed) / xavier_uniform(shape, seed)",
+      "overloads": [
+        [
+          "seed"
+        ],
+        [
+          "shape",
+          "seed"
+        ]
+      ],
+      "purpose": "Generate a seeded rank-2 Xavier uniform recipe.",
+      "implementation": "crates/wgt-language/src/initializer.rs",
+      "documentation": "docs/initialization.md",
+      "defaults": {},
+      "arity": {
+        "min": 1,
+        "max": 2
+      },
+      "shape": "Optional first argument is an explicit dimension list; otherwise the declared target shape is used."
     }
   ]
 }

@@ -40,9 +40,14 @@ fn scope(text: &str, prefix: &str, inherited: &BTreeMap<String, Definition>, inh
     let mut definitions = inherited.clone();
     for (name, body) in &unit.models { definitions.insert(name.clone(), Definition { source: body.clone(), environment }); }
     let mut functions = parse::parse_functions(&unit.functions)?;
+    let initialization_helpers = crate::initializer::helpers(&unit.declarations, &functions)?;
     ensure!(!functions.contains_key("loss"), "stateful model composition does not support loss or cross-state AD");
     let mut names = HashMap::new();
     let mut calls = inherited_calls.clone();
+    for (name, function) in &functions {
+        let operation = function.signature.is_some() || (function.args.is_empty() && !initialization_helpers.contains(name));
+        calls.insert(name.clone(), if prefix.is_empty() && operation { format!("wgt_operation_{name}") } else { format!("{prefix}{name}") });
+    }
     let mut instances = BTreeMap::new();
     let mut input = None;
     let mut output = None;
@@ -58,7 +63,7 @@ fn scope(text: &str, prefix: &str, inherited: &BTreeMap<String, Definition>, inh
                 ensure!(operators::identifier(name), "invalid storage name: {name}");
                 let target = format!("{prefix}{name}");
                 ensure!(names.insert(name.to_owned(), target.clone()).is_none(), "duplicate storage: {name}");
-                flat.declarations.push_str(&format!("{keyword} {target}:{ty}\n"));
+                flat.declarations.push_str(&crate::model_modules::rewrite_storage_initializers(&format!("{keyword} {target}:{ty}"), &calls)?);
             }
             "input" | "output" => {
                 ensure!(!prefix.is_empty(), "typed operations declare ports in function signatures, not input/output/target declarations");
@@ -88,7 +93,7 @@ fn scope(text: &str, prefix: &str, inherited: &BTreeMap<String, Definition>, inh
     }
     for (name, function) in &mut functions {
         ensure!(operators::identifier(name) && name != "main" && !function.is_async, "model cannot contain host/async entrypoints");
-        if function.args.is_empty() && function.signature.is_none() {
+        if function.args.is_empty() && function.signature.is_none() && !initialization_helpers.contains(name) {
             function.signature = Some(parse::OperationSignature { inputs: Vec::new(), output: None });
         }
         let target = if prefix.is_empty() && function.signature.is_some() { format!("wgt_operation_{name}") } else { format!("{prefix}{name}") };
@@ -146,6 +151,7 @@ fn validate_declarations(text: &str, inherited_definitions: &BTreeSet<String>, i
     let mut definitions = inherited_definitions.clone();
     definitions.extend(unit.models.iter().map(|(name, _)| name.clone()));
     let mut functions = parse::parse_functions(&unit.functions)?;
+    let initialization_helpers = crate::initializer::helpers(&unit.declarations, &functions)?;
     let mut storage = HashMap::new();
     let mut instance_names = BTreeSet::new();
     let mut declarations = String::new();
@@ -167,7 +173,7 @@ fn validate_declarations(text: &str, inherited_definitions: &BTreeSet<String>, i
                 let name = name.trim();
                 ensure!(operators::identifier(name) && !instance_names.contains(name) && storage.insert(name.to_owned(), name.to_owned()).is_none(), "duplicate or invalid storage: {name}");
                 if keyword == "state" {
-                    let (ty, _) = ty.split_once('=').context("state requires an explicit initializer")?;
+                    let ty = ty.split_once('=').map_or(ty, |(ty, _)| ty).trim_end_matches(';');
                     source::vector_port(&format!("{name}: {}", ty.trim()))?;
                     declarations.push_str(&format!("parameter {}\n", rest.trim_end_matches(';').trim()));
                 } else {
@@ -206,7 +212,12 @@ fn validate_declarations(text: &str, inherited_definitions: &BTreeSet<String>, i
     let mut argument = "wgt_validation_input".to_owned();
     while storage.contains_key(&argument) { argument.push('_'); }
     declarations.push_str(&format!("input {argument}: f32[1]\noutput wgt_validation_output: f32[1]\n"));
-    let identity = parse::parse_functions(&format!("wgt 0.5\nfn forward({argument}) {{ return {argument}; }}"))?;
+    let mut identity = inherited_functions.clone();
+    for (original, target) in inherited_calls {
+        if let Some(function) = inherited_functions.get(target) { identity.insert(original.clone(), function.clone()); }
+    }
+    identity.extend(functions.clone());
+    identity.extend(parse::parse_functions(&format!("wgt 0.5\nfn forward({argument}) {{ return {argument}; }}"))?);
     let plan = crate::adaptive::validate_definition(&declarations, &identity)?;
     let total = plan.parameters.iter().try_fold(0usize, |total, parameter| {
         total.checked_add(crate::model::validate_shape(&parameter.shape)?).context("storage size overflow")
@@ -218,7 +229,7 @@ fn validate_declarations(text: &str, inherited_definitions: &BTreeSet<String>, i
     let mut calls = inherited_calls.clone();
     for (name, function) in &mut functions {
         ensure!(operators::identifier(name) && name != "main" && name != "loss" && !function.is_async, "model cannot contain host/async/loss entrypoints");
-        if function.signature.is_none() && function.args.is_empty() {
+        if function.signature.is_none() && function.args.is_empty() && !initialization_helpers.contains(name) {
             function.signature = Some(parse::OperationSignature { inputs: Vec::new(), output: None });
         }
         if let Some(signature) = &function.signature {
@@ -251,7 +262,7 @@ fn validate_model_body(body: &[Statement]) -> Result<()> {
     fn expression(value: &Expr) -> Result<()> {
         match value {
             Expr::Call(name, args) | Expr::BuiltinCall(name, args) => {
-                ensure!(operators::intrinsic(name) || crate::script::prelude::builtin(name).is_none() || ["__probabilities", "__record_field", "__transaction_write", "__operation_dispatch"].contains(&name.as_str()), "model functions cannot call host functions: {name}");
+                ensure!(operators::intrinsic(name) || crate::initializer::intrinsic(name) || crate::script::prelude::builtin(name).is_none() || ["__probabilities", "__record_field", "__transaction_write", "__operation_dispatch"].contains(&name.as_str()), "model functions cannot call host functions: {name}");
                 for arg in args { expression(arg)?; }
             }
             Expr::List(items) | Expr::Tuple(items) => { for item in items { expression(item)?; } }

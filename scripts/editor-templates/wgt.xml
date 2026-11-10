@@ -3,7 +3,7 @@
 <language name="WeightLang" version="1" kateversion="5.0" section="Sources" extensions="*.wgt" mimetype="text/x-wgt" author="WeightLang contributors" license="MIT">
 <highlighting>
 <list name="keywords">@@keywords_ITEMS@@</list>
-<list name="builtins">@@builtins_ITEMS@@</list>
+<list name="builtins">@@builtins_ITEMS@@@@intrinsics_ITEMS@@@@initializers_ITEMS@@@@layers_ITEMS@@</list>
 <list name="types">@@types_ITEMS@@</list>
 <list name="constants">@@constants_ITEMS@@</list>
 <contexts><context name="Normal" attribute="Normal" lineEndContext="#stay">

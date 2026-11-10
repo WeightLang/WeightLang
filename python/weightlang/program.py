@@ -207,7 +207,7 @@ class ProgramExecutor:
         for declared in program["parameters"]:
             fields = {"name", "shape", "data"}
             _require(isinstance(declared, dict) and fields <= declared.keys()
-                     and declared.keys() <= fields | {"frozen", "probability", "learn"}, "invalid parameter fields")
+                     and declared.keys() <= fields | {"frozen", "probability", "learn", "initializer"}, "invalid parameter fields")
             name = declared["name"]
             _require(isinstance(name, str) and name and name not in self.specs and name != self.input, "duplicate/invalid parameter")
             spec = deepcopy({key: value for key, value in all_specs[name].items() if key != "data"})
@@ -587,7 +587,8 @@ def model_loss(model: nn.Module, prediction: torch.Tensor, target: torch.Tensor,
 class ProgramModule(nn.Module):
     """A native forward program with standard registered PyTorch parameters."""
 
-    def __init__(self, definition: dict, *, max_work: int = DEFAULT_MAX_WORK, memory_bytes: int = DEFAULT_MEMORY_BYTES):
+    def __init__(self, definition: dict, *, max_work: int = DEFAULT_MAX_WORK, memory_bytes: int = DEFAULT_MEMORY_BYTES,
+                 bindings: dict[str, torch.Tensor] | None = None, _schema_only: bool = False):
         super().__init__()
         self.register_buffer("_wgt_gradient_anchor", torch.zeros((), requires_grad=True), persistent=False)
         self.definition = deepcopy(definition)
@@ -598,9 +599,11 @@ class ProgramModule(nn.Module):
         self.learn_domains: dict[str, dict] = {}
         definition = self.definition
         self._specs = {spec["name"]: spec for spec in definition["program"]["parameters"]}
-        self.parameter_names = register_storage(self, list(self._specs.values()), definition.get("modules"))
+        self.parameter_names = register_storage(self, list(self._specs.values()), definition.get("modules"), bindings,
+                                                schema_only=_schema_only)
         for name, spec in self._specs.items():
-            validate_parameter(self.get_parameter(self.parameter_names[name]), spec)
+            if not _schema_only:
+                validate_parameter(self.get_parameter(self.parameter_names[name]), spec)
             if spec.get("learn") is not None:
                 self.learn_domains[name] = spec["learn"]
         self._executor = ProgramExecutor(definition["program"])

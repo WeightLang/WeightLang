@@ -16,6 +16,21 @@ impl Graph {
     /// Materialize the declared sequential initializer without executing a model.
     /// Native sessions may enforce a smaller storage budget before calling this.
     pub fn initial_parameters(&self) -> Result<Vec<Parameter>> {
+        let mut parameters = self.parameter_definitions()?;
+        for parameter in &mut parameters {
+            let count = crate::model::validate_shape(&parameter.shape)?;
+            if parameter.data.is_empty() {
+                parameter.data = parameter.initializer.as_ref().context("missing parameter initializer")?
+                    .materialize(&parameter.shape).with_context(|| format!("parameter {}", parameter.name))?;
+            }
+            ensure!(parameter.data.len() == count && parameter.data.iter().all(|v| v.is_finite()), "invalid bound graph parameter: {}", parameter.name);
+        }
+        Ok(parameters)
+    }
+
+    /// Schema and recipes only. Legacy seed streams are represented by offsets,
+    /// so compilation does not draw random values or allocate generated tensors.
+    pub fn parameter_definitions(&self) -> Result<Vec<Parameter>> {
         ensure!(
             (1..=16384).contains(&self.input) && !self.layers.is_empty(),
             "invalid graph input or layers"
@@ -61,23 +76,31 @@ impl Graph {
             parameters.push(Parameter {
                 name: format!("{}.weight", layer.name),
                 shape: vec![layer.output, layer.input],
-                data: (0..layer.input * layer.output)
-                    .map(|_| ((initialization_random(&mut rng) * 2. - 1.) * scale) as f32)
-                    .collect(),
+                data: Vec::new(),
+                initializer: Some(crate::initializer::Recipe::Uniform { shape: vec![layer.output, layer.input], seed: rng, low: -scale, high: scale }),
                 frozen: false,
                 probability: false,
                 learn: None,
             });
+            rng = rng.wrapping_add(((layer.input * layer.output) as u64).wrapping_mul(0x9e3779b97f4a7c15));
             if layer.bias {
                 parameters.push(Parameter {
                     name: format!("{}.bias", layer.name),
                     shape: vec![layer.output],
-                    data: vec![0.; layer.output],
+                    data: Vec::new(),
+                    initializer: Some(crate::initializer::Recipe::Full { shape: vec![layer.output], value: 0. }),
                     frozen: false,
                     probability: false,
                     learn: None,
                 });
             }
+        }
+        if let Some(bound) = &self.parameters {
+            ensure!(bound.len() == parameters.len(), "graph parameter key set mismatch");
+            for (expected, actual) in parameters.iter().zip(bound) {
+                ensure!(expected.name == actual.name && expected.shape == actual.shape && !actual.frozen && !actual.probability && actual.learn.is_none(), "graph parameter schema mismatch");
+            }
+            return Ok(bound.clone());
         }
         Ok(parameters)
     }

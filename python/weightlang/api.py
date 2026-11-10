@@ -85,9 +85,19 @@ def load(
         raise ValueError("Expected a model saved by weightlang.save; load plain state_dict files with PyTorch")
     if not isinstance(bundle.get("definition"), dict) or not isinstance(bundle.get("state_dict"), dict):
         raise ValueError("Saved WeightLang model requires a definition and state_dict")
-    model = from_ir(bundle["definition"], device="cpu")
+    # Reuse the exact registration layout, but allocate no parameter/state data
+    # and execute no declared initializer before binding the saved values.
+    model = build_module(bundle["definition"], _schema_only=True)
     # assign preserves saved tensor precision; create optimizers after loading.
     model.load_state_dict(bundle["state_dict"], strict=True, assign=True)
+    from .initialization import parameter_specs
+    from .program import validate_parameter
+    for spec in parameter_specs(bundle["definition"]):
+        validate_parameter(model.get_parameter(model.parameter_names[spec["name"]]), spec)
+    for spec in bundle["definition"].get("operations", {}).get("states", []):
+        validate_parameter(model.get_buffer(model.state_names[spec["name"]]), spec)
+    if any(not bool(torch.isfinite(value).all()) for value in model.buffers() if value.is_floating_point()):
+        raise ValueError("saved model contains nonfinite state or constants")
     return model.to(device=select_device(device), dtype=dtype)
 
 

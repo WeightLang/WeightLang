@@ -85,13 +85,13 @@ pub(crate) fn resolve_with_overlays(
     let calls = resolver.imports(&imports, root.as_deref().and_then(Path::parent), 0)?;
     let unit = crate::source::split(text)?;
     let functions = parse::parse_functions(&unit.functions)?;
-    let declarations = strip_imports(&unit.declarations);
+    let declarations = rewrite_storage_initializers(&strip_imports(&unit.declarations), &calls)?;
     let mut output = declarations;
     fn emit_model(output: &mut String, name: &str, body: &str, calls: &HashMap<String,String>, depth: usize) -> Result<()> {
         ensure!(depth < 32, "model nesting exceeds 32");
         let child = crate::source::split(body)?;
         output.push_str(&format!("\nmodel {name} {{\n"));
-        output.push_str(&child.declarations.lines().skip(2).collect::<Vec<_>>().join("\n"));
+        output.push_str(&rewrite_storage_initializers(&child.declarations.lines().skip(2).collect::<Vec<_>>().join("\n"), calls)?);
         for (name, body) in &child.models { emit_model(output, name, body, calls, depth + 1)?; }
         for (name, mut function) in parse::parse_functions(&child.functions)?.into_iter().collect::<BTreeMap<_,_>>() {
             rewrite_function(&mut function, calls);
@@ -246,6 +246,28 @@ fn strip_imports(source: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n"
+}
+/// Link initializer calls with the same AST rewrite used for model functions.
+pub(crate) fn rewrite_storage_initializers(source: &str, calls: &HashMap<String, String>) -> Result<String> {
+    let mut output = String::new();
+    for line in source.lines() {
+        let text = line.split('#').next().unwrap_or("").trim();
+        let keyword = text.split_whitespace().next().unwrap_or("");
+        let assignment = text.rfind('=').filter(|index| *index == 0 || text.as_bytes()[index - 1] != b'.');
+        if ["parameter", "frozen", "learn", "state"].contains(&keyword) && assignment.is_some() {
+            let index = assignment.unwrap();
+            let rhs = text[index + 1..].trim().trim_end_matches(';');
+            if rhs == "external" { output.push_str(line); }
+            else {
+                let parsed = parse::parse_functions(&format!("wgt 0.5\nfn initializer_value() {{ return {rhs}; }}"))?;
+                let Stmt::Return(expr) = &parsed["initializer_value"].body[0].kind else { bail!("invalid initializer expression"); };
+                let rewritten = operators::rewrite(expr, &HashMap::new(), calls);
+                output.push_str(&format!("{} = {}{}", text[..index].trim_end(), expression(&rewritten)?, if text.ends_with(';') { ";" } else { "" }));
+            }
+        } else { output.push_str(line); }
+        output.push('\n');
+    }
+    Ok(output)
 }
 fn rewrite_function(function: &mut Function, calls: &HashMap<String, String>) {
     fn rewrite(body: &mut [parse::Statement], calls: &HashMap<String,String>) {

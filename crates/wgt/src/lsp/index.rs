@@ -953,11 +953,12 @@ impl Index {
         wgt_language::script::prelude::entries()
             .iter()
             .filter(move |e| {
-                matches!(e.kind.as_str(), "function" | "intrinsic" | "layer")
+                matches!(e.kind.as_str(), "function" | "intrinsic" | "initializer" | "layer")
                     && e.contexts.iter().any(|c| {
                         if tensor {
                             c == "tensor"
                                 || c.starts_with("tensor_")
+                                || c == "initializer"
                                 || c == "model_declaration"
                                 || c == "forward_parameter_declaration"
                         } else {

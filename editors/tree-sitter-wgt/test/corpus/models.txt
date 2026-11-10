@@ -13,7 +13,7 @@ layer value: linear(
 ) from input
 layer selected: gate * value
 layer pooled: mean(axis=time)
-init seed=42
+init weights=xavier_uniform(42) bias=zeros()
 
 ---
 
@@ -97,7 +97,17 @@ init seed=42
   (directive
     (parameter
       (identifier))
-    (number)))
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (number)))
+    (parameter
+      (identifier))
+    (call
+      (qualified_name
+        (identifier))
+      (arguments))))
 
 ==================
 Library, quoted hash, shared loop and numeric operators
@@ -190,7 +200,7 @@ require T % 2 == 0
 input x: f32[time=T,feature=4]
 output scalar: f32[] from reduced
 layer reduced: reduce_sum(axis=0)
-init seed=0
+init weights=xavier_uniform(0) bias=zeros()
 
 ---
 
@@ -248,7 +258,17 @@ init seed=0
   (directive
     (parameter
       (identifier))
-    (number)))
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (number)))
+    (parameter
+      (identifier))
+    (call
+      (qualified_name
+        (identifier))
+      (arguments))))
 
 ==================
 Legacy data and source imports remain editable

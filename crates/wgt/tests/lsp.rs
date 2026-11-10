@@ -105,6 +105,7 @@ fn lifecycle_errors_and_capabilities() {
     assert_eq!(capabilities["positionEncoding"], "utf-16");
     assert_eq!(capabilities["textDocumentSync"]["change"], 2);
     assert_eq!(capabilities["inlayHintProvider"], true);
+    assert_eq!(capabilities["documentFormattingProvider"], true);
     assert_eq!(
         messages.iter().find(|message| message["id"] == 2).unwrap()["error"]["code"],
         -32600
@@ -126,6 +127,48 @@ fn lifecycle_errors_and_capabilities() {
 }
 
 #[test]
+fn formatting_uses_shared_layout_and_utf16_ranges_without_writing_buffers() {
+    let source = format!("{}# 😀尾", MODEL.replace('\n', "\r\n"));
+    let formatted = wgt_language::format::format_source(&source).unwrap();
+    let formatting = |id| {
+        request(
+            id,
+            "textDocument/formatting",
+            json!({
+                "textDocument":{"uri":URI},"options":{"tabSize":4,"insertSpaces":true}
+            }),
+        )
+    };
+    let messages = run(vec![
+        initialize(),
+        open(URI, &source),
+        formatting(2),
+        formatting(3),
+        change(URI, 2, &formatted),
+        formatting(4),
+        change(URI, 3, "wgt 0.5\nfn broken(){return 1}\n"),
+        formatting(5),
+    ]);
+    let edits = result(&messages, 2).as_array().unwrap();
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0]["newText"], formatted);
+    assert_eq!(edits[0]["range"]["start"], json!({"line":0,"character":0}));
+    assert_eq!(
+        edits[0]["range"]["end"],
+        json!({
+            "line":source.bytes().filter(|byte| *byte == b'\n').count(),
+            "character":source.rsplit('\n').next().unwrap().encode_utf16().count()
+        })
+    );
+    // The server proposes edits; another request still observes the original buffer.
+    assert_eq!(result(&messages, 2), result(&messages, 3));
+    assert_eq!(result(&messages, 4), &json!([]));
+    let failure = messages.iter().find(|message| message["id"] == 5).unwrap();
+    assert_eq!(failure["error"]["code"], -32803);
+    assert!(failure.get("result").is_none());
+}
+
+#[test]
 fn live_diagnostics_clear_after_fix_and_close() {
     let wrong = MODEL.replace("f32[inner=3, cols=2]", "f32[inner=2, cols=3]");
     let messages = run(vec![
@@ -144,6 +187,21 @@ fn live_diagnostics_clear_after_fix_and_close() {
     assert_eq!(updates[2]["version"], 3);
     assert_eq!(updates[2]["diagnostics"], json!([]));
     assert_eq!(updates[3]["diagnostics"], json!([]));
+}
+
+#[test]
+fn declared_initializers_have_catalog_signatures_and_completion() {
+    let source = "wgt 0.5\nmodel Initializer\ninput x:f32[2]\noutput y:f32[2]\nparameter gain:f32[2]=uniform(7, -1, 1)\nfn forward(x){return gain*x;}\n";
+    let messages = run(vec![
+        initialize(), open(URI, source),
+        at(2, "textDocument/signatureHelp", source, "-1, 1"),
+        at(3, "textDocument/completion", source, "uniform("),
+    ]);
+    assert_eq!(diagnostics(&messages)[0]["diagnostics"], json!([]));
+    let signatures = result(&messages, 2)["signatures"].as_array().unwrap();
+    assert_eq!(signatures.len(), 2);
+    assert!(signatures.iter().any(|entry| entry["label"].as_str().unwrap().contains("shape")));
+    assert!(result(&messages, 3).as_array().unwrap().iter().any(|entry| entry["label"] == "xavier_uniform"));
 }
 
 #[test]

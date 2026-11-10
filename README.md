@@ -59,6 +59,35 @@ does not read project `train`, `infer` or `runtime` settings automatically. A
 host that uses `wgt.toml` must read those settings and pass them to the SDK and
 PyTorch APIs.
 
+## Initialize, reference, and migrate weights explicitly
+
+The current, unreleased WGT 0.5 implementation has no default parameter
+initializer. A definition records shapes and optional recipes such as `zeros()`,
+`eye()`, `xavier_uniform(seed)`, or a pure user helper. Checking and compilation
+keep these recipes without drawing samples. An omitted initializer requires
+complete external weights before an instance can execute.
+
+Python and Rust hosts can capture immutable `WeightSet` snapshots, reference a
+full parameter name at a fixed revision, and construct a new snapshot with a
+`Plan`. A plan explicitly inherits a compatible base and replaces selected
+parameters, or names every target when migrating to a new architecture. Preview
+reports missing bindings without executing callbacks; complete restoration
+skips parameter recipes and treats runtime state separately.
+
+```python
+import weightlang as wgt
+
+definition = wgt.compile("model.wgt")
+weights = wgt.WeightSet.load("weights/model/version-1")
+model = wgt.restore(definition, weights, device="cpu")
+```
+
+See [explicit initialization](docs/initialization.md) for recipe contracts and
+[weight snapshots and migration](docs/weights.md) for selected-layer averaging,
+shape changes, provenance, and native/Python restoration. Format model sources
+with `wgt format`; use `wgt format --check` in checks or `wgt format -` for stdin.
+The CLI and language server share the [same formatter](docs/format.md).
+
 ## Train your first model
 
 Choose a template, edit `wgt.toml`, then train and run it. The PyTorch

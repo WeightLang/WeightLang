@@ -242,8 +242,8 @@ def test_input_contract_and_unsupported_ir_fail_clearly(compile_plan):
 def test_precompiled_parameter_shapes_and_learn_domains_are_checked(compile_plan):
     definition = compile_plan(model_source(1, 1, "return x * p;", "parameter p: f32[1] = [2]"))
     malformed = deepcopy(definition)
-    malformed["program"]["parameters"][0]["data"] = [1, 2]
-    with pytest.raises(ValueError, match="initializer does not match"):
+    malformed["program"]["parameters"][0]["initializer"] = {"op": "full", "shape": [2], "value": 1}
+    with pytest.raises(ValueError, match="shape mismatch"):
         build_module(malformed)
     malformed = deepcopy(definition)
     malformed["program"]["parameters"][0]["learn"] = {"kind": "bool"}

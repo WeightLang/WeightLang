@@ -18,6 +18,7 @@ libc = "0.2"
 wgtime = { workspace = true }
 wgt-language = { workspace = true }
 wgt-model-macros = { workspace = true }
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"

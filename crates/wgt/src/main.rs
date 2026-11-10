@@ -172,6 +172,15 @@ enum Cmd {
     Metadata,
     /// Strictly parse and validate a WGT model definition without initializing it
     Check { source: Option<PathBuf> },
+    /// Format project WGT sources, explicit files, or stdin (-); never executes models
+    #[command(visible_alias = "fmt")]
+    Format {
+        /// Explicit source files; omit to discover project .wgt sources
+        sources: Vec<PathBuf>,
+        /// Report files needing formatting and exit nonzero without writing
+        #[arg(long)]
+        check: bool,
+    },
     /// Compile a model architecture for PyTorch or Rust; never executes it
     Compile {
         /// WGT model definition, or - to read a definition from stdin
@@ -343,6 +352,9 @@ fn execute(cli: Cli) -> Result<u8> {
         return weightlang_wgt::lsp::run();
     }
     let base = fs::canonicalize(&cli.directory).context("project directory does not exist")?;
+    if let Cmd::Format { sources, check } = &command {
+        return weightlang_wgt::format::run(&base, sources, *check);
+    }
     // Checking must return before toolchain dispatch or dependency preparation.
     if let Cmd::Check { source } = &command {
         let project = manifest::project(&base).unwrap_or_else(|_| base.clone());
@@ -463,7 +475,7 @@ fn execute(cli: Cli) -> Result<u8> {
         _ => {}
     }
     match command {
-        Cmd::Lsp => unreachable!("language server returned before project preparation"),
+        Cmd::Lsp | Cmd::Format { .. } => unreachable!("static tool returned before project preparation"),
         Cmd::Update {
             module: None,
             version,
@@ -1123,7 +1135,7 @@ fn executable(path: &Path) -> bool {
 }
 fn list_commands() {
     println!(
-        "Built-in: version toolchain self download new init templates train infer run add remove update fetch sync tree metadata check compile verify graph package export release-assets publish register cache doctor lsp"
+        "Built-in: version toolchain self download new init templates train infer run add remove update fetch sync tree metadata check format fmt compile verify graph package export release-assets publish register cache doctor lsp"
     );
     let mut names = std::collections::BTreeSet::new();
     if let Some(path) = std::env::var_os("PATH") {

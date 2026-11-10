@@ -85,7 +85,7 @@ fn artifact(root: &Path, residual: bool) {
     let mut bytes = (header.len() as u64).to_le_bytes().to_vec();
     bytes.extend(header);
     bytes.extend([0u8; 24]);
-    let source=b"wgt 0.5\nmodel demo\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ninit seed=42\n";
+    let source=b"wgt 0.5\nmodel demo\ninput x: f32[2]\noutput y: f32[2]\nlayer fc: linear(in=2, out=2)\ninit weights=xavier_uniform(42) bias=zeros()\n";
     let m = json!({"format":"weightlang.artifact","format_version":2,"model":"demo",
         "source":{"file":"source.wgt","sha256":hash(source)},
         "weights":{"file":"weights.safetensors","sha256":hash(&bytes),"tensors":{

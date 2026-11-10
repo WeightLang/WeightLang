@@ -215,6 +215,8 @@ fn check_expr(
             let probability_suffix = matches!(e, Expr::BuiltinCall(_, _)) && n == "__probabilities";
             if probability_suffix {
                 ensure!(args.len() == 1, "tensor primitive arity mismatch: {n}");
+            } else if crate::initializer::intrinsic(n) {
+                ensure!(args.len() <= 4, "initializer primitive arity mismatch: {n}");
             } else if let Some(contract) = super::prelude::tensor(n) {
                 let arity = contract.operator_arity.as_ref().with_context(|| {
                     format!("state/parameter primitive is not a pure operator: {n}")
@@ -341,6 +343,7 @@ pub fn standard_source(path: &str) -> Option<&'static str> {
         "std/snn" => Some(include_str!("../../assets/std/snn.wgt")),
         "std/plasticity" => Some(include_str!("../../assets/std/plasticity.wgt")),
         "std/ff" => Some(include_str!("../../assets/std/ff.wgt")),
+        "std/initialization" => Some(include_str!("../../assets/std/initialization.wgt")),
         _ => None,
     }
 }
