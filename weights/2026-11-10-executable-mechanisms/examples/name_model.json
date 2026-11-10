@@ -1,0 +1,44 @@
+{
+  "format": "executable-mechanism-v1",
+  "program": [
+    "concat",
+    [
+      [
+        "pipe",
+        [
+          [
+            "split",
+            "",
+            1
+          ]
+        ]
+      ],
+      [
+        "literal",
+        ", "
+      ],
+      [
+        "pipe",
+        [
+          [
+            "split",
+            "",
+            0
+          ]
+        ]
+      ]
+    ]
+  ],
+  "training_stats": {
+    "generated": 303,
+    "executions": 909,
+    "matching_checks": 23,
+    "unique_behaviors": 98,
+    "index_items": 32,
+    "states": 10,
+    "library_checks": 0,
+    "elapsed_s": 0.0019695789960678667,
+    "stopped": "concat_fit"
+  },
+  "status": "training_consistent_only"
+}

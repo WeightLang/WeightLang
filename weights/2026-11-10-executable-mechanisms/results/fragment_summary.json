@@ -1,0 +1,616 @@
+{
+  "protocol": {
+    "frozen_at_utc": "2026-11-10T15:19:00.065247+00:00",
+    "status": "Exploratory follow-up protocol fixed after primary results were observed, before fragment predictions. Not an independent preregistration.",
+    "source_results_sha256": "7ac3fd4679bea2715754a19e85f0bc78e3203c41d5f2e890b3da87aed7640013",
+    "learner_sha256": "105cd8c8e1727c5c72dac011e9ec6f0eb27840a9a39f424cd7b477af837b8f19",
+    "source_commit": "0b9a62a294897b707c86ba3c0f63561ff503cb3b",
+    "budget": {
+      "candidates": 25000,
+      "checks": 25000,
+      "max_parts": 8,
+      "max_intermediates": 160,
+      "max_output": 512,
+      "library_checks": 128
+    },
+    "seeds": [
+      11,
+      23,
+      37,
+      53,
+      71
+    ],
+    "modes": [
+      "cold",
+      "whole_cache",
+      "fragment_reuse"
+    ],
+    "cases": "All 200 cold_indexed cases in frozen public pilot, same training and heldout pairs; no exclusions based on results.",
+    "source_library": "Only the 14 accepted programs learned in the primary pilot from source train tasks; original reference programs ignored. Original family and example-pair exclusions retained.",
+    "fragment_rule": "All actual AST subtrees plus all nonempty proper prefixes of existing pipelines. Unique ASTs ordered by existing structural cost then canonical JSON. No primitive invented; no target program hard-coded.",
+    "composition": "Use learned fragment output signatures and training-target-derived literals to search concatenations with the existing residual prefix index. If no fit, run cold solver with candidates and checks reduced by already-consumed counts.",
+    "budget_accounting": "Every reused program, subprogram, or literal counts as one candidate and one evaluation per training example; matching checks, index items, and states recorded. This is a dual candidate/check budget, not a universal machine-instruction budget. Full wall time includes enumeration, hashing, filtering, literal generation, verification, and indexing. Source discovery and fragment extraction added to lifetime costs. Test-only reporting evaluation is excluded from learner time for every method.",
+    "whole_cache_control": "Charges whole-program tests against candidate budget before cold fallback; slightly stricter than original main-pilot cache implementation. Do not overwrite or silently replace original results.",
+    "outcomes": [
+      "all-heldout task success",
+      "fit-but-wrong",
+      "no-fit",
+      "paired regressions and improvements",
+      "novel combinations that pass heldout",
+      "all raw predictions",
+      "total measured lifetime learning time and counters"
+    ],
+    "no_tuning": "One frozen protocol; keep every failure and negative-transfer case. No grammar or budget updates after observing outcomes.",
+    "scope": "Public PBE task replay; 200 seed-task trials are not 200 independent task families. No production deployment, broad general-intelligence claim, or independent out-of-domain validation."
+  },
+  "summary": {
+    "cold": {
+      "runs": 200,
+      "all_test_correct": 146,
+      "fit_but_wrong": 44,
+      "no_fit": 10,
+      "correct_examples": 1085,
+      "test_examples": 1140,
+      "test_task_learning_s": 7.941497224092018,
+      "source_discovery_s": 0.0,
+      "source_fragment_extraction_s": 0.0,
+      "lifetime_learning_s": 7.941497224092018,
+      "median_learning_ms": 1.5487189957639202,
+      "improved_vs_cold": 0,
+      "regressed_vs_cold": 0,
+      "improved_vs_whole": 0,
+      "regressed_vs_whole": 0,
+      "composed_routes": 0,
+      "composed_and_heldout_correct": 0,
+      "composed_new_ast_and_correct": 0,
+      "generated": 1137420,
+      "lifetime_generated": 1137420,
+      "executions": 7718000,
+      "lifetime_executions": 7718000,
+      "matching_checks": 312671,
+      "lifetime_matching_checks": 312671,
+      "index_items": 13694,
+      "lifetime_index_items": 13694,
+      "states": 10465,
+      "lifetime_states": 10465,
+      "library_checks": 0,
+      "lifetime_library_checks": 0
+    },
+    "whole_cache": {
+      "runs": 200,
+      "all_test_correct": 146,
+      "fit_but_wrong": 44,
+      "no_fit": 10,
+      "correct_examples": 1085,
+      "test_examples": 1140,
+      "test_task_learning_s": 7.8611940900591435,
+      "source_discovery_s": 0.3267067059932742,
+      "source_fragment_extraction_s": 0.0,
+      "lifetime_learning_s": 8.187900796052418,
+      "median_learning_ms": 1.5617675016983412,
+      "improved_vs_cold": 0,
+      "regressed_vs_cold": 0,
+      "improved_vs_whole": 0,
+      "regressed_vs_whole": 0,
+      "composed_routes": 0,
+      "composed_and_heldout_correct": 0,
+      "composed_new_ast_and_correct": 0,
+      "generated": 1138554,
+      "lifetime_generated": 1189494,
+      "executions": 7712054,
+      "lifetime_executions": 8042988,
+      "matching_checks": 312671,
+      "lifetime_matching_checks": 338006,
+      "index_items": 13694,
+      "lifetime_index_items": 14768,
+      "states": 10465,
+      "lifetime_states": 10686,
+      "library_checks": 2725,
+      "lifetime_library_checks": 2725
+    },
+    "fragment_reuse": {
+      "runs": 200,
+      "all_test_correct": 144,
+      "fit_but_wrong": 46,
+      "no_fit": 10,
+      "correct_examples": 1083,
+      "test_examples": 1140,
+      "test_task_learning_s": 8.134754338956554,
+      "source_discovery_s": 0.3267067059932742,
+      "source_fragment_extraction_s": 0.0005890830070711672,
+      "lifetime_learning_s": 8.4620501279569,
+      "median_learning_ms": 1.7431484957342036,
+      "improved_vs_cold": 0,
+      "regressed_vs_cold": 2,
+      "improved_vs_whole": 0,
+      "regressed_vs_whole": 2,
+      "composed_routes": 12,
+      "composed_and_heldout_correct": 9,
+      "composed_new_ast_and_correct": 9,
+      "generated": 1140808,
+      "lifetime_generated": 1191748,
+      "executions": 7755880,
+      "lifetime_executions": 8086814,
+      "matching_checks": 313093,
+      "lifetime_matching_checks": 338428,
+      "index_items": 15380,
+      "lifetime_index_items": 16454,
+      "states": 11059,
+      "lifetime_states": 11280,
+      "library_checks": 5383,
+      "lifetime_library_checks": 5383
+    }
+  },
+  "fragments": [
+    [
+      "literal",
+      " "
+    ],
+    [
+      "literal",
+      "("
+    ],
+    [
+      "literal",
+      "."
+    ],
+    [
+      "literal",
+      ") "
+    ],
+    [
+      "pipe",
+      [
+        [
+          "alpha"
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "drop_first",
+          4
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "drop_last",
+          5
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "prefix",
+          1
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "prefix",
+          3
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "",
+          0
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "",
+          1
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "suffix",
+          3
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "suffix",
+          5
+        ]
+      ]
+    ],
+    [
+      "literal",
+      "Dr. "
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "",
+          -1
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "-",
+          0
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "-",
+          1
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          ".",
+          0
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          ".",
+          1
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "|",
+          0
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "-",
+          -1
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "suffix",
+          5
+        ],
+        [
+          "split",
+          "",
+          0
+        ]
+      ]
+    ],
+    [
+      "concat",
+      [
+        [
+          "literal",
+          "Dr. "
+        ],
+        [
+          "pipe",
+          [
+            [
+              "split",
+              "",
+              0
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "concat",
+      [
+        [
+          "pipe",
+          [
+            [
+              "split",
+              "",
+              0
+            ]
+          ]
+        ],
+        [
+          "pipe",
+          [
+            [
+              "split",
+              ".",
+              1
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "concat",
+      [
+        [
+          "pipe",
+          [
+            [
+              "prefix",
+              1
+            ]
+          ]
+        ],
+        [
+          "literal",
+          " "
+        ],
+        [
+          "pipe",
+          [
+            [
+              "split",
+              "",
+              1
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "concat",
+      [
+        [
+          "pipe",
+          [
+            [
+              "drop_last",
+              5
+            ]
+          ]
+        ],
+        [
+          "pipe",
+          [
+            [
+              "suffix",
+              5
+            ],
+            [
+              "split",
+              "",
+              0
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "concat",
+      [
+        [
+          "literal",
+          "("
+        ],
+        [
+          "pipe",
+          [
+            [
+              "prefix",
+              3
+            ]
+          ]
+        ],
+        [
+          "literal",
+          ") "
+        ],
+        [
+          "pipe",
+          [
+            [
+              "drop_first",
+              4
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "concat",
+      [
+        [
+          "pipe",
+          [
+            [
+              "prefix",
+              3
+            ]
+          ]
+        ],
+        [
+          "literal",
+          "."
+        ],
+        [
+          "pipe",
+          [
+            [
+              "split",
+              "-",
+              1
+            ]
+          ]
+        ],
+        [
+          "literal",
+          "."
+        ],
+        [
+          "pipe",
+          [
+            [
+              "suffix",
+              3
+            ]
+          ]
+        ]
+      ]
+    ]
+  ],
+  "extraction": {
+    "elapsed_s": 0.0005890830070711672,
+    "nodes_visited": 33,
+    "unique_fragments": 28,
+    "serialized_bytes": 1038,
+    "provenance": {
+      "[\"concat\",[[\"pipe\",[[\"drop_last\",5]]],[\"pipe\",[[\"suffix\",5],[\"split\",\"\",0]]]]]": [
+        "library:0"
+      ],
+      "[\"pipe\",[[\"drop_last\",5]]]": [
+        "library:0/concat:0"
+      ],
+      "[\"pipe\",[[\"suffix\",5],[\"split\",\"\",0]]]": [
+        "library:0/concat:1"
+      ],
+      "[\"pipe\",[[\"suffix\",5]]]": [
+        "library:0/concat:1/prefix:1"
+      ],
+      "[\"concat\",[[\"pipe\",[[\"prefix\",1]]],[\"literal\",\" \"],[\"pipe\",[[\"split\",\"\",1]]]]]": [
+        "library:1"
+      ],
+      "[\"pipe\",[[\"prefix\",1]]]": [
+        "library:1/concat:0"
+      ],
+      "[\"literal\",\" \"]": [
+        "library:1/concat:1"
+      ],
+      "[\"pipe\",[[\"split\",\"\",1]]]": [
+        "library:1/concat:2"
+      ],
+      "[\"pipe\",[[\"split\",\"|\",0]]]": [
+        "library:2"
+      ],
+      "[\"concat\",[[\"pipe\",[[\"split\",\"\",0]]],[\"pipe\",[[\"split\",\".\",1]]]]]": [
+        "library:3"
+      ],
+      "[\"pipe\",[[\"split\",\"\",0]]]": [
+        "library:3/concat:0",
+        "library:6/concat:1",
+        "library:7"
+      ],
+      "[\"pipe\",[[\"split\",\".\",1]]]": [
+        "library:3/concat:1"
+      ],
+      "[\"pipe\",[[\"alpha\"]]]": [
+        "library:4"
+      ],
+      "[\"pipe\",[[\"split\",\"-\",-1]]]": [
+        "library:5"
+      ],
+      "[\"concat\",[[\"literal\",\"Dr. \"],[\"pipe\",[[\"split\",\"\",0]]]]]": [
+        "library:6"
+      ],
+      "[\"literal\",\"Dr. \"]": [
+        "library:6/concat:0"
+      ],
+      "[\"pipe\",[[\"split\",\"\",-1]]]": [
+        "library:8"
+      ],
+      "[\"pipe\",[[\"split\",\"-\",1]]]": [
+        "library:9",
+        "library:11/concat:2"
+      ],
+      "[\"concat\",[[\"literal\",\"(\"],[\"pipe\",[[\"prefix\",3]]],[\"literal\",\") \"],[\"pipe\",[[\"drop_first\",4]]]]]": [
+        "library:10"
+      ],
+      "[\"literal\",\"(\"]": [
+        "library:10/concat:0"
+      ],
+      "[\"pipe\",[[\"prefix\",3]]]": [
+        "library:10/concat:1",
+        "library:11/concat:0"
+      ],
+      "[\"literal\",\") \"]": [
+        "library:10/concat:2"
+      ],
+      "[\"pipe\",[[\"drop_first\",4]]]": [
+        "library:10/concat:3"
+      ],
+      "[\"concat\",[[\"pipe\",[[\"prefix\",3]]],[\"literal\",\".\"],[\"pipe\",[[\"split\",\"-\",1]]],[\"literal\",\".\"],[\"pipe\",[[\"suffix\",3]]]]]": [
+        "library:11"
+      ],
+      "[\"literal\",\".\"]": [
+        "library:11/concat:1",
+        "library:11/concat:3"
+      ],
+      "[\"pipe\",[[\"suffix\",3]]]": [
+        "library:11/concat:4"
+      ],
+      "[\"pipe\",[[\"split\",\"-\",0]]]": [
+        "library:12"
+      ],
+      "[\"pipe\",[[\"split\",\".\",0]]]": [
+        "library:13"
+      ]
+    }
+  },
+  "source_discovery_counters": {
+    "generated": 50940,
+    "executions": 330934,
+    "matching_checks": 25335,
+    "index_items": 1074,
+    "states": 221
+  },
+  "evaluation_wall_s": 24.004951103997882,
+  "environment": {
+    "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+    "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "peak_process_rss_kib": 26636
+  },
+  "probe_sha256": "dc1e8be439ba576b1d0d794535a302144f2801da9b60c17a59514e8f815aaedf",
+  "protocol_sha256": "46cc029180d7a6a1803f87239550da3e918e27579a1a77af6140f770d383b776"
+}

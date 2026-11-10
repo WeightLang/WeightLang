@@ -1,0 +1,211 @@
+wine seed=11 dummy: acc=0.4000 F1=0.1905 train=0.0027s nodes=1
+wine seed=11 cost_tree: acc=0.9333 F1=0.9326 train=0.0539s nodes=13
+wine seed=11 cart: acc=0.9333 F1=0.9361 train=0.0216s nodes=11
+wine seed=11 random_forest: acc=0.9556 F1=0.9586 train=1.1996s nodes=1086
+wine seed=23 dummy: acc=0.4000 F1=0.1905 train=0.0042s nodes=1
+wine seed=23 cost_tree: acc=0.9556 F1=0.9562 train=0.0454s nodes=9
+wine seed=23 cart: acc=0.8889 F1=0.8960 train=0.0232s nodes=9
+wine seed=23 random_forest: acc=0.9333 F1=0.9363 train=1.1885s nodes=960
+wine seed=37 dummy: acc=0.4000 F1=0.1905 train=0.0019s nodes=1
+wine seed=37 cost_tree: acc=0.9111 F1=0.9124 train=0.0428s nodes=17
+wine seed=37 cart: acc=0.9111 F1=0.9162 train=0.0192s nodes=15
+wine seed=37 random_forest: acc=0.9556 F1=0.9593 train=1.1717s nodes=1458
+wine seed=53 dummy: acc=0.4000 F1=0.1905 train=0.0023s nodes=1
+wine seed=53 cost_tree: acc=0.9556 F1=0.9563 train=0.0441s nodes=9
+wine seed=53 cart: acc=0.9111 F1=0.9106 train=0.0227s nodes=13
+wine seed=53 random_forest: acc=0.9778 F1=0.9771 train=1.1552s nodes=1054
+wine seed=71 dummy: acc=0.4000 F1=0.1905 train=0.0023s nodes=1
+wine seed=71 cost_tree: acc=0.9333 F1=0.9363 train=0.0511s nodes=9
+wine seed=71 cart: acc=0.8000 F1=0.7931 train=0.0218s nodes=11
+wine seed=71 random_forest: acc=0.9778 F1=0.9797 train=1.1089s nodes=1422
+breast_cancer_wisconsin_diagnostic seed=11 dummy: acc=0.6294 F1=0.3863 train=0.0024s nodes=1
+breast_cancer_wisconsin_diagnostic seed=11 cost_tree: acc=0.9091 F1=0.9014 train=0.2728s nodes=21
+breast_cancer_wisconsin_diagnostic seed=11 cart: acc=0.9231 F1=0.9158 train=0.0536s nodes=27
+breast_cancer_wisconsin_diagnostic seed=11 random_forest: acc=0.9371 F1=0.9317 train=2.6046s nodes=2058
+breast_cancer_wisconsin_diagnostic seed=23 dummy: acc=0.6294 F1=0.3863 train=0.0025s nodes=1
+breast_cancer_wisconsin_diagnostic seed=23 cost_tree: acc=0.9091 F1=0.9043 train=0.5196s nodes=19
+breast_cancer_wisconsin_diagnostic seed=23 cart: acc=0.9231 F1=0.9172 train=0.0718s nodes=23
+breast_cancer_wisconsin_diagnostic seed=23 random_forest: acc=0.9371 F1=0.9328 train=2.4406s nodes=1754
+breast_cancer_wisconsin_diagnostic seed=37 dummy: acc=0.6294 F1=0.3863 train=0.0023s nodes=1
+breast_cancer_wisconsin_diagnostic seed=37 cost_tree: acc=0.9720 F1=0.9702 train=0.3701s nodes=11
+breast_cancer_wisconsin_diagnostic seed=37 cart: acc=0.9580 F1=0.9557 train=0.0577s nodes=13
+breast_cancer_wisconsin_diagnostic seed=37 random_forest: acc=0.9860 F1=0.9850 train=2.2259s nodes=3612
+breast_cancer_wisconsin_diagnostic seed=53 dummy: acc=0.6294 F1=0.3863 train=0.0023s nodes=1
+breast_cancer_wisconsin_diagnostic seed=53 cost_tree: acc=0.9441 F1=0.9405 train=0.3921s nodes=13
+breast_cancer_wisconsin_diagnostic seed=53 cart: acc=0.9091 F1=0.9043 train=0.0521s nodes=37
+breast_cancer_wisconsin_diagnostic seed=53 random_forest: acc=0.9580 F1=0.9554 train=2.2126s nodes=2706
+breast_cancer_wisconsin_diagnostic seed=71 dummy: acc=0.6294 F1=0.3863 train=0.0018s nodes=1
+breast_cancer_wisconsin_diagnostic seed=71 cost_tree: acc=0.8951 F1=0.8871 train=0.3740s nodes=19
+breast_cancer_wisconsin_diagnostic seed=71 cart: acc=0.9091 F1=0.9029 train=0.0525s nodes=15
+breast_cancer_wisconsin_diagnostic seed=71 random_forest: acc=0.9231 F1=0.9172 train=2.0312s nodes=2666
+RESULT /workspace/scratch/64876ce6d21d/mechanism_lab/results/tabular_results.json
+[
+  {
+    "dataset": "wine",
+    "model": "dummy",
+    "n_runs": 5,
+    "accuracy_mean": 0.4,
+    "accuracy_sd": 0.0,
+    "macro_f1_mean": 0.19047619047619047,
+    "macro_f1_sd": 0.0,
+    "total_training_seconds_mean": 0.0026658134040189905,
+    "total_training_seconds_sd": 0.0009051284127187092,
+    "final_fit_seconds_mean": 0.00021047480113338678,
+    "final_fit_seconds_sd": 5.999175003166653e-05,
+    "tuning_seconds_mean": 0.002455338602885604,
+    "tuning_seconds_sd": 0.0008818418500085778,
+    "predict_us_per_sample_mean": 3.100964444444444,
+    "predict_us_per_sample_sd": 0.24969524763470763,
+    "node_count_mean": 1,
+    "node_count_sd": 0.0,
+    "serialized_pickle_bytes_mean": 468,
+    "serialized_pickle_bytes_sd": 0.0
+  },
+  {
+    "dataset": "wine",
+    "model": "cost_tree",
+    "n_runs": 5,
+    "accuracy_mean": 0.9377777777777778,
+    "accuracy_sd": 0.018592445034090594,
+    "macro_f1_mean": 0.9387497783060128,
+    "macro_f1_sd": 0.018394910981400833,
+    "total_training_seconds_mean": 0.047447203597403134,
+    "total_training_seconds_sd": 0.004825402758149745,
+    "final_fit_seconds_mean": 0.00541155379905831,
+    "final_fit_seconds_sd": 0.0007788872534630379,
+    "tuning_seconds_mean": 0.04203564979834482,
+    "tuning_seconds_sd": 0.004153258903072307,
+    "predict_us_per_sample_mean": 0.17068,
+    "predict_us_per_sample_sd": 0.014168758886898372,
+    "node_count_mean": 11.4,
+    "node_count_sd": 3.5777087639996634,
+    "serialized_pickle_bytes_mean": 429,
+    "serialized_pickle_bytes_sd": 62.609903369994115
+  },
+  {
+    "dataset": "wine",
+    "model": "cart",
+    "n_runs": 5,
+    "accuracy_mean": 0.8888888888888888,
+    "accuracy_sd": 0.052115730664704756,
+    "macro_f1_mean": 0.8903884404585668,
+    "macro_f1_sd": 0.056263003730871876,
+    "total_training_seconds_mean": 0.021711655604303815,
+    "total_training_seconds_sd": 0.00153488653139508,
+    "final_fit_seconds_mean": 0.0011883622006280347,
+    "final_fit_seconds_sd": 0.00035629973800951296,
+    "tuning_seconds_mean": 0.02052329340367578,
+    "tuning_seconds_sd": 0.0013680600103142962,
+    "predict_us_per_sample_mean": 1.0926266666666666,
+    "predict_us_per_sample_sd": 0.10667324215843722,
+    "node_count_mean": 11.8,
+    "node_count_sd": 2.280350850198276,
+    "serialized_pickle_bytes_mean": 2172.4,
+    "serialized_pickle_bytes_sd": 200.6708748174483
+  },
+  {
+    "dataset": "wine",
+    "model": "random_forest",
+    "n_runs": 5,
+    "accuracy_mean": 0.96,
+    "accuracy_sd": 0.018592445034090542,
+    "macro_f1_mean": 0.9622060464750359,
+    "macro_f1_sd": 0.01749731360050729,
+    "total_training_seconds_mean": 1.1647851793997688,
+    "total_training_seconds_sd": 0.035484526563970616,
+    "final_fit_seconds_mean": 0.13337897119636183,
+    "final_fit_seconds_sd": 0.013951094230402953,
+    "tuning_seconds_mean": 1.031406208203407,
+    "tuning_seconds_sd": 0.029278390618267005,
+    "predict_us_per_sample_mean": 116.7858,
+    "predict_us_per_sample_sd": 9.878276019767618,
+    "node_count_mean": 1196,
+    "node_count_sd": 227.85960589801783,
+    "serialized_pickle_bytes_mean": 135253,
+    "serialized_pickle_bytes_sd": 20113.2227029882
+  },
+  {
+    "dataset": "breast_cancer_wisconsin_diagnostic",
+    "model": "dummy",
+    "n_runs": 5,
+    "accuracy_mean": 0.6293706293706294,
+    "accuracy_sd": 0.0,
+    "macro_f1_mean": 0.38626609442060084,
+    "macro_f1_sd": 0.0,
+    "total_training_seconds_mean": 0.002281433393363841,
+    "total_training_seconds_sd": 0.0002553778936770189,
+    "final_fit_seconds_mean": 0.0001840161974541843,
+    "final_fit_seconds_sd": 4.394180168264658e-05,
+    "tuning_seconds_mean": 0.0020974171959096564,
+    "tuning_seconds_sd": 0.00024701776795628687,
+    "predict_us_per_sample_mean": 0.9527972027972028,
+    "predict_us_per_sample_sd": 0.048437235957265526,
+    "node_count_mean": 1,
+    "node_count_sd": 0.0,
+    "serialized_pickle_bytes_mean": 452,
+    "serialized_pickle_bytes_sd": 0.0
+  },
+  {
+    "dataset": "breast_cancer_wisconsin_diagnostic",
+    "model": "cost_tree",
+    "n_runs": 5,
+    "accuracy_mean": 0.9258741258741259,
+    "accuracy_sd": 0.031507357555437224,
+    "macro_f1_mean": 0.920708841251591,
+    "macro_f1_sd": 0.03396893386068344,
+    "total_training_seconds_mean": 0.3857353742030682,
+    "total_training_seconds_sd": 0.08817644330441979,
+    "final_fit_seconds_mean": 0.061187780203181316,
+    "final_fit_seconds_sd": 0.011711204856429068,
+    "tuning_seconds_mean": 0.32454759399988686,
+    "tuning_seconds_sd": 0.07787882264280066,
+    "predict_us_per_sample_mean": 0.17762937062937062,
+    "predict_us_per_sample_sd": 0.014804091751057211,
+    "node_count_mean": 16.6,
+    "node_count_sd": 4.33589667773576,
+    "serialized_pickle_bytes_mean": 514,
+    "serialized_pickle_bytes_sd": 75.8781918603758
+  },
+  {
+    "dataset": "breast_cancer_wisconsin_diagnostic",
+    "model": "cart",
+    "n_runs": 5,
+    "accuracy_mean": 0.9244755244755245,
+    "accuracy_sd": 0.020024924564022873,
+    "macro_f1_mean": 0.9191934043560522,
+    "macro_f1_sd": 0.02140508426867517,
+    "total_training_seconds_mean": 0.057541641592979434,
+    "total_training_seconds_sd": 0.008266289461777212,
+    "final_fit_seconds_mean": 0.005027496599359438,
+    "final_fit_seconds_sd": 0.0010243231215206995,
+    "tuning_seconds_mean": 0.05251414499361999,
+    "tuning_seconds_sd": 0.008723316810047498,
+    "predict_us_per_sample_mean": 0.36330769230769233,
+    "predict_us_per_sample_sd": 0.014328027984888322,
+    "node_count_mean": 23,
+    "node_count_sd": 9.695359714832659,
+    "serialized_pickle_bytes_mean": 2966,
+    "serialized_pickle_bytes_sd": 775.6287771866126
+  },
+  {
+    "dataset": "breast_cancer_wisconsin_diagnostic",
+    "model": "random_forest",
+    "n_runs": 5,
+    "accuracy_mean": 0.9482517482517483,
+    "accuracy_sd": 0.024525423659790456,
+    "macro_f1_mean": 0.9444271710424403,
+    "macro_f1_sd": 0.02647085649999782,
+    "total_training_seconds_mean": 2.3029705868015298,
+    "total_training_seconds_sd": 0.22241744311465558,
+    "final_fit_seconds_mean": 0.26822205299977214,
+    "final_fit_seconds_sd": 0.13375081514001072,
+    "tuning_seconds_mean": 2.034748533801758,
+    "tuning_seconds_sd": 0.10554544468833732,
+    "predict_us_per_sample_mean": 36.492429370629374,
+    "predict_us_per_sample_sd": 0.7707111546718667,
+    "node_count_mean": 2559.2,
+    "node_count_sd": 714.2990970174889,
+    "serialized_pickle_bytes_mean": 233928.4,
+    "serialized_pickle_bytes_sd": 57157.439378439616
+  }
+]

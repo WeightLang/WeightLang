@@ -62,3 +62,4 @@ requires acquisition and matching overhead to be included, not merely cache
 hit speed. A novel general intelligence claim requires much broader evidence
 than these experiments. This pilot does not certify AGI, causal discovery,
 real-world deployment reliability, state-of-the-art speed or global optimality.
+

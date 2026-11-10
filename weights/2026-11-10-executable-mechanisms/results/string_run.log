@@ -1,0 +1,118 @@
+{"seeds": [11, 23, 37, 53, 71], "budget": {"candidates": 25000, "checks": 25000, "max_parts": 8, "max_intermediates": 160, "max_output": 512, "library_checks": 128}, "test_tasks": 40, "test_families": 34, "library_training_tasks": 30, "source_commit": "0b9a62a294897b707c86ba3c0f63561ff503cb3b", "source_test_files": 82, "source_train_files": 123, "modes": ["cold_indexed", "cold_scan", "whole_program_cache", "memorization"], "library_mode": "whole learned programs only; no invented subroutine abstractions", "parser": "SMT-LIB literal examples only; grammar and reference programs ignored"}
+{"library_programs": 14, "library_discovery_s": 0.3267067059932742}
+{"completed_seed": 11, "elapsed_s": 5.578478458992322}
+{"completed_seed": 23, "elapsed_s": 10.915041918997304}
+{"completed_seed": 37, "elapsed_s": 15.340098329994362}
+{"completed_seed": 53, "elapsed_s": 19.98211004699988}
+{"completed_seed": 71, "elapsed_s": 24.17818676799652}
+{
+  "summary": {
+    "cold_indexed": {
+      "runs": 200,
+      "train_consistent": 190,
+      "all_test_correct": 146,
+      "fit_but_wrong": 44,
+      "no_fit": 10,
+      "task_success_mean": 0.73,
+      "task_success_seed_sd": 0.037080992435478306,
+      "heldout_examples": 1140,
+      "correct_examples": 1085,
+      "train_total_s": 7.578350942960242,
+      "train_median_ms": 1.5651984940632246,
+      "generated": 1137420,
+      "executions": 7718000,
+      "matching_checks": 312671,
+      "library_checks": 0,
+      "model_bytes_median_fitted": 42.0,
+      "inference_us_median_fitted": 1.2772425543516874,
+      "seed_success_rates": [
+        0.775,
+        0.725,
+        0.725,
+        0.75,
+        0.675
+      ]
+    },
+    "cold_scan": {
+      "runs": 200,
+      "train_consistent": 188,
+      "all_test_correct": 146,
+      "fit_but_wrong": 42,
+      "no_fit": 12,
+      "task_success_mean": 0.73,
+      "task_success_seed_sd": 0.037080992435478306,
+      "heldout_examples": 1140,
+      "correct_examples": 1085,
+      "train_total_s": 7.64644722196681,
+      "train_median_ms": 1.8139165040338412,
+      "generated": 1137420,
+      "executions": 7718000,
+      "matching_checks": 616638,
+      "library_checks": 0,
+      "model_bytes_median_fitted": 39.5,
+      "inference_us_median_fitted": 1.3528216191899087,
+      "seed_success_rates": [
+        0.775,
+        0.725,
+        0.725,
+        0.75,
+        0.675
+      ]
+    },
+    "memorization": {
+      "runs": 200,
+      "train_consistent": 200,
+      "all_test_correct": 0,
+      "fit_but_wrong": 200,
+      "no_fit": 0,
+      "task_success_mean": 0.0,
+      "task_success_seed_sd": 0.0,
+      "heldout_examples": 1140,
+      "correct_examples": 0,
+      "train_total_s": 0.0,
+      "train_median_ms": 0.0,
+      "generated": 0,
+      "executions": 0,
+      "matching_checks": 0,
+      "library_checks": 0,
+      "model_bytes_median_fitted": 102.5,
+      "inference_us_median_fitted": 0.0,
+      "seed_success_rates": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "whole_program_cache": {
+      "runs": 200,
+      "train_consistent": 190,
+      "all_test_correct": 146,
+      "fit_but_wrong": 44,
+      "no_fit": 10,
+      "task_success_mean": 0.73,
+      "task_success_seed_sd": 0.037080992435478306,
+      "heldout_examples": 1140,
+      "correct_examples": 1085,
+      "train_total_s": 7.640076918905834,
+      "train_median_ms": 1.5096254937816411,
+      "generated": 1136319,
+      "executions": 7715792,
+      "matching_checks": 312671,
+      "library_checks": 2725,
+      "model_bytes_median_fitted": 42.0,
+      "inference_us_median_fitted": 1.2884707482016617,
+      "seed_success_rates": [
+        0.775,
+        0.725,
+        0.725,
+        0.75,
+        0.675
+      ]
+    }
+  },
+  "cache_total_cost_ratio": 1.0512555679807483,
+  "wall_s": 24.186624899986782,
+  "rss_kib": 20608
+}

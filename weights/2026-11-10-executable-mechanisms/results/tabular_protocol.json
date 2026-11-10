@@ -1,0 +1,138 @@
+{
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "outer_test_fraction": 0.25,
+  "inner_validation_fraction_of_outer_train": 0.25,
+  "stratified": true,
+  "selection_metric": "validation_macro_f1",
+  "tie_break": "fewer nodes, then fixed grid order",
+  "grids": {
+    "cost_tree": [
+      {
+        "penalty": 0.25,
+        "min_leaf": 2,
+        "max_depth": 8
+      },
+      {
+        "penalty": 0.25,
+        "min_leaf": 5,
+        "max_depth": 8
+      },
+      {
+        "penalty": 0.5,
+        "min_leaf": 2,
+        "max_depth": 8
+      },
+      {
+        "penalty": 0.5,
+        "min_leaf": 5,
+        "max_depth": 8
+      },
+      {
+        "penalty": 1.0,
+        "min_leaf": 2,
+        "max_depth": 8
+      },
+      {
+        "penalty": 1.0,
+        "min_leaf": 5,
+        "max_depth": 8
+      },
+      {
+        "penalty": 2.0,
+        "min_leaf": 2,
+        "max_depth": 8
+      },
+      {
+        "penalty": 2.0,
+        "min_leaf": 5,
+        "max_depth": 8
+      }
+    ],
+    "cart": [
+      {
+        "max_depth": 3,
+        "min_samples_leaf": 1
+      },
+      {
+        "max_depth": 3,
+        "min_samples_leaf": 5
+      },
+      {
+        "max_depth": 5,
+        "min_samples_leaf": 1
+      },
+      {
+        "max_depth": 5,
+        "min_samples_leaf": 5
+      },
+      {
+        "max_depth": 8,
+        "min_samples_leaf": 1
+      },
+      {
+        "max_depth": 8,
+        "min_samples_leaf": 5
+      },
+      {
+        "max_depth": null,
+        "min_samples_leaf": 1
+      },
+      {
+        "max_depth": null,
+        "min_samples_leaf": 5
+      }
+    ],
+    "random_forest": [
+      {
+        "max_depth": 5,
+        "min_samples_leaf": 1,
+        "max_features": "sqrt"
+      },
+      {
+        "max_depth": 5,
+        "min_samples_leaf": 1,
+        "max_features": null
+      },
+      {
+        "max_depth": 5,
+        "min_samples_leaf": 3,
+        "max_features": "sqrt"
+      },
+      {
+        "max_depth": 5,
+        "min_samples_leaf": 3,
+        "max_features": null
+      },
+      {
+        "max_depth": null,
+        "min_samples_leaf": 1,
+        "max_features": "sqrt"
+      },
+      {
+        "max_depth": null,
+        "min_samples_leaf": 1,
+        "max_features": null
+      },
+      {
+        "max_depth": null,
+        "min_samples_leaf": 3,
+        "max_features": "sqrt"
+      },
+      {
+        "max_depth": null,
+        "min_samples_leaf": 3,
+        "max_features": null
+      }
+    ]
+  },
+  "forest_trees": 100,
+  "forest_jobs": 1,
+  "inference_timing": "median of 31 whole test-batch predictions / test size, including call overhead",
+  "serialized_size": "pickle protocol 5; implementation-dependent, not fair compression ratio"
+}

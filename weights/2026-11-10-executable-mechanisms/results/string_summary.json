@@ -1,0 +1,979 @@
+{
+  "protocol": {
+    "seeds": [
+      11,
+      23,
+      37,
+      53,
+      71
+    ],
+    "budget": {
+      "candidates": 25000,
+      "checks": 25000,
+      "max_parts": 8,
+      "max_intermediates": 160,
+      "max_output": 512,
+      "library_checks": 128
+    },
+    "test_tasks": 40,
+    "test_families": 34,
+    "library_training_tasks": 30,
+    "source_commit": "0b9a62a294897b707c86ba3c0f63561ff503cb3b",
+    "test_exclusions": [
+      {
+        "file": "36462127.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "38871714.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "39060015.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "44789427.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "count-total-words-in-a-cell.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "exceljet1.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "extract-nth-word-from-text-string.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "extract-text-between-parentheses.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "extract-word-containing-specific-text.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "find-nth-occurrence-of-character.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "get-first-name-from-name-with-comma.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "initials-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "initials-long-repeat.sl"
+      },
+      {
+        "file": "initials_small.sl",
+        "reason": "identical example set",
+        "duplicate_of": "initials.sl"
+      },
+      {
+        "file": "phone-10-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-10-long-repeat.sl"
+      },
+      {
+        "file": "phone-10_short.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-10.sl"
+      },
+      {
+        "file": "phone-5-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-5-long-repeat.sl"
+      },
+      {
+        "file": "phone-5.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-5-short.sl"
+      },
+      {
+        "file": "phone-6-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-6-long-repeat.sl"
+      },
+      {
+        "file": "phone-6.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-6-short.sl"
+      },
+      {
+        "file": "phone-7-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-7-long-repeat.sl"
+      },
+      {
+        "file": "phone-7.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-7-short.sl"
+      },
+      {
+        "file": "phone-9-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-9-long-repeat.sl"
+      },
+      {
+        "file": "phone-9.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-9-short.sl"
+      },
+      {
+        "file": "split-text-string-at-specific-character.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "stackoverflow2.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "stackoverflow5.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "stackoverflow6.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "stackoverflow7.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "stackoverflow8.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "stackoverflow9.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "univ_4-long-repeat.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_4-long.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_4.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_4_short.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_5-long-repeat.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_5-long.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_5.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_5_short.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_6-long-repeat.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_6-long.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_6.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_6_short.sl",
+        "reason": "not a single-String to String task"
+      }
+    ],
+    "train_exclusions": [
+      {
+        "file": "12948338.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "19274448.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "19558979.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "23435880.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "28627624_1.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "34801680.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "35016216.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "37281007.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "37534494.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "40498040.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "add-a-line-break-with-a-formula.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "bikes-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "bikes-long-repeat.sl"
+      },
+      {
+        "file": "bikes_small.sl",
+        "reason": "identical example set",
+        "duplicate_of": "bikes.sl"
+      },
+      {
+        "file": "cell-contains-all-of-many-things.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "cell-contains-number.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "cell-contains-one-of-many-things.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "cell-contains-one-of-many-with-exclusions.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "cell-contains-some-words-but-not-others.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "cell-contains-specific-text.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "cell-equals-one-of-many-things.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "compare-two-strings.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "convert-numbers-to-text.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "convert-text-to-numbers.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "count-consecutive-monthly-orders.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "count-line-breaks-in-cell.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "count-specific-characters-in-a-cell.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "count-specific-words-in-a-cell.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "count-total-characters-in-a-cell.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "create-email-address-from-name.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "create-email-address-with-name-and-domain.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "dr-name-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "dr-name-long-repeat.sl"
+      },
+      {
+        "file": "dr-name_small.sl",
+        "reason": "identical example set",
+        "duplicate_of": "dr-name.sl"
+      },
+      {
+        "file": "firstname-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "firstname-long-repeat.sl"
+      },
+      {
+        "file": "firstname_small.sl",
+        "reason": "identical example set",
+        "duplicate_of": "firstname.sl"
+      },
+      {
+        "file": "get-domain-from-email-address_2.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "join-cells-with-comma.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "join-first-and-last-name.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "lastname-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "lastname-long-repeat.sl"
+      },
+      {
+        "file": "lastname_small.sl",
+        "reason": "identical example set",
+        "duplicate_of": "lastname.sl"
+      },
+      {
+        "file": "most-frequently-occurring-text.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-2-long-repeat.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-2-long.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-2.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-2_short.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-3-long-repeat.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-3-long.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-3.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-3_short.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-4-long-repeat.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-4-long.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-4.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-4_short.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-long-repeat.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine-long.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "name-combine_short.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "phone-1-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-1-long-repeat.sl"
+      },
+      {
+        "file": "phone-1_short.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-1.sl"
+      },
+      {
+        "file": "phone-2-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-2-long-repeat.sl"
+      },
+      {
+        "file": "phone-2_short.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-2.sl"
+      },
+      {
+        "file": "phone-3-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-3-long-repeat.sl"
+      },
+      {
+        "file": "phone-3_short.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-3.sl"
+      },
+      {
+        "file": "phone-4-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-4-long-repeat.sl"
+      },
+      {
+        "file": "phone-4_short.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-4.sl"
+      },
+      {
+        "file": "phone-8-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-8-long-repeat.sl"
+      },
+      {
+        "file": "phone-8_short.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-8.sl"
+      },
+      {
+        "file": "phone-long.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone-long-repeat.sl"
+      },
+      {
+        "file": "phone_short.sl",
+        "reason": "identical example set",
+        "duplicate_of": "phone.sl"
+      },
+      {
+        "file": "position-of-2nd-3rd-etc-instance-of-character.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "remove-characters-from-left.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "remove-characters-from-right.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "remove-text-by-matching.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "remove-unwanted-characters.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "replace-one-character-with-another.sl",
+        "reason": "fewer than three distinct inputs"
+      },
+      {
+        "file": "reverse-name-long-repeat.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "reverse-name-long.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "reverse-name.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "reverse-name_short.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "split-numbers-from-units-of-measure_1.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "split-numbers-from-units-of-measure_2.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "split-text-and-numbers.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_1-long-repeat.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_1-long.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_1.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_1_short.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_2-long-repeat.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_2-long.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_2.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_2_short.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_3-long-repeat.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_3-long.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_3.sl",
+        "reason": "not a single-String to String task"
+      },
+      {
+        "file": "univ_3_short.sl",
+        "reason": "not a single-String to String task"
+      }
+    ],
+    "source_test_files": 82,
+    "source_train_files": 123,
+    "modes": [
+      "cold_indexed",
+      "cold_scan",
+      "whole_program_cache",
+      "memorization"
+    ],
+    "library_mode": "whole learned programs only; no invented subroutine abstractions",
+    "parser": "SMT-LIB literal examples only; grammar and reference programs ignored"
+  },
+  "summary": {
+    "cold_indexed": {
+      "runs": 200,
+      "train_consistent": 190,
+      "all_test_correct": 146,
+      "fit_but_wrong": 44,
+      "no_fit": 10,
+      "task_success_mean": 0.73,
+      "task_success_seed_sd": 0.037080992435478306,
+      "heldout_examples": 1140,
+      "correct_examples": 1085,
+      "train_total_s": 7.578350942960242,
+      "train_median_ms": 1.5651984940632246,
+      "generated": 1137420,
+      "executions": 7718000,
+      "matching_checks": 312671,
+      "library_checks": 0,
+      "model_bytes_median_fitted": 42.0,
+      "inference_us_median_fitted": 1.2772425543516874,
+      "seed_success_rates": [
+        0.775,
+        0.725,
+        0.725,
+        0.75,
+        0.675
+      ]
+    },
+    "cold_scan": {
+      "runs": 200,
+      "train_consistent": 188,
+      "all_test_correct": 146,
+      "fit_but_wrong": 42,
+      "no_fit": 12,
+      "task_success_mean": 0.73,
+      "task_success_seed_sd": 0.037080992435478306,
+      "heldout_examples": 1140,
+      "correct_examples": 1085,
+      "train_total_s": 7.64644722196681,
+      "train_median_ms": 1.8139165040338412,
+      "generated": 1137420,
+      "executions": 7718000,
+      "matching_checks": 616638,
+      "library_checks": 0,
+      "model_bytes_median_fitted": 39.5,
+      "inference_us_median_fitted": 1.3528216191899087,
+      "seed_success_rates": [
+        0.775,
+        0.725,
+        0.725,
+        0.75,
+        0.675
+      ]
+    },
+    "memorization": {
+      "runs": 200,
+      "train_consistent": 200,
+      "all_test_correct": 0,
+      "fit_but_wrong": 200,
+      "no_fit": 0,
+      "task_success_mean": 0.0,
+      "task_success_seed_sd": 0.0,
+      "heldout_examples": 1140,
+      "correct_examples": 0,
+      "train_total_s": 0.0,
+      "train_median_ms": 0.0,
+      "generated": 0,
+      "executions": 0,
+      "matching_checks": 0,
+      "library_checks": 0,
+      "model_bytes_median_fitted": 102.5,
+      "inference_us_median_fitted": 0.0,
+      "seed_success_rates": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "whole_program_cache": {
+      "runs": 200,
+      "train_consistent": 190,
+      "all_test_correct": 146,
+      "fit_but_wrong": 44,
+      "no_fit": 10,
+      "task_success_mean": 0.73,
+      "task_success_seed_sd": 0.037080992435478306,
+      "heldout_examples": 1140,
+      "correct_examples": 1085,
+      "train_total_s": 7.640076918905834,
+      "train_median_ms": 1.5096254937816411,
+      "generated": 1136319,
+      "executions": 7715792,
+      "matching_checks": 312671,
+      "library_checks": 2725,
+      "model_bytes_median_fitted": 42.0,
+      "inference_us_median_fitted": 1.2884707482016617,
+      "seed_success_rates": [
+        0.775,
+        0.725,
+        0.725,
+        0.75,
+        0.675
+      ]
+    }
+  },
+  "library": [
+    [
+      "concat",
+      [
+        [
+          "pipe",
+          [
+            [
+              "drop_last",
+              5
+            ]
+          ]
+        ],
+        [
+          "pipe",
+          [
+            [
+              "suffix",
+              5
+            ],
+            [
+              "split",
+              "",
+              0
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "concat",
+      [
+        [
+          "pipe",
+          [
+            [
+              "prefix",
+              1
+            ]
+          ]
+        ],
+        [
+          "literal",
+          " "
+        ],
+        [
+          "pipe",
+          [
+            [
+              "split",
+              "",
+              1
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "|",
+          0
+        ]
+      ]
+    ],
+    [
+      "concat",
+      [
+        [
+          "pipe",
+          [
+            [
+              "split",
+              "",
+              0
+            ]
+          ]
+        ],
+        [
+          "pipe",
+          [
+            [
+              "split",
+              ".",
+              1
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "alpha"
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "-",
+          -1
+        ]
+      ]
+    ],
+    [
+      "concat",
+      [
+        [
+          "literal",
+          "Dr. "
+        ],
+        [
+          "pipe",
+          [
+            [
+              "split",
+              "",
+              0
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "",
+          0
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "",
+          -1
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "-",
+          1
+        ]
+      ]
+    ],
+    [
+      "concat",
+      [
+        [
+          "literal",
+          "("
+        ],
+        [
+          "pipe",
+          [
+            [
+              "prefix",
+              3
+            ]
+          ]
+        ],
+        [
+          "literal",
+          ") "
+        ],
+        [
+          "pipe",
+          [
+            [
+              "drop_first",
+              4
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "concat",
+      [
+        [
+          "pipe",
+          [
+            [
+              "prefix",
+              3
+            ]
+          ]
+        ],
+        [
+          "literal",
+          "."
+        ],
+        [
+          "pipe",
+          [
+            [
+              "split",
+              "-",
+              1
+            ]
+          ]
+        ],
+        [
+          "literal",
+          "."
+        ],
+        [
+          "pipe",
+          [
+            [
+              "suffix",
+              3
+            ]
+          ]
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          "-",
+          0
+        ]
+      ]
+    ],
+    [
+      "pipe",
+      [
+        [
+          "split",
+          ".",
+          0
+        ]
+      ]
+    ]
+  ],
+  "library_discovery_s": 0.3267067059932742,
+  "cache_including_discovery_s": 7.966783624899108,
+  "cold_total_s": 7.578350942960242,
+  "cache_total_cost_ratio": 1.0512555679807483,
+  "environment": {
+    "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+    "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "peak_process_rss_kib": 20608
+  },
+  "total_wall_s": 24.186624899986782,
+  "learner_sha256": "105cd8c8e1727c5c72dac011e9ec6f0eb27840a9a39f424cd7b477af837b8f19",
+  "benchmark_sha256": "a039e5a0e881e5097501d7cdf7797a3cde275ca507e39b58b3f00bfbb0fb9a21"
+}

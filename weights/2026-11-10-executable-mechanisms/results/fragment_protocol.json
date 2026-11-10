@@ -1,0 +1,44 @@
+{
+  "frozen_at_utc": "2026-11-10T15:19:00.065247+00:00",
+  "status": "Exploratory follow-up protocol fixed after primary results were observed, before fragment predictions. Not an independent preregistration.",
+  "source_results_sha256": "7ac3fd4679bea2715754a19e85f0bc78e3203c41d5f2e890b3da87aed7640013",
+  "learner_sha256": "105cd8c8e1727c5c72dac011e9ec6f0eb27840a9a39f424cd7b477af837b8f19",
+  "source_commit": "0b9a62a294897b707c86ba3c0f63561ff503cb3b",
+  "budget": {
+    "candidates": 25000,
+    "checks": 25000,
+    "max_parts": 8,
+    "max_intermediates": 160,
+    "max_output": 512,
+    "library_checks": 128
+  },
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "modes": [
+    "cold",
+    "whole_cache",
+    "fragment_reuse"
+  ],
+  "cases": "All 200 cold_indexed cases in frozen public pilot, same training and heldout pairs; no exclusions based on results.",
+  "source_library": "Only the 14 accepted programs learned in the primary pilot from source train tasks; original reference programs ignored. Original family and example-pair exclusions retained.",
+  "fragment_rule": "All actual AST subtrees plus all nonempty proper prefixes of existing pipelines. Unique ASTs ordered by existing structural cost then canonical JSON. No primitive invented; no target program hard-coded.",
+  "composition": "Use learned fragment output signatures and training-target-derived literals to search concatenations with the existing residual prefix index. If no fit, run cold solver with candidates and checks reduced by already-consumed counts.",
+  "budget_accounting": "Every reused program, subprogram, or literal counts as one candidate and one evaluation per training example; matching checks, index items, and states recorded. This is a dual candidate/check budget, not a universal machine-instruction budget. Full wall time includes enumeration, hashing, filtering, literal generation, verification, and indexing. Source discovery and fragment extraction added to lifetime costs. Test-only reporting evaluation is excluded from learner time for every method.",
+  "whole_cache_control": "Charges whole-program tests against candidate budget before cold fallback; slightly stricter than original main-pilot cache implementation. Do not overwrite or silently replace original results.",
+  "outcomes": [
+    "all-heldout task success",
+    "fit-but-wrong",
+    "no-fit",
+    "paired regressions and improvements",
+    "novel combinations that pass heldout",
+    "all raw predictions",
+    "total measured lifetime learning time and counters"
+  ],
+  "no_tuning": "One frozen protocol; keep every failure and negative-transfer case. No grammar or budget updates after observing outcomes.",
+  "scope": "Public PBE task replay; 200 seed-task trials are not 200 independent task families. No production deployment, broad general-intelligence claim, or independent out-of-domain validation."
+}
