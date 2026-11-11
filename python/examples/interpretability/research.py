@@ -7,7 +7,7 @@ import weightlang as wgt
 
 
 def main():
-    directory = Path(__file__).resolve().parent
+    directory = Path(__file__).resolve().parents[3] / "examples/native_training/interpretability"
     model = wgt.load(directory / "model.wgt")
     value = torch.tensor([2., 3.])
     seed = torch.ones(2)

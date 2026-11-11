@@ -3,7 +3,7 @@
 WGT 提供命名激活、逐次干预、梯度归因、干预验证电路图和稀疏特征字典。
 Rust CPU、wgtime 服务和 Python SDK 共用原生编译器产生的观测元数据。
 模型定义检查和编译登记边界，研究接口显式执行实验。
-[完整研究程序](../examples/native_training/interpretability/research.py)
+[完整研究程序](../python/examples/interpretability/research.py)
 串联采集、归因、电路发现、WGT 稀疏字典训练和特征消融。
 
 ## WGT 表达式与源码定位
