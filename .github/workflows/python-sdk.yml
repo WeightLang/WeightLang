@@ -95,7 +95,7 @@ jobs:
         run: |
           if ! command -v dot >/dev/null; then
             # Use a signed Ubuntu archive mirror independently of Azure mirror DNS.
-            for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+            for source_file in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
               if [[ -f "$source_file" ]]; then
                 sudo sed -E -i 's#https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/?#https://mirrors.edge.kernel.org/ubuntu/#g' "$source_file"
               fi
