@@ -41,11 +41,38 @@ impl Parameter {
 impl Program {
     pub fn validate_tensor_contracts(&self) -> Result<()> {
         ensure!(matches!(self.version, 1 | 2 | 3), "unsupported adaptive IR version");
+        let mut sites = std::collections::HashSet::new();
+        for site in &self.observations {
+            ensure!(site.line <= 4 * 1024 * 1024 && site.scope.len() <= 2048,
+                "invalid observation source location");
+            ensure!(!site.name.is_empty() && site.name.len() <= 256
+                && sites.insert(site.instruction), "invalid/duplicate observation site");
+            let instruction = self.instructions.get(site.instruction)
+                .context("observation instruction out of range")?;
+            ensure!(matches!(instruction,
+                Instruction::Slice { out, start: 0, .. } | Instruction::Reshape { out, .. }
+                    if out == &site.register), "observation must reference an identity copy");
+        }
         let mut registers = HashMap::new();
         for register in &self.registers {
             ensure!(!register.name.is_empty() && registers.insert(register.name.as_str(), register).is_none(),
                 "duplicate/empty register: {}", register.name);
             register.validate_tensor_shape(self.version)?;
+        }
+        for site in &self.observations {
+            let register = registers.get(site.register.as_str()).context("unknown observation output")?;
+            let mut axes = std::collections::HashSet::new();
+            ensure!(site.axes.is_empty() || site.axes.len() == register.shape.len(), "invalid observation axes");
+            for name in site.axes.iter().flatten() {
+                ensure!(!name.is_empty() && name.len() <= 256 && axes.insert(name), "invalid observation axis name");
+            }
+            let input = match &self.instructions[site.instruction] {
+                Instruction::Slice { input, .. } | Instruction::Reshape { input, .. } => input,
+                _ => unreachable!(),
+            };
+            ensure!(registers.get(input.as_str()).context("unknown observation input")?.shape
+                == registers.get(site.register.as_str()).context("unknown observation output")?.shape,
+                "observation must preserve shape");
         }
         let mut parameters = std::collections::HashSet::new();
         for parameter in &self.parameters {

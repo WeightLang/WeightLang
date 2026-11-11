@@ -21,6 +21,12 @@ type Values = BTreeMap<String, Vec<f32>>;
 struct Request {
     source: String,
     #[serde(default)]
+    dictionary: Option<wgtime_core::adaptive::research::FeatureDictionary>,
+    #[serde(default)]
+    instruction: Option<usize>,
+    #[serde(default)]
+    occurrence: usize,
+    #[serde(default)]
     input: Vec<f32>,
     #[serde(default)]
     inputs: Option<Vec<Vec<f32>>>,
@@ -89,6 +95,20 @@ fn storage(values: Vec<(String, Vec<usize>, Vec<f32>)>) -> Values {
 
 fn adaptive(program: Program, request: &Request) -> Result<Value> {
     let mut session = AdaptiveSession::prepare(program, request.memory_bytes)?;
+    if request.mode == "features" {
+        let seed = request.gradient.as_deref().context("feature mode requires gradient seed")?;
+        let dictionary = request.dictionary.as_ref().context("feature mode requires dictionary")?;
+        let instruction = request.instruction.context("feature mode requires instruction")?;
+        return Ok(serde_json::to_value(session.feature_effects(&request.input, seed, dictionary,
+            instruction, request.occurrence, request.max_work, request.memory_bytes)?)?);
+    }
+    if request.mode == "research" {
+        ensure!(request.bindings.is_empty(), "research oracle uses declared parameter values");
+        let seed = request.gradient.as_deref().context("research mode requires gradient seed")?;
+        let attribution = session.attribute(&request.input, seed, request.max_work, request.memory_bytes)?;
+        let circuit = session.circuit(&request.input, seed, 32, request.max_work, request.memory_bytes, 1e-6)?;
+        return Ok(json!({"attribution": attribution, "circuit": circuit}));
+    }
     if request.mode == "train" {
         for (name, values) in &request.bindings {
             session.replace_parameter(name, values)?;

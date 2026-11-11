@@ -201,3 +201,16 @@ GPU linear 使用工作组并行归约，文件 I/O 尚未与计算重叠。
 不能把此阶段描述为完整 PyTorch 替代。所有能力为本地源码实现，尚未发布。
 
 验证执行核心：`cargo test -p wgtime-core`。GPU 能力须在目标设备单独验证。
+
+### 命名激活实验
+
+`Model::inspect` 通过 wgtime 服务采集 `observe(name, value)` 边界，
+并可替换完整激活张量。实验采用原生 CPU 解释执行和参数回滚。
+接口、IPC 预算及后端支持见[机械可解释性](mechanistic-interpretability.md)。
+
+`Model::attribute`、`Model::circuit` 和 `Model::feature_effects`
+分别执行原生 VJP、单事件消融电路发现和字典特征消融。
+`Model::intervene` 使用 instruction/occurrence 精确定位一次动态执行。
+已有编译前向的 ForwardPass 保留观测值版本，可直接调用 attribute(seed)。
+WGT 稀疏自编码器示例可以使用原生 Loss::Custom 训练，
+归因、电路和特征报告包含初始结构与参数状态的 SHA-256 标识。

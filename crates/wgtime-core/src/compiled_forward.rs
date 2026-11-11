@@ -85,6 +85,7 @@ impl CompiledForward {
     }
     pub fn model_program(model: &crate::Model) -> Result<Program> {
         let mut program = Program {
+            observations: Vec::new(),
             version: if model.output_type.is_plain() { 1 } else { 2 },
             output_type: model.output_type,
             input: "input".into(),

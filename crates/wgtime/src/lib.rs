@@ -16,6 +16,14 @@ pub const PROTOCOL: u32 = 1;
 #[cfg(target_os = "linux")]
 pub mod buffer;
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActivationIntervention {
+    pub instruction: usize,
+    pub occurrence: usize,
+    pub value: Vec<f32>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum Request {
@@ -37,6 +45,27 @@ pub enum Request {
     StateValues { handle: u64 },
     UpdateParameters { handle: u64, candidates: Vec<(String, Vec<usize>, Vec<f32>)> },
     TrainStepWithPolicy { handle: u64, inputs: Vec<Vec<f32>>, targets: serde_json::Value, rate: f32, loss: String, clip: Option<f32>, straight_through: bool },
+    FeatureEffects {
+        handle: u64, input: Vec<f32>, seed: Vec<f32>, dictionary: serde_json::Value,
+        instruction: usize, occurrence: usize, max_steps: u64, max_bytes: usize,
+    },
+    AttributeActivations {
+        handle: u64, input: Vec<f32>, seed: Vec<f32>, max_steps: u64, max_bytes: usize,
+    },
+    DiscoverCircuit {
+        handle: u64, input: Vec<f32>, seed: Vec<f32>, max_nodes: usize,
+        max_steps: u64, max_bytes: usize, epsilon: f32,
+    },
+    InspectActivations {
+        handle: u64,
+        input: Vec<f32>,
+        replacements: std::collections::BTreeMap<String, Vec<f32>>,
+        #[serde(default)]
+        interventions: Vec<ActivationIntervention>,
+        max_events: usize,
+        max_bytes: usize,
+        max_steps: u64,
+    },
     Predict {
         handle: u64,
         input: Vec<f32>,

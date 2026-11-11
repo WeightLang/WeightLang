@@ -93,7 +93,7 @@ jobs:
           cargo test --locked --no-default-features -p wgtime-core
           --test compiled_instruction_coverage --test compiled_semantics
           --test compiled_forward --test compiled_control_flow --test compiled_training
-          --test adaptive_numeric --test local_learning --test composition_lowering
+          --test adaptive_numeric --test local_learning --test composition_lowering --test research
       - name: Compile and run generated Rust consumers
         run: cargo test --locked -p weightlang-wgt --test rust_export
       - name: Build the real model service

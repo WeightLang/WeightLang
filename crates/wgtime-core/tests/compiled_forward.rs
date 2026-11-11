@@ -281,6 +281,7 @@ fn native_compilation_rejects_equal_size_incompatible_tensor_geometry() {
     ];
     for (instruction, reason) in cases {
         let program = Program {
+            observations: Vec::new(),
             version: 3,
             output_type: wgt_language::categorical::VectorType::F32,
             input: "x".into(),

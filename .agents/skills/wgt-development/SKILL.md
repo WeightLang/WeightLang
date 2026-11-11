@@ -211,3 +211,31 @@ fn main() { return 7; }` 验证基本执行，直接 `jsonl("data.jsonl")` 在�
 ### Transformer Encoder acceptance
 
 The fixed-shape two-head encoder acceptance model is `crates/wgt-model/tests/fixtures/transformer_encoder/model.wgt`; its Rust definition/service checks are in `crates/wgt-model/tests/transformer_encoder.rs`. The fixture uses distinct `query_sequence` and `key_sequence` axis names: attention contracts the `head_dim` axis and softmax reduces `key_sequence`. Heads are represented as the batch dimension of rank-3 `batch_matmul`. Keep the single-vector facade boundary explicit. Do not claim dynamic batch, masking, dropout, positional embeddings, arbitrary dtype or GPU fusion from this fixture. See `docs/transformer-encoder.md`; record only tests that were actually run.
+
+## 机械可解释性
+
+forward/helper 内使用 `observe("name", tensor)` 声明同形 identity 边界。
+标签为 1..256 UTF-8 字节，既有同名用户 helper 保持调用语义。
+共享 IR observations 含 line/scope/axes/instruction/register，旧字段可缺省。
+line 属于共享前端编译单元，scope 含 helper 和子模型实例路径。
+动态事件由 instruction/occurrence 定位。逐次干预优先于按标签替换。
+
+原生 CPU、真实服务和 Python eager 接通 inspect/intervene、attribute、
+circuit 和 feature_effects。attribute 复用原生 tape/PyTorch autograd.grad，
+返回输入梯度、各动态激活梯度及 activation×gradient。
+circuit 对各事件独立置零并重跑，输出边为有符号目标变化，
+下游边为激活 L2 变化，路径消失 effect=null，并报告 changed_paths。
+电路边记录总因果影响，输入、边界和干预条件限定解释范围。
+
+WGT SAE 示例位于 examples/native_training/interpretability/sparse_autoencoder/model.wgt。
+其输出前2项为重建、后4项为非负特征，fn loss 为 MSE+0.001×特征均值，
+支持原生 Loss::Custom 和 Python model.loss。
+Python SparseAutoencoder.from_wgt 复制已训练的四个字典参数，
+export 对接原生 FeatureDictionary，特征干预保留原始重建残差。
+归因/电路/特征报告包含结构和状态指纹。
+研究会话丢弃候选状态，失败恢复执行配置。
+原生研究使用 CPU 解释器，现有编译 tape 也可归因。
+Python 单样本 eager，typed 操作保持原有无 AD 合同。
+完整签名、预算及后端合同见 docs/mechanistic-interpretability.md。
+验证 core research、Python test_research/native_parity、真实服务实验，
+并运行示例研究宿主和全量 example_sources。

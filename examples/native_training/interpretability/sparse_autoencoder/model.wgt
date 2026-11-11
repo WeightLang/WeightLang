@@ -1,0 +1,32 @@
+wgt 0.5
+model SparseDictionary
+input x:f32[2]
+output reconstruction_and_features:f32[6]
+target activation:f32[2]
+
+# Two activation coordinates expand into four nonnegative sparse features.
+# Fresh parameters are explicit recipes. Training produces a reusable dictionary.
+parameter encoder:f32[4,2] = xavier_uniform(7)
+parameter encoder_bias:f32[4] = zeros()
+parameter decoder:f32[2,4] = xavier_uniform(11)
+parameter decoder_bias:f32[2] = zeros()
+
+# Fixed packers concatenate reconstruction and feature strengths in the output.
+# The first two coordinates reconstruct the input, the last four expose sparsity.
+frozen reconstruction_pack:f32[6,2] = [1,0,0,1,0,0,0,0,0,0,0,0]
+frozen feature_pack:f32[6,4] = [0,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]
+
+fn forward(x) {
+    # Native linear uses [output,input] weights. Each feature owns one encoder row.
+    let features = observe("features",relu(linear(x,encoder,encoder_bias)));
+    let reconstruction = linear(features,decoder,decoder_bias);
+    return linear(reconstruction,reconstruction_pack) + linear(features,feature_pack);
+}
+
+fn loss(prediction,activation) {
+    # Relu features are nonnegative, so their mean equals mean absolute activation.
+    # Reconstruction and sparsity are differentiable through the same native tape.
+    let reconstruction = prediction[0:2];
+    let features = prediction[2:6];
+    return square(reconstruction-activation).mean + scale(features.mean,0.001);
+}

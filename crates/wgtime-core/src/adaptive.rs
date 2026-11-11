@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use wgt_language::tensor::MAX_RANK;
 
 pub use wgt_language::adaptive::{parse, parse_with_functions};
+pub mod research;
 mod autodiff;
 pub use autodiff::ForwardPass;
 mod training;
@@ -63,6 +64,8 @@ enum Op {
 /// CPU-only experimental runtime; owns persistent weights and per-call registers.
 /// Budget covers f32 storage (including rollback and scratch), not program metadata.
 pub struct AdaptiveSession {
+    research: Option<research::Research>,
+    observation_sites: HashMap<usize, usize>,
     program: Program,
     ops: Vec<Op>,
     registers: Vec<Vec<f32>>,
@@ -507,6 +510,9 @@ impl AdaptiveSession {
             compiled: None,
             compiled_forward_calls: 0,
             compiled_tape_calls: 0,
+            research: None,
+            observation_sites: program.observations.iter().enumerate()
+                .map(|(index, site)| (site.instruction,index)).collect(),
             initialized: vec![false; program.registers.len()],
             views: vec![None; program.registers.len()],
             program,
@@ -765,6 +771,8 @@ impl AdaptiveSession {
             let parameters: Vec<&[f32]> = self.program.parameters.iter()
                 .map(|parameter| parameter.data.as_slice()).collect();
             let ops = &self.ops;
+            let program = &self.program;
+            let observation_sites = &self.observation_sites;
             let mut returned = None;
             let mut written = vec![false; parameters.len()];
             let mut tape = tape;
@@ -801,6 +809,13 @@ impl AdaptiveSession {
                             if let Some(tape) = tape.as_deref_mut() {
                                 tape.record(op, value)?;
                             }
+                        }
+                    }
+                    if let Some(tape) = tape.as_deref_mut() {
+                        if let Some(site) = observation_sites.get(&index).map(|i| &program.observations[*i]) {
+                            let register = program.registers.iter().position(|r| r.name == site.register)
+                                .context("unknown observation register")?;
+                            tape.observe(site, register)?;
                         }
                     }
                     Ok(())
@@ -1204,6 +1219,22 @@ impl AdaptiveSession {
                     self.registers[r].copy_from_slice(&self.scratch[..n]);
                     self.views[r] = None;
                     self.initialized[r] = true;
+                }
+            }
+            if let Some(tape) = tape.as_deref_mut() {
+                if let Some(site) = self.observation_sites.get(&pc).map(|i| &self.program.observations[*i]) {
+                    tape.observe(site, output.context("observation produced no tensor")?)?;
+                }
+            }
+            if self.research.is_some() {
+                if let Some(site) = self.observation_sites.get(&pc).map(|i| &self.program.observations[*i]).cloned() {
+                    let r = output.context("observation produced no tensor")?;
+                    let n = self.program.registers[r].len;
+                    let mut values = (0..n).map(|i| self.read_value(r, i)).collect::<Vec<_>>();
+                    self.research.as_mut().unwrap().visit(&site, &self.program.registers[r].shape, &mut values)?;
+                    self.detach_views_of(r);
+                    self.registers[r] = values;
+                    self.views[r] = None;
                 }
             }
             self.pc += 1;

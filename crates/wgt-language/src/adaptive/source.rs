@@ -77,6 +77,7 @@ fn parse_definition_with_details(
         .get("forward")
         .context("stateful model requires fn forward(input)")?;
     let mut program = Program {
+        observations: Vec::new(),
         output_type: crate::categorical::VectorType::F32,
         version: 1,
         input: String::new(),
@@ -336,6 +337,8 @@ fn parse_definition_with_details(
         constants: HashMap::new(),
         unavailable: HashSet::new(),
         tuple_bindings: HashSet::new(),
+        source_line: 0,
+        scope: vec!["forward".into()],
         operation_stack: Vec::new(),
         operation_returns: Vec::new(),
     };
@@ -372,6 +375,7 @@ fn parse_definition_with_details(
         };
         let input = "__loss_input".to_string();
         let program = Program {
+            observations: Vec::new(),
             output_type: crate::categorical::VectorType::F32,
             version: 1,
             input: input.clone(),
@@ -401,6 +405,8 @@ fn parse_definition_with_details(
             constants: HashMap::new(),
             unavailable: HashSet::new(),
             tuple_bindings: HashSet::new(),
+            source_line: 0,
+            scope: vec!["loss".into()],
             operation_stack: Vec::new(),
             operation_returns: Vec::new(),
         };
@@ -487,6 +493,8 @@ struct ModuleInstance {
     output: usize,
 }
 struct Lower {
+    source_line: usize,
+    scope: Vec<String>,
     program: Program,
     sizes: HashMap<String, usize>,
     types: HashMap<String, crate::categorical::VectorType>,
@@ -555,7 +563,9 @@ impl Lower {
         }
         ensure!(self.call_depth < 32, "operator expansion depth exceeded");
         self.call_depth += 1;
+        let line = self.source_line;
         let result = self.expand_operator(out, name, args);
+        self.source_line = line;
         self.call_depth -= 1;
         result
     }
@@ -575,31 +585,37 @@ impl Lower {
             let input = self.value(value)?;
             names.insert(arg.clone(), input);
         }
-        for s in f.body {
-            match s.kind {
-                Stmt::Let(n, e) => {
-                    let e = rewrite(&e, &names, &HashMap::new());
-                    let local = self.fresh();
-                    self.assign(&local, &e)
-                        .with_context(|| format!("operator {name}, line {}", s.line))?;
-                    names.insert(n, local);
+        self.scope.push(name.into());
+        let result = (|| {
+            for s in f.body {
+                self.source_line = s.line;
+                match s.kind {
+                    Stmt::Let(n, e) => {
+                        let e = rewrite(&e, &names, &HashMap::new());
+                        let local = self.fresh();
+                        self.assign(&local, &e)
+                            .with_context(|| format!("operator {name}, line {}", s.line))?;
+                        names.insert(n, local);
+                    }
+                    Stmt::LetTuple(bindings, e) => {
+                        let e = rewrite(&e, &names, &HashMap::new());
+                        let value = self.value(&e)?;
+                        let fields = self.tuples.get(&value).context("tuple binding requires a tuple result")?.clone();
+                        ensure!(bindings.len() == fields.len(), "tuple binding arity mismatch");
+                        for (name, value) in bindings.into_iter().zip(fields) { names.insert(name, value); }
+                    }
+                    Stmt::Return(e) => {
+                        return self
+                            .assign(out, &rewrite(&e, &names, &HashMap::new()))
+                            .with_context(|| format!("operator {name}, line {}", s.line));
+                    }
+                    _ => unreachable!(),
                 }
-                Stmt::LetTuple(bindings, e) => {
-                    let e = rewrite(&e, &names, &HashMap::new());
-                    let value = self.value(&e)?;
-                    let fields = self.tuples.get(&value).context("tuple binding requires a tuple result")?.clone();
-                    ensure!(bindings.len() == fields.len(), "tuple binding arity mismatch");
-                    for (name, value) in bindings.into_iter().zip(fields) { names.insert(name, value); }
-                }
-                Stmt::Return(e) => {
-                    return self
-                        .assign(out, &rewrite(&e, &names, &HashMap::new()))
-                        .with_context(|| format!("operator {name}, line {}", s.line));
-                }
-                _ => unreachable!(),
             }
-        }
-        bail!("operator requires return")
+            bail!("operator requires return")
+        })();
+        self.scope.pop();
+        result
     }
     /// Inline a typed call into its caller's transaction. Return jumps are local,
     /// so an early return never exits the parent operation or commits partial state.
@@ -657,7 +673,11 @@ impl Lower {
         self.operation_stack.push(name.into());
         self.call_depth += 1;
         let loops = std::mem::take(&mut self.loops);
+        let line = self.source_line;
+        self.scope.push(name.into());
         let result = self.block(&body);
+        self.scope.pop();
+        self.source_line = line;
         self.loops = loops;
         self.call_depth -= 1;
         self.operation_stack.pop();
@@ -788,6 +808,26 @@ impl Lower {
         Ok(())
     }
     fn assign_inner(&mut self, out: &str, expr: &Expr) -> Result<()> {
+        if let Expr::Call(name, args) = expr {
+            if name == "observe" && !self.functions.contains_key(name) {
+                let [Expr::Text(label), value] = args.as_slice() else {
+                    bail!("observe requires a literal name and a tensor");
+                };
+                ensure!(!label.is_empty() && label.len() <= 256, "observation name must be 1..256 bytes");
+                let input = self.value(value)?;
+                self.assign(out, &Expr::Name(input))?;
+                self.program.observations.push(super::Observation {
+                    line: self.source_line,
+                    scope: self.scope.join("/"),
+                    axes: self.axes.get(out).cloned().unwrap_or_default(),
+                    name: label.clone(),
+                    instruction: self.program.instructions.len() - 1,
+                    register: out.into(),
+                });
+                return Ok(());
+            }
+        }
+
         use crate::categorical::VectorType;
         if let Expr::Name(name) = expr {
             ensure!(!self.tuple_bindings.contains(name) || !self.unavailable.contains(name), "tensor is not defined on every control-flow path: {name}");
@@ -978,8 +1018,11 @@ impl Lower {
             let mut names = module.names.clone();
             names.insert(forward.args[0].clone(), input);
             let previous = std::mem::replace(&mut self.functions, module.functions);
+            let line = self.source_line;
+            self.scope.push(format!("{name}[{index}]"));
             let result = (|| {
                 for statement in forward.body {
+                    self.source_line = statement.line;
                     match statement.kind {
                         Stmt::Let(n, e) => {
                             let e = crate::script::operators::rewrite(&e, &names, &HashMap::new());
@@ -999,6 +1042,8 @@ impl Lower {
                 bail!("submodel requires return")
             })();
             self.functions = previous;
+            self.scope.pop();
+            self.source_line = line;
             result?;
             ensure!(
                 self.shape(out)? == vec![module.output],
@@ -2052,6 +2097,7 @@ impl Lower {
     }
     fn block(&mut self, body: &[Statement]) -> Result<()> {
         for s in body {
+            self.source_line = s.line;
             (|| -> Result<()> {
                 match &s.kind {
                     Stmt::Let(n, e) | Stmt::Set(n, e) => {

@@ -24,6 +24,8 @@ pub struct ModuleSchema {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Program {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observations: Vec<Observation>,
     #[serde(default, skip_serializing_if = "crate::categorical::VectorType::is_plain")]
     pub output_type: crate::categorical::VectorType,
     pub version: u32,
@@ -352,4 +354,19 @@ impl Instruction {
             memory: memory.map(String::as_str),
         }
     }
+}
+
+/// A named identity boundary, attached to its materializing instruction.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Observation {
+    #[serde(default)]
+    pub line: usize,
+    #[serde(default)]
+    pub scope: String,
+    #[serde(default)]
+    pub axes: Vec<Option<String>>,
+    pub name: String,
+    pub instruction: usize,
+    pub register: String,
 }

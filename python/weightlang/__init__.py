@@ -8,11 +8,17 @@ from .evolution import Candidate, GA, GAConfig, GeneticAlgorithm, GenomeSchema, 
 from .forward_forward import FFReport, train_forward_forward
 from .weights import Plan, WeightRef, WeightSet, restore
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 __all__ = [
     "CompilationError", "compile", "compile_source", "from_ir", "load", "loads",
-    "save", "select_device", "summary", "trace", "visualize", "bind_optimizer",
+    "inspect", "attribute", "circuit", "Research", "Activation", "Intervention",
+    "Attribution", "AttributionReport", "Circuit", "SparseAutoencoder", "feature_effects", "save", "select_device", "summary", "trace", "visualize", "bind_optimizer",
     "Candidate", "GA", "GAConfig", "GeneticAlgorithm", "GenomeSchema", "evaluate_isolated",
     "FFReport", "train_forward_forward",
     "Plan", "WeightRef", "WeightSet", "restore",
 ]
+
+from .research import (inspect, attribute, circuit, Research, Activation, Intervention,
+                       Attribution, AttributionReport, Circuit)
+
+from .features import SparseAutoencoder, feature_effects

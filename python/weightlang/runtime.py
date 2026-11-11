@@ -558,6 +558,8 @@ def build_module(definition: dict[str, Any], *, bindings: dict[str, torch.Tensor
             from .program import ProgramExecutor, ProgramModule
             # Validate the complete program even when FX handles its tensor path.
             ProgramExecutor(definition["program"])
+            if definition["program"].get("observations"):
+                return ProgramModule(definition, bindings=bindings, _schema_only=_schema_only)
             instructions = definition["program"]["instructions"]
             if any(item["op"] in _UNSUPPORTED or (item["op"] == "return" and index != len(instructions) - 1)
                    for index, item in enumerate(instructions)):

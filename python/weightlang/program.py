@@ -184,10 +184,28 @@ class ProgramExecutor:
         self.transactional = transactional
         required = {"version", "input", "registers", "parameters", "instructions"}
         _require(isinstance(program, dict) and required <= program.keys()
-                 and program.keys() <= required | {"output_type", "loss"}, "invalid adaptive program fields")
+                 and program.keys() <= required | {"output_type", "loss", "observations"}, "invalid adaptive program fields")
         # Snapshot executable metadata without duplicating full initializers for
         # every entry in a model with several typed operations.
         self.instructions = deepcopy(program["instructions"])
+        self.observations = {}
+        for site in program.get("observations", []):
+            _require(isinstance(site, dict) and {"name", "instruction", "register"} <= set(site) <= {"name", "instruction", "register", "line", "scope", "axes"}, "invalid observation fields")
+            _require(type(site.get("line", 0)) is int and 0 <= site.get("line", 0) <= 4 * 1024 * 1024,
+                     "invalid observation source line")
+            _require(isinstance(site.get("scope", ""), str) and len(site.get("scope", "").encode()) <= 2048,
+                     "invalid observation scope")
+            pc = site["instruction"]
+            _require(type(pc) is int and 0 <= pc < len(self.instructions) and pc not in self.observations,
+                     "invalid observation instruction")
+            item = self.instructions[pc]
+            _require(isinstance(site["name"], str) and 0 < len(site["name"].encode()) <= 256,
+                     "invalid observation name")
+            _require(item.get("out") == site["register"] and
+                     (item["op"] == "reshape" or item["op"] == "slice" and item["start"] == 0),
+                     "observation must reference an identity copy")
+            self.observations[pc] = deepcopy(site)
+
         _require(type(program["version"]) is int and program["version"] in (1, 2, 3), "unsupported adaptive IR version")
         _require(isinstance(self.instructions, list) and 0 < len(self.instructions) <= 100_000, "invalid instruction count")
         self.shapes: dict[str, tuple[int, ...]] = {}
@@ -199,6 +217,17 @@ class ProgramExecutor:
             _require(all(axis <= 16384 for axis in shape), "register extent exceeds 16384")
             _require(program["version"] >= 3 or shape == (register["len"],), "multiaxis registers require IR version 3")
             self.shapes[name] = shape
+        for pc, site in self.observations.items():
+            item = self.instructions[pc]
+            _require(self.shapes.get(item["input"]) is not None
+                     and self.shapes.get(item["input"]) == self.shapes.get(site["register"]),
+                     "observation must preserve shape")
+            axes = site.get("axes", [])
+            _require(isinstance(axes, list) and (not axes or len(axes) == len(self.shapes[site["register"]]))
+                     and all(axis is None or isinstance(axis, str) and 0 < len(axis.encode()) <= 256 for axis in axes)
+                     and len([a for a in axes if a is not None]) == len(set(a for a in axes if a is not None)),
+                     "invalid observation axes")
+
         self.input = program["input"]
         _require(self.input in self.shapes and len(self.shapes[self.input]) == 1, "invalid input register")
         self.input_shape = self.shapes[self.input]
@@ -393,7 +422,7 @@ class ProgramExecutor:
 
     def run(self, input: torch.Tensor, parameters: Mapping[str, torch.Tensor], *, differentiable: bool,
             max_work: int = DEFAULT_MAX_WORK, memory_bytes: int = DEFAULT_MEMORY_BYTES,
-            diagnostic_anchor: torch.Tensor | None = None) -> ExecutionResult:
+            diagnostic_anchor: torch.Tensor | None = None, research=None) -> ExecutionResult:
         _require(type(max_work) is int and 0 < max_work < 2**64, "max_work must be a positive u64")
         _require(type(memory_bytes) is int and memory_bytes >= self.managed_bytes,
                  f"adaptive managed memory budget exceeded: need {self.managed_bytes}, have {memory_bytes}")
@@ -547,6 +576,8 @@ class ProgramExecutor:
                     if out is not None:
                         _require(tuple(out.shape) == self.shapes[item["out"]], f"{op} produced an unexpected shape")
                         _finite_tensor(out, "activation")
+                        if research is not None and pc in self.observations:
+                            out = research.visit(self.observations[pc], out)
                         values[item["out"]] = ops.check_gradient(out, diagnostic_anchor)
                 except (KeyError, RuntimeError, ValueError) as error:
                     raise RuntimeError(f"instruction {pc} ({op}): {error}") from error

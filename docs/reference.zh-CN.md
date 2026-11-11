@@ -707,3 +707,13 @@ fn main() { return 7; }` 验证基本执行，直接 `jsonl("data.jsonl")` 在�
 ## Transformer Encoder 验收模型
 
 固定形状双头 Transformer Encoder 的完整模型、Rust 验收入口、张量轴约定和已知限制见 [Transformer Encoder 专题](transformer-encoder.md)。该样例覆盖 Q/K/V 投影、按 head 分组的 BatchMatmul、key 轴 Softmax、head 合并、残差、LayerNorm 和 FFN。它仍遵守单个 f32 向量服务入口；新增 fixture 不代表动态 batch、dropout、mask、位置编码或 GPU 融合已经实现。只有实际运行相应 CI 与 native service 测试后，才能将对应能力标记为已验收。
+
+## 命名观测与因果实验
+
+`observe(name, value)` 在当前 `wgt 0.5` forward 模型中声明张量观测边界。
+name 为 1..256 UTF-8 字节的字符串字面量，value 为张量，两参数必填。
+返回值保持 value 的形状、轴名称、类别与梯度。编译只登记元数据。
+Rust 与 Python 研究接口显式执行激活采集、逐次干预、
+VJP/激活乘梯度归因、单事件消融电路发现和稀疏字典特征干预。
+观测元数据包含语句行号、模块调用路径和命名轴，报告保留模型与状态指纹。合同、预算、后端范围和完整示例见
+[机械可解释性](mechanistic-interpretability.md)。

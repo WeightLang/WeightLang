@@ -399,3 +399,18 @@ uv run --no-project python -m pytest python/tests -q
 ```
 
 原生差分测试直接复用 Rust `AdaptiveSession`、`OperationSession` 和 `Trainer`，核对前向、输入／参数梯度、自定义损失、SGD 投影、写入和回滚。权重验收另覆盖 Rust→Python→Rust 双向快照交换、版本 pin、指定层混合、扩维迁移、来源覆盖、冲突拒绝，以及不执行初始化配方的直接恢复。另有指令全集覆盖、批次隔离、结构共享、保存恢复、FX／导出捕获、IR 图渲染、非法输入和浮点边界检查。CI 在 Python 3.10、3.12 上执行 CPU 验证，并运行 MLP、可学习深度与权重生命周期示例；GPU 硬件与具体编译加速效果按目标设备另行验收。
+
+### 激活采集与干预
+
+带 `observe(name, value)` 的 forward 模型通过 eager ProgramModule 执行。
+`weightlang.inspect(model, input, replacements=...)` 返回输出和激活事件，
+支持单样本完整张量消融及跨运行替换，执行时丢弃候选状态更新。
+完整参数、限制和例子见[机械可解释性](mechanistic-interpretability.md)。
+
+研究接口还提供 `weightlang.attribute(model, input, seed)`、
+`weightlang.circuit(model, input, seed)` 和
+`weightlang.feature_effects(model, input, dictionary, instruction, seed)`。
+逐次激活由 `Intervention(instruction, occurrence, value)` 定位。
+WGT 稀疏自编码器通过普通 PyTorch 优化器和自身 model.loss 训练，
+用 `SparseAutoencoder.from_wgt(model)` 导出特征字典。
+梯度归因使用 autograd.grad，参数已有 .grad 得到保留。

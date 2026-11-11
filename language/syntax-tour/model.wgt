@@ -604,3 +604,14 @@ fn loss(prediction, target) {
 # dim N = 2 提供显式默认值；dim N 要求宿主 --dim N=3 或 dimensions 绑定。
 # 带 fn loss 的 typed forward 可训练，首期一个向量输入/输出；不混用根级端口或 state。
 # 无 loss 的 typed 操作保持无 AD；这不是所有模型入口已完全合一。
+
+# 18 命名激活与因果实验
+# observe("hidden", tensor) 保持形状、轴名称和正常 forward 梯度。
+# 完整模型 examples/native_training/interpretability/model.wgt。
+# Rust Model::inspect / Python weightlang.inspect 显式采集并可替换完整张量。
+# 事件按 instruction 和 occurrence 定位，实验调用不提交候选状态。
+
+# attribute(input,seed) 提供输入和逐次激活 VJP，circuit 执行单事件消融扫描。
+# 元数据 line/scope/axes 对应编译单元位置、调用路径和命名轴。
+# 稀疏自编码器完整例子 interpretability/sparse_autoencoder/model.wgt，
+# 使用重建 MSE+稀疏项训练，可导出字典进行保留重建残差的特征干预。

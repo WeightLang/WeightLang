@@ -75,6 +75,7 @@ struct Node {
 }
 
 pub(super) struct Tape {
+    observations: Vec<(wgt_language::adaptive::Observation, usize)>,
     nodes: Vec<Node>,
     gradients: Vec<Vec<f32>>,
     registers: Vec<Option<usize>>,
@@ -87,6 +88,7 @@ pub(super) struct Tape {
 impl Tape {
     fn new(session: &AdaptiveSession, input: &[f32], budget: usize) -> Result<Self> {
         let mut tape = Self {
+            observations: Vec::new(),
             nodes: Vec::new(),
             gradients: Vec::new(),
             registers: vec![None; session.registers.len()],
@@ -158,6 +160,11 @@ impl Tape {
             value: self.reg(v)?,
         };
         self.memories[m] = Some(self.push(value, edge)?);
+        Ok(())
+    }
+
+    pub(super) fn observe(&mut self, site: &wgt_language::adaptive::Observation, register: usize) -> Result<()> {
+        self.observations.push((site.clone(), self.reg(register)?));
         Ok(())
     }
 
@@ -626,5 +633,31 @@ impl ForwardPass {
         );
         self.differentiated = true;
         Ok(())
+    }
+}
+
+impl ForwardPass {
+    /// First-order VJP at each executed observation, preserving dynamic value versions.
+    pub fn attribute(&mut self, seed: &[f32]) -> Result<super::research::AttributionReport> {
+        ensure!(self.tape.observations.len() <= 10000, "attribution event budget exceeded");
+        self.backward(seed, &BTreeMap::new())?;
+        let mut counts = BTreeMap::new();
+        let mut events = Vec::new();
+        for (site, node) in &self.tape.observations {
+            let occurrence = counts.entry(site.instruction).or_insert(0usize);
+            let value = &self.tape.nodes[*node].value;
+            let gradient = self.tape.gradients[*node].clone();
+            let contribution: Vec<f32> = value.iter().zip(&gradient).map(|(v,g)| v*g).collect();
+            ensure!(contribution.iter().all(|v| v.is_finite()), "nonfinite attribution");
+            events.push(super::research::Attribution {
+                site: site.clone(), occurrence: *occurrence, value: value.clone(),
+                gradient, contribution,
+            });
+            *occurrence += 1;
+        }
+        Ok(super::research::AttributionReport {
+            context: None,
+            output: self.output().to_vec(), input_gradient: self.input_gradient()?.to_vec(), events,
+        })
     }
 }

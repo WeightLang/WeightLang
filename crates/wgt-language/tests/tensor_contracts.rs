@@ -145,6 +145,7 @@ fn register_adapter_preserves_wire_format_and_rejects_forged_geometry() {
 #[test]
 fn static_and_runtime_ir_use_the_same_instruction_contracts() {
     let mut program = Program {
+        observations: Vec::new(),
         output_type: wgt_language::categorical::VectorType::F32, version: 3, input: "x".into(),
         registers: vec![Register { name:"x".into(), len:6, shape:vec![2,3] }, Register { name:"y".into(), len:6, shape:vec![3,2] }],
         parameters: vec![], instructions: vec![Instruction::Transpose { out:"y".into(), input:"x".into() }, Instruction::Return { value:"y".into() }], loss:None,

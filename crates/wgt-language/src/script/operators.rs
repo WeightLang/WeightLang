@@ -212,6 +212,13 @@ fn check_expr(
             }
         }
         Expr::Call(n, args) | Expr::BuiltinCall(n, args) => {
+            if n == "observe" && !functions.contains_key(n) {
+                let [Expr::Text(label), value] = args.as_slice() else {
+                    bail!("observe requires a literal name and a tensor");
+                };
+                ensure!(!label.is_empty() && label.len() <= 256, "observation name must be 1..256 bytes");
+                return check_expr(value, names, functions, stack, checked);
+            }
             let probability_suffix = matches!(e, Expr::BuiltinCall(_, _)) && n == "__probabilities";
             if probability_suffix {
                 ensure!(args.len() == 1, "tensor primitive arity mismatch: {n}");

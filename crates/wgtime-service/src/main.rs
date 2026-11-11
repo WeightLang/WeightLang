@@ -220,6 +220,49 @@ impl Connection {
                 Some(Session::Trainer(trainer)) => Ok(serde_json::json!({"output": trainer.predict(&input)?, "steps": trainer.steps()})),
                 _ => bail!("unknown session or foreign owner"),
             },
+            Request::FeatureEffects { handle, input, seed, dictionary, instruction, occurrence, max_steps, max_bytes } => {
+                ensure!(max_steps > 0 && max_steps <= 1_000_000 && max_bytes <= 262144,
+                    "IPC feature experiment budget exceeded");
+                let dictionary = serde_json::from_value::<wgtime_core::adaptive::research::FeatureDictionary>(dictionary)?;
+                let Some(Session::Adaptive(session)) = self.sessions.get_mut(&handle) else {
+                    bail!("feature effects require an owned forward program");
+                };
+                Ok(serde_json::to_value(session.feature_effects(&input, &seed, &dictionary,
+                    instruction, occurrence, max_steps, max_bytes)?)?)
+            },
+            Request::AttributeActivations { handle, input, seed, max_steps, max_bytes } => {
+                ensure!(max_steps > 0 && max_steps <= 1_000_000 && max_bytes <= 262144,
+                    "IPC attribution budget exceeded");
+                let Some(Session::Adaptive(session)) = self.sessions.get_mut(&handle) else {
+                    bail!("attribution requires an owned forward program");
+                };
+                let report = session.attribute(&input, &seed, max_steps, max_bytes)?;
+                ensure!(report.events.len() <= 1024, "IPC attribution event limit exceeded");
+                Ok(serde_json::to_value(report)?)
+            },
+            Request::DiscoverCircuit { handle, input, seed, max_nodes, max_steps, max_bytes, epsilon } => {
+                ensure!(max_steps > 0 && max_steps <= 1_000_000 && max_bytes <= 262144 && max_nodes <= 32,
+                    "IPC circuit budget exceeded");
+                let Some(Session::Adaptive(session)) = self.sessions.get_mut(&handle) else {
+                    bail!("circuit discovery requires an owned forward program");
+                };
+                Ok(serde_json::to_value(session.circuit(&input, &seed, max_nodes, max_steps, max_bytes, epsilon)?)?)
+            },
+            Request::InspectActivations { handle, input, replacements, interventions, max_events, max_bytes, max_steps } => {
+                ensure!(max_events <= 1024 && max_bytes <= 262144, "IPC research capture limit exceeded");
+                ensure!(max_steps > 0 && max_steps <= 1_000_000, "invalid research step budget");
+                let Some(Session::Adaptive(session)) = self.sessions.get_mut(&handle) else {
+                    bail!("activation inspection requires an owned forward program");
+                };
+                let mut research = wgtime_core::adaptive::research::Research::new(max_events, max_bytes);
+                research.replacements = replacements;
+                research.interventions = interventions.into_iter().map(|patch|
+                    wgtime_core::adaptive::research::Intervention {
+                        instruction: patch.instruction, occurrence: patch.occurrence, value: patch.value,
+                    }).collect();
+                let (output, research) = session.inspect(&input, max_steps, research)?;
+                Ok(serde_json::json!({"output": output, "events": research.events}))
+            },
             Request::CreateTrainingProgram { program, memory, optimizer } => {
                 let admission = self.sessions.admit(memory).context("program admission budget exceeded")?;
                 ensure!(matches!(optimizer.as_str(), "none"|"sgd"|"adam"), "unknown optimizer");

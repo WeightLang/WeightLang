@@ -1,0 +1,13 @@
+wgt 0.5
+model CausalExperiment
+input x:f32[2]
+output y:f32[2]
+
+fn forward(x) {
+    # The two entries are independent features. Squaring preserves the feature axis.
+    # This named boundary captures the computed activation before downstream use.
+    let hidden = observe("hidden", x * x);
+    # Patching hidden isolates its contribution from the direct input pathway.
+    # This parameter-free model requires no initialization or training.
+    return hidden + x;
+}

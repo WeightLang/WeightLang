@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
+// observe(name, tensor), observation source metadata and research APIs retain canonical tensor syntax.
 const obsoleteSyntax = /\b(?:reshape|matmul|transpose)\s*\(|\binit\s+seed\s*=|\b(?:read|write)\s*\(/;
 const ignoredDirectories = new Set(['.git', '.cache', '.venv', 'node_modules', 'target', 'weights', 'dist', 'build']);
 

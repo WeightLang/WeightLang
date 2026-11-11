@@ -198,3 +198,37 @@ fn signature_dimensions_execute_and_train_through_the_real_service() {
     model.close().unwrap();
     assert_eq!(client.stats().unwrap()["sessions"], 0);
 }
+
+#[test]
+#[ignore = "requires prebuilt WGTIME_TEST_DAEMON; isolated real service"]
+fn activation_capture_and_patch_use_real_service() {
+    let service = support::Service::start().unwrap();
+    let client = service.client().unwrap();
+    let definition = ModelDefinition::parse(include_str!("../../../examples/native_training/interpretability/model.wgt")).unwrap();
+    let model = client.initialize(&definition, InstanceOptions::default()).unwrap();
+    let baseline = model.inspect(&[2., 3.], Default::default(), 10, 1024, 10000).unwrap();
+    assert_eq!(baseline["output"], serde_json::json!([6., 12.]));
+    assert_eq!(baseline["events"][0]["before"], serde_json::json!([4., 9.]));
+    let attribution = model.attribute(&[2.,3.], &[1.,1.], 10000, 262144).unwrap();
+    assert_eq!(attribution["input_gradient"],serde_json::json!([5.,7.]));
+    assert_eq!(attribution["events"][0]["gradient"],serde_json::json!([1.,1.]));
+    let graph = model.circuit(&[2.,3.], &[1.,1.], 8, 10000, 1024, 0.).unwrap();
+    assert_eq!(graph["edges"][0]["effect"],serde_json::json!(13.));
+    let instruction = baseline["events"][0]["instruction"].as_u64().unwrap() as usize;
+    let targeted = model.intervene(&[2.,3.],vec![wgt::ActivationIntervention {
+        instruction,occurrence:0,value:vec![1.,1.],
+    }],10,1024,10000).unwrap();
+    assert_eq!(targeted["output"],serde_json::json!([3.,4.]));
+    let dictionary=serde_json::json!({"width":2,"features":2,
+        "encoder":[1.,0.,0.,1.],"encoder_bias":[0.,0.],"decoder":[0.5,0.,0.,0.5]});
+    let feature_effects=model.feature_effects(&[2.,3.],&[1.,1.],dictionary,
+        instruction,0,10000,1024).unwrap();
+    assert_eq!(feature_effects["effects"],serde_json::json!([2.,4.5]));
+
+    let mut replacements = std::collections::BTreeMap::new();
+    replacements.insert("hidden".into(), vec![0., 0.]);
+    let patched = model.inspect(&[2., 3.], replacements, 10, 1024, 10000).unwrap();
+    assert_eq!(patched["output"], serde_json::json!([2., 3.]));
+    assert!(model.inspect(&[2., 3.], Default::default(), 0, 0, 10000).is_err());
+    assert_eq!(model.forward(&[2., 3.]).unwrap(), vec![6., 12.]);
+}

@@ -104,8 +104,52 @@ impl Model {
     }
     /// Execution backend reported by the initialized service instance.
     pub fn backend(&self)->&str { &self.backend }
-    /// Execute one finite f32 input vector and commit explicit forward writes on success.
-    /// Failed execution preserves parameters. Typed multi-input models use `call`.
+    /// Capture activations and optionally replace complete observed tensors.
+    /// The service executes against a read-only CPU snapshot.
+    pub fn inspect(&self, input: &[f32], replacements: std::collections::BTreeMap<String, Vec<f32>>,
+        max_events: usize, max_bytes: usize, max_steps: u64) -> Result<serde_json::Value> {
+        self.connection.borrow_mut().call(Request::InspectActivations {
+            handle: self.handle()?, input: input.to_vec(), replacements,
+            max_events, max_bytes, max_steps, interventions: Vec::new(),
+        })
+    }
+
+    /// Replace one dynamic activation occurrence using an isolated experiment.
+    pub fn intervene(&self, input: &[f32], interventions: Vec<wgtime::ActivationIntervention>,
+        max_events: usize, max_bytes: usize, max_steps: u64) -> Result<serde_json::Value> {
+        self.connection.borrow_mut().call(Request::InspectActivations {
+            handle: self.handle()?, input: input.to_vec(), replacements: Default::default(),
+            interventions, max_events, max_bytes, max_steps,
+        })
+    }
+
+    /// Measure individual sparse feature ablations against one activation event.
+    pub fn feature_effects(&self, input: &[f32], seed: &[f32], dictionary: serde_json::Value,
+        instruction: usize, occurrence: usize, max_steps: u64, max_bytes: usize) -> Result<serde_json::Value> {
+        self.connection.borrow_mut().call(Request::FeatureEffects {
+            handle: self.handle()?, input: input.to_vec(), seed: seed.to_vec(), dictionary,
+            instruction, occurrence, max_steps, max_bytes,
+        })
+    }
+
+    /// Compute an output VJP at every executed activation boundary.
+    pub fn attribute(&self, input: &[f32], seed: &[f32], max_steps: u64,
+        max_bytes: usize) -> Result<serde_json::Value> {
+        self.connection.borrow_mut().call(Request::AttributeActivations {
+            handle: self.handle()?, input: input.to_vec(), seed: seed.to_vec(), max_steps, max_bytes,
+        })
+    }
+
+    /// Discover total causal influences by one-event ablation experiments.
+    pub fn circuit(&self, input: &[f32], seed: &[f32], max_nodes: usize,
+        max_steps: u64, max_bytes: usize, epsilon: f32) -> Result<serde_json::Value> {
+        self.connection.borrow_mut().call(Request::DiscoverCircuit {
+            handle: self.handle()?, input: input.to_vec(), seed: seed.to_vec(),
+            max_nodes, max_steps, max_bytes, epsilon,
+        })
+    }
+
+    /// Execute one input and commit explicit forward writes on success.
     pub fn forward(&self, input:&[f32])->Result<Vec<f32>> {
         let interface=self.interface.as_ref().context("typed model requires an explicit named operation call")?;
         ensure!(input.len()==interface.input && input.iter().all(|n|n.is_finite()), "input must be a finite vector of width {}",interface.input);
@@ -161,3 +205,5 @@ impl Model {
 impl Drop for Model {
     fn drop(&mut self) { if let Some(handle)=self.handle.take() { let _=self.connection.borrow_mut().call(Request::Drop {handle}); } }
 }
+
+pub use wgtime::ActivationIntervention;

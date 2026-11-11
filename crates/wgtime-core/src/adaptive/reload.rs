@@ -79,6 +79,7 @@ mod tests {
     fn session(data: f32) -> AdaptiveSession {
         AdaptiveSession::prepare(
             crate::adaptive::Program {
+                observations: Vec::new(),
                 output_type: crate::categorical::VectorType::F32,
                 version: 1,
                 input: "x".into(),

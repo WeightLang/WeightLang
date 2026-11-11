@@ -34,7 +34,6 @@ fn malformed_groups_and_standalone_declarations() {
         "let a=1,,b=2;",
         "let a=1,b;",
         "let a,b=1;",
-        "let a=(1,2);",
         "let a=1,let b=2;",
         "let a=1 b=2;",
         "let {action}=sample from net([1]),b=2;",
@@ -45,6 +44,11 @@ fn malformed_groups_and_standalone_declarations() {
         let source = format!("wgt 0.5\nfn main(){{{body}}}");
         assert!(script::parse(&source).is_err(), "{body}");
     }
+    // Shared parsing accepts model tuples; the host execution boundary rejects them.
+    let tuple = "wgt 0.5\nfn main(){let a=(1,2);}";
+    script::parse(tuple).unwrap();
+    let error = script::run(tuple, Path::new("."), 1000).unwrap_err();
+    assert!(format!("{error:#}").contains("only available in tensor model functions"));
     script::parse("wgt 0.5\nfn choose(net){let {action,log_prob}=sample from net([1]);return action;}\nfn main(){let a=1;return a;}").unwrap();
     assert!(script::run(
         "wgt 0.5\nfn main(){let a=b,b=1;return a;}",

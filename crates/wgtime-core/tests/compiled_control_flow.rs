@@ -1,7 +1,7 @@
 use wgtime_core::compiled_forward::CompiledForward;
 use wgt_language::{adaptive::{Instruction as I,Program,Register},categorical::VectorType};
 fn program(instructions:Vec<I>)->Program {
-    Program{version:1,output_type:VectorType::F32,input:"x".into(),registers:vec![Register{name:"x".into(),len:1,shape:vec![1]}],parameters:vec![],instructions,loss:None}
+    Program{observations:Vec::new(),version:1,output_type:VectorType::F32,input:"x".into(),registers:vec![Register{name:"x".into(),len:1,shape:vec![1]}],parameters:vec![],instructions,loss:None}
 }
 #[test]
 fn native_branches_reach_actual_return_and_loops_exhaust_budget() {
