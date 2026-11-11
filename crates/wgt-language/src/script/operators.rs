@@ -477,6 +477,7 @@ pub(crate) fn link(
                 Function {
                     is_async: f.is_async,
                     signature: f.signature,
+                    tensor_signature: f.tensor_signature,
                     args: f.args,
                     body,
                 },

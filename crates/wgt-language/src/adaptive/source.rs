@@ -330,6 +330,7 @@ fn parse_definition_with_details(
         next: 0,
         loops: Vec::new(),
         output: output.unwrap(),
+        return_shape: forward.tensor_signature.as_ref().map(|signature| signature.output.clone()),
         functions: functions.clone(),
         calls: 0,
         call_depth: 0,
@@ -342,7 +343,9 @@ fn parse_definition_with_details(
         operation_stack: Vec::new(),
         operation_returns: Vec::new(),
     };
-    lower.block(&forward.body)?;
+    lower.validate_shape_helpers()?;
+    let forward_body = lower.matrix_arguments(forward)?;
+    lower.block(&forward_body)?;
     let mut inferred = super::InferredTypes::new();
     if collect_types { inferred.insert("forward".into(), lower.inferred_types()?); }
 
@@ -397,6 +400,7 @@ fn parse_definition_with_details(
             next: 0,
             loops: vec![],
             output: 1,
+            return_shape: loss.tensor_signature.as_ref().map(|signature| signature.output.clone()),
             functions: functions.clone(),
             modules: HashMap::new(),
             calls: 0,
@@ -418,7 +422,8 @@ fn parse_definition_with_details(
                 start: i * n,
             });
         }
-        loss_lower.block(&loss.body).context("fn loss")?;
+        let loss_body = loss_lower.matrix_arguments(loss)?;
+        loss_lower.block(&loss_body).context("fn loss")?;
         ensure!(
             loss_lower
                 .program
@@ -504,6 +509,7 @@ struct Lower {
     next: usize,
     loops: Vec<(String, String)>,
     output: usize,
+    return_shape: Option<Vec<usize>>,
     functions: crate::script::parse::Program,
     modules: HashMap<String, ModuleInstance>,
     calls: usize,
@@ -557,6 +563,101 @@ impl Lower {
             .filter(|n| !yes.available.contains(*n) || !no.available.contains(*n))
             .cloned().collect();
     }
+    fn validate_shape_helpers(&self) -> Result<()> {
+        let mut checker = Self {
+            source_line: 0,
+            scope: Vec::new(),
+            program: Program {
+                observations: Vec::new(),
+                output_type: crate::categorical::VectorType::F32,
+                version: 1,
+                input: "wgt_shape_check".into(),
+                registers: Vec::new(),
+                parameters: Vec::new(),
+                instructions: Vec::new(),
+                loss: None,
+            },
+            sizes: HashMap::new(),
+            types: HashMap::new(),
+            axes: HashMap::new(),
+            memories: HashMap::new(),
+            next: 0,
+            loops: Vec::new(),
+            output: 1,
+            return_shape: None,
+            functions: self.functions.clone(),
+            modules: HashMap::new(),
+            calls: 0,
+            call_depth: 0,
+            tuples: HashMap::new(),
+            constants: HashMap::new(),
+            unavailable: HashSet::new(),
+            tuple_bindings: HashSet::new(),
+            operation_stack: Vec::new(),
+            operation_returns: Vec::new(),
+        };
+        for (name, function) in &self.functions {
+            if matches!(name.as_str(), "forward" | "loss") { continue; }
+            let Some(signature) = &function.tensor_signature else { continue; };
+            let mut args = Vec::new();
+            for shape in &signature.inputs {
+                let register = checker.fresh();
+                checker.register_tensor(&register,
+                    TensorType::unnamed(DType::F32, shape.clone(), ShapeLimits::REGISTER)?)?;
+                args.push(Expr::Name(register));
+            }
+            let output = checker.fresh();
+            checker.operator(&output, name, &args)
+                .with_context(|| format!("function shape contract {name}"))?;
+            // Only register metadata was constructed. No values, model weights,
+            // initialization recipes or forward computations have executed.
+            checker.program.registers.clear();
+            checker.program.instructions.clear();
+            checker.program.observations.clear();
+            checker.sizes.clear();
+            checker.types.clear();
+            checker.axes.clear();
+            checker.tuples.clear();
+            checker.constants.clear();
+            checker.unavailable.clear();
+            checker.tuple_bindings.clear();
+            checker.calls = 0;
+        }
+        Ok(())
+    }
+    fn matrix_arguments(&mut self, function: &crate::script::parse::Function) -> Result<Vec<Statement>> {
+        let Some(signature) = &function.tensor_signature else { return Ok(function.body.clone()); };
+        let mut names = HashMap::new();
+        for (arg, shape) in function.args.iter().zip(&signature.inputs) {
+            ensure!(self.size(arg)? == shape.iter().product::<usize>(), "matrix entrypoint input shape mismatch: {arg}");
+            let local = self.fresh();
+            self.assign(&local, &Expr::Call("reshape".into(), vec![Expr::Name(arg.clone()),
+                Expr::List(shape.iter().map(|dimension| Expr::Number(*dimension as f64)).collect())]))?;
+            names.insert(arg.clone(), local);
+        }
+        let mut body = function.body.clone();
+        fn rewrite(body: &mut [Statement], names: &HashMap<String, String>) {
+            for statement in body {
+                match &mut statement.kind {
+                    Stmt::Let(_, value) | Stmt::Set(_, value) | Stmt::Return(value) | Stmt::Eval(value) => {
+                        *value = crate::script::operators::rewrite(value, names, &HashMap::new());
+                    }
+                    Stmt::LetTuple(_, value) => *value = crate::script::operators::rewrite(value, names, &HashMap::new()),
+                    Stmt::If(value, yes, no) => {
+                        *value = crate::script::operators::rewrite(value, names, &HashMap::new());
+                        rewrite(yes, names); rewrite(no, names);
+                    }
+                    Stmt::While(value, body) => {
+                        *value = crate::script::operators::rewrite(value, names, &HashMap::new());
+                        rewrite(body, names);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        rewrite(&mut body, &names);
+        Ok(body)
+    }
     fn operator(&mut self, out: &str, name: &str, args: &[Expr]) -> Result<()> {
         if self.functions[name].signature.is_some() {
             return self.operation(out, name, args, false);
@@ -581,8 +682,12 @@ impl Lower {
         );
         let mut names = HashMap::new();
         // Evaluate each argument exactly once, in caller order, before binding locals.
-        for (arg, value) in f.args.iter().zip(args) {
+        for (index, (arg, value)) in f.args.iter().zip(args).enumerate() {
             let input = self.value(value)?;
+            if let Some(signature) = &f.tensor_signature {
+                ensure!(self.shape(&input)? == signature.inputs[index],
+                    "function {name} argument {arg} shape mismatch: expected {:?}, got {:?}", signature.inputs[index], self.shape(&input)?);
+            }
             names.insert(arg.clone(), input);
         }
         self.scope.push(name.into());
@@ -605,9 +710,13 @@ impl Lower {
                         for (name, value) in bindings.into_iter().zip(fields) { names.insert(name, value); }
                     }
                     Stmt::Return(e) => {
-                        return self
-                            .assign(out, &rewrite(&e, &names, &HashMap::new()))
-                            .with_context(|| format!("operator {name}, line {}", s.line));
+                        self.assign(out, &rewrite(&e, &names, &HashMap::new()))
+                            .with_context(|| format!("operator {name}, line {}", s.line))?;
+                        if let Some(signature) = &f.tensor_signature {
+                            ensure!(self.shape(out)? == signature.output,
+                                "function {name} return shape mismatch: expected {:?}, got {:?}", signature.output, self.shape(out)?);
+                        }
+                        return Ok(());
                     }
                     _ => unreachable!(),
                 }
@@ -2187,11 +2296,16 @@ impl Lower {
                             self.program.instructions.push(I::Jump { target: end });
                             return Ok(());
                         }
-                        let value = self.value(e)?;
-                        ensure!(
-                            self.shape(&value)? == vec![self.output],
-                            "forward return/output shape mismatch"
-                        );
+                        let mut value = self.value(e)?;
+                        let expected = self.return_shape.clone().unwrap_or_else(|| vec![self.output]);
+                        ensure!(self.shape(&value)? == expected,
+                            "forward return/output shape mismatch: expected {:?}, got {:?}", expected, self.shape(&value)?);
+                        if expected.len() > 1 {
+                            let flat = self.fresh();
+                            self.assign(&flat, &Expr::Call("reshape".into(), vec![Expr::Name(value),
+                                Expr::List(vec![Expr::Number(self.output as f64)])]))?;
+                            value = flat;
+                        }
                         self.program.instructions.push(I::Return { value });
                     }
                     Stmt::Eval(Expr::Call(name, args)) if self.functions.get(name).is_some_and(|f| f.signature.is_some()) => {

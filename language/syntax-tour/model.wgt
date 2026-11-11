@@ -615,3 +615,11 @@ fn loss(prediction, target) {
 # 元数据 line/scope/axes 对应编译单元位置、调用路径和命名轴。
 # 稀疏自编码器完整例子 interpretability/sparse_autoencoder/model.wgt，
 # 使用重建 MSE+稀疏项训练，可导出字典进行保留重建残差的特征干预。
+
+# T14 BEGIN：函数输入输出矩阵形状。独立复制为 model.wgt 时去掉本节注释符。
+# wgt 0.5
+# model MatrixTranspose
+# # 六项宿主向量在入口按两行三列解释，出口为三行两列并行优先展平。
+# fn transpose_matrix(x: f32[2,3]) -> f32[3,2] { return x.T; }
+# fn forward(x: f32[2,3]) -> f32[3,2] { return transpose_matrix(x); }
+# T14 END：调用处逐轴检查 helper 参数和返回值，相同元素数的不同形状仍报错。

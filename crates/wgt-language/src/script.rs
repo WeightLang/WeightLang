@@ -83,6 +83,7 @@ fn parse_linked(source: &str, imported: Program, materialize: bool) -> Result<Pr
             parse::Function {
                 is_async: false,
                 signature: None,
+                tensor_signature: None,
                 args: vec!["optimizer".into()],
                 body: vec![Statement {
                     line: 1,

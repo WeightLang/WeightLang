@@ -34,3 +34,9 @@ test('canonical model reads and updates have one spelling', () => {
   assert.deepEqual(sourceProblems('let old = read(memory);\nwrite(memory, next);'), [1, 2]);
   assert.deepEqual(sourceProblems('let old = memory;\nmemory <- next as [1,1];'), []);
 });
+
+test('matrix function input and output contracts are canonical', () => {
+  const source = 'fn project(x: f32[2,3], w: f32[3,4]) -> f32[2,4] { return x @ w; }';
+  assert.deepEqual(sourceProblems(source), []);
+  assert.deepEqual(markdownProblems('```wgt\n' + source + '\n```'), []);
+});

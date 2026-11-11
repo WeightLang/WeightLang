@@ -239,3 +239,7 @@ Python 单样本 eager，typed 操作保持原有无 AD 合同。
 完整签名、预算及后端合同见 docs/mechanistic-interpretability.md。
 验证 core research、Python test_research/native_parity、真实服务实验，
 并运行示例研究宿主和全量 example_sources。
+
+## 矩阵函数形状签名（本地新增）
+
+纯张量 helper 可写 `fn project(x: f32[M,K], w: f32[K,N]) -> f32[M,N]`。至少一个端口为多轴张量时使用形状合同，所有参数和返回值须标注；`dim` 在所属编译单元构造时绑定。每次调用展开逐轴检查实参及最终返回值，相同元素数不等于相同 shape。保持纯 helper 的不可变 let 与最终 return 合同。根级 matrix forward/loss 复用原有单向量宿主 ABI，在内部重塑、校验并展平，单端口元素数仍最多 16384。全 rank-1 typed 操作保留原有分类和无 AD 合同。示例 examples/native_training/matrix_signatures/model.wgt；验证 language/core matrix_signatures 与 Python API。未调用的多轴 helper 也按声明形状静态检查。

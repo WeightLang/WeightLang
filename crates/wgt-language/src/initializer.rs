@@ -384,7 +384,7 @@ impl Compiler<'_> {
         }
         ensure!(self.stack.len() < 32 && !self.stack.iter().any(|v| v == name), "recursive/deep initializer function: {name}");
         let function = self.functions.get(name).with_context(|| format!("unknown initialization function: {name}"))?.clone();
-        ensure!(!function.is_async && function.signature.is_none() && function.args.len() == args.len(), "initializer function must be a pure helper with matching arguments");
+        ensure!(!function.is_async && function.signature.is_none() && function.tensor_signature.is_none() && function.args.len() == args.len(), "initializer function must be a pure helper with matching arguments");
         let mut locals = HashMap::new();
         for (name, expr) in function.args.iter().zip(args) { locals.insert(name.clone(), self.expression(expr, env)?); }
         self.stack.push(name.into());

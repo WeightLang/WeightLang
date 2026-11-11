@@ -414,3 +414,7 @@ uv run --no-project python -m pytest python/tests -q
 WGT 稀疏自编码器通过普通 PyTorch 优化器和自身 model.loss 训练，
 用 `SparseAutoencoder.from_wgt(model)` 导出特征字典。
 梯度归因使用 autograd.grad，参数已有 .grad 得到保留。
+
+### 多轴函数签名（本地新增）
+
+共享前端支持在纯函数和根级 forward/loss 上声明固定矩阵形状，见[形状签名](model-language.md#矩阵函数形状签名本地新增)。SDK 继续接收和返回原有固定宽度向量（以及 SDK 已有的宿主 batch），由编译后的 reshape 在模型内部恢复形状。多轴注解不会自动改变宿主的输入输出维度约定。

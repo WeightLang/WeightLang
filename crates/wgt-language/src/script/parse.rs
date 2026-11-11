@@ -103,7 +103,14 @@ pub struct Function {
     pub args: Vec<String>,
     /// Present on explicitly typed model operations; absent on legacy helpers.
     pub signature: Option<OperationSignature>,
+    /// Pure tensor function contract when at least one port has multiple axes.
+    pub tensor_signature: Option<TensorSignature>,
     pub body: Vec<Statement>,
+}
+#[derive(Clone, Debug)]
+pub struct TensorSignature {
+    pub inputs: Vec<Vec<usize>>,
+    pub output: Vec<usize>,
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct OperationSignature {
@@ -286,7 +293,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
                 let arg = parser.name()?;
                 ensure!(!args.contains(&arg), "duplicate argument: {arg}");
                 args.push(arg);
-                input_types.push(if parser.take(":") { Some(parser.tensor_width()?) } else { None });
+                input_types.push(if parser.take(":") { Some(parser.tensor_shape()?) } else { None });
                 if !parser.take(",") {
                     break;
                 }
@@ -294,10 +301,26 @@ pub fn parse_functions(source: &str) -> Result<Program> {
         }
         parser.expect(")")?;
         let has_return = parser.take("->");
-        let output = if has_return { Some(parser.tensor_width()?) } else { None };
+        let output = if has_return { Some(parser.tensor_shape()?) } else { None };
+        let mut tensor_signature = None;
         let signature = if has_return || input_types.iter().any(Option::is_some) {
-            ensure!(input_types.iter().all(Option::is_some), "operation arguments must all declare f32[N] types");
-            Some(OperationSignature { inputs: input_types.into_iter().flatten().collect(), output })
+            ensure!(input_types.iter().all(Option::is_some), "function arguments must all declare tensor types");
+            let inputs: Vec<Vec<usize>> = input_types.into_iter().flatten().collect();
+            let multiple_axes = inputs.iter().any(|shape| shape.len() > 1)
+                || output.as_ref().is_some_and(|shape| shape.len() > 1);
+            if multiple_axes {
+                ensure!(!is_async, "tensor shape functions must be synchronous");
+                tensor_signature = Some(TensorSignature {
+                    inputs,
+                    output: output.context("matrix function requires an explicit tensor return type")?,
+                });
+                None
+            } else {
+                Some(OperationSignature {
+                    inputs: inputs.into_iter().map(|shape| shape[0]).collect(),
+                    output: output.map(|shape| shape[0]),
+                })
+            }
         } else { None };
         ensure!(
             !is_async || !matches!(name.as_str(), "main" | "forward" | "loss"),
@@ -312,6 +335,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
                         is_async,
                         args,
                         signature,
+                        tensor_signature,
                         body
                     }
                 )
@@ -329,13 +353,17 @@ struct Parser {
     depth: usize,
 }
 impl Parser {
-    fn tensor_width(&mut self) -> Result<usize> {
+    fn tensor_shape(&mut self) -> Result<Vec<usize>> {
         self.expect("f32")?;
         self.expect("[")?;
-        let width = self.next()?.text.parse::<usize>().context("tensor width must be a fixed integer")?;
-        ensure!((1..=16384).contains(&width), "tensor width must be 1..16384");
+        let mut shape = Vec::new();
+        loop {
+            shape.push(self.next()?.text.parse::<usize>().context("tensor dimension must be a fixed integer")?);
+            if !self.take(",") { break; }
+        }
         self.expect("]")?;
-        Ok(width)
+        crate::tensor::TensorType::unnamed(crate::tensor::DType::F32, shape.clone(), crate::tensor::ShapeLimits::REGISTER)?;
+        Ok(shape)
     }
     fn instance_declaration(&mut self) -> Result<(String, Function)> {
         let line = self.line();
@@ -427,6 +455,7 @@ impl Parser {
                 is_async: false,
                 args,
                 signature: None,
+                tensor_signature: None,
                 body: vec![Statement {
                     line,
                     kind: Stmt::Return(Expr::BuiltinCall(builtin.into(), values)),

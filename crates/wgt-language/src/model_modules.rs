@@ -290,8 +290,14 @@ pub(crate) fn emit_function(out: &mut String, name: &str, function: &Function) -
         !function.is_async,
         "model modules cannot contain async functions"
     );
-    let args=if let Some(signature)=&function.signature {function.args.iter().zip(&signature.inputs).map(|(n,w)|format!("{n}: f32[{w}]")).collect::<Vec<_>>().join(",")}else{function.args.join(",")};
-    let output=function.signature.as_ref().and_then(|s|s.output).map(|n|format!(" -> f32[{n}]")).unwrap_or_default();
+    let format_shape = |shape: &[usize]| shape.iter().map(usize::to_string).collect::<Vec<_>>().join(",");
+    let (args, output) = if let Some(signature) = &function.tensor_signature {
+        (function.args.iter().zip(&signature.inputs).map(|(name, shape)| format!("{name}: f32[{}]", format_shape(shape))).collect::<Vec<_>>().join(","),
+         format!(" -> f32[{}]", format_shape(&signature.output)))
+    } else if let Some(signature) = &function.signature {
+        (function.args.iter().zip(&signature.inputs).map(|(name, width)| format!("{name}: f32[{width}]")).collect::<Vec<_>>().join(","),
+         signature.output.map(|width| format!(" -> f32[{width}]")).unwrap_or_default())
+    } else { (function.args.join(","), String::new()) };
     out.push_str(&format!("\nfn {name}({args}){output} {{\n"));
     fn emit_body(out:&mut String,body:&[parse::Statement])->Result<()> {
         for statement in body {match &statement.kind {

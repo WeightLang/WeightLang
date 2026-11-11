@@ -1,0 +1,26 @@
+wgt 0.5
+dim M = 2
+dim K = 3
+dim N = 2
+model MatrixProjection
+# K is the contracted feature axis; N is the output feature axis.
+# This explicit recipe creates starting weights only, without training.
+parameter weight: f32[K,N] = full(0.25)
+
+# Each of the M rows is projected from K features to N features.
+# The compiler checks both argument axes and both return axes at each call.
+fn project(x: f32[M,K], w: f32[K,N]) -> f32[M,N] {
+    return x @ w;
+}
+
+# Hosts pass a row-major vector of M*K values at the existing vector ABI.
+# The function body receives the declared matrix, and calls share weight.
+fn forward(x: f32[M,K]) -> f32[M,N] {
+    return project(x, weight as [K,N]);
+}
+
+# Reduce the four output elements of one sample. The host owns batch training.
+fn loss(prediction: f32[M,N], target: f32[M,N]) -> f32[1] {
+    let error = (prediction - target) as [4];
+    return 0.5 * (error ** 2).mean;
+}

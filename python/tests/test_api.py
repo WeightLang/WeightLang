@@ -206,3 +206,18 @@ def test_dimensioned_file_import_keeps_library_dimensions_independent(compiler, 
     (tmp_path / "model.wgt").write_text(source.replace("model Projection", 'import ops from "./ops.wgt"\nmodel Projection').replace("return linear(x, weight, bias);", "return ops.widen_value(linear(x, weight, bias));"))
     model = wgt.load(tmp_path / "model.wgt", dimensions={"N": 3}, device="cpu")
     torch.testing.assert_close(model(torch.ones(3)), torch.full((3,), 7.))
+
+
+def test_matrix_function_contracts_compile_execute_and_differentiate(compiler):
+    path = ROOT / "examples/native_training/matrix_signatures/model.wgt"
+    model = wgt.load(path, device="cpu")
+    x = torch.tensor([1., 2., 3., 4., 5., 6.], requires_grad=True)
+    output = model(x)
+    torch.testing.assert_close(output, torch.tensor([1.5, 1.5, 3.75, 3.75]))
+    loss = model.loss(output, torch.zeros(4))
+    torch.testing.assert_close(loss, torch.tensor(4.078125))
+    loss.sum().backward()
+    torch.testing.assert_close(x.grad, torch.tensor([0.1875] * 3 + [0.46875] * 3))
+    source = path.read_text().replace("project(x, weight as [K,N])", "project(x.T, weight as [K,N])")
+    with pytest.raises(Exception, match="shape mismatch"):
+        wgt.loads(source, device="cpu")

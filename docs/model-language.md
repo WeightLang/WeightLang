@@ -43,7 +43,7 @@ Python 的 `compile` / `compile_source` / `load` / `loads` 接受可选关键字
 - `fn forward(x: f32[N]) -> f32[M]`，一个输入、一个输出，宽度各为 1..=16384；需要矩阵时在函数内显式 `as [...]`。
 - `fn loss(prediction: f32[M], target: f32[T]) -> f32[1]`；预测宽度必须等于 forward 输出，target 可不同。兼容无注解的 `fn loss(prediction,target)`，此时 target 宽度默认等于输出。
 - 不混用根级端口、`layer` 或持久 `state`。typed forward 保持纯计算，不允许 `write`/`<-`，需传递状态时通过纯 helper 返回下一状态。
-- 其他 helper 仍为无类型注解的纯张量函数；不允许额外 typed 操作入口混入训练模型。
+- 其他 helper 可保持无注解，也可使用下文的多轴形状签名；不允许额外 typed 操作入口混入训练模型。
 - 无 `loss` 的现有 typed 操作仍保持原有无 AD 合同；本补丁不改变其调用 API。旧根级端口 forward 继续兼容，包括其已有梯度/写入语义。
 
 Rust 原生服务与 Python SDK 都使用相同的定义与 loss。Python `.loss(prediction,target)` 保留梯度；Rust 显式使用 `Loss::Custom`。原生解释、compiled-forward、真实 IPC 和 Python 的行为分别测试，不能从语法通过推断 GPU 加速或跨状态求导。
@@ -63,3 +63,29 @@ Rust 原生服务与 Python SDK 都使用相同的定义与 loss。Python `.loss
 新代码优先使用 `as [...]`、`@`、`.T`、直接参数读取和 `<-`。加权计算优先使用现有 `gate/route` 与纯 helper；不再扩张 `mix/blend` 同义语法。旧调用形式、顺序 layer、prob 参数与 learn 域均继续兼容，本补丁没有合并它们的存储格式，也未改变 `if` 的旧 STE 行为。
 
 后续破坏性收敛需要单独的语言版本与迁移：统一所有无 loss/有 loss 的入口能力、多输入多输出可微端口、独立的梯度策略、布尔 mask/多轴切片以及完全退役旧宿主脚本。本补丁没有以文档描述冒充这些能力已经完成。
+
+## 矩阵函数形状签名（本地新增）
+
+函数参数与返回值可以声明固定多轴形状。至少一个参数或返回值为多轴张量时，函数按纯张量形状合同检查。所有参数须显式标注，返回类型必填。使用已有 `dim` 绑定构造时维度。
+
+```wgt
+wgt 0.5
+model MatrixProduct
+# 两行、三维输入特征乘三行、四维输出投影，结果为两行四列。
+fn project(x: f32[2,3], w: f32[3,4]) -> f32[2,4] {
+    return x @ w;
+}
+# 宿主提供六项行优先输入；模型内部按两行三列处理。
+parameter weight: f32[3,4] = full(0.25)
+fn forward(x: f32[2,3]) -> f32[2,4] {
+    return project(x, weight as [3,4]);
+}
+```
+
+每次函数展开都逐轴校验实参和最终返回值；`[2,3]` 与 `[3,2]` 即使元素数相同也拒绝互换。显式 `as [...]` 是调用方要求的形状变换。合同支持 1..8 轴、每轴 1..16384、总元素数最多 16777216，沿用共享张量限制；所有形状固定，维度不能写运行时变量或 `-1`。多轴 helper 保持纯函数的不可变 `let` 与最终 `return` 限制，参数显式传递，检查发生在调用展开时。未调用的多轴 helper 也使用声明形状进行静态检查，检查只构造张量元数据。
+
+根级矩阵 `forward` 仍为一个输入，输入与输出各最多 16384 项。共享 IR 在入口把原有行优先向量重塑成声明形状，在出口校验各轴后展平。原生 Rust/service 与 Python SDK 的宿主输入输出接口仍传固定宽度向量。可选矩阵 `loss` 的 prediction 形状须等于 forward 输出，返回 `f32[1]`；target 形状可不同。样例见 [matrix_signatures/model.wgt](../examples/native_training/matrix_signatures/model.wgt)。矩阵入口保持纯计算，状态更新使用既有 typed 操作合同。
+
+纯 helper 的形状签名会保留到本地算子导入、闭合源码和模型定义序列化中。已有全 rank-1 typed 操作保持原有分类与无 AD 合同。此语法随工具包 0.5.4 发布，执行验证范围见下文的原生与 Python 定点检查。
+
+本地执行验证已覆盖原生 CPU、compiled-forward、自定义 loss 训练、真实 wgtime IPC 前向与训练，以及 Python CPU/f32 前向和一阶梯度。语言回归还覆盖逐轴不匹配拒绝、本地库导入、定义序列化、formatter/LSP 与全仓示例。

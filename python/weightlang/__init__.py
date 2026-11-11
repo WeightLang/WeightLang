@@ -8,7 +8,7 @@ from .evolution import Candidate, GA, GAConfig, GeneticAlgorithm, GenomeSchema, 
 from .forward_forward import FFReport, train_forward_forward
 from .weights import Plan, WeightRef, WeightSet, restore
 
-__version__ = "0.5.3"
+__version__ = "0.5.4"
 __all__ = [
     "CompilationError", "compile", "compile_source", "from_ir", "load", "loads",
     "inspect", "attribute", "circuit", "Research", "Activation", "Intervention",
