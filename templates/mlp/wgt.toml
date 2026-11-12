@@ -1,0 +1,33 @@
+[project]
+module = "local/{{project-name}}"
+edition = "0.5"
+
+[python]
+runner = "workflow.py"
+
+# A small regression model: one input, two hidden layers, one output.
+[model]
+kind = "mlp"
+input_size = 1
+output_size = 1
+hidden_size = 16
+layers = 2
+dropout = 0.0
+
+[runtime]
+device = "auto"
+
+[train]
+data = "data.csv" # No header: input columns first, then target columns.
+steps = 100
+batch_size = 4
+learning_rate = 0.01
+weight_decay = 0.01
+seed = 42
+output = "weights/model"
+log_every = 10
+
+[infer]
+checkpoint = "weights/model"
+inputs = [0.5]
+seed = 42

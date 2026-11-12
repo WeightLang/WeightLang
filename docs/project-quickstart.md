@@ -30,6 +30,33 @@ Windows 先运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`，打
 
 如果希望创建项目后立即准备环境，可运行 `wgt init my-model --template tiny-lm --sync`。只执行 `init` 或 `wgt check` 时不会安装依赖、初始化模型或开始训练。
 
+<a id="cargo-generate"></a>
+### 使用 cargo generate
+
+安装 `cargo install --locked cargo-generate` 后，无需预先安装 `wgt` 即可生成项目：
+
+```sh
+cargo generate --git https://github.com/WeightLang/WeightLang.git
+```
+
+根目录提供模板菜单。非交互使用时指定子目录和项目名：
+
+```sh
+cargo generate --git https://github.com/WeightLang/WeightLang.git templates/native --name my-native
+cargo generate --git https://github.com/WeightLang/WeightLang.git templates/mlp --name my-regression
+cargo generate --git https://github.com/WeightLang/WeightLang.git templates/tiny-lm --name my-language-model
+```
+
+生成结果与 `wgt init --template` 使用同一套模型或 Python 配方，并附带 README、忽略规则和当前工具链版本锁定。`native` 仅生成 `model.wgt` 和 WGT 项目配置，不生成 Rust 应用；在目录内运行 `wgt check model.wgt` 检查，执行与训练接入见[原生后端](native-backend.md)。Python 模板使用 TOML/Python 架构，不附加无用的 `model.wgt`。生成阶段不会下载 Python 依赖、初始化模型或训练；训练前安装 `wgt` 和 uv，然后运行项目 README 中的命令。
+
+已有本地源码时，可以直接使用工作区内容：
+
+```sh
+cargo generate --path templates/mlp --name my-regression
+```
+
+维护者修改 `crates/wgt/templates/`、默认忽略规则或项目版本后，运行 `python3 scripts/generate_cargo_templates.py` 同步模板；运行 `python3 scripts/generate_cargo_templates.py --check` 检查同步状态。新增入口或配置字段时应同时更新该脚本和 CLI 初始化逻辑。使用 `python3 scripts/test_cargo_templates.py` 验证实际生成结果。
+
 ## 2. 在 wgt.toml 中修改架构和训练参数
 
 `wgt.toml` 集中保存项目、模型配方、运行设备、训练和推理参数。Python 模板同时生成 `pyproject.toml`，让 uv 继续使用标准 Python 项目配置；Rust 应用则继续使用 Cargo。

@@ -1,0 +1,10 @@
+wgt 0.5
+model Starter
+# One input feature expands to eight learned features, then one prediction.
+# This is a model definition. Checking it does not initialize or train weights.
+input x: f32[1]
+output y: f32[1]
+layer hidden: linear(8)
+layer activation: tanh
+layer prediction: linear(1)
+init weights=xavier_uniform(42) bias=zeros()

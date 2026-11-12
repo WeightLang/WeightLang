@@ -1,0 +1,12 @@
+[project]
+module = "local/{{project-name}}"
+edition = "0.5"
+
+[model]
+source = "model.wgt"
+output = "weights"
+
+[revisions]
+max_versions = 5
+
+[dependencies]

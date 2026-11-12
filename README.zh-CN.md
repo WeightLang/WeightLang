@@ -18,6 +18,24 @@ Windows 运行 `powershell -ExecutionPolicy Bypass -File .\install.ps1`，然后
 源码编译还需要系统链接器：macOS 使用 Xcode Command Line Tools，Linux 使用 C/C++ 构建工具链，Windows 使用包含 C++ 工作负载和 Windows SDK 的 Visual Studio Build Tools。
 自定义路径、版本 tag 与 shell 配置见[安装说明](docs/weightc-migration.md#安装)。
 
+## 使用 cargo generate 创建项目
+
+```sh
+cargo install --locked cargo-generate
+cargo generate --git https://github.com/WeightLang/WeightLang.git
+```
+
+交互选择 `native`、`mlp` 或 `tiny-lm`，也可以直接指定：
+
+```sh
+cargo generate --git https://github.com/WeightLang/WeightLang.git templates/tiny-lm --name my-model
+cd my-model
+wgt train
+wgt infer --prompt "Hello"
+```
+
+生成项目只需要 cargo-generate；训练前需安装 `wgt` 和 uv。`native` 生成用于 Rust/service 集成的 WGT 模型定义。离线生成及维护方法见[项目快速上手](docs/project-quickstart.md#cargo-generate)。
+
 ## 在 PyTorch 中导入 WGT 架构
 
 用 `model.wgt` 描述参数和前向计算，Python 加载后得到标准 `torch.nn.Module`。SDK 复用 Rust 编译器、PyTorch FX、自动求导、优化器及模型查看工具。

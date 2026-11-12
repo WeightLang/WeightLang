@@ -21,6 +21,26 @@ linker: Xcode Command Line Tools on macOS, a C/C++ build toolchain on Linux, or
 Visual Studio Build Tools with the C++ workload and Windows SDK on Windows.
 See [installation options](docs/weightc-migration.md#安装) for custom paths and tags.
 
+## Create a project with cargo generate
+
+```sh
+cargo install --locked cargo-generate
+cargo generate --git https://github.com/WeightLang/WeightLang.git
+```
+
+Choose `native`, `mlp`, or `tiny-lm` in the template menu. To select directly:
+
+```sh
+cargo generate --git https://github.com/WeightLang/WeightLang.git templates/tiny-lm --name my-model
+cd my-model
+wgt train
+wgt infer --prompt "Hello"
+```
+
+Generation requires only cargo-generate. Install `wgt` and uv before training;
+`native` creates a WGT model definition for Rust/service integration. See the
+[project guide](docs/project-quickstart.md#cargo-generate) for local templates and maintenance.
+
 ## Use WGT architectures in PyTorch
 
 Write the parameters and forward computation in `model.wgt`, then import a

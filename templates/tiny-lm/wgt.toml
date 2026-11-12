@@ -1,0 +1,37 @@
+[project]
+module = "local/{{project-name}}"
+edition = "0.5"
+
+[python]
+runner = "workflow.py"
+
+# Change these numbers to design a small GPT-2 architecture from scratch.
+# PyTorch/Transformers perform the computation; no pretrained model is fetched.
+[model]
+kind = "tiny-lm"
+hidden_size = 64
+layers = 2
+heads = 4
+context_length = 128
+dropout = 0.0
+
+[runtime]
+device = "auto" # Prefer an available GPU; otherwise use CPU. Explicit devices override this.
+
+[train]
+data = "data.txt" # Your own UTF-8 text; the included text is only a toy corpus.
+steps = 100
+batch_size = 4
+learning_rate = 0.003
+weight_decay = 0.01
+seed = 42
+output = "weights/model"
+log_every = 10
+
+[infer]
+checkpoint = "weights/model"
+prompt = "WeightLang"
+max_new_tokens = 32 # Tokens here are UTF-8 bytes, not words.
+temperature = 0.8
+top_k = 40
+seed = 42
