@@ -226,3 +226,25 @@ def test_native_typed_state_is_owned_and_not_differentiable(service):
         with pytest.raises(wgt.ServiceError):model.call('tick',[1.,2.])
         assert model.call('tick',[3.])==[5.]
         with pytest.raises(wgt.ServiceError):model.train_step([[1.]],[[0.]],rate=.1)
+
+
+def test_owned_work_limit_bounds_and_atomic_training(service):
+    with wgt.loads(SOURCE,work_limit=1,optimizer='adam') as model, wgt.loads(SOURCE,optimizer='adam') as control:
+        before=model.parameters()
+        with pytest.raises(wgt.ServiceError,match='budget'):
+            model([1.])
+        with pytest.raises(wgt.ServiceError,match='budget'):
+            model.train_step([[1.]],[[0.]],rate=.01)
+        assert model.parameters()==before
+        assert model.set_work_limit(1000)==1000
+        assert model([1.])==[2.]
+        for _ in range(2):
+            model.train_step([[1.]],[[0.]],rate=.01)
+            control.train_step([[1.]],[[0.]],rate=.01)
+            model.set_work_limit(2000)
+        assert model.parameters()==control.parameters(), 'budget changes preserve Adam state'
+        for invalid in [False,0,-1,100_000_001,1.5]:
+            with pytest.raises(ValueError):model.set_work_limit(invalid)
+        with pytest.raises(wgt.ServiceError,match='owned'):
+            model._client.call('SetWorkLimit',handle=control._handle,work=1)
+        assert control([1.])==model([1.])

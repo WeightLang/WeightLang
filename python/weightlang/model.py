@@ -166,7 +166,7 @@ class Model:
     """
     _wgt_backend = "native"
 
-    def __init__(self, definition, *, endpoint=None, timeout=30, memory_bytes=64 * 1024 * 1024, optimizer=None, device="cpu", dtype=None):
+    def __init__(self, definition, *, endpoint=None, timeout=30, memory_bytes=64 * 1024 * 1024, optimizer=None, device="cpu", dtype=None, work_limit=None):
         if str(device) not in {"cpu", "auto"} or (dtype is not None and str(dtype) not in {"float32", "torch.float32"}):
             raise ValueError("native execution supports CPU/f32; choose backend='torch' for other devices/dtypes")
         if not isinstance(definition, dict) or definition.get("kind") not in {"forward", "sequential", "operations"}:
@@ -179,6 +179,9 @@ class Model:
             raise ValueError("memory_bytes must be a positive integer")
         if optimizer not in {None, "sgd", "adam"}:
             raise ValueError("native optimizer must be None, 'sgd' or 'adam'")
+        if work_limit is not None and (type(work_limit) is not int or not 1 <= work_limit <= 100_000_000 or definition["kind"] != "forward"):
+            raise ValueError("work_limit requires a forward model and integer in 1..100000000")
+        self.work_limit = None
         self._definition = deepcopy(definition)
         self._lock = threading.RLock()
         self._client = NativeConnection(endpoint, timeout=timeout)
@@ -192,6 +195,8 @@ class Model:
             self._definition["forward_interface"] = result.get("forward_interface")
             self._handle = result["handle"]
             self.execution_backend = result.get("backend")
+            if work_limit is not None:
+                self.set_work_limit(work_limit)
         except BaseException:
             self._client.close()
             self._closed = True
@@ -278,6 +283,15 @@ class Model:
         with self._lock:
             candidates = [(p.name, list(p.shape), list(p.data)) for p in values]
             return self._call("UpdateParameters", candidates=candidates)["revision"]
+
+    def set_work_limit(self, work):
+        """Set the owned native forward call/training work budget, not weights."""
+        self._ensure_native_process()
+        if type(work) is not int or not 1 <= work <= 100_000_000:
+            raise ValueError("work limit must be an integer in 1..100000000")
+        with self._lock:
+            self.work_limit = self._call("SetWorkLimit", work=work)["work_limit"]
+            return self.work_limit
 
     def set_optimizer(self, optimizer):
         if self.backend != "native":

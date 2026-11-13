@@ -45,6 +45,7 @@ pub enum Request {
     OperationSchemas { handle: u64 },
     ParameterValues { handle: u64 },
     StateValues { handle: u64 },
+    SetWorkLimit { handle: u64, work: u64 },
     SetOptimizer { handle: u64, optimizer: String },
     UpdateParameters { handle: u64, candidates: Vec<(String, Vec<usize>, Vec<f32>)> },
     TrainRecurrent { handle: u64, inputs: Vec<Vec<f32>>, targets: Vec<Option<Vec<f32>>>,

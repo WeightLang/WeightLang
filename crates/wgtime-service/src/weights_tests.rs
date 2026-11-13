@@ -11,6 +11,7 @@ fn context() -> (Connection, Shared) {
         Connection {
             sessions: Sessions::default(),
             ready: true,
+            work_limits: HashMap::new(),
             tensors: HashMap::new(),
             checkpoints: HashMap::new(),
             strategies: HashMap::new(),

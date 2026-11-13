@@ -110,6 +110,7 @@ fn listen(directory: &Path) -> Result<(UnixListener, Guard)> {
 struct Connection {
     sessions: Sessions,
     ready: bool,
+    work_limits: HashMap<u64, u64>,
     tensors: HashMap<u64, wgtime::buffer::Mapping>,
     checkpoints: HashMap<u64, Vec<u8>>,
     strategies: HashMap<u64, wgtime_service::strategy::Strategy>,
@@ -227,15 +228,25 @@ impl Connection {
                 };
                 Ok(serde_json::json!({"revision": revision}))
             }
+            Request::SetWorkLimit { handle, work } => {
+                ensure!((1..=100_000_000).contains(&work), "work limit must be in 1..100000000");
+                ensure!(
+                    matches!(self.sessions.get(&handle), Some(Session::Adaptive(_))),
+                    "work limit requires an owned forward model"
+                );
+                self.work_limits.insert(handle, work);
+                Ok(serde_json::json!({"work_limit":work}))
+            }
             Request::TrainRecurrent { handle, inputs, targets, input_offset, output_offset,
                 state_width, supervised_offset, supervised_width, rate, clip } => {
+                let mut work = *self.work_limits.get(&handle).unwrap_or(&1_000_000);
                 let Some(Session::Adaptive(session)) = self.sessions.get_mut(&handle) else {
                     bail!("recurrent differentiation requires an owned forward program");
                 };
                 let loss=session.train_recurrent(&inputs,&targets,
                     wgtime_core::adaptive::recurrent::StateLink {input_offset,output_offset,width:state_width},
                     wgtime_core::adaptive::recurrent::OutputSlice {offset:supervised_offset,width:supervised_width},
-                    rate,clip,&mut 1_000_000,64*1024*1024)?;
+                    rate,clip,&mut work,64*1024*1024)?;
                 Ok(serde_json::json!({"loss":loss,"revision":session.revision()}))
             }
             Request::TrainStepWithPolicy { handle, inputs, targets, rate, loss, clip, straight_through } => {
@@ -248,7 +259,7 @@ impl Connection {
             }
             Request::Predict { handle, input } => match self.sessions.get_mut(&handle) {
                 Some(Session::Adaptive(session)) => {
-                    let output = session.run(&input, 1_000_000)?.to_vec();
+                    let output = session.run(&input, *self.work_limits.get(&handle).unwrap_or(&1_000_000))?.to_vec();
                     Ok(serde_json::json!({"output": output, "revision": session.revision()}))
                 }
                 Some(Session::Trainer(trainer)) => Ok(serde_json::json!({"output": trainer.predict(&input)?, "steps": trainer.steps()})),
@@ -335,7 +346,7 @@ impl Connection {
                 ensure!(loss != "loss" || matches!(self.sessions.get(&handle), Some(Session::Adaptive(_))), "custom loss requires a forward model with fn loss");
                 let value = match self.sessions.get_mut(&handle) {
                     Some(Session::Adaptive(session)) => {
-                        let mut remaining = 10_000_000;
+                        let mut remaining = *self.work_limits.get(&handle).unwrap_or(&10_000_000);
                         if loss == "loss" {
                             if let Some(limit) = clip { session.train_clipped(&inputs, &matrix, rate, limit, &mut remaining, 64*1024*1024)? }
                             else { session.train_custom(&inputs, &matrix, rate, &mut remaining, 64*1024*1024)? }
@@ -350,6 +361,7 @@ impl Connection {
             }
             Request::Drop { handle } => {
                 self.sessions.remove(&handle)?;
+                self.work_limits.remove(&handle);
                 Ok(serde_json::json!({"released": true}))
             }
             Request::PersistFd { .. } | Request::LoadFd { .. } | Request::InspectArtifactFd { .. } | Request::ExportWeightsFd { .. } | Request::BindWeightsFd { .. } | Request::InitializeWeightsFd { .. } => {
@@ -479,6 +491,7 @@ fn connection(mut stream: UnixStream, shared: Arc<Shared>) {
         let mut state = Connection {
             sessions: Sessions::default(),
             ready: false,
+            work_limits: HashMap::new(),
             tensors: HashMap::new(),
             checkpoints: HashMap::new(),
             strategies: HashMap::new(),
@@ -678,6 +691,7 @@ mod lifecycle_tests {
         Connection {
             sessions: Sessions::default(),
             ready: true,
+            work_limits: HashMap::new(),
             tensors: HashMap::new(),
             checkpoints: HashMap::new(),
             strategies: HashMap::new(),

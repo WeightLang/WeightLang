@@ -21,6 +21,8 @@ with wgt.load("model.wgt", optimizer="adam", memory_bytes=64 * 1024 * 1024) as m
 - `train_recurrent(inputs, targets, *, input_offset, output_offset, state_width, supervised_offset, supervised_width, rate, clip=None, straight_through=False)` 使用原生显式 hidden BPTT，监督 MSE；`None` target 不监督该步。限制与预算见 [动态模型](dynamic-models.md)。
 - `load_dynamic` / `loads_dynamic` 必填 `input_shapes`，一个服务句柄保留权重与优化器。输入形状变化时由共享编译器重新绑定；检查首个定义的源码指纹，并由服务验证参数 schema 和候选瞬时内存。`specialize(input_shapes)` 可显式切换形状。没有 Python WGT 解析器。
 
+`Model(..., work_limit=None)`、原生 load/loads/from_ir 可显式传 `work_limit`，或调用 `set_work_limit(work)`：仅适用于本连接拥有的 forward 模型，值为 1..100,000,000 的整数（不接受 bool）。预算按原生指令成本计数，推理每次调用重置，train_step 对整批次计量，train_recurrent 对整条序列计量；超限失败保持参数与优化器事务。未设置时保留服务默认值：forward 1,000,000、train_step 10,000,000、train_recurrent 1,000,000。设置不改变权重、Adam 状态或内存上限；几何重绑定保留设置，释放句柄时移除。此接口需要配套源码版本服务，不会隐式读取项目配置；typed/sequential 模型不接受该设置。
+
 ## 显式 PyTorch 后端和原有接口
 
 安装 `weightlang[torch]`，使用 `wgt.load(..., backend="torch", device="cpu")` 等入口得到 `TorchModel`，它也是 `wgt.Model`。`forward`、`parameters()`、`state_dict()` 等委托给真实 PyTorch 模块；`to_torch()` 显式取得原始 `nn.Module`，可以使用标准优化器与 autograd。`train/eval/to` 返回同一个 WGT 对象。没有跨后端隐式迁移参数/优化器的操作。
