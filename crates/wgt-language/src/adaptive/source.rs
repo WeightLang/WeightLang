@@ -2128,6 +2128,13 @@ impl Lower {
                         len,
                     )
                 }
+                ("dropout", [x,rng,Expr::Number(p)]) => {
+                    ensure!(p.is_finite() && *p>=0. && *p<1.,"dropout probability must be in [0,1)");
+                    let input=self.value(x)?;let rng=self.value(rng)?;
+                    ensure!(self.shape(&rng)?==[4],"dropout rng requires f32[4]");
+                    let len=self.size(&input)?;
+                    (I::Dropout {out:out.into(),input,rng,probability:*p as f32},len)
+                }
                 ("topk_mask", [x,count]) => {
                     let input=self.value(x)?;let count=self.value(count)?;
                     ensure!(!self.shape(&input)?.is_empty() && self.shape(&count)?==[1], "topk_mask requires a tensor and scalar count");
@@ -2174,7 +2181,7 @@ impl Lower {
             | I::Detach { input, .. }
             | I::Exp { input, .. }
             | I::Log { input, .. }
-            | I::TopkMask { input, .. } | I::Gelu { input, .. } | I::Tanh { input, .. }
+            | I::Dropout { input, .. } | I::TopkMask { input, .. } | I::Gelu { input, .. } | I::Tanh { input, .. }
             | I::Sigmoid { input, .. }
             | I::Relu { input, .. }
             | I::Clip { input, .. } => self.tensor_type(input)?,

@@ -44,6 +44,8 @@ pub enum Request {
     CallOperation { handle: u64, name: String, inputs: Vec<Vec<f32>> },
     OperationSchemas { handle: u64 },
     ParameterValues { handle: u64 },
+    ParameterValuesHex { handle: u64 },
+    UpdateParametersHex { handle: u64, candidates: Vec<(String,Vec<usize>,String)> },
     StateValues { handle: u64 },
     SetWorkLimit { handle: u64, work: u64 },
     SetOptimizer { handle: u64, optimizer: String },

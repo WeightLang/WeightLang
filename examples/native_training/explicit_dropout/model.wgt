@@ -1,0 +1,10 @@
+wgt 0.5
+model ExplicitDropout
+# A host provides eight feature values and a four-number RNG configuration:
+# [seed_low16, seed_high16, stream16, training_bit]. There is no hidden RNG state.
+# Each flat element gets its own counter. Training keeps and rescales ~75%; eval
+# is identity. Reusing a configuration intentionally replays the same mask.
+# No parameters or initialization recipes: this example demonstrates value VJP.
+fn forward(x: f32[8], rng: f32[4]) -> (f32[8],) {
+    return (dropout(x, rng, 0.25),);
+}

@@ -744,7 +744,7 @@ impl<'a> Generator<'a> {
                     }
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]={value};");
                 }
-                I::MaskedSoftmax {..} | I::Gelu {..} | I::TopkMask {..} => anyhow::bail!("GELU/top-k/masked-softmax use the native interpreter"),
+                I::Dropout {..} | I::MaskedSoftmax {..} | I::Gelu {..} | I::TopkMask {..} => anyhow::bail!("complex tensor execution requires the reference-interpreter backend"),
                 I::Tanh { input: x, .. }
                 | I::Sigmoid { input: x, .. }
                 | I::Relu { input: x, .. }

@@ -212,6 +212,7 @@ pub enum Instruction {
         left: String,
         right: String,
     },
+    Dropout { out: String, input: String, rng: String, probability: f32 },
     Gelu { out: String, input: String },
     TopkMask { out: String, input: String, count: String },
     Tanh {
@@ -356,6 +357,7 @@ impl Instruction {
             | Minimum { out, left, right } =>
                 (Some(out), [Some(left), Some(right), None], None),
             MaskedSoftmax {out,input,mask,..} => (Some(out),[Some(input),Some(mask),None],None),
+            Dropout {out,input,rng,..} => (Some(out),[Some(input),Some(rng),None],None),
             TopkMask { out, input, count } => (Some(out), [Some(input), Some(count), None], None),
             Embedding { out, table, indices, .. } =>
                 (Some(out), [Some(table), Some(indices), None], None),

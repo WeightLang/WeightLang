@@ -55,6 +55,7 @@ pub const OPERATOR_CONTRACTS: &[OperatorContract] = &[
     OperatorContract { name: "gelu", min_ir_version: 3, shape: "same shape; exact erf GELU", layout: "materialized", gradient: "vjp", effect: "pure" },
     OperatorContract { name: "topk_mask", min_ir_version: 3, shape: "rank 1..8 values; select on last axis; scalar integer count 0..axis width; ties prefer lower index", layout: "materialized", gradient: "stop", effect: "pure" },
     OperatorContract { name: "masked_softmax", min_ir_version: 3, shape: "same-shaped f32 input and binary mask, axis in range; each axis group needs a valid element", layout: "materialized", gradient: "value VJP; no mask gradient", effect: "pure" },
+    OperatorContract { name: "dropout", min_ir_version: 3, shape: "same-shaped f32 values; rng f32[4] = low/high 16-bit seed, 16-bit stream, training 0/1; literal probability in [0,1)", layout: "materialized", gradient: "input VJP replays mask; no rng gradient", effect: "pure explicit counter RNG" },
 ];
 
 impl Instruction {
@@ -115,6 +116,7 @@ impl Instruction {
             Self::Gelu { .. } => &OPERATOR_CONTRACTS[52],
             Self::TopkMask { .. } => &OPERATOR_CONTRACTS[53],
             Self::MaskedSoftmax { .. } => &OPERATOR_CONTRACTS[54],
+            Self::Dropout { .. } => &OPERATOR_CONTRACTS[55],
         }
     }
 }

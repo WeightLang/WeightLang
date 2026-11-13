@@ -197,6 +197,25 @@ impl Connection {
                 };
                 Ok(serde_json::to_value(session.state_values())?)
             }
+            Request::ParameterValuesHex {handle} => {
+                let values=self.execute(Request::ParameterValues {handle},shared)?;
+                let values:Vec<(String,Vec<usize>,Vec<f32>)>=serde_json::from_value(values)?;
+                let packed=values.into_iter().map(|(name,shape,data)| {
+                    let hex=data.iter().map(|v|format!("{:08x}",v.to_bits())).collect::<String>();
+                    (name,shape,hex)
+                }).collect::<Vec<_>>();
+                Ok(serde_json::to_value(packed)?)
+            }
+            Request::UpdateParametersHex {handle,candidates} => {
+                let mut decoded=Vec::with_capacity(candidates.len());
+                for (name,shape,hex) in candidates {
+                    ensure!(hex.bytes().all(|b|b.is_ascii_hexdigit()) && hex.len()%8==0,"invalid f32 hex payload");
+                    let mut data=Vec::with_capacity(hex.len()/8);
+                    for offset in (0..hex.len()).step_by(8){data.push(f32::from_bits(u32::from_str_radix(&hex[offset..offset+8],16)?));}
+                    decoded.push((name,shape,data));
+                }
+                self.execute(Request::UpdateParameters {handle,candidates:decoded},shared)
+            }
             Request::ParameterValues { handle } => match self.sessions.get(&handle) {
                 Some(Session::Operations(session)) => Ok(serde_json::to_value(session.parameter_values())?),
                 Some(Session::Adaptive(session)) => Ok(serde_json::to_value(session.program().parameters.iter().map(|p| (p.name.clone(), p.shape.clone(), p.data.clone())).collect::<Vec<_>>())?),

@@ -134,3 +134,22 @@ fn shaped_large_read_keeps_existing_compiled_matmul_path() {
             .all(|&v| v == 1.)
     );
 }
+
+#[test]
+fn dropout_replays_mask_and_validates_rng_without_rng_gradients(){
+    let mut s=session("parameter rng:f32[4]=[1234,4321,17,1]\nfn forward(x){return dropout(x,rng,0.5);}",8);
+    let mut pass=s.forward(&[1.;8],10000,1<<20).unwrap();
+    let output=pass.output().to_vec();
+    assert!(output.contains(&0.) && output.contains(&2.));
+    pass.backward(&[1.;8],&BTreeMap::new()).unwrap();
+    assert_eq!(pass.input_gradient().unwrap(),output);
+    assert_eq!(pass.parameter_gradient("rng").unwrap(),[0.;4]);
+    assert_eq!(s.forward(&[1.;8],10000,1<<20).unwrap().output(),output);
+    assert!(s.forward(&[1.;8],8,1<<20).is_err());
+    for rng in [[-1.,0.,0.,1.],[0.,65536.,0.,1.],[0.,0.,1.5,1.],[0.,0.,0.,0.5]]{
+        s.replace_parameter("rng",&rng).unwrap();
+        assert!(s.forward(&[1.;8],10000,1<<20).is_err());
+    }
+    s.replace_parameter("rng",&[1.,2.,3.,0.]).unwrap();
+    assert_eq!(s.forward(&[1.;8],10000,1<<20).unwrap().output(),[1.;8]);
+}

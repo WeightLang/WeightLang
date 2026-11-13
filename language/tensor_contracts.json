@@ -496,6 +496,15 @@
       "layout": "materialized",
       "gradient": "value VJP; no mask gradient",
       "effect": "pure"
+    },
+    {
+      "variant": "Dropout",
+      "name": "dropout",
+      "min_ir_version": 3,
+      "shape": "same-shaped f32 values; rng f32[4] = low/high 16-bit seed, 16-bit stream, training 0/1; literal probability in [0,1)",
+      "layout": "materialized",
+      "gradient": "input VJP replays mask; no rng gradient",
+      "effect": "pure explicit counter RNG"
     }
   ]
 }

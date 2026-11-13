@@ -207,6 +207,10 @@ fn every_catalog_instruction_executes_and_tensor_values_match_the_reference() {
     // model must execute its new instruction to produce the asserted return;
     // add its catalog name only after both execution paths succeed.
     for (name, body, expected_values) in [
+        ("dropout","return dropout(x,[1234,4321,17,1],0.5);",vec![0.0,4.0,6.0,0.0,0.0,12.0]),
+        ("gelu","return gelu(x);",vec![0.8413448,1.9544997,2.9959502,3.9998734,4.9999986,6.]),
+        ("topk_mask","return topk_mask(x as [2,3],[1]) as [6];",vec![0.,0.,1.,0.,0.,1.]),
+        ("masked_softmax","return masked_softmax(x as [2,3],[1,0,1,0,1,1] as [2,3],1) as [6];",vec![0.11920292,0.,0.8807971,0.,0.26894143,0.7310586]),
         (
             "gather",
             "return gather(x as [2,3],[2,0,2],1) as [6];",

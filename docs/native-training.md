@@ -324,7 +324,7 @@ mkdir -p weights/custom_momentum
 
 首次求导保存转换后的 f32 批次，二次不能传入另一批次，也不会重新执行 host RNG/环境采样。
 每个样本从相同模型初始状态出发，forward write 只在本次 tape 内参与求导，不提交；冻结参数保持相同。
-当前 tensor forward/loss 没有 RNG 原语。工作预算继续消耗，`resource_state()` 的预算观测会随调用变化，
+当前 tensor forward/loss 没有隐式可变 RNG 状态；dropout 使用显式 seed/stream/training 配置，并在反向重放同一掩码，见[复杂模型原语](complex-models.md#stateless-dropout)。工作预算继续消耗，`resource_state()` 的预算观测会随调用变化，
 因此含资源观测的模型不保证两次前向仅参数不同；这类状态需调用方明确考虑。
 checkpoint 只保存最终提交的原权重候选/基础优化器状态/单次步数，不保存梯度句柄或临时扰动。
 

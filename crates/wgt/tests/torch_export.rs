@@ -241,6 +241,10 @@ parameter w:f32[4,4]=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]
 parameter b:f32[4]=[0,0,0,0]
 parameter state:f32[4]=[0,0,0,0]
 fn forward(x) {
+    let dropout_value=dropout(x,[1234,4321,17,1],0.1);
+    let gelu_value=gelu(x);
+    let selected_mask=topk_mask(x,[2]);
+    let masked=masked_softmax(x,[1,0,1,1],0);
     let joined=concat(x,x);
     let gathered=gather(w as [4,4],[0,2]);
     let selected=dynamic_slice(x,[1],2);

@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy)]
 enum Edge {
+    Dropout {x:usize,config:super::dropout::Config},
     Conv { x:usize,k:usize,b:usize,g:wgt_language::adaptive::ConvGeometry },
     MaxPool2d { x: usize, g: wgt_language::adaptive::Pool2dGeometry },
     AvgPool2d { x: usize, g: wgt_language::adaptive::Pool2dGeometry },
@@ -191,6 +192,7 @@ impl Tape {
                 x:self.reg(x)?, gamma:self.reg(gamma)?, beta:self.reg(beta)?, groups, epsilon
             }),
             Op::MaskedSoftmax(r,x,_,groups) | Op::SoftmaxAxis(r,x,groups) => (r, Edge::SoftmaxAxis { x:self.reg(x)?,groups }),
+            Op::Dropout(r,x,rng,p) => (r,Edge::Dropout {x:self.reg(x)?,config:super::dropout::Config::new(&self.nodes[self.reg(rng)?].value,p)?}),
             Op::Scale(r,x,factor) => (r, Edge::Scale { x:self.reg(x)?,factor }),
             Op::ScaleBy(r,x,scalar) => (r, Edge::ScaleBy { x:self.reg(x)?,scalar:self.reg(scalar)? }),
             Op::Div(r,a,b) => (r, Edge::Div { a:self.reg(a)?,b:self.reg(b)? }),
@@ -575,6 +577,9 @@ impl ForwardPass {
                         })?;
                 },
                 Edge::SoftmaxAxis { x,groups } => groups.softmax_vjp(&node.value,gradient,&mut gradients[x]),
+                Edge::Dropout {x,config} => {
+                    for (i,g) in gradient.iter().enumerate(){gradients[x][i]+=g*config.factor(i);}
+                }
                 Edge::Scale { x,factor } => {
                     for (i,g) in gradient.iter().enumerate() { gradients[x][i] += g * factor; }
                 },

@@ -16,6 +16,7 @@ pub mod optimization;
 pub mod transport;
 pub(crate) mod workspace;
 mod tensor;
+mod dropout;
 mod unary;
 use unary::Unary;
 use tensor::TensorView;
@@ -27,6 +28,7 @@ enum Op {
     Conv(usize, usize, usize, usize, wgt_language::adaptive::ConvGeometry),
     MaxPool2d(usize, usize, wgt_language::adaptive::Pool2dGeometry),
     AvgPool2d(usize, usize, wgt_language::adaptive::Pool2dGeometry),
+    Dropout(usize,usize,usize,f32),
     TopkMask(usize,usize,usize,usize),
     MaskedSoftmax(usize,usize,usize,tensor::AxisGroups),
     Reshape(usize, usize),
@@ -284,6 +286,7 @@ impl AdaptiveSession {
                         Op::ScaleBy(dest(out)?,reg(input)?,reg(scalar)?)
                     },
                     Instruction::MaskedSoftmax {out,input,mask,axis} => Op::MaskedSoftmax(dest(out)?,reg(input)?,reg(mask)?,tensor::AxisGroups::new(&program.registers[reg(input)?].shape,*axis)?),
+                    Instruction::Dropout {out,input,rng,probability} => Op::Dropout(dest(out)?,reg(input)?,reg(rng)?,*probability),
                     Instruction::TopkMask {out,input,count} => Op::TopkMask(dest(out)?,reg(input)?,reg(count)?,*program.registers[reg(input)?].shape.last().unwrap()),
                     Instruction::Ge { out, left, right } => Op::Ge(dest(out)?,reg(left)?,reg(right)?),
                     Instruction::Div { out, left, right } => Op::Div(dest(out)?,reg(left)?,reg(right)?),
@@ -567,7 +570,7 @@ impl AdaptiveSession {
         // Runtime indexing deliberately uses the interpreter, including its tape.
         // Report the actual backend through execution_backend/is_compiled.
         if self.program.instructions.iter().chain(self.program.loss.iter().flat_map(|p| p.instructions.iter()))
-            .any(|i| matches!(i, Instruction::MaskedSoftmax {..} | Instruction::TopkMask {..} | Instruction::Gelu {..} | Instruction::Embedding { .. } | Instruction::Concat { .. } | Instruction::Gather { .. } | Instruction::DynamicSlice { .. })) {
+            .any(|i| matches!(i, Instruction::Dropout {..} | Instruction::MaskedSoftmax {..} | Instruction::TopkMask {..} | Instruction::Gelu {..} | Instruction::Embedding { .. } | Instruction::Concat { .. } | Instruction::Gather { .. } | Instruction::DynamicSlice { .. })) {
             return Ok(());
         }
         let optimizer_bytes=self.optimizer_storage_bytes()?;
@@ -906,6 +909,7 @@ impl AdaptiveSession {
                 Op::Conv(_,_,_,_,g) => g.work()? as u64,
                 Op::MaxPool2d(_,_,g) | Op::AvgPool2d(_,_,g) => g.work()? as u64,
                 Op::MaskedSoftmax(_,_,_,groups) => (groups.len() as u64).saturating_mul(4).saturating_add(1),
+                Op::Dropout(r,..) => (self.program.registers[r].len as u64).saturating_add(1),
                 Op::Unary(r,_,Unary::Gelu) => (self.program.registers[r].len as u64).saturating_add(1),
                 Op::TopkMask(r,_,_,width) => { let n=self.program.registers[r].len as u64; n.saturating_mul(width as u64).saturating_add(n).saturating_add(1) },
                 Op::Concat(r,..) | Op::Gather(r,..) | Op::DynamicSlice(r,..) | Op::Reshape(r,_) | Op::Permute(r,..) => (self.program.registers[r].len as u64).saturating_add(1),
@@ -1225,6 +1229,12 @@ impl AdaptiveSession {
                 Op::MaskedSoftmax(r,x,mask,groups) => {
                     self.ready(x)?;self.ready(mask)?;
                     groups.masked_softmax(&self.registers[x],&self.registers[mask],&mut self.scratch[..self.program.registers[r].len])?;
+                    output=Some(r);
+                }
+                Op::Dropout(r,x,rng,p) => {
+                    self.ready(x)?;self.ready(rng)?;
+                    let config=dropout::Config::new(&self.registers[rng],p)?;
+                    for (i,v) in self.registers[x].iter().enumerate(){self.scratch[i]=v*config.factor(i);}
                     output=Some(r);
                 }
                 Op::TopkMask(r,x,k,width) => {

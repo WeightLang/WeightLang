@@ -747,4 +747,6 @@ Python 的默认原生模型对象、显式后端与 IPC/训练合同见 [Python
 
 `gelu(x)` 保持任意已支持 f32 张量的 shape/轴名，采用精确 erf 形式，无参数默认值；其 VJP 使用对应解析导数。`topk_mask(x,count)` 返回同形 0/1 张量，沿最后一个轴选取最大的 count 项：count 必须是 `f32[1]` 的有限精确整数，范围 0..该轴宽度；相等值优先较小索引。选择路径及 count 无梯度，后续 `x * mask` 仍对被选值求导。`masked_softmax(x,mask,axis)` 要求两个同形张量、mask 严格 0/1，axis 为非负轴字面量或轴名；每组至少一个有效元素。先排除无效项再求最大值，以 f64 累加归一化，输出无效位置精确为零；仅对 logits 求导，不对 mask 求导。这三个原语从 Adaptive IR v3 起支持，WGT 源版本仍为 0.5，无隐式广播、dtype 转换或 Python 执行。Rust 当前走原生解释器；Python 显式 Torch 后端使用相同共享前端。完整签名、验证及例子见[复杂模型原语](complex-models.md)。
 
+`dropout(x,rng,probability)` 同样从 Adaptive IR v3 起支持，保留 f32 rank1..8 的 shape/轴名。所有参数必填；rng 是 f32[4]，依次为 seed 低16位、高16位、stream（均须0..65535的精确整数）、training（严格0/1）。probability 为有限 f32 数值字面量，0≤p<1；无默认值。training=0 或p=0时为恒等，仍校验配置并消耗预算；训练时按显式计数器产生可重放掩码，保留值缩放1/(1-p)。仅对 x 求导，VJP 重用相同掩码；无 RNG/概率梯度，无隐式随机状态或种子推进，不保证与 PyTorch 全局 RNG 序列相同。Rust 当前原生解释执行，显式 Torch FX/动态程序执行共享合同，typed 操作仍无 AD。完整哈希定义、工作计量、批次规则与例子见[复杂模型原语](complex-models.md#stateless-dropout)。
+
 大参数显式读取可写 `table as [257,128]`，直接形成同元素数的多轴 Read，不先产生长度32896的非法单轴临时量。裸参数读取仍保留旧扁平合同；此路径不放宽单轴16384、寄存器总元素、端口或服务内存上限，详情见上面的复杂模型原语专题。

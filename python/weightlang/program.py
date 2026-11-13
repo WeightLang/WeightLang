@@ -32,7 +32,7 @@ _UNARY = {
 }
 _BINARY = {"add": torch.add, "mul": torch.mul, "minimum": torch.minimum,
            "ge": ops.ge, "div": ops.div}
-_GEOMETRY = {"gelu", "conv", "max_pool2d", "avg_pool2d", "reshape", "transpose", "permute",
+_GEOMETRY = {"dropout", "gelu", "conv", "max_pool2d", "avg_pool2d", "reshape", "transpose", "permute",
              "matmul", "batch_matmul", "layer_norm", "softmax_axis", "scale",
              "ge", "div", "sqrt", "masked_softmax", "topk_mask", "scale_by", "embedding", "gather", "dynamic_slice", "concat"}
 _FIELDS = {
@@ -46,6 +46,7 @@ _FIELDS = {
     "scale": "out input factor", "scale_by": "out input scalar",
     "constant": "out data", "clip": "out input low high",
     "masked_softmax": "out input mask axis",
+    "dropout": "out input rng probability",
     "topk_mask": "out input count",
     "sum": "out input", "mean": "out input", "log_softmax": "out input",
     "softmax": "out input", "validate_probabilities": "out input",
@@ -399,6 +400,9 @@ class ProgramExecutor:
         elif op == "masked_softmax":
             _require(shape==reg("input")==reg("mask") and type(item["axis"]) is int and 0<=item["axis"]<len(shape), "masked_softmax shape/axis mismatch")
             return 1 + 4 * math.prod(shape)
+        elif op == "dropout":
+            _require(shape==reg("input") and reg("rng")== (4,) and 0<=_finite(item["probability"],"dropout probability")<1,"invalid dropout contract")
+            return 1+math.prod(shape)
         elif op == "topk_mask":
             _require(shape == reg("input") and reg("count") == (1,), "topk_mask shape mismatch")
             return 1 + math.prod(shape) * (shape[-1]+1)
@@ -560,6 +564,8 @@ class ProgramExecutor:
                         out = ops.linear(get("input"), candidates[item["weight"]], bias)
                     elif op == "masked_softmax":
                         out = ops.masked_softmax(get("input"),get("mask"),item["axis"])
+                    elif op == "dropout":
+                        out=ops.dropout(get("input"),get("rng"),item["probability"],math.prod(self.shapes[item["input"]]))
                     elif op == "topk_mask":
                         out = ops.topk_mask(get("input"), get("count"))
                     elif op in _UNARY:

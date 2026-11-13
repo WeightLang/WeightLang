@@ -183,6 +183,7 @@
     "depth_gate",
     "detach",
     "div",
+    "dropout",
     "dynamic_slice",
     "embedding",
     "exp",

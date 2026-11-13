@@ -66,3 +66,9 @@ test('tuple explicit hidden and dynamic matrix ports retain canonical syntax', (
   assert.deepEqual(sourceProblems('# return (reshape(x,[1,2]), hidden);'), [1]);
   assert.deepEqual(markdownProblems('```wgt\nreturn (x, read(hidden));\n```'), [2]);
 });
+
+test('explicit dropout retains ordinary shared model syntax',()=>{
+ const source='wgt 0.5\nmodel Mask\nfn forward(x:f32[8],rng:f32[4])->(f32[8],){return (dropout(x,rng,0.25),);}';
+ assert.deepEqual(sourceProblems(source),[]);
+ assert.deepEqual(markdownProblems('```wgt\n'+source+'\n```'),[]);
+});

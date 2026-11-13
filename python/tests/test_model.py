@@ -248,3 +248,28 @@ def test_owned_work_limit_bounds_and_atomic_training(service):
         with pytest.raises(wgt.ServiceError,match='owned'):
             model._client.call('SetWorkLimit',handle=control._handle,work=1)
         assert control([1.])==model([1.])
+
+
+def test_compact_f32_parameter_roundtrip_is_atomic_and_owned(service):
+    text='''wgt 0.5
+model WideTable
+parameter table:f32[512,256]=zeros()
+fn forward(x:f32[1])->(f32[256],){return (embedding(table as [512,256],x) as [256],);}
+'''
+    import struct
+    with wgt.loads(text) as model,wgt.loads(SOURCE) as foreign:
+        assert model._compact_parameters
+        parameter=model.parameters()[0]
+        values=[0.]*len(parameter.data)
+        values[:4]=[-0.,2**-149,-1.25,1.0000001192092896]
+        expected=wgt.Parameter(parameter.name,parameter.shape,tuple(values))
+        model.set_parameters([expected])
+        got=model.parameters()[0]
+        assert b''.join(struct.pack('>f',v) for v in got.data)==b''.join(struct.pack('>f',v) for v in values)
+        before=model.parameters()
+        for candidates in [[('table',[512,256],'zzzzzzzz')],[('table',[512,256],'000')],[('table',[512,256],'7fc00000'+'00000000'*(len(values)-1))],[('table',[512,256],'+0000000')]]:
+            with pytest.raises(wgt.ServiceError):model._call('UpdateParametersHex',candidates=candidates)
+            assert model.parameters()==before
+        with pytest.raises(wgt.ServiceError):model._client.call('ParameterValuesHex',handle=foreign._handle)
+        with pytest.raises(wgt.ServiceError):model._client.call('UpdateParametersHex',handle=foreign._handle,candidates=[('gain',[1],'00000000')])
+        assert foreign([1.])==[2.]

@@ -322,8 +322,8 @@ class _Builder:
         program = definition["program"]
         if type(program["version"]) is not int or program["version"] not in (1, 2, 3):
             raise ValueError("unsupported adaptive IR version; recompile with wgt")
-        if program["version"] < 3 and any(i.get("op") in {"gelu","topk_mask","masked_softmax"} for i in program["instructions"]):
-            raise ValueError("gelu/topk_mask/masked_softmax require IR version 3")
+        if program["version"] < 3 and any(i.get("op") in {"dropout","gelu","topk_mask","masked_softmax"} for i in program["instructions"]):
+            raise ValueError("dropout/gelu/topk_mask/masked_softmax require IR version 3")
         for register in program["registers"]:
             name = register["name"]
             if not isinstance(name, str) or not name or name in self.shapes:
@@ -416,6 +416,12 @@ class _Builder:
             self.equal(shape,source_shape("mask"),op)
             axis=self.axis(item["axis"],shape)
             node=self.graph.call_function(ops.masked_softmax,(value("input"),value("mask"),axis))
+        elif op == "dropout":
+            self.equal(shape,source_shape("input"),op)
+            p=item["probability"]
+            if source_shape("rng")!=(4,) or type(p) not in {int,float} or not 0<=p<1:
+                raise ValueError("invalid dropout contract")
+            node=self.graph.call_function(ops.dropout,(value("input"),value("rng"),p,math.prod(shape)))
         elif op == "topk_mask":
             self.equal(shape, source_shape("input"), op)
             if source_shape("count") != (1,):

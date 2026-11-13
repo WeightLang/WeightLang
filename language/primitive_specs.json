@@ -27,5 +27,6 @@
   "masked_softmax": {"arity": 2, "required": ["axis"], "defaults": {}},
   "resize2d": {"arity": 1, "required": ["height", "width"], "defaults": {"mode": 0, "align_corners": 0}},
   "pad2d": {"arity": 1, "required": ["left", "right", "top", "bottom"], "defaults": {"mode": 0}},
-  "avgpool2d": {"arity": 1, "required": ["kernel", "stride"], "defaults": {"padding": 0, "count_include_pad": 1}}
+  "avgpool2d": {"arity": 1, "required": ["kernel", "stride"], "defaults": {"padding": 0, "count_include_pad": 1}},
+  "dropout": {"arity": 3, "required": [], "defaults": {}}
 }

@@ -130,3 +130,11 @@ fn gate_and_route_merge_named_probability_vectors_but_keep_scalar_gates() {
         assert!(adaptive::parse(&scalar.replace("probability = [0.5]", "probability: f32[1,1] = [0.5]")).is_err());
     }
 }
+
+#[test]
+fn explicit_dropout_preserves_axes_and_rejects_bad_contracts(){
+    let text=model(8,4,"let v:f32[rows=2,features=2]=x[0:4];let y=dropout(v,x[4:8],0.1);return softmax(y,\"features\") as [4];");
+    let program=adaptive::parse(&text).unwrap();
+    assert!(program.instructions.iter().any(|i|matches!(i,Instruction::SoftmaxAxis{axis:1,..})));
+    for wrong in [text.replace("x[4:8]","x[4:7]"),text.replace("0.1)","1.0)"),text.replace("0.1)","-0.1)"),text.replace("0.1)","x[0])")]{assert!(adaptive::parse(&wrong).is_err(),"{wrong}");}
+}

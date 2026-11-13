@@ -181,6 +181,7 @@ class Model:
             raise ValueError("native optimizer must be None, 'sgd' or 'adam'")
         if work_limit is not None and (type(work_limit) is not int or not 1 <= work_limit <= 100_000_000 or definition["kind"] != "forward"):
             raise ValueError("work_limit requires a forward model and integer in 1..100000000")
+        self._compact_parameters = sum(math.prod(p["shape"]) for p in definition.get("parameters",[])) > 100_000
         self.work_limit = None
         self._definition = deepcopy(definition)
         self._lock = threading.RLock()
@@ -276,11 +277,16 @@ class Model:
     def parameters(self):
         self._ensure_native_process()
         with self._lock:
+            if self._compact_parameters:
+                return tuple(Parameter(name,tuple(shape),tuple(v[0] for v in struct.iter_unpack(">f",bytes.fromhex(data)))) for name,shape,data in self._call("ParameterValuesHex"))
             return tuple(Parameter(name, tuple(shape), tuple(data)) for name, shape, data in self._call("ParameterValues"))
 
     def set_parameters(self, values):
         self._ensure_native_process()
         with self._lock:
+            if self._compact_parameters:
+                candidates=[(p.name,list(p.shape),b"".join(struct.pack(">f",v) for v in p.data).hex()) for p in values]
+                return self._call("UpdateParametersHex",candidates=candidates)["revision"]
             candidates = [(p.name, list(p.shape), list(p.data)) for p in values]
             return self._call("UpdateParameters", candidates=candidates)["revision"]
 

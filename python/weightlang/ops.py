@@ -551,3 +551,52 @@ def masked_softmax(input, mask, axis):
     if not ((mask == 0) | (mask == 1)).all() or not mask.bool().any(axis).all():
         raise ValueError("masked_softmax requires binary mask and a valid element in every group")
     return input.masked_fill(~mask.bool(), -torch.inf).softmax(axis)
+
+
+def dropout(input, rng, probability, elements):
+    """Explicit per-sample counter masks; never consumes PyTorch global RNG."""
+    import struct
+
+    probability = struct.unpack("<f", struct.pack("<f", probability))[0]
+    if not 0 <= probability < 1 or rng.shape[-1] != 4:
+        raise ValueError("invalid dropout contract")
+    configs = rng.detach().reshape(-1, 4)
+    if (
+        not bool(torch.isfinite(configs).all())
+        or not bool(
+            (
+                (configs[:, :3] >= 0)
+                & (configs[:, :3] <= 65535)
+                & (configs[:, :3] == configs[:, :3].floor())
+            ).all()
+        )
+        or not bool(((configs[:, 3] == 0) | (configs[:, 3] == 1)).all())
+    ):
+        raise ValueError("dropout rng requires three uint16 values and training 0/1")
+    values = input.reshape(-1, elements)
+    if len(configs) not in (1, len(values)):
+        raise ValueError("dropout rng batch mismatch")
+    masks = []
+    index = torch.arange(elements, device=input.device, dtype=torch.int64)
+    for low, high, stream, training in configs.cpu().tolist():
+        if not training or not probability:
+            mask = torch.ones(elements, device=input.device, dtype=input.dtype)
+        else:
+            x = (
+                (int(low) | (int(high) << 16))
+                ^ ((int(stream) * 0x9E3779B9) & 0xFFFFFFFF)
+                ^ ((index * 0x85EBCA6B) & 0xFFFFFFFF)
+            )
+            x = x ^ (x >> 16)
+            x = (x * 0x7FEB352D) & 0xFFFFFFFF
+            x = x ^ (x >> 15)
+            x = (x * 0x846CA68B) & 0xFFFFFFFF
+            x = x ^ (x >> 16)
+            scale = torch.ones((), dtype=torch.float32, device=input.device) / (
+                1 - torch.tensor(probability, dtype=torch.float32, device=input.device)
+            )
+            mask = ((x >> 8).to(torch.float32) / 16777216 >= probability).to(
+                input.dtype
+            ) * scale.to(input.dtype)
+        masks.append(mask)
+    return (values * torch.stack(masks)).reshape(input.shape)

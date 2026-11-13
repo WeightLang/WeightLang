@@ -23,6 +23,8 @@ with wgt.load("model.wgt", optimizer="adam", memory_bytes=64 * 1024 * 1024) as m
 
 `Model(..., work_limit=None)`、原生 load/loads/from_ir 可显式传 `work_limit`，或调用 `set_work_limit(work)`：仅适用于本连接拥有的 forward 模型，值为 1..100,000,000 的整数（不接受 bool）。预算按原生指令成本计数，推理每次调用重置，train_step 对整批次计量，train_recurrent 对整条序列计量；超限失败保持参数与优化器事务。未设置时保留服务默认值：forward 1,000,000、train_step 10,000,000、train_recurrent 1,000,000。设置不改变权重、Adam 状态或内存上限；几何重绑定保留设置，释放句柄时移除。此接口需要配套源码版本服务，不会隐式读取项目配置；typed/sequential 模型不接受该设置。
 
+大参数模型（定义中参数总元素数超过100,000）通过紧凑 f32 位模式传输参数：每值8个十六进制字符，不把 Python float 的长十进制文本当权重格式。`parameters` / `set_parameters` 的 Python 对象合同不变，保留负零与 subnormal；所有候选完整解码、校验后仍由原有单次事务替换，成功重置优化器、保留模型状态。服务只操作本连接拥有的句柄，无损传输不放宽16 MiB单帧或内存限制；这不是完整训练检查点或无限大小权重通道。需要配套源码服务。
+
 ## 显式 PyTorch 后端和原有接口
 
 安装 `weightlang[torch]`，使用 `wgt.load(..., backend="torch", device="cpu")` 等入口得到 `TorchModel`，它也是 `wgt.Model`。`forward`、`parameters()`、`state_dict()` 等委托给真实 PyTorch 模块；`to_torch()` 显式取得原始 `nn.Module`，可以使用标准优化器与 autograd。`train/eval/to` 返回同一个 WGT 对象。没有跨后端隐式迁移参数/优化器的操作。

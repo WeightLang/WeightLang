@@ -3181,6 +3181,24 @@
         "min": 3,
         "max": 3
       }
+    },
+    {
+      "name": "dropout",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Explicit stateless counter dropout; immutable mask replay for VJP.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/complex-models.md",
+      "position": "expression",
+      "signature": "dropout(x,rng,probability)",
+      "defaults": {},
+      "operator_arity": {
+        "min": 3,
+        "max": 3
+      }
     }
   ]
 }

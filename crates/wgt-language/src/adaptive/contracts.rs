@@ -115,6 +115,10 @@ impl Program {
                         same(out,input)?;same(input,mask)?;
                         ensure!(*axis<reg(input)?.shape.len(),"masked_softmax axis out of bounds");
                     }
+                    I::Dropout {out,input,rng,probability} => {
+                        same(out,input)?;
+                        ensure!(reg(rng)?.shape==[4] && probability.is_finite() && *probability>=0. && *probability<1.,"invalid dropout contract");
+                    }
                     I::TopkMask { out, input, count } => {
                         same(out,input)?;
                         ensure!(!reg(input)?.shape.is_empty() && reg(count)?.shape==[1], "topk_mask requires a tensor and scalar count");

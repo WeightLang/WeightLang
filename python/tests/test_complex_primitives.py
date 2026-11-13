@@ -97,3 +97,32 @@ def test_shaped_large_parameter_read_and_sparse_embedding_gradient(dynamic):
     assert torch.count_nonzero(gradient[:256]) == 0
     torch.testing.assert_close(gradient[256], torch.ones(128), atol=0, rtol=0)
     assert value.grad is None, "discrete embedding addresses have no Torch gradient"
+
+
+@pytest.mark.parametrize('dynamic',[False,True])
+@pytest.mark.parametrize('training',[0,1])
+@pytest.mark.parametrize('p',[0.,.1,.5])
+def test_dropout_native_replay_vjp_and_independent_counter(dynamic,training,p):
+    body=f'return dropout(slice(x,0,16),slice(x,16,4),{p});'
+    if dynamic:body='if positive([1]) {'+body+'} return slice(x,0,16);'
+    text=source(body,width=20,output=16)
+    values=list(range(1,17))+[1234.,4321.,17.,float(training)]
+    expected=native(text,values,[1.]*16)
+    def multiplier(i):
+        if not training or p==0:return 1.
+        seed=1234|(4321<<16)
+        h=seed ^ ((17*0x9e3779b9)&0xffffffff) ^ ((i*0x85ebca6b)&0xffffffff)
+        h^=h>>16;h=(h*0x7feb352d)&0xffffffff;h^=h>>15;h=(h*0x846ca68b)&0xffffffff;h^=h>>16
+        return 1/(1-p) if (h>>8)/16777216>=p else 0.
+    mask=torch.tensor([multiplier(i) for i in range(16)])
+    value=torch.tensor(values,requires_grad=True)
+    model=wgt.loads(text,device='cpu')
+    state=torch.random.get_rng_state().clone()
+    out=model(value);out.sum().backward()
+    torch.testing.assert_close(out.detach(),torch.tensor(expected['output']))
+    torch.testing.assert_close(value.grad,torch.tensor(expected['input_gradient']))
+    torch.testing.assert_close(out.detach(),torch.tensor(values[:16])*mask)
+    torch.testing.assert_close(value.grad[:16],mask)
+    assert value.grad[16:].tolist()==[0.]*4
+    assert torch.equal(state,torch.random.get_rng_state())
+    assert torch.equal(out,model(value)), 'same seed replays the same mask'

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
+// Explicit dropout keeps ordinary tensor call syntax; its four-value RNG is data.
 // Shared dynamic/multi-port forward and runtime indexing retain ordinary WGT model syntax.
 // Fixed multi-axis f32[M,K] function contracts and observe(name, tensor) retain canonical tensor syntax.
 const obsoleteSyntax = /\b(?:reshape|matmul|transpose)\s*\(|\binit\s+seed\s*=|\b(?:read|write)\s*\(/;

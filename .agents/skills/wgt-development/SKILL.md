@@ -274,3 +274,7 @@ Python 单样本 eager，typed 操作保持原有无 AD 合同。
 当前共享前端支持 `gelu(x)`（精确 erf，保 shape/轴名及解析 VJP）、`topk_mask(x,count)`（最后一轴逐组选 top-k，count 为 f32[1] 精确整数，0..轴宽，相等值优先小索引，选择/count 无梯度）和 `masked_softmax(x,mask,axis)`（同形严格 0/1 mask、逐轴至少一有效项、稳定 f64 累加，只对 logits 求导）。三者最低 Adaptive IR v3，Rust 当前解释执行回退，不能声称 AOT/GPU 支持。WGT 仍0.5；不添加隐式广播或 Python 回调。参考 docs/complex-models.md、examples/native_training/complex_routing/model.wgt；必须验证原生 CPU/VJP、预算/错误边界及 Torch 差分。
 
 大参数需要显式 `parameter_name as [axis,...]`，共享前端直接发出同元素数的多轴 Read，避免先产生超16384的扁平单轴。裸读仍旧扁平合同；不放宽 axis/element/port/memory 边界。大 embedding 验证表行的 scatter-add VJP 及零 index 梯度。
+
+## 显式 dropout
+
+`dropout(x,rng,probability)` 保持 f32 张量 shape/轴名，最低 IR v3；rng=f32[4] 为低16位 seed、高16位 seed、stream16、training0/1，前三项为0..65535整数。概率为[0,1)的有限 f32 字面量。纯显式计数器，不推进隐藏 RNG；反向重放同一掩码，仅 x 有 VJP。CPU解释回退与显式Torch支持，typed仍无AD，不保证PyTorch全局RNG序列。见 docs/complex-models.md 和 examples/native_training/explicit_dropout/model.wgt；验证无效配置、eval/p0、预算、原生差分和梯度。
