@@ -83,7 +83,20 @@ fn cpu_only_limit_allows_small_program() {
 }
 
 fn transport_test_executable() -> std::path::PathBuf {
-    let path = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("examples").join(format!("core-transport-test{}",std::env::consts::EXE_SUFFIX));
-    assert!(path.is_file(), "build the private process harness with cargo build -p wgtime-core --example core-transport-test before running this test");
+    // Tests may execute under Cargo's build directory, while examples are
+    // emitted to the target directory. Do not derive one from the other.
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| workspace.join("target"));
+    let path = target
+        .join("debug")
+        .join("examples")
+        .join(format!("core-transport-test{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        path.is_file(),
+        "build the private process harness with cargo build -p wgtime-core --example core-transport-test before running this test: {}",
+        path.display()
+    );
     path
 }
