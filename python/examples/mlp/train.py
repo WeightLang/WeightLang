@@ -5,7 +5,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 
 def main() -> None:

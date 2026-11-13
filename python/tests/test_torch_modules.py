@@ -7,7 +7,7 @@ import pytest
 import torch
 from torch import nn
 
-from weightlang import compile_source
+from weightlang.torch_api import compile_source
 from weightlang.modules import classes_from_ir, load_module, save_module
 
 SOURCE = """wgt 0.5

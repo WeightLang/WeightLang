@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 from weightlang.ports import ForwardModule
 
 ROOT = Path(__file__).resolve().parents[2]

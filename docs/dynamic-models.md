@@ -10,7 +10,7 @@ Python 的 `load_dynamic(path, *, input_shapes, dimensions=None, device="auto", 
 
 ```python
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 model = wgt.load_dynamic(
     "examples/native_training/input_shapes/model.wgt",
@@ -54,7 +54,7 @@ fn forward(x: f32[2], hidden: f32[2]) -> (f32[2], f32[2]) {
 
 ```python
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 model = wgt.load("explicit_hidden/model.wgt", device="cpu")
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
@@ -94,7 +94,7 @@ fn forward(x: f32[ROWS,2], hidden: f32[1,2]) -> (f32[ROWS,2], f32[1,2]) {
 
 ```python
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 model = wgt.load_dynamic(
     "dynamic_hidden/model.wgt",

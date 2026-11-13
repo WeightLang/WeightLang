@@ -10,7 +10,7 @@ import subprocess
 import pytest
 import torch
 
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 
 def discrete_schema():

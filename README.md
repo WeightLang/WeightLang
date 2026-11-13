@@ -1,5 +1,7 @@
 # WeightLang
 
+The current source SDK defaults to native `wgt.Model` execution through wgtime; `wgt compile` exports `weightlang.wgt.v1`. Select `backend="torch"` explicitly, or use `torch_api` for a raw PyTorch module. See [Python model objects](docs/python-model.md). These APIs require this checkout, not just the previously published 0.5.4 package.
+
 [简体中文](README.zh-CN.md)
 
 > **Express neural architectures clearly and elegantly.**
@@ -49,13 +51,13 @@ PyTorch FX, autograd, optimizers, and model inspection tools.
 
 ```sh
 uv venv
-uv pip install -e './python[visualize]'
+uv pip install -e './python[torch,visualize]'
 uv run --no-project python python/examples/mlp/train.py
 ```
 
 ```python
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 model = wgt.load("model.wgt", device="auto")
 input_tensor = torch.zeros(1, *model.input_shape, device=next(model.parameters()).device)
@@ -95,7 +97,7 @@ reports missing bindings without executing callbacks; complete restoration
 skips parameter recipes and treats runtime state separately.
 
 ```python
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 definition = wgt.compile("model.wgt")
 weights = wgt.WeightSet.load("weights/model/version-1")

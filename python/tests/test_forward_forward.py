@@ -7,7 +7,7 @@ import os
 import pytest
 import torch
 
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 
 SOURCE = """wgt 0.5

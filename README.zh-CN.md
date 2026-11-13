@@ -1,5 +1,7 @@
 # WeightLang
 
+当前源码的 Python SDK 默认创建 Rust/wgtime 执行的 `wgt.Model`，`wgt compile` 默认导出后端无关定义。PyTorch 需显式 backend="torch"；原始模块互操作使用 torch_api。见[模型对象](docs/python-model.md)。这些接口要求当前 checkout，不能仅根据已发布的 0.5.4 版本号推断支持。
+
 [English](README.md)
 
 > **优雅地描述神经网络的内部架构。**
@@ -42,13 +44,13 @@ wgt infer --prompt "Hello"
 
 ```sh
 uv venv
-uv pip install -e './python[visualize]'
+uv pip install -e './python[torch,visualize]'
 uv run --no-project python python/examples/mlp/train.py
 ```
 
 ```python
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 model = wgt.load("model.wgt", device="auto")
 input_tensor = torch.zeros(1, *model.input_shape, device=next(model.parameters()).device)

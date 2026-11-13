@@ -85,6 +85,6 @@ impl Connection {
         }
         let backend = session.execution_backend();
         admission.insert(handle, Session::Adaptive(session));
-        Ok(serde_json::json!({"handle":handle,"backend":backend}))
+        Ok(serde_json::json!({"handle":handle,"backend":backend,"forward_interface":definition.forward_interface()}))
     }
 }

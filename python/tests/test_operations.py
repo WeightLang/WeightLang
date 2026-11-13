@@ -8,7 +8,7 @@ import shutil
 import pytest
 import torch
 
-import weightlang as wgt
+from weightlang import torch_api as wgt
 from weightlang.operations import OperationsModule
 
 

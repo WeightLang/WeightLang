@@ -44,9 +44,10 @@ impl AdaptiveSession {
     }
     pub fn set_optimizer(&mut self, optimizer: Optimizer) -> Result<()> {
         self.ensure_mutable()?;
+        self.ensure_idle()?;
         let bytes=self.program.parameters.iter().try_fold(0usize,|total,p|total.checked_add(p.data.len()).context("optimizer storage overflow"))?
             .checked_mul(8).context("optimizer storage overflow")?;
-        ensure!(self.managed_bytes.checked_add(bytes).is_some_and(|total|total<=self.memory_limit),"optimizer state memory budget exceeded");
+        ensure!(self.managed_bytes.checked_add(self.optimizer_storage_bytes()?).and_then(|total|total.checked_add(bytes)).is_some_and(|total|total<=self.memory_limit),"optimizer state memory budget exceeded");
         self.custom_optimizer = None;
         let zeros = || {
             self.program

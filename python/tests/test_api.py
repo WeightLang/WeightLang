@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import torch
 
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 ROOT = Path(__file__).resolve().parents[2]
 SCALE = """wgt 0.5

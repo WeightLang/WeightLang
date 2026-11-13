@@ -38,11 +38,14 @@ def _compile(
     dimensions: dict[str, int] | None,
     input_shapes: dict[str, tuple[int, ...] | list[int]] | None,
     directory: Path | None = None,
+    target: str = "torch",
 ) -> dict[str, Any]:
+    if target not in {"torch", "wgt"}:
+        raise ValueError("model definition target must be 'wgt' or 'torch'")
     command = [_compiler(compiler)]
     if directory is not None:
         command.extend(["-C", str(directory)])
-    command.extend(["compile", source, "--target", "torch"])
+    command.extend(["compile", source, "--target", target])
     for name, value in (dimensions or {}).items():
         if not isinstance(name, str) or type(value) is not int or not 1 <= value <= 16384:
             raise ValueError("dimensions must map declared names to integers in 1..=16384")
@@ -66,9 +69,10 @@ def _compile(
     try:
         definition = json.loads(result.stdout)
     except json.JSONDecodeError as error:
-        raise CompilationError("WGT compiler returned invalid JSON; use a compiler with --target torch support") from error
-    if not isinstance(definition, dict) or definition.get("format") != IR_FORMAT:
-        raise CompilationError(f"WGT compiler must return {IR_FORMAT}")
+        raise CompilationError(f"WGT compiler returned invalid JSON; use a compiler with --target {target} support") from error
+    expected_format = "weightlang.wgt.v1" if target == "wgt" else IR_FORMAT
+    if not isinstance(definition, dict) or definition.get("format") != expected_format:
+        raise CompilationError(f"WGT compiler must return {expected_format}")
     return definition
 
 
@@ -79,6 +83,7 @@ def compile(
     timeout: float = 30,
     dimensions: dict[str, int] | None = None,
     input_shapes: dict[str, tuple[int, ...] | list[int]] | None = None,
+    target: str = "torch",
 ) -> dict[str, Any]:
     """Compile a model.wgt file to portable JSON data without executing forward.
 
@@ -90,7 +95,7 @@ def compile(
     source = Path(path).expanduser().resolve(strict=True)
     if not source.is_file():
         raise ValueError(f"Expected a WGT source file: {source}")
-    return _compile(str(source), text=None, compiler=compiler, timeout=timeout, dimensions=dimensions, input_shapes=input_shapes, directory=source.parent)
+    return _compile(str(source), text=None, compiler=compiler, timeout=timeout, dimensions=dimensions, input_shapes=input_shapes, directory=source.parent, target=target)
 
 
 def compile_source(
@@ -100,8 +105,9 @@ def compile_source(
     timeout: float = 30,
     dimensions: dict[str, int] | None = None,
     input_shapes: dict[str, tuple[int, ...] | list[int]] | None = None,
+    target: str = "torch",
 ) -> dict[str, Any]:
     """Compile inline WGT source through stdin. Use compile(path) for local imports."""
     if not isinstance(source, str):
         raise TypeError("source must be a WGT source string")
-    return _compile("-", text=source, compiler=compiler, timeout=timeout, dimensions=dimensions, input_shapes=input_shapes)
+    return _compile("-", text=source, compiler=compiler, timeout=timeout, dimensions=dimensions, input_shapes=input_shapes, target=target)

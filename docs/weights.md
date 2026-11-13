@@ -39,7 +39,7 @@ Python 的 `snapshot.ref(name)` 和 Rust 的 `snapshot.reference(name)` 生成�
 假定 `model.wgt` 编译出的参数包含 `encoder.weight` 和 `head.weight`，两个已保存版本都符合该定义。下例明确继承版本 A，只替换这两个完整参数：A 占 0.75，B 占 0.25。`sources` 把参与计算的固定引用记录进 provenance；它不会检查任意 Python 表达式是否真的使用了这些来源。
 
 ```python
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 definition = wgt.compile("model.wgt")
 version_a = wgt.WeightSet.load("weights/model/version-a")
@@ -94,7 +94,7 @@ fn forward(x) {
 
 ```python
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 target = wgt.compile("model.wgt")  # ProjectionV2
 old = wgt.WeightSet.load("weights/projection/v1")

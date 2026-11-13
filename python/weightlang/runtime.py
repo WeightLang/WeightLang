@@ -570,7 +570,7 @@ class _Builder:
 def build_module(definition: dict[str, Any], *, bindings: dict[str, torch.Tensor] | None = None,
                  _schema_only: bool = False) -> nn.Module:
     """Instantiate a compiler export on CPU, using float32 PyTorch parameters."""
-    if not isinstance(definition, dict) or definition.get("format") != "weightlang.torch.v1":
+    if not isinstance(definition, dict) or definition.get("format") not in {"weightlang.torch.v1", "weightlang.wgt.v1"}:
         raise ValueError("expected a weightlang.torch.v1 compiler export")
     if bindings is not None:
         bindings = checked_bindings(definition, bindings)

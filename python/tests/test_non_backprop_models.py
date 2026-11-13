@@ -10,7 +10,7 @@ import pytest
 import torch
 from torch.nn import functional as F
 
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 
 ROOT = Path(__file__).resolve().parents[2]

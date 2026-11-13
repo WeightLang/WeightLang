@@ -175,7 +175,7 @@ impl Connection {
                     bail!("geometry rebinding requires an owned forward model");
                 };
                 session.rebind_geometry(program)?;
-                Ok(serde_json::json!({"backend":session.execution_backend(),"revision":session.revision()}))
+                Ok(serde_json::json!({"backend":session.execution_backend(),"revision":session.revision(),"forward_interface":definition.forward_interface()}))
             }
             Request::CallOperation { handle, name, inputs } => {
                 let Some(Session::Operations(session)) = self.sessions.get_mut(&handle) else {
@@ -201,6 +201,18 @@ impl Connection {
                 Some(Session::Adaptive(session)) => Ok(serde_json::to_value(session.program().parameters.iter().map(|p| (p.name.clone(), p.shape.clone(), p.data.clone())).collect::<Vec<_>>())?),
                 _ => bail!("unknown model or foreign owner"),
             },
+            Request::SetOptimizer { handle, optimizer } => {
+                let optimizer=match optimizer.as_str() {
+                    "sgd" => Optimizer::Sgd,
+                    "adam" => Optimizer::Adam,
+                    _ => bail!("unsupported optimizer"),
+                };
+                let Some(Session::Adaptive(session))=self.sessions.get_mut(&handle) else {
+                    bail!("optimizer configuration requires an owned forward model");
+                };
+                session.set_optimizer(optimizer)?;
+                Ok(serde_json::json!({"revision":session.revision()}))
+            }
             Request::UpdateParameters { handle, candidates } => {
                 let revision = match self.sessions.get_mut(&handle) {
                     Some(Session::Operations(session)) => {

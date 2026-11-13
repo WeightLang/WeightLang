@@ -39,7 +39,7 @@ def test_visualization_preserves_both_residual_edges():
 def test_visualization_hides_diagnostic_buffers_without_changing_model_graph():
     import os
     from pathlib import Path
-    import weightlang as wgt
+    from weightlang import torch_api as wgt
 
     root = Path(__file__).resolve().parents[2]
     compiler = os.environ.get("WGT_COMPILER", str(root / "target/debug/wgt"))

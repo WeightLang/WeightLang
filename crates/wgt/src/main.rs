@@ -59,6 +59,7 @@ enum SelfCommand {
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum CompileTarget {
+    Wgt,
     Torch,
     Rust,
 }
@@ -191,12 +192,12 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
-    /// Compile a model architecture for PyTorch or Rust; never executes it
+    /// Compile a WGT definition, or explicitly select PyTorch/Rust; never executes it
     Compile {
         /// WGT model definition, or - to read a definition from stdin
         #[arg(default_value = "model.wgt")]
         source: PathBuf,
-        #[arg(long, value_enum, default_value = "torch")]
+        #[arg(long, value_enum, default_value = "wgt")]
         target: CompileTarget,
         /// New architecture file; omit to write the generated target to stdout
         #[arg(short, long)]
@@ -452,12 +453,19 @@ fn execute(cli: Cli) -> Result<u8> {
                 (Some(definition.source().to_owned()), Default::default(), Some(template.source_fingerprint()?))
             };
             match target {
-                CompileTarget::Torch => {
+                CompileTarget::Wgt | CompileTarget::Torch => {
+                    if *target == CompileTarget::Wgt {
+                        let native_source = if let Some(text) = &text {text.clone()} else {
+                            wgt_language::source::read_model_source(&base.join(source))?
+                        };
+                        wgt_language::backend::preflight_source(&native_source, wgt_language::backend::Backend::Rust)?;
+                    }
                     let mut architecture = if let Some(text) = text {
                         weightlang_wgt::torch_export::compile_source_with_dimensions(&text, &dimensions)?
                     } else {
                         weightlang_wgt::torch_export::compile_with_dimensions(&base.join(source), &dimensions)?
                     };
+                    if *target == CompileTarget::Wgt { architecture.format = "weightlang.wgt.v1"; }
                     architecture.template_fingerprint = template_fingerprint;
                     if let Some(output) = output {
                         weightlang_wgt::torch_export::write(&architecture, &base.join(output))?;
@@ -1241,7 +1249,7 @@ fn dimension_bindings(values: &[String]) -> Result<wgt_language::dimensions::Dim
 
 fn backend(target: CompileTarget) -> wgt_language::backend::Backend {
     match target {
-        CompileTarget::Rust => wgt_language::backend::Backend::Rust,
+        CompileTarget::Wgt | CompileTarget::Rust => wgt_language::backend::Backend::Rust,
         CompileTarget::Torch => wgt_language::backend::Backend::Torch,
     }
 }

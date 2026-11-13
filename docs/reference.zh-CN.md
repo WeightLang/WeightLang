@@ -738,3 +738,7 @@ VJP/激活乘梯度归因、单事件消融电路发现和稀疏字典特征干�
 ## 共享动态执行与显式状态 AD（本地新增）
 
 同一原生实例可重绑定激活几何并保留参数、SGD/Adam 状态；Python 动态模块的各形状图共享同一批 Parameter。显式 tuple-return forward 提供可微多输入、多输出，但不改变旧 typed operation 的无 AD 合同。有界跨调用 hidden 求导使用明确的 StateLink、监督输出范围和 targets，失败不提交优化器更新。运行时 `gather`、`dynamic_slice` 和 `concat` 的源级签名、索引检查、VJP、解释执行回退、大小与序列预算，见[动态模型与显式状态](dynamic-models.md)。本地能力尚未发布，不表示通用整数子图、持久 state AD 或全部 LightNest 模型已经迁移。
+
+Python 的默认原生模型对象、显式后端与 IPC/训练合同见 [Python 模型对象](python-model.md)。
+
+`wgt compile` 默认目标为 `wgt`，导出后端无关的 `weightlang.wgt.v1` 定义；显式 `--target torch` 保留兼容格式，`--target rust` 仍输出 Rust 宿主模块。`--target wgt` 拒绝 Torch 专用方言；检查和编译不初始化实例。

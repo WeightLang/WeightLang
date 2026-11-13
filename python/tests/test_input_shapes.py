@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 ROOT = Path(__file__).resolve().parents[2]
 MODEL = ROOT / "examples/native_training/input_shapes/model.wgt"

@@ -262,3 +262,9 @@ Python 单样本 eager，typed 操作保持原有无 AD 合同。
 ## 同实例变长与显式 hidden 求导
 
 `ModelTemplate` 绑定定义与 `DynamicModel` 单实例重绑定是不同 API。后者保留一个服务句柄、权重和优化器，严格拒绝参数合同变化，候选几何与编译 workspace 先做瞬时预算。Python `load_dynamic` / `loads_dynamic` 的各形状共享 canonical Parameter，缓存有界且检查 template_fingerprint；完整动态 save 尚不支持，不得误存为静态模型。tuple-return forward 明确进入纯 Forward AD，输入输出逐轴检查并打包既有 IR；旧 typed operation 无 AD 不变。原生 `recurrent_gradients` / `train_recurrent` 对显式 hidden 链作有界 BPTT，只监督 OutputSlice，None target 不监督该步；不等于持久 state AD。`gather` 对值 scatter-add、对索引无梯度；`dynamic_slice` 的 start 无梯度；concat 拆分梯度；embedding 对 table scatter-add，索引无梯度，显式 padding_idx 仅屏蔽对应行梯度。新索引 kernel 当前解释执行原生回退，不是 PyTorch 回退。详细签名与限制见 docs/dynamic-models.md；运行动态几何、tuple IO、跨调用梯度与优化器、真实服务和 Python 差分用例。
+
+## Python 原生对象
+
+当前源码的公共 load/loads/from_ir/load_dynamic/loads_dynamic 默认创建 `wgt.Model` 并通过 wgtime 执行，不能声称仍默认生成 PyTorch 模块。CPU/f32 和服务所有权、错误/超时不重放规则见 docs/python-model.md。PyTorch 必须显式 backend="torch"；需要实际 nn.Module 类型的兼容宿主用 `weightlang.torch_api`。Torch 专用 bind_models 保留其兼容默认，但项目新调用写明确 backend。原生参数更新后需重新显式配置优化器；参数快照不是训练检查点。测试须用真实服务，不把 mocked IPC 当执行验收。
+
+公共 Python compile/compile_source 和 CLI compile 默认导出后端无关的 weightlang.wgt.v1（--target wgt）；显式 torch 目标仍输出兼容 IR，不能以默认编译成功推断 Torch 专用源码可在原生执行。

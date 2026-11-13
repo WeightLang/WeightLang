@@ -2,7 +2,7 @@
 from pathlib import Path
 import pytest
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 SOURCE = Path(__file__).resolve().parents[2] / "examples/native_training/interpretability/model.wgt"
 

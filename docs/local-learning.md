@@ -34,7 +34,7 @@ typed `forward` 只读；更新使用普通具名函数，例如 `step`、`adapt
 
 ```python
 import torch
-import weightlang as wl
+from weightlang import torch_api as wl
 
 model = wl.load("examples/native_training/non_backprop/snn/model.wgt")
 model.call("reset")
@@ -64,7 +64,7 @@ fn forward(input: f32[2]) -> f32[2] {
 
 ```python
 import torch
-import weightlang as wl
+from weightlang import torch_api as wl
 
 model = wl.load("examples/native_training/non_backprop/ff/model.wgt")
 report = wl.train_forward_forward(
@@ -97,7 +97,7 @@ Rust `wgt::evolution::fit_forward_forward(&model,pairs,rate,"adapt") -> Result<u
 
 ```python
 import torch
-import weightlang as wl
+from weightlang import torch_api as wl
 
 model = wl.load("examples/native_training/non_backprop/snn/model.wgt")
 search = wl.GA(model, config=wl.GAConfig(population_size=16, elite_count=2), seed=7)

@@ -1,7 +1,11 @@
 # WeightLang Python SDK
 
+当前源码默认返回原生 `wgt.Model`，详见 [Python 模型对象](../docs/python-model.md)。下文 PyTorch 训练示例显式使用 `torch_api` 互操作接口；不表示默认执行后端仍是 PyTorch。
+
 Describe the architecture and forward computation in `model.wgt`, then load a
-regular PyTorch `torch.nn.Module`. Pure tensor models use FX; control flow,
+native `weightlang.Model`. Native execution uses an existing wgtime service and
+does not import PyTorch. The explicit `torch_api` compatibility examples below
+return a regular PyTorch `torch.nn.Module`. Pure tensor models use FX; control flow,
 working memory, learn constraints and typed state operations preserve their WGT
 rules through PyTorch execution. Python owns data loading, training, inference,
 checkpoints, and visualization.
@@ -11,7 +15,7 @@ Install from a source checkout:
 ```sh
 cargo install --locked --force --path crates/wgt --bin wgt
 uv venv
-uv pip install -e './python[visualize]'
+uv pip install -e './python[torch,visualize]'
 ```
 
 The compiler must come from the same source checkout with `wgt compile --target
@@ -20,7 +24,7 @@ JSON and saved SDK models load without the compiler.
 
 ```python
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 model = wgt.load('model.wgt')
 device = next(model.parameters()).device

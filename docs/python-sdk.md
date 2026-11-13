@@ -1,5 +1,7 @@
 # Python SDK：用 PyTorch 运行 WGT 架构
 
+当前源码默认返回原生 `wgt.Model`，详见 [Python 模型对象](python-model.md)。下文 PyTorch 训练示例显式使用 `torch_api` 互操作接口；不表示默认执行后端仍是 PyTorch。
+
 0.5.2 的命名维度绑定、签名式 forward/loss 以及兼容限制见[模型语言](model-language.md)。普通 load/loads 的 dimensions 在构造时固定，不改变既有执行 dtype、batch 或 typed 状态求导合同；单实例变长使用本文新增的 load_dynamic。
 
 WeightLang 描述模型内部的参数、张量计算、分支、循环和状态。Python 负责数据、训练循环、推理调用与可视化。SDK 复用 Rust 前端，把模型加载为标准 `torch.nn.Module`：纯张量模型使用 FX 图，含动态控制或状态的模型按原生中间指令执行 PyTorch 张量计算。
@@ -14,10 +16,10 @@ WeightLang 描述模型内部的参数、张量计算、分支、循环和状态
 sh install.sh
 . "${XDG_CONFIG_HOME:-$HOME/.config}/weightlang/env"
 uv venv
-uv pip install -e './python[visualize]'
+uv pip install -e './python[torch,visualize]'
 ```
 
-安装器自动准备 uv、Rust/Cargo 和原生编译器；Windows 使用 `powershell -ExecutionPolicy Bypass -File .\install.ps1`，打开新终端后再运行 uv 命令。SDK 与 PyTorch 装入项目的 `.venv`。需要 Python 3.10+、PyTorch 2.5+。`visualize` 是可选依赖组，提供 torchinfo、NumPy 和 Graphviz 的 Python 包；仅加载、训练和导出 Mermaid/DOT 时可改为 `uv pip install -e ./python`。SVG/PNG 还需要系统 Graphviz 的 `dot` 程序，例如 Debian/Ubuntu 的 `graphviz` 软件包。
+安装器自动准备 uv、Rust/Cargo 和原生编译器；Windows 使用 `powershell -ExecutionPolicy Bypass -File .\install.ps1`，打开新终端后再运行 uv 命令。SDK 与 PyTorch 装入项目的 `.venv`。原生对象需要 Python 3.10+；本页 Torch 互操作示例另需 PyTorch 2.5+。`visualize` 是可选依赖组，提供 torchinfo、NumPy 和 Graphviz 的 Python 包；仅加载、训练和导出 Mermaid/DOT 时可改为 `uv pip install -e "./python[torch]"`。SVG/PNG 还需要系统 Graphviz 的 `dot` 程序，例如 Debian/Ubuntu 的 `graphviz` 软件包。
 
 上述命令安装当前源码版本。编译器与 Python 包应来自同一源码版本，以获得完整指令、原生初始化值和子模型元数据。已有项目可通过 uv 安装 Git 仓库的 `python` 子目录，或安装上述本地目录。已发布版本的 Python 与 Rust SDK 安装方式见[联合发布说明](releases.md)。
 
@@ -44,7 +46,7 @@ Python 直接加载架构，用 PyTorch 训练 `y = 2x + 1`：
 
 ```python
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 model = wgt.load("model.wgt")
 device = next(model.parameters()).device
@@ -206,7 +208,7 @@ SDK 使用调用时传入的模型与设备参数，不隐式应用 `wgt.toml` �
 
 ```python
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 definition = wgt.compile("python/examples/weight_lifecycle/model.wgt")
 initial = (

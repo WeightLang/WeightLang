@@ -42,7 +42,7 @@ axes 保留命名轴，匿名轴为 null。相同子模型实例的重复调用�
 
 ```python
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 model = wgt.load("examples/native_training/interpretability/model.wgt")
 x = torch.tensor([2., 3.])

@@ -8,7 +8,7 @@ Every output uses a new snapshot directory; repeated writes are rejected.
 from pathlib import Path
 
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 
 HERE = Path(__file__).resolve().parent

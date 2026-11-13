@@ -41,7 +41,7 @@ Python 宿主：
 
 ```python
 import torch
-import weightlang as wgt
+from weightlang import torch_api as wgt
 
 model = wgt.load(
     "examples/native_training/input_shapes/model.wgt",

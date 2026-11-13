@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import torch
 
-import weightlang as wgt
+from weightlang import torch_api as wgt
 from weightlang.program import ProgramExecutor, ProgramModule, SUPPORTED_OPS, project_value
 
 

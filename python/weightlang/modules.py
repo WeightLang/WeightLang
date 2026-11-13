@@ -39,7 +39,10 @@ def _build(definition, namespace):
     if missing:
         raise ValueError(f"missing declared host dependencies: {sorted(missing)}")
     scope = {name: namespace[name] for name in plan["externs"]}
-    scope.update(Module=nn.Module, __name__=plan["host"])
+    from .model import Model
+    class TorchModule(nn.Module, Model):
+        _wgt_backend = "torch"
+    scope.update(Module=TorchModule, __name__=plan["host"])
     # Only compiler-generated Python is evaluated. WGT parsing and expression
     # validation belong to the Rust frontend, never a parallel Python parser.
     exec(compile(plan["code"], "<compiled WGT torch model>", "exec"), scope)
@@ -68,8 +71,10 @@ def classes_from_ir(definition, namespace, *, trusted=False):
     return _build(definition, namespace)
 
 
-def bind_models(path, namespace, *, compiler=None):
+def bind_models(path, namespace, *, compiler=None, backend="torch"):
     """Compile a local project model and bind its declared host dependencies."""
+    if backend != "torch":
+        raise ValueError("bind_models binds the Torch-specific dialect; explicitly select backend='torch'. For shared native WGT use Model.from_file or weightlang.load.")
     snapshots = _SNAPSHOTS.get()
     definition = (
         snapshots.get(namespace.get("__name__")) if snapshots is not None else None
