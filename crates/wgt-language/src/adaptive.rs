@@ -123,6 +123,7 @@ pub enum Instruction {
     /// Batched rank-3 matrix product with equal batch extents.
     BatchMatmul { out: String, left: String, right: String },
     LayerNorm { out: String, input: String, gamma: String, beta: String, axis: usize, epsilon: f32 },
+    MaskedSoftmax { out:String, input:String, mask:String, axis:usize },
     SoftmaxAxis { out: String, input: String, axis: usize },
     Scale { out: String, input: String, factor: f32 },
     /// Runtime scalar scaling is explicit; other elementwise operators never broadcast.
@@ -211,6 +212,8 @@ pub enum Instruction {
         left: String,
         right: String,
     },
+    Gelu { out: String, input: String },
+    TopkMask { out: String, input: String, count: String },
     Tanh {
         out: String,
         input: String,
@@ -327,7 +330,7 @@ impl Instruction {
             | SoftmaxAxis { out, input, .. }
             | Scale { out, input, .. }
             | Linear { out, input, .. }
-            | Tanh { out, input }
+            | Gelu { out, input } | Tanh { out, input }
             | Sigmoid { out, input }
             | Relu { out, input }
             | Softmax { out, input }
@@ -352,6 +355,8 @@ impl Instruction {
             | Div { out, left, right }
             | Minimum { out, left, right } =>
                 (Some(out), [Some(left), Some(right), None], None),
+            MaskedSoftmax {out,input,mask,..} => (Some(out),[Some(input),Some(mask),None],None),
+            TopkMask { out, input, count } => (Some(out), [Some(input), Some(count), None], None),
             Embedding { out, table, indices, .. } =>
                 (Some(out), [Some(table), Some(indices), None], None),
             Gather { out, input, indices, .. } =>

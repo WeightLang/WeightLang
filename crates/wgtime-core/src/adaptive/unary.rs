@@ -2,6 +2,7 @@ use anyhow::Result;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Unary {
+    Gelu,
     Tanh,
     Sigmoid,
     Relu,
@@ -34,6 +35,7 @@ impl Unary {
         };
         for (&value, output) in input.iter().zip(output) {
             *output = match self {
+                Self::Gelu => (0.5*f64::from(value)*(1.+libm::erf(f64::from(value)*std::f64::consts::FRAC_1_SQRT_2))) as f32,
                 Self::Tanh => value.tanh(),
                 Self::Sigmoid => 1. / (1. + (-value).exp()),
                 Self::Relu => value.max(0.),
@@ -71,6 +73,8 @@ impl Unary {
                     }
                     let y = output[index];
                     let derivative = match self {
+                        Self::Gelu => { let x=f64::from(input[index]);
+                            (0.5*(1.+libm::erf(x*std::f64::consts::FRAC_1_SQRT_2))+x*(-0.5*x*x).exp()/(2.*std::f64::consts::PI).sqrt()) as f32 },
                         Self::Tanh => 1. - y * y,
                         Self::Sigmoid => y * (1. - y),
                         Self::Relu => if input[index] > 0. { 1. } else { 0. },

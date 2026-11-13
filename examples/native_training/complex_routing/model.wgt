@@ -1,0 +1,11 @@
+wgt 0.5
+model ComplexRouting
+# Two rows, three candidate logits per row. All data is explicit: no parameter
+# initialization, training or persistent mutable state occurs in this model.
+# valid must contain binary values and at least one valid candidate per row.
+# count is a single exact integer 0..3. Selection ties prefer lower indices;
+# it does not differentiate rankings, while selected probabilities retain VJP.
+fn forward(x:f32[2,3],valid:f32[2,3],count:f32[1])->(f32[2,3],){
+    let probabilities=masked_softmax(gelu(x),valid,1);
+    return (probabilities*topk_mask(probabilities,count),);
+}

@@ -1003,6 +1003,7 @@ impl Lower {
         self.register_tensor(out, tensor)?;
         self.program.version = 3;
         self.types.insert(out.into(), crate::categorical::VectorType::F32);
+        self.program.version=self.program.version.max(instruction.contract().min_ir_version);
         self.program.instructions.push(instruction);
         Ok(())
     }
@@ -1538,6 +1539,22 @@ impl Lower {
             }
             let tensor = match (op, args) {
                 ("reshape", [x, Expr::List(dims)]) => {
+                    // An explicit shaped parameter read must not first create
+                    // an illegal >16384-axis flattened temporary. Keep legacy
+                    // small/vector reads unchanged, and use the same Read IR.
+                    let parameter = self.parameter(x).ok().filter(|p| !self.sizes.contains_key(&p.name) && !p.probability && p.learn.is_none() && p.shape.iter().product::<usize>()>16384).cloned();
+                    if let Some(parameter)=parameter {
+                        let shape=dims.iter().map(|e| {let n=scalar_literal(e)?;
+                            ensure!(n>=1. && n<=16384. && n.fract()==0.,"reshape dimensions must be integers in 1..16384");Ok(n as usize)
+                        }).collect::<Result<Vec<_>>>()?;
+                        let tensor=TensorType::unnamed(DType::F32,shape,ShapeLimits::REGISTER)?;
+                        ensure!(tensor.shape().iter().product::<usize>()==parameter.shape.iter().product::<usize>(),"reshape must preserve element count");
+                        self.register_tensor(out,tensor)?;
+                        self.types.insert(out.into(),VectorType::F32);
+                        self.program.version=self.program.version.max(3);
+                        self.program.instructions.push(I::Read {out:out.into(),parameter:parameter.name});
+                        return Ok(());
+                    }
                     let x = self.value(x)?;
                     ensure!(x != out, "in-place reshape is unsupported; bind the view to a new name");
                     let shape = dims
@@ -1714,6 +1731,12 @@ impl Lower {
                         tensor,
                     ))
                 }
+                ("masked_softmax", [x,mask,axis]) => {
+                    let input=self.value(x)?;let mask=self.value(mask)?;
+                    let tensor=self.tensor_type(&input)?.elementwise(&self.tensor_type(&mask)?,ShapeLimits::REGISTER)?;
+                    let axis=tensor_axis(&tensor,axis)?;
+                    Some((I::MaskedSoftmax {out:out.into(),input,mask,axis},tensor))
+                }
                 ("softmax", [x, axis]) => {
                     let x = self.value(x)?;
                     let tensor = self.tensor_type(&x)?;
@@ -1761,7 +1784,8 @@ impl Lower {
                 self.register_tensor(out, tensor)?;
                 self.program.version = 3;
                 self.types.insert(out.into(), VectorType::F32);
-                self.program.instructions.push(instruction);
+                self.program.version=self.program.version.max(instruction.contract().min_ir_version);
+        self.program.instructions.push(instruction);
                 return Ok(());
             }
         }
@@ -2078,11 +2102,12 @@ impl Lower {
                     };
                     (instruction, len)
                 }
-                ("relu", [x]) | ("tanh", [x]) | ("sigmoid", [x]) | ("softmax", [x]) => {
+                ("gelu", [x]) | ("relu", [x]) | ("tanh", [x]) | ("sigmoid", [x]) | ("softmax", [x]) => {
                     let x = self.value(x)?;
                     let len = self.size(&x)?;
                     (
                         match op.as_str() {
+                            "gelu" => I::Gelu {out:out.into(),input:x},
                             "relu" => I::Relu {
                                 out: out.into(),
                                 input: x,
@@ -2102,6 +2127,12 @@ impl Lower {
                         },
                         len,
                     )
+                }
+                ("topk_mask", [x,count]) => {
+                    let input=self.value(x)?;let count=self.value(count)?;
+                    ensure!(!self.shape(&input)?.is_empty() && self.shape(&count)?==[1], "topk_mask requires a tensor and scalar count");
+                    let len=self.size(&input)?;
+                    (I::TopkMask {out:out.into(),input,count},len)
                 }
                 ("slice", [x, Expr::Number(start), Expr::Number(len)]) => {
                     ensure!(
@@ -2143,7 +2174,7 @@ impl Lower {
             | I::Detach { input, .. }
             | I::Exp { input, .. }
             | I::Log { input, .. }
-            | I::Tanh { input, .. }
+            | I::TopkMask { input, .. } | I::Gelu { input, .. } | I::Tanh { input, .. }
             | I::Sigmoid { input, .. }
             | I::Relu { input, .. }
             | I::Clip { input, .. } => self.tensor_type(input)?,
@@ -2176,6 +2207,7 @@ impl Lower {
         self.register_tensor(out, tensor)?;
 
         self.types.insert(out.into(), kind);
+        self.program.version=self.program.version.max(instruction.contract().min_ir_version);
         self.program.instructions.push(instruction);
         Ok(())
     }

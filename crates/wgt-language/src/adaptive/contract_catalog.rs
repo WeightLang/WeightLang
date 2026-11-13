@@ -52,6 +52,9 @@ pub const OPERATOR_CONTRACTS: &[OperatorContract] = &[
     OperatorContract { name: "dynamic_slice", min_ir_version: 3, shape: "rank-1 input; f32[1] finite exact nonnegative integer start; compile-time positive length; runtime bounds Preserves the input axis name.", layout: "materialized", gradient: "vjp", effect: "pure" },
     OperatorContract { name: "concat", min_ir_version: 3, shape: "equal ranks 1..8 and equal non-axis dimensions; sum axis lengths Axis names merge positionally from either operand, including the concatenation axis; conflicts and duplicate result names are rejected.", layout: "materialized", gradient: "vjp", effect: "pure" },
     OperatorContract { name: "embedding", min_ir_version: 3, shape: "rank-2 table [rows,width], rank-1 finite exact nonnegative integer f32 indices -> [count,width]; runtime row bounds; omitted source padding_idx=None, signed literals in [-rows,rows) normalize negatives; IR padding_idx is None or normalized 0..rows-1; preserves padding row values but suppresses its VJP; no index gradient Named axes are [indices axis, table feature axis]; duplicate result names are rejected.", layout: "materialized", gradient: "vjp", effect: "pure" },
+    OperatorContract { name: "gelu", min_ir_version: 3, shape: "same shape; exact erf GELU", layout: "materialized", gradient: "vjp", effect: "pure" },
+    OperatorContract { name: "topk_mask", min_ir_version: 3, shape: "rank 1..8 values; select on last axis; scalar integer count 0..axis width; ties prefer lower index", layout: "materialized", gradient: "stop", effect: "pure" },
+    OperatorContract { name: "masked_softmax", min_ir_version: 3, shape: "same-shaped f32 input and binary mask, axis in range; each axis group needs a valid element", layout: "materialized", gradient: "value VJP; no mask gradient", effect: "pure" },
 ];
 
 impl Instruction {
@@ -109,6 +112,9 @@ impl Instruction {
             Self::DynamicSlice { .. } => &OPERATOR_CONTRACTS[49],
             Self::Concat { .. } => &OPERATOR_CONTRACTS[50],
             Self::Embedding { .. } => &OPERATOR_CONTRACTS[51],
+            Self::Gelu { .. } => &OPERATOR_CONTRACTS[52],
+            Self::TopkMask { .. } => &OPERATOR_CONTRACTS[53],
+            Self::MaskedSoftmax { .. } => &OPERATOR_CONTRACTS[54],
         }
     }
 }

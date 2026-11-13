@@ -535,3 +535,19 @@ def embedding(table: torch.Tensor, indices: torch.Tensor,
         padding = torch.arange(table.shape[-2], device=table.device).unsqueeze(-1) == padding_idx
         table = torch.where(padding, table.detach(), table)
     return gather(table, indices, axis=0, rank=2)
+
+
+def topk_mask(input, count):
+    """Stable native top-k selection: lower indices win ties; no selection VJP."""
+    value = count.detach()
+    if value.shape[-1:] != (1,) or not torch.isfinite(value).all() or not ((value >= 0) & (value <= input.shape[-1]) & (value == value.round())).all():
+        raise ValueError("topk_mask count must be an integer in 0..width")
+    indices = input.detach().argsort(dim=-1, descending=True, stable=True)
+    ranks = torch.empty_like(indices).scatter_(-1, indices, torch.arange(input.shape[-1], device=input.device).expand_as(indices))
+    return (ranks < value).to(input.dtype)
+
+
+def masked_softmax(input, mask, axis):
+    if not ((mask == 0) | (mask == 1)).all() or not mask.bool().any(axis).all():
+        raise ValueError("masked_softmax requires binary mask and a valid element in every group")
+    return input.masked_fill(~mask.bool(), -torch.inf).softmax(axis)

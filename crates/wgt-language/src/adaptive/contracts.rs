@@ -111,6 +111,14 @@ impl Program {
                         same(out, input)?;
                         ensure!(*axis < reg(input)?.shape.len(), "tensor axis out of bounds");
                     }
+                    I::MaskedSoftmax {out,input,mask,axis} => {
+                        same(out,input)?;same(input,mask)?;
+                        ensure!(*axis<reg(input)?.shape.len(),"masked_softmax axis out of bounds");
+                    }
+                    I::TopkMask { out, input, count } => {
+                        same(out,input)?;
+                        ensure!(!reg(input)?.shape.is_empty() && reg(count)?.shape==[1], "topk_mask requires a tensor and scalar count");
+                    }
                     I::Scale { out, input, factor } => {
                         same(out, input)?; ensure!(factor.is_finite(), "nonfinite scale factor");
                     }
@@ -128,7 +136,7 @@ impl Program {
                     }
                     I::Detach { out, input } | I::Exp { out, input } | I::Log { out, input }
                     | I::Sqrt { out, input }
-                    | I::Neg { out, input } | I::Tanh { out, input } | I::Sigmoid { out, input }
+                    | I::Gelu { out, input } | I::Neg { out, input } | I::Tanh { out, input } | I::Sigmoid { out, input }
                     | I::Relu { out, input } => same(out, input)?,
                     I::Softmax { out, input } | I::LogSoftmax { out, input } | I::ValidateProbabilities { out, input } => {
                         same(out, input)?; ensure!(reg(input)?.shape.len() == 1, "vector normalization requires rank 1");

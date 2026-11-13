@@ -744,6 +744,7 @@ impl<'a> Generator<'a> {
                     }
                     body += &format!("for(size_t i=0;i<{n};i++)t[i]={value};");
                 }
+                I::MaskedSoftmax {..} | I::Gelu {..} | I::TopkMask {..} => anyhow::bail!("GELU/top-k/masked-softmax use the native interpreter"),
                 I::Tanh { input: x, .. }
                 | I::Sigmoid { input: x, .. }
                 | I::Relu { input: x, .. }

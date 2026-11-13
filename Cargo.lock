@@ -2453,6 +2453,7 @@ dependencies = [
  "fuser",
  "libc",
  "libloading",
+ "libm",
  "pollster",
  "reqwest",
  "safetensors",

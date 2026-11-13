@@ -268,3 +268,9 @@ Python 单样本 eager，typed 操作保持原有无 AD 合同。
 当前源码的公共 load/loads/from_ir/load_dynamic/loads_dynamic 默认创建 `wgt.Model` 并通过 wgtime 执行，不能声称仍默认生成 PyTorch 模块。CPU/f32 和服务所有权、错误/超时不重放规则见 docs/python-model.md。PyTorch 必须显式 backend="torch"；需要实际 nn.Module 类型的兼容宿主用 `weightlang.torch_api`。Torch 专用 bind_models 保留其兼容默认，但项目新调用写明确 backend。原生参数更新后需重新显式配置优化器；参数快照不是训练检查点。测试须用真实服务，不把 mocked IPC 当执行验收。
 
 公共 Python compile/compile_source 和 CLI compile 默认导出后端无关的 weightlang.wgt.v1（--target wgt）；显式 torch 目标仍输出兼容 IR，不能以默认编译成功推断 Torch 专用源码可在原生执行。
+
+## 原生复杂模型原语
+
+当前共享前端支持 `gelu(x)`（精确 erf，保 shape/轴名及解析 VJP）、`topk_mask(x,count)`（最后一轴逐组选 top-k，count 为 f32[1] 精确整数，0..轴宽，相等值优先小索引，选择/count 无梯度）和 `masked_softmax(x,mask,axis)`（同形严格 0/1 mask、逐轴至少一有效项、稳定 f64 累加，只对 logits 求导）。三者最低 Adaptive IR v3，Rust 当前解释执行回退，不能声称 AOT/GPU 支持。WGT 仍0.5；不添加隐式广播或 Python 回调。参考 docs/complex-models.md、examples/native_training/complex_routing/model.wgt；必须验证原生 CPU/VJP、预算/错误边界及 Torch 差分。
+
+大参数需要显式 `parameter_name as [axis,...]`，共享前端直接发出同元素数的多轴 Read，避免先产生超16384的扁平单轴。裸读仍旧扁平合同；不放宽 axis/element/port/memory 边界。大 embedding 验证表行的 scatter-add VJP 及零 index 梯度。

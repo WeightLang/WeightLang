@@ -3127,6 +3127,60 @@
         "min": 2,
         "max": 3
       }
+    },
+    {
+      "name": "gelu",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Exact erf GELU, shape preserving; native and Torch VJP.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression",
+      "signature": "gelu(x)",
+      "defaults": {},
+      "operator_arity": {
+        "min": 1,
+        "max": 1
+      }
+    },
+    {
+      "name": "topk_mask",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Rank 1..8 top-k mask along last axis; scalar integer count 0..axis width; ties choose lower index; selection has no gradient.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression",
+      "signature": "topk_mask(x,count)",
+      "defaults": {},
+      "operator_arity": {
+        "min": 2,
+        "max": 2
+      }
+    },
+    {
+      "name": "masked_softmax",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Stable softmax over binary-valid positions; reject empty groups; zero mask gradient.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/reference.zh-CN.md",
+      "position": "expression",
+      "signature": "masked_softmax(x,mask,axis)",
+      "defaults": {},
+      "operator_arity": {
+        "min": 3,
+        "max": 3
+      }
     }
   ]
 }

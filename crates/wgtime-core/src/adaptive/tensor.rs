@@ -102,6 +102,16 @@ impl AxisGroups {
         } }
         Ok(())
     }
+    pub fn masked_softmax(self,input:&[f32],mask:&[f32],output:&mut[f32])->Result<()> {
+        ensure!(input.len()==self.len() && mask.len()==self.len() && output.len()==self.len(),"masked_softmax shape mismatch");
+        ensure!(mask.iter().all(|v| *v==0. || *v==1.),"masked_softmax mask must be binary");
+        for o in 0..self.outer {for i in 0..self.inner {
+            let max=(0..self.width).filter(|&a|mask[self.index(o,a,i)]==1.).map(|a|input[self.index(o,a,i)]).reduce(f32::max).context("masked_softmax requires a valid entry in every group")?;
+            let sum:f64=(0..self.width).filter(|&a|mask[self.index(o,a,i)]==1.).map(|a|(f64::from(input[self.index(o,a,i)])-f64::from(max)).exp()).sum();
+            for a in 0..self.width {let j=self.index(o,a,i);output[j]=if mask[j]==0. {0.} else {((f64::from(input[j])-f64::from(max)).exp()/sum) as f32};}
+        }}
+        Ok(())
+    }
     pub fn softmax_vjp(self, value: &[f32], gradient: &[f32], result: &mut [f32]) {
         for o in 0..self.outer { for i in 0..self.inner {
             let dot: f64 = (0..self.width).map(|a| { let j=self.index(o,a,i); f64::from(value[j])*f64::from(gradient[j]) }).sum();

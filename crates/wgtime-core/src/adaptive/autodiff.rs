@@ -190,12 +190,12 @@ impl Tape {
             Op::LayerNorm(r,x,gamma,beta,groups,epsilon) => (r, Edge::LayerNorm {
                 x:self.reg(x)?, gamma:self.reg(gamma)?, beta:self.reg(beta)?, groups, epsilon
             }),
-            Op::SoftmaxAxis(r,x,groups) => (r, Edge::SoftmaxAxis { x:self.reg(x)?,groups }),
+            Op::MaskedSoftmax(r,x,_,groups) | Op::SoftmaxAxis(r,x,groups) => (r, Edge::SoftmaxAxis { x:self.reg(x)?,groups }),
             Op::Scale(r,x,factor) => (r, Edge::Scale { x:self.reg(x)?,factor }),
             Op::ScaleBy(r,x,scalar) => (r, Edge::ScaleBy { x:self.reg(x)?,scalar:self.reg(scalar)? }),
             Op::Div(r,a,b) => (r, Edge::Div { a:self.reg(a)?,b:self.reg(b)? }),
             Op::Ge(..) => anyhow::bail!("ge does not support automatic differentiation; use non-AD evaluation"),
-            Op::Constant(r, _) | Op::Unary(r, _, Unary::Detach) => (r, Edge::Leaf),
+            Op::TopkMask(r,..) | Op::Constant(r, _) | Op::Unary(r, _, Unary::Detach) => (r, Edge::Leaf),
             Op::Minimum(r, a, b) => (
                 r,
                 Edge::Minimum {

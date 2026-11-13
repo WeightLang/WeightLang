@@ -27,6 +27,7 @@ _UNARY = {
     "exp": torch.exp,
     "log": ops.log,
     "tanh": torch.tanh,
+    "gelu": F.gelu,
     "sigmoid": torch.sigmoid,
     "relu": torch.relu,
     "neg": torch.neg,
@@ -321,6 +322,8 @@ class _Builder:
         program = definition["program"]
         if type(program["version"]) is not int or program["version"] not in (1, 2, 3):
             raise ValueError("unsupported adaptive IR version; recompile with wgt")
+        if program["version"] < 3 and any(i.get("op") in {"gelu","topk_mask","masked_softmax"} for i in program["instructions"]):
+            raise ValueError("gelu/topk_mask/masked_softmax require IR version 3")
         for register in program["registers"]:
             name = register["name"]
             if not isinstance(name, str) or not name or name in self.shapes:
@@ -408,6 +411,16 @@ class _Builder:
         elif op in _UNARY:
             self.equal(shape, source_shape("input"), op)
             node = self.graph.call_function(_UNARY[op], (value("input"),))
+        elif op == "masked_softmax":
+            self.equal(shape,source_shape("input"),op)
+            self.equal(shape,source_shape("mask"),op)
+            axis=self.axis(item["axis"],shape)
+            node=self.graph.call_function(ops.masked_softmax,(value("input"),value("mask"),axis))
+        elif op == "topk_mask":
+            self.equal(shape, source_shape("input"), op)
+            if source_shape("count") != (1,):
+                raise ValueError("topk_mask requires a vector and scalar count")
+            node = self.graph.call_function(ops.topk_mask, (value("input"), value("count")))
         elif op in _BINARY:
             self.equal(shape, source_shape("left"), op)
             self.equal(shape, source_shape("right"), op)

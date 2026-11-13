@@ -742,3 +742,9 @@ VJP/激活乘梯度归因、单事件消融电路发现和稀疏字典特征干�
 Python 的默认原生模型对象、显式后端与 IPC/训练合同见 [Python 模型对象](python-model.md)。
 
 `wgt compile` 默认目标为 `wgt`，导出后端无关的 `weightlang.wgt.v1` 定义；显式 `--target torch` 保留兼容格式，`--target rust` 仍输出 Rust 宿主模块。`--target wgt` 拒绝 Torch 专用方言；检查和编译不初始化实例。
+
+### 原生复杂模型：激活、选择与掩码
+
+`gelu(x)` 保持任意已支持 f32 张量的 shape/轴名，采用精确 erf 形式，无参数默认值；其 VJP 使用对应解析导数。`topk_mask(x,count)` 返回同形 0/1 张量，沿最后一个轴选取最大的 count 项：count 必须是 `f32[1]` 的有限精确整数，范围 0..该轴宽度；相等值优先较小索引。选择路径及 count 无梯度，后续 `x * mask` 仍对被选值求导。`masked_softmax(x,mask,axis)` 要求两个同形张量、mask 严格 0/1，axis 为非负轴字面量或轴名；每组至少一个有效元素。先排除无效项再求最大值，以 f64 累加归一化，输出无效位置精确为零；仅对 logits 求导，不对 mask 求导。这三个原语从 Adaptive IR v3 起支持，WGT 源版本仍为 0.5，无隐式广播、dtype 转换或 Python 执行。Rust 当前走原生解释器；Python 显式 Torch 后端使用相同共享前端。完整签名、验证及例子见[复杂模型原语](complex-models.md)。
+
+大参数显式读取可写 `table as [257,128]`，直接形成同元素数的多轴 Read，不先产生长度32896的非法单轴临时量。裸参数读取仍保留旧扁平合同；此路径不放宽单轴16384、寄存器总元素、端口或服务内存上限，详情见上面的复杂模型原语专题。

@@ -27,6 +27,8 @@ enum Op {
     Conv(usize, usize, usize, usize, wgt_language::adaptive::ConvGeometry),
     MaxPool2d(usize, usize, wgt_language::adaptive::Pool2dGeometry),
     AvgPool2d(usize, usize, wgt_language::adaptive::Pool2dGeometry),
+    TopkMask(usize,usize,usize,usize),
+    MaskedSoftmax(usize,usize,usize,tensor::AxisGroups),
     Reshape(usize, usize),
     Transpose(usize, usize, usize, usize),
     Permute(usize, usize, [usize; MAX_RANK], [usize; MAX_RANK], usize),
@@ -281,6 +283,8 @@ impl AdaptiveSession {
                     Instruction::ScaleBy { out, input, scalar } => {
                         Op::ScaleBy(dest(out)?,reg(input)?,reg(scalar)?)
                     },
+                    Instruction::MaskedSoftmax {out,input,mask,axis} => Op::MaskedSoftmax(dest(out)?,reg(input)?,reg(mask)?,tensor::AxisGroups::new(&program.registers[reg(input)?].shape,*axis)?),
+                    Instruction::TopkMask {out,input,count} => Op::TopkMask(dest(out)?,reg(input)?,reg(count)?,*program.registers[reg(input)?].shape.last().unwrap()),
                     Instruction::Ge { out, left, right } => Op::Ge(dest(out)?,reg(left)?,reg(right)?),
                     Instruction::Div { out, left, right } => Op::Div(dest(out)?,reg(left)?,reg(right)?),
                     Instruction::MemoryAlloc { out, slots, width } => {
@@ -395,7 +399,7 @@ impl AdaptiveSession {
                     | Instruction::Log { out, input }
                     | Instruction::Sqrt { out, input }
                     | Instruction::LogSoftmax { out, input }
-                    | Instruction::Tanh { out, input }
+                    | Instruction::Gelu { out, input } | Instruction::Tanh { out, input }
                     | Instruction::Sigmoid { out, input }
                     | Instruction::Softmax { out, input }
                     | Instruction::ValidateProbabilities { out, input }
@@ -403,6 +407,7 @@ impl AdaptiveSession {
                     | Instruction::Relu { out, input } => {
                         let (r, x) = (dest(out)?, reg(input)?);
                         let kind = match instruction {
+                            Instruction::Gelu {..} => Unary::Gelu,
                             Instruction::Tanh { .. } => Unary::Tanh,
                             Instruction::Sigmoid { .. } => Unary::Sigmoid,
                             Instruction::Relu { .. } => Unary::Relu,
@@ -495,7 +500,7 @@ impl AdaptiveSession {
             if program.version >= 3 {
                 let shape = |r: usize| &program.registers[r].shape;
                 match op {
-                    Op::Read(r,_) => ensure!(*shape(r) == [program.registers[r].len], "parameter reads require a vector; reshape explicitly"),
+                    Op::Read(r,p) => ensure!(*shape(r) == [program.registers[r].len] || (!program.parameters[p].probability && program.parameters[p].learn.is_none()), "categorical parameter reads require a vector"),
                     Op::Write(_,r) => ensure!(*shape(r) == [program.registers[r].len], "parameter writes require a vector; reshape explicitly"),
                     Op::Linear(r,x,_,_) => ensure!(shape(r).len() == 1 && shape(x).len() == 1, "linear requires vectors"),
                     Op::Slice(r,x,_) => ensure!(shape(r).len() == 1 && shape(x).len() == 1, "slice requires vectors"),
@@ -562,7 +567,7 @@ impl AdaptiveSession {
         // Runtime indexing deliberately uses the interpreter, including its tape.
         // Report the actual backend through execution_backend/is_compiled.
         if self.program.instructions.iter().chain(self.program.loss.iter().flat_map(|p| p.instructions.iter()))
-            .any(|i| matches!(i, Instruction::Embedding { .. } | Instruction::Concat { .. } | Instruction::Gather { .. } | Instruction::DynamicSlice { .. })) {
+            .any(|i| matches!(i, Instruction::MaskedSoftmax {..} | Instruction::TopkMask {..} | Instruction::Gelu {..} | Instruction::Embedding { .. } | Instruction::Concat { .. } | Instruction::Gather { .. } | Instruction::DynamicSlice { .. })) {
             return Ok(());
         }
         let optimizer_bytes=self.optimizer_storage_bytes()?;
@@ -900,6 +905,9 @@ impl AdaptiveSession {
             let cost = match op {
                 Op::Conv(_,_,_,_,g) => g.work()? as u64,
                 Op::MaxPool2d(_,_,g) | Op::AvgPool2d(_,_,g) => g.work()? as u64,
+                Op::MaskedSoftmax(_,_,_,groups) => (groups.len() as u64).saturating_mul(4).saturating_add(1),
+                Op::Unary(r,_,Unary::Gelu) => (self.program.registers[r].len as u64).saturating_add(1),
+                Op::TopkMask(r,_,_,width) => { let n=self.program.registers[r].len as u64; n.saturating_mul(width as u64).saturating_add(n).saturating_add(1) },
                 Op::Concat(r,..) | Op::Gather(r,..) | Op::DynamicSlice(r,..) | Op::Reshape(r,_) | Op::Permute(r,..) => (self.program.registers[r].len as u64).saturating_add(1),
                 Op::Transpose(_,_,m,n) => m.checked_mul(n).and_then(|v|v.checked_add(1)).context("transpose work overflow")? as u64,
                 Op::Matmul(_,_,_,m,k,n) => m.checked_mul(k).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("matmul work overflow")? as u64,
@@ -1213,6 +1221,23 @@ impl AdaptiveSession {
                         }
                     }
                     output = Some(r);
+                }
+                Op::MaskedSoftmax(r,x,mask,groups) => {
+                    self.ready(x)?;self.ready(mask)?;
+                    groups.masked_softmax(&self.registers[x],&self.registers[mask],&mut self.scratch[..self.program.registers[r].len])?;
+                    output=Some(r);
+                }
+                Op::TopkMask(r,x,k,width) => {
+                    self.ready(x)?;self.ready(k)?;
+                    let count=self.registers[k][0]; let n=self.registers[x].len();
+                    ensure!(count.is_finite() && count>=0. && count.fract()==0. && count<=width as f32, "topk_mask count must be an integer in 0..axis width");
+                    self.scratch[..n].fill(0.);
+                    for base in (0..n).step_by(width) { for _ in 0..count as usize {
+                        let mut best=None;
+                        for j in base..base+width { if self.scratch[j]==0. && best.is_none_or(|i| self.registers[x][j]>self.registers[x][i]) {best=Some(j);} }
+                        self.scratch[best.context("topk_mask selection failed")?]=1.;
+                    } }
+                    output=Some(r);
                 }
                 Op::DynamicSlice(r, x, start, length) => {
                     self.ready(x)?;

@@ -469,6 +469,33 @@
       "layout": "materialized",
       "gradient": "vjp",
       "effect": "pure"
+    },
+    {
+      "variant": "Gelu",
+      "name": "gelu",
+      "min_ir_version": 3,
+      "shape": "same shape; exact erf GELU",
+      "layout": "materialized",
+      "gradient": "vjp",
+      "effect": "pure"
+    },
+    {
+      "variant": "TopkMask",
+      "name": "topk_mask",
+      "min_ir_version": 3,
+      "shape": "rank 1..8 values; select on last axis; scalar integer count 0..axis width; ties prefer lower index",
+      "layout": "materialized",
+      "gradient": "stop",
+      "effect": "pure"
+    },
+    {
+      "variant": "MaskedSoftmax",
+      "name": "masked_softmax",
+      "min_ir_version": 3,
+      "shape": "same-shaped f32 input and binary mask, axis in range; each axis group needs a valid element",
+      "layout": "materialized",
+      "gradient": "value VJP; no mask gradient",
+      "effect": "pure"
     }
   ]
 }

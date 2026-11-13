@@ -27,14 +27,14 @@ DEFAULT_MEMORY_BYTES = 256 * 1024**2
 
 _UNARY = {
     "detach": torch.detach, "exp": torch.exp, "log": ops.log,
-    "tanh": torch.tanh, "sigmoid": torch.sigmoid, "relu": torch.relu,
+    "gelu": torch.nn.functional.gelu, "tanh": torch.tanh, "sigmoid": torch.sigmoid, "relu": torch.relu,
     "neg": torch.neg, "sqrt": ops.sqrt,
 }
 _BINARY = {"add": torch.add, "mul": torch.mul, "minimum": torch.minimum,
            "ge": ops.ge, "div": ops.div}
-_GEOMETRY = {"conv", "max_pool2d", "avg_pool2d", "reshape", "transpose", "permute",
+_GEOMETRY = {"gelu", "conv", "max_pool2d", "avg_pool2d", "reshape", "transpose", "permute",
              "matmul", "batch_matmul", "layer_norm", "softmax_axis", "scale",
-             "ge", "div", "sqrt", "scale_by", "embedding", "gather", "dynamic_slice", "concat"}
+             "ge", "div", "sqrt", "masked_softmax", "topk_mask", "scale_by", "embedding", "gather", "dynamic_slice", "concat"}
 _FIELDS = {
     **{name: "out input" for name in _UNARY},
     **{name: "out left right" for name in _BINARY},
@@ -45,6 +45,8 @@ _FIELDS = {
     "layer_norm": "out input gamma beta axis epsilon", "softmax_axis": "out input axis",
     "scale": "out input factor", "scale_by": "out input scalar",
     "constant": "out data", "clip": "out input low high",
+    "masked_softmax": "out input mask axis",
+    "topk_mask": "out input count",
     "sum": "out input", "mean": "out input", "log_softmax": "out input",
     "softmax": "out input", "validate_probabilities": "out input",
     "memory_alloc": "out slots width", "memory_free": "memory",
@@ -344,9 +346,9 @@ class ProgramExecutor:
             spec = self.specs[item["parameter"]]
             tensor_shape = shape if op == "read" else reg("value")
             expected_shape = spec["shape"] if op == "write" and self.transactional else (math.prod(spec["shape"]),)
-            _require(tensor_shape == expected_shape,
-                     "typed parameter write must match storage shape" if op == "write" and self.transactional
-                     else "parameter read/write requires its flattened vector")
+            _require((math.prod(tensor_shape) == math.prod(spec["shape"]) if op == "read" else tensor_shape == expected_shape),
+                     "parameter read shape must preserve storage elements" if op == "read" else
+                     "typed parameter write must match storage shape" if self.transactional else "parameter write requires its flattened vector")
             if op == "write":
                 _require(not spec.get("frozen") and not spec.get("probability") and (self.transactional or spec.get("learn") is None),
                          "cannot write frozen/prob/learn storage")
@@ -363,6 +365,8 @@ class ProgramExecutor:
         elif op in _UNARY or op in {"softmax", "log_softmax", "validate_probabilities", "clip", "scale", "scale_by", "softmax_axis", "layer_norm"}:
             previous = reg("input")
             _require(shape == previous, f"{op} shape mismatch")
+            if op == "gelu":
+                return 1 + math.prod(shape)
             if op in {"softmax", "log_softmax", "validate_probabilities"}:
                 _require(len(shape) == 1, f"{op} requires a vector")
             if op == "clip":
@@ -392,6 +396,12 @@ class ProgramExecutor:
             _require(padding is None or type(padding) is int and 0 <= padding < table[0], "invalid embedding padding_idx")
             _require(shape == (ids[0], table[1]), "embedding output shape mismatch")
             return 1 + math.prod(shape)
+        elif op == "masked_softmax":
+            _require(shape==reg("input")==reg("mask") and type(item["axis"]) is int and 0<=item["axis"]<len(shape), "masked_softmax shape/axis mismatch")
+            return 1 + 4 * math.prod(shape)
+        elif op == "topk_mask":
+            _require(shape == reg("input") and reg("count") == (1,), "topk_mask shape mismatch")
+            return 1 + math.prod(shape) * (shape[-1]+1)
         elif op == "gather":
             previous, ids, axis = reg("input"), reg("indices"), item["axis"]
             _require(type(axis) is int and 0 <= axis < len(previous) and len(ids) == 1, "invalid gather axis/indices")
@@ -548,6 +558,10 @@ class ProgramExecutor:
                     elif op == "linear":
                         bias = candidates[item["bias"]] if item.get("bias") is not None else None
                         out = ops.linear(get("input"), candidates[item["weight"]], bias)
+                    elif op == "masked_softmax":
+                        out = ops.masked_softmax(get("input"),get("mask"),item["axis"])
+                    elif op == "topk_mask":
+                        out = ops.topk_mask(get("input"), get("count"))
                     elif op in _UNARY:
                         out = _UNARY[op](get("input"))
                     elif op in _BINARY:
