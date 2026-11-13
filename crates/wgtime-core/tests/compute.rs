@@ -157,7 +157,20 @@ fn main() {
 }
 
 fn transport_test_executable() -> std::path::PathBuf {
-    let path = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("examples").join(format!("core-transport-test{}",std::env::consts::EXE_SUFFIX));
-    assert!(path.is_file(), "build the private process harness with cargo build -p wgtime-core --example core-transport-test before running this test");
+    // The test executable can live under Cargo's per-package build directory,
+    // which is not the same directory used for the separately built example.
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| workspace.join("target"));
+    let path = target
+        .join("debug")
+        .join("examples")
+        .join(format!("core-transport-test{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        path.is_file(),
+        "build the private process harness with cargo build -p wgtime-core --example core-transport-test before running this test: {}",
+        path.display()
+    );
     path
 }

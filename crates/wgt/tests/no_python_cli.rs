@@ -97,6 +97,8 @@ fn native_distribution_limits_python_to_host_and_build_tools() {
                             "scripts/check_python_dist.py",
                             "scripts/smoke_python_sdk.py",
                             "scripts/test_rust_sdk_package.py",
+                            "scripts/generate_cargo_templates.py",
+                            "scripts/test_cargo_templates.py",
                             "scripts/publish_rust_sdk.py",
                             "scripts/test_publish_rust_sdk.py",
                         ]
