@@ -83,7 +83,7 @@ jobs:
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -101,12 +101,12 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       tree: ${{ steps.source.outputs.tree }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
       - name: Test version selection and manifest updates
@@ -145,7 +145,7 @@ jobs:
           echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
           printf '### Release candidate\n\nVersion: `%s`\n\nTag: `%s`\n\nBase commit: `%s`\n' \
             "$VERSION" "$RELEASE_TAG" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-version
           path: |
@@ -172,11 +172,11 @@ jobs:
       SOURCE_TREE: ${{ needs.prepare.outputs.tree }}
       ARCH: ${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-version
       - name: Verify the candidate and build storage
@@ -205,7 +205,7 @@ jobs:
           sh scripts/package_wgt.sh --binary target/release/wgt --output dist/native
           install -m 755 target/release/wgtime "dist/native/wgtime-linux-$ARCH"
           (cd dist/native && sha256sum "wgtime-linux-$ARCH" >> SHA256SUMS)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-linux-${{ matrix.arch }}
           path: dist/native/
@@ -240,22 +240,22 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       SOURCE_TREE: ${{ needs.prepare.outputs.tree }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-version
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: native-linux-*
           path: native-assets
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: python-sdk
           path: sdk-assets/python
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: rust-sdk
           path: sdk-assets/rust
@@ -284,7 +284,7 @@ jobs:
           (cd dist/release && sha256sum --check SHA256SUMS)
           printf '### Build complete\n\nLinux x86_64 and aarch64 tools, Python wheel/sdist, four Rust SDK crates, matching source and SHA256SUMS.\n\nDownload the `weightlang-release-%s` artifact below. Only manual runs with `publish` enabled update Git refs and publish a Release.\n' \
             "$VERSION" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: weightlang-release-${{ needs.prepare.outputs.version }}
           path: dist/release/
@@ -305,14 +305,14 @@ jobs:
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
       SOURCE_TREE: ${{ needs.prepare.outputs.tree }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-version
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: weightlang-release-${{ needs.prepare.outputs.version }}
           path: dist/release
@@ -385,14 +385,14 @@ jobs:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       SOURCE_TREE: ${{ needs.prepare.outputs.tree }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-version
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: weightlang-release-${{ needs.prepare.outputs.version }}
           path: dist/release
@@ -405,7 +405,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: rust-sdk
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Authenticate through crates.io trusted publishing
@@ -430,7 +430,7 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: weightlang-release-${{ needs.prepare.outputs.version }}
           path: dist/release
