@@ -1,7 +1,7 @@
 wgt 0.5
 # WGT 当前模型语法总览：可直接读取的主模型 + 中文注释中的独立示例。
 # 本文件不是多个模型的拼接。只有未加 # 的 T01 是活跃模型。
-# T02..T12、R01、P01 均为注释资料；不要整体去掉 # 后当成一个编译单元。
+# T02..T17、R01、P01 均为注释资料；不要整体去掉 # 后当成一个编译单元。
 # 每个独立模型落盘时各用一个目录的 model.wgt；本次不创建 examples。
 # 语法依据：crates/wgt-language/src/source.rs、adaptive/source.rs、
 # script/parse.rs、script/operators.rs、model.rs、model_modules.rs。
@@ -623,3 +623,65 @@ fn loss(prediction, target) {
 # fn transpose_matrix(x: f32[2,3]) -> f32[3,2] { return x.T; }
 # fn forward(x: f32[2,3]) -> f32[3,2] { return transpose_matrix(x); }
 # T14 END：调用处逐轴检查 helper 参数和返回值，相同元素数的不同形状仍报错。
+
+# T15 BEGIN：共享模型按逻辑输入形状创建实例。独立复制时去掉本节注释符。
+# wgt 0.5
+# dim ROWS = 2
+# dim FEATURES = 3
+# dim OUTPUTS = 2
+# model ShapeBoundProjection
+#
+# # ROWS is a logical input axis supplied by the host at instance creation.
+# # FEATURES can be inferred from the input too; OUTPUTS uses its explicit default
+# # unless the host binds it. The same definition serves Rust and Python.
+# # This recipe describes an untrained model; compilation never samples weights.
+# parameter weight: f32[FEATURES,OUTPUTS] = full(0.25)
+#
+# # Project each row's feature vector. The contraction must match FEATURES;
+# # different row counts create separate fixed-shape instances, not a shape cache
+# # or shared optimizer. Hosts pass/receive flattened row-major vectors at the ABI.
+# fn forward(x: f32[ROWS,FEATURES]) -> f32[ROWS,OUTPUTS] {
+#     return x @ (weight as [FEATURES,OUTPUTS]);
+# }
+# T15 END
+# --input-shape x=7,3 从输入推导 ROWS/FEATURES；--dim OUTPUTS=4 绑定输出维度。
+# 同一源码可选 --target rust/torch；普通 load 创建固定形状实例；单实例跨调用变长用 T17 的动态 API。
+# std/recurrent.gru_cell 的双步共享权重模型见 examples/native_training/shared_recurrent/model.wgt。
+
+# 19 tuple pure Forward 与动态多输入；完整宿主用法见 docs/dynamic-models.md。
+# T16 BEGIN：tuple pure Forward；显式 hidden 是宿主传入、返回的张量，不是持久 state。
+# wgt 0.5
+# model ExplicitHidden
+# # 两个特征各有一个共享衰减权重；初值显式给定，尚未训练。
+# parameter gain: f32[2] = [0.5,0.5]
+# fn forward(x: f32[2], hidden: f32[2]) -> (f32[2], f32[2]) {
+#     let next_hidden = x + hidden * gain;
+#     # 两个位置引用同一结果；宿主同时监督时，梯度汇总到同一 gain。
+#     return (next_hidden, next_hidden);
+# }
+# T16 END
+# 每个输入、输出分量逐轴匹配合同；底层仍是输入/输出各一个打包向量。
+# Python load/loads 接收声明顺序的张量或全具名参数，结果始终是 tuple。
+# 宿主把第二项连接到下一次调用以保留 autograd；detach 则显式截断。
+# 本路径不声明 fn loss、不写持久 state；loss 在宿主计算，typed operation 仍无 AD。
+
+# T17 BEGIN：dynamic hidden；激活行数可变，同一动态实例的权重 shape 固定。
+# wgt 0.5
+# dim ROWS = 2
+# model DynamicHidden
+# # 行是 token/样本，列是两个特征；[2,2] 权重独立于 ROWS，所有调用共享。
+# # 显式初值表示未训练参数；候选形状不得再次初始化这些参数。
+# parameter weight: f32[2,2] = [0.2,-0.1,0.3,0.4]
+# fn forward(x: f32[ROWS,2], hidden: f32[1,2]) -> (f32[ROWS,2], f32[1,2]) {
+#     let y = x @ (weight as [2,2]);
+#     # sum 归约全部行和特征为 [1]；scale 将信号送到两个 hidden 通道。
+#     # hidden 固定一行，使 ROWS=2 和 ROWS=3 的调用仍能直接连接 hidden。
+#     let contribution = scale([1,1], sum(y)) as [1,2];
+#     let next_hidden = hidden + contribution;
+#     return (y, next_hidden);
+# }
+# T17 END
+# load_dynamic/loads_dynamic 初始 input_shapes 必须覆盖 x 和 hidden；Rust 绑定 ROWS。
+# 之后 forward 直接读各 Tensor.shape；返回 y/next_hidden 的 tuple，不展平逻辑分量。
+# 跨调用只改变 ROWS，不改变 weight；源码/import 指纹或参数 schema 变化必须重新加载。
+# 缓存有界，Parameter 对象唯一；普通单输入非 tuple 模型仍返回展平结果。

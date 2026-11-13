@@ -26,6 +26,9 @@ const number = '(?<![\\w.])-?(?:\\d+\\.(?!\\.)\\d*|\\.\\d+|\\d+)(?:[eE][-+]?\\d+
 const grammar = {
   name: 'WeightLang', scopeName: 'source.wgt', fileTypes: ['wgt'],
   patterns: [
+    {name: 'meta.torch.model.wgt', begin: '^target\\s+torch\\s*$', end: '(?!)', patterns: [
+      {include: '#torch_extensions'}, {include: '$self'},
+    ]},
     {name: 'comment.line.number-sign.wgt', match: '#.*$'},
     {name: 'string.quoted.double.wgt', begin: '"', end: '"|$', patterns: [
       {name: 'constant.character.escape.wgt', match: '\\\\(?:["\\\\/bfnrt]|u[0-9a-fA-F]{4})'},
@@ -67,6 +70,13 @@ const grammar = {
     {name: 'punctuation.wgt', match: '[\\[\\](){},.:;]'},
   ],
   repository: {
+    torch_extensions: {patterns: [
+      {name: 'string.quoted.single.wgt', begin: "'", end: "'|$", patterns: [
+        {name: 'constant.character.escape.wgt', match: '\\\\.'},
+      ]},
+      {name: 'keyword.control.wgt', match: '\\b(?:host|extern|extends|elif|with|try|except|finally|raise|pass|is|not|and|or)\\b'},
+      {name: 'constant.language.wgt', match: '\\b(?:True|False|None)\\b'},
+    ]},
     shape: {patterns: [
       {name: 'comment.line.number-sign.wgt', match: '#.*$'},
       {name: 'entity.name.label.wgt', match: '\\b[A-Za-z_]\\w*(?=\\s*=)'},

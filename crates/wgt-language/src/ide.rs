@@ -73,6 +73,12 @@ pub fn analyze_with_overlays(
     overlays: &BTreeMap<PathBuf, String>,
 ) -> Analysis {
     let mut result = Analysis::default();
+    if crate::torch_model::is_torch_model(source) {
+        if let Err(error) = crate::torch_model::parse(source) {
+            result.diagnostics.push(diagnostic(source, &error, None, 1));
+        }
+        return result;
+    }
     let unit = match crate::source::split(source) {
         Ok(unit) => unit,
         Err(error) => {

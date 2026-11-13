@@ -243,3 +243,22 @@ Python 单样本 eager，typed 操作保持原有无 AD 合同。
 ## 矩阵函数形状签名（本地新增）
 
 纯张量 helper 可写 `fn project(x: f32[M,K], w: f32[K,N]) -> f32[M,N]`。至少一个端口为多轴张量时使用形状合同，所有参数和返回值须标注；`dim` 在所属编译单元构造时绑定。每次调用展开逐轴检查实参及最终返回值，相同元素数不等于相同 shape。保持纯 helper 的不可变 let 与最终 return 合同。根级 matrix forward/loss 复用原有单向量宿主 ABI，在内部重塑、校验并展平，单端口元素数仍最多 16384。全 rank-1 typed 操作保留原有分类和无 AD 合同。示例 examples/native_training/matrix_signatures/model.wgt；验证 language/core matrix_signatures 与 Python API。未调用的多轴 helper 也按声明形状静态检查。
+
+
+## 动态 PyTorch 目标
+
+本地 `target torch` 扩展沿用 `wgt 0.5`，尚未发布。源码使用 `model NAME extends BASE {}`、
+`init(...) {}`、`fn ... {}`、分号语句和 Python/PyTorch 表达式，Rust 前端负责语法验证及
+生成代码，SDK `weightlang.modules.bind_models` 负责显式宿主绑定。语法检查不证明动态形状。
+此目标的执行和训练通过 PyTorch，原生服务模型另有固定张量合同。保存完整编译快照和
+非持久 buffer，使用 meta 布局绑定保存权重并恢复 alias，拒绝缺失/不一致绑定。
+验证 `wgt-language --test torch_model --test example_sources --test format`、CLI `torch_export`
+和 Python `test_torch_modules.py`。完整契约在 WeightLang checkout 的 `docs/torch-models.md`。
+
+## 共享模型与形状驱动实例
+
+新模型优先写普通 WGT，由宿主或编译命令选择 Rust/PyTorch。`target torch` 保留为 Python/PyTorch 专用兼容扩展，不能用于原生后端，不隐式回退。`ModelTemplate::parse/from_file` 和 `bind_input_shapes`、CLI `--input-shape x=7,3`、Python `input_shapes={"x": (7,3)}` 复用 Rust 前端推导维度；绑定结果仍为具体固定形状定义；同一实例切换形状使用下文 DynamicModel。完整合同与限制见 `docs/shared-models.md`。`std/recurrent.gru_cell` 用同形向量公式实现 reset-after-projection GRU；参数和 hidden 显式由模型/宿主管理。例子 `examples/native_training/shared_recurrent/model.wgt` 的两步共享同一组参数，不能误称跨调用状态 AD。验证 ModelTemplate 正反例、CLI 两后端、原生/Python/GRUCell 前向及梯度、真实服务权重恢复。
+
+## 同实例变长与显式 hidden 求导
+
+`ModelTemplate` 绑定定义与 `DynamicModel` 单实例重绑定是不同 API。后者保留一个服务句柄、权重和优化器，严格拒绝参数合同变化，候选几何与编译 workspace 先做瞬时预算。Python `load_dynamic` / `loads_dynamic` 的各形状共享 canonical Parameter，缓存有界且检查 template_fingerprint；完整动态 save 尚不支持，不得误存为静态模型。tuple-return forward 明确进入纯 Forward AD，输入输出逐轴检查并打包既有 IR；旧 typed operation 无 AD 不变。原生 `recurrent_gradients` / `train_recurrent` 对显式 hidden 链作有界 BPTT，只监督 OutputSlice，None target 不监督该步；不等于持久 state AD。`gather` 对值 scatter-add、对索引无梯度；`dynamic_slice` 的 start 无梯度；concat 拆分梯度；embedding 对 table scatter-add，索引无梯度，显式 padding_idx 仅屏蔽对应行梯度。新索引 kernel 当前解释执行原生回退，不是 PyTorch 回退。详细签名与限制见 docs/dynamic-models.md；运行动态几何、tuple IO、跨调用梯度与优化器、真实服务和 Python 差分用例。

@@ -37,8 +37,16 @@ enum LossMode {
 }
 
 impl AdaptiveSession {
+    pub(super) fn optimizer_storage_bytes(&self) -> Result<usize> {
+        let Some(state) = &self.optimizer else { return Ok(0); };
+        let elements=state.first.iter().chain(&state.second).try_fold(0usize, |total, values| total.checked_add(values.len()).context("optimizer storage overflow"))?;
+        elements.checked_mul(4).context("optimizer storage overflow")
+    }
     pub fn set_optimizer(&mut self, optimizer: Optimizer) -> Result<()> {
         self.ensure_mutable()?;
+        let bytes=self.program.parameters.iter().try_fold(0usize,|total,p|total.checked_add(p.data.len()).context("optimizer storage overflow"))?
+            .checked_mul(8).context("optimizer storage overflow")?;
+        ensure!(self.managed_bytes.checked_add(bytes).is_some_and(|total|total<=self.memory_limit),"optimizer state memory budget exceeded");
         self.custom_optimizer = None;
         let zeros = || {
             self.program
@@ -154,10 +162,7 @@ impl AdaptiveSession {
             rate.is_finite() && rate > 0.,
             "learning rate must be positive and finite"
         );
-        let mut state = self
-            .optimizer
-            .clone()
-            .context("forward training requires optimizer sgd or adam")?;
+        ensure!(self.optimizer.is_some(), "forward training requires optimizer sgd or adam");
         ensure!(!inputs.is_empty(), "empty training batch");
         match &objective {
             Objective::Mse(y) => ensure!(y.len() == inputs.len(), "target batch length mismatch"),
@@ -246,6 +251,18 @@ impl AdaptiveSession {
             loss.is_finite() && gradients.iter().flatten().all(|v| v.is_finite()),
             "nonfinite loss or gradient"
         );
+        self.apply_gradient_batch(gradients, rate, clipping)?;
+        Ok(loss)
+    }
+
+    pub(super) fn apply_gradient_batch(&mut self, mut gradients: Vec<Vec<f32>>, rate: f32, clipping: GradientClip) -> Result<()> {
+        self.ensure_mutable()?;
+        self.ensure_idle()?;
+        ensure!(rate.is_finite() && rate > 0., "learning rate must be positive and finite");
+        ensure!(gradients.len() == self.program.parameters.len() && gradients.iter().zip(&self.program.parameters)
+            .all(|(gradient,parameter)| gradient.len() == parameter.data.len() && gradient.iter().all(|v|v.is_finite())),
+            "invalid optimizer gradient batch");
+        let mut state = self.optimizer.clone().context("forward training requires optimizer sgd or adam")?;
         clipping.apply(&mut gradients, |index| !self.program.parameters[index].frozen);
         state.steps = state
             .steps
@@ -279,7 +296,7 @@ impl AdaptiveSession {
         }
         self.optimizer = Some(state);
         self.revision = revision;
-        Ok(loss)
+        Ok(())
     }
 
     pub fn save_checkpoint(&self, path: &Path) -> Result<()> {
@@ -338,6 +355,7 @@ impl AdaptiveSession {
             );
         }
         session.optimizer = checkpoint.optimizer;
+        ensure!(session.managed_bytes.checked_add(session.optimizer_storage_bytes()?).is_some_and(|total|total<=session.memory_limit),"optimizer state memory budget exceeded");
         Ok(session)
     }
 }

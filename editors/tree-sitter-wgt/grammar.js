@@ -21,9 +21,16 @@ module.exports = grammar({
     module_declaration: $ => seq('module', field('name', $.identifier)),
     prelude_declaration: $ => seq('prelude', 'native', field('version', $.number), ';'),
     instance_declaration: $ => seq(choice('agent', 'environment'), field('name', $.identifier), repeat($._newline), $.body),
-    function_declaration: $ => seq(optional('async'), 'fn', field('name', $.identifier), $.arguments, optional(seq('->', field('return_type', $.tensor_type))), repeat($._newline), $.body),
+    function_declaration: $ => seq(optional('async'), 'fn', field('name', $.identifier), $.arguments, optional(seq('->', field('return_type', choice($.tensor_type, $.tuple_type)))), repeat($._newline), $.body),
     // Typed categorical returns remain editor tolerance, not runtime support.
-    tensor_type: $ => seq(field('dtype', choice('f32', 'logits', 'probabilities')), $.learn_shape),
+    tensor_type: $ => seq(field('dtype', choice('f32', 'logits', 'probabilities')), choice($.learn_shape, $.tensor_shape)),
+    // Preserve rank-one shape nodes while recognizing multi-axis ports.
+    tensor_shape: $ => seq('[', choice($.number, $.identifier), repeat1(seq(',', choice($.number, $.identifier))), ']'),
+    // One-field tuples require a comma; larger tuples may trail a comma.
+    // Only tensor elements are allowed, matching the native port contract.
+    tuple_type: $ => seq('(', repeat($._newline), $._tuple_element, ',', repeat($._newline),
+      optional(seq($._tuple_element, repeat(seq(',', repeat($._newline), $._tuple_element)), optional(seq(',', repeat($._newline))))), ')'),
+    _tuple_element: $ => seq(field('element', $.tensor_type), repeat($._newline)),
     state_declaration: $ => seq('state', field('name', $.identifier), ':', field('type', $.tensor_type), '=', field('initializer', $.array), optional(';')),
     body: $ => seq('{', repeat(choice($._item, $._newline, $.body, $.script_keyword, ';')), '}'),
     // Keywords with dedicated syntax productions live only in those productions,

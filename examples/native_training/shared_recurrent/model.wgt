@@ -1,0 +1,39 @@
+wgt 0.5
+import recurrent from "std/recurrent"
+model SharedRecurrent
+
+# Input width I=2, hidden width H=2. Rows pack reset, update, new gates;
+# columns are input/hidden features, matching nn.GRUCell's [3H,I]/[3H,H].
+# These explicit recipes describe UNTRAINED starting values; defining or
+# compiling this model does not initialize an instance or run training.
+parameter weight_ih: f32[6,2] = xavier_uniform(7)
+parameter weight_hh: f32[6,2] = xavier_uniform(11)
+parameter bias_ih: f32[6] = zeros()
+parameter bias_hh: f32[6] = zeros()
+
+# Pass the same model-owned parameters explicitly to this pure helper on each
+# call: no captured storage or step-specific copies; both steps share weights.
+fn cell(input, hidden, wi, wh, bi, bh) {
+    # Parameter reads are flat at the native ABI. Restore [gate,feature] and
+    # [feature,1] explicitly, then flatten [6,1] before slicing each gate [2].
+    let input_gates = ((wi as [6,2]) @ (input as [2,1])) as [6];
+    let hidden_gates = ((wh as [6,2]) @ (hidden as [2,1])) as [6];
+    let x = input_gates + bi;
+    let h = hidden_gates + bh;
+    return recurrent.gru_cell(x[0:2], x[2:4], x[4:6], h[0:2], h[2:4], h[4:6], hidden);
+}
+
+# One packed host vector: [x_step0(2), x_step1(2), previous_hidden(2)].
+# Hidden is explicit input/output, not persistent service state. The host chooses
+# zeros or a previous result; this two-step graph retains gradients within the
+# call, while the host owns sequence scheduling and any cross-call handling.
+fn forward(packed: f32[6]) -> f32[2] {
+    let hidden1 = cell(packed[0:2], packed[4:6], weight_ih, weight_hh, bias_ih, bias_hh);
+    return cell(packed[2:4], hidden1, weight_ih, weight_hh, bias_ih, bias_hh);
+}
+
+# Mean squared error over the two final hidden features. The host supplies the
+# target, optimizer and training loop; these recipes alone are not trained weights.
+fn loss(prediction: f32[2], target: f32[2]) -> f32[1] {
+    return ((prediction - target) ** 2).mean;
+}

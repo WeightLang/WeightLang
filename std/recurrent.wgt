@@ -1,0 +1,17 @@
+wgt 0.5
+operators Recurrent
+
+# All seven arguments are same-shaped f32[H] feature vectors, H >= 1.
+# xr/xz/xn are input projections plus input biases in reset/update/new order;
+# hr/hz/hn are hidden projections plus hidden biases in the same order.
+# Match PyTorch nn.GRUCell: reset gates the COMPLETE hidden candidate projection
+# (including its bias), after matrix multiplication, not the previous hidden.
+# No scalar broadcasting: the equivalent (1-z)*candidate + z*hidden uses only
+# same-shaped operations. The caller owns projections, shared weights and state;
+# this pure helper neither initializes parameters nor stores or trains hidden.
+fn gru_cell(xr, xz, xn, hr, hz, hn, hidden) {
+    let r = sigmoid(xr + hr);
+    let z = sigmoid(xz + hz);
+    let candidate = tanh(xn + r * hn);
+    return candidate + z * (hidden - candidate);
+}

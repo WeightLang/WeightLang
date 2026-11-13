@@ -1,0 +1,15 @@
+wgt 0.5
+dim B = 2
+model DynamicHidden
+# B is an activation-only row axis. This scalar gate is shared by every row and
+# every call; changing B must preserve its value, identity and optimizer history.
+parameter gain: f32[1] = [0.5]
+
+# x and hidden have matching logical rows. The host owns hidden and explicitly
+# chooses which output contributes loss; neither output is persistent state.
+# Repeated calls can have different B, while each return retains its own shape.
+fn forward(x: f32[B,1], hidden: f32[B,1]) -> (f32[B,1], f32[B,1]) {
+    let prediction = scale(x, gain) + hidden;
+    let next_hidden = scale(hidden, gain) + x;
+    return (prediction, next_hidden);
+}

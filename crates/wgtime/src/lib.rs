@@ -38,12 +38,17 @@ pub enum Request {
         memory: usize,
     },
     InitializeDefinition { source: String, memory: usize, optimizer: Option<String> },
+    /// Rebind activation geometry on the existing session; storage and optimizer must match.
+    RebindDefinition { handle: u64, source: String },
     InitializeWeightsFd { source: String, memory: usize, optimizer: Option<String>, revision: Option<String> },
     CallOperation { handle: u64, name: String, inputs: Vec<Vec<f32>> },
     OperationSchemas { handle: u64 },
     ParameterValues { handle: u64 },
     StateValues { handle: u64 },
     UpdateParameters { handle: u64, candidates: Vec<(String, Vec<usize>, Vec<f32>)> },
+    TrainRecurrent { handle: u64, inputs: Vec<Vec<f32>>, targets: Vec<Option<Vec<f32>>>,
+        input_offset: usize, output_offset: usize, state_width: usize,
+        supervised_offset: usize, supervised_width: usize, rate: f32, clip: Option<f32> },
     TrainStepWithPolicy { handle: u64, inputs: Vec<Vec<f32>>, targets: serde_json::Value, rate: f32, loss: String, clip: Option<f32>, straight_through: bool },
     FeatureEffects {
         handle: u64, input: Vec<f32>, seed: Vec<f32>, dictionary: serde_json::Value,

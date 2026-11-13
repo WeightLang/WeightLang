@@ -1,0 +1,17 @@
+wgt 0.5
+target torch
+host weightlang.modules
+extern nn, torch
+
+# x is [batch,time,width]. The returned GRU state is [1,batch,width].
+# Calls share cell weights; the Python host carries state and chooses the loss.
+# Construction initializes parameters. Compilation performs no initialization.
+model Recurrent extends Module {
+    init(self, width=4) {
+        super().__init__();
+        self.cell = nn.GRU(width, width, batch_first=True);
+    }
+    fn forward(self, x, hidden=None) {
+        return self.cell(x, hidden);
+    }
+}

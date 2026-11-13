@@ -291,7 +291,10 @@ pub(crate) fn emit_function(out: &mut String, name: &str, function: &Function) -
         "model modules cannot contain async functions"
     );
     let format_shape = |shape: &[usize]| shape.iter().map(usize::to_string).collect::<Vec<_>>().join(",");
-    let (args, output) = if let Some(signature) = &function.tensor_signature {
+    let (args, output) = if let Some(signature) = &function.forward_signature {
+        (function.args.iter().zip(&signature.inputs).map(|(name, shape)| format!("{name}: f32[{}]", format_shape(shape))).collect::<Vec<_>>().join(","),
+         format!(" -> ({}{})", signature.outputs.iter().map(|shape| format!("f32[{}]", format_shape(shape))).collect::<Vec<_>>().join(","), if signature.outputs.len() == 1 { "," } else { "" }))
+    } else if let Some(signature) = &function.tensor_signature {
         (function.args.iter().zip(&signature.inputs).map(|(name, shape)| format!("{name}: f32[{}]", format_shape(shape))).collect::<Vec<_>>().join(","),
          format!(" -> f32[{}]", format_shape(&signature.output)))
     } else if let Some(signature) = &function.signature {
@@ -311,7 +314,7 @@ pub(crate) fn emit_function(out: &mut String, name: &str, function: &Function) -
                 out.push_str(&format!("let {name}: f32[{dimensions}] = {};\n",expression(value)?));
             }
             Stmt::Let(name,e)=>out.push_str(&format!("let {name} = {};\n",expression(e)?)),
-            Stmt::LetTuple(names,e)=>out.push_str(&format!("let ({}) = {};\n",names.join(","),expression(e)?)),
+            Stmt::LetTuple(names,e)=>out.push_str(&format!("let ({}{}) = {};\n",names.join(","),if names.len() == 1 { "," } else { "" },expression(e)?)),
             Stmt::Set(name,e)=>out.push_str(&format!("{name} = {};\n",expression(e)?)),
             Stmt::Return(Expr::Null)=>out.push_str("return;\n"),
             Stmt::Return(e)=>out.push_str(&format!("return {};\n",expression(e)?)),
@@ -344,7 +347,7 @@ fn expression(expr: &Expr) -> Result<String> {
                 .collect::<Result<Vec<_>>>()?
                 .join(",")
         ),
-        Expr::Tuple(items) => format!("({})", items.iter().map(expression).collect::<Result<Vec<_>>>()?.join(",")),
+        Expr::Tuple(items) => format!("({}{})", items.iter().map(expression).collect::<Result<Vec<_>>>()?.join(","), if items.len() == 1 { "," } else { "" }),
         Expr::BuiltinCall(name, args) if name == "__probabilities" && args.len() == 1 => {
             format!("({}).probabilities", expression(&args[0])?)
         }

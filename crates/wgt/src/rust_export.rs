@@ -5,6 +5,7 @@
 use anyhow::{Context, Result, ensure};
 use std::{io::Write, path::Path};
 use wgt_language::model::ModelDefinition;
+use wgt_language::backend::{Backend, preflight_source};
 
 pub const DEFAULT_CRATE_PATH: &str = "::wgt";
 
@@ -16,6 +17,8 @@ pub fn compile(path: &Path, crate_path: &str) -> Result<String> {
 
 pub fn compile_with_dimensions(path: &Path, crate_path: &str, dimensions: &wgt_language::dimensions::Dimensions) -> Result<String> {
     validate_crate_path(crate_path)?;
+    // ModelDefinition performs Rust preflight before resolving file imports,
+    // retaining its bounded regular-file reader and original diagnostic lines.
     let definition = ModelDefinition::from_file_with_dimensions(path, dimensions)
         .with_context(|| format!("invalid model definition {}", path.display()))?;
     Ok(render(&definition, crate_path))
@@ -29,6 +32,7 @@ pub fn compile_source(source: &str, crate_path: &str) -> Result<String> {
 
 pub fn compile_source_with_dimensions(source: &str, crate_path: &str, dimensions: &wgt_language::dimensions::Dimensions) -> Result<String> {
     validate_crate_path(crate_path)?;
+    preflight_source(source, Backend::Rust).context("invalid model definition")?;
     let definition = ModelDefinition::parse_with_dimensions(source, dimensions).context("invalid model definition")?;
     Ok(render(&definition, crate_path))
 }
@@ -98,4 +102,31 @@ pub fn write(module: &str, output: &Path) -> Result<()> {
         )
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod backend_tests {
+    use super::*;
+
+    #[test]
+    fn torch_compatibility_reports_backend_boundary_for_source_and_file() {
+        let source = "# compatibility model\nwgt 0.5\ntarget torch\nhost demo\n";
+        let error = compile_source(source, DEFAULT_CRATE_PATH).unwrap_err();
+        assert_boundary(&error);
+        let root = std::env::temp_dir().join("weightlang");
+        std::fs::create_dir_all(&root).unwrap();
+        let directory = tempfile::tempdir_in(root).unwrap();
+        let path = directory.path().join("model.wgt");
+        std::fs::write(&path, source).unwrap();
+        let error = compile(&path, DEFAULT_CRATE_PATH).unwrap_err();
+        assert_boundary(&error);
+        assert!(error.to_string().contains(&path.display().to_string()));
+    }
+
+    fn assert_boundary(error: &anyhow::Error) {
+        let message = format!("{error:#}");
+        for expected in ["line 3:", "Python/PyTorch", "Rust backend", "shared WGT"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
 }

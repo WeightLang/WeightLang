@@ -35,6 +35,9 @@ pub fn format_with_context(
     overlays: &BTreeMap<PathBuf, String>,
 ) -> Result<String> {
     let source = source.replace("\r\n", "\n").replace('\r', "\n");
+    if crate::torch_model::is_torch_model(&source) {
+        return crate::torch_model::format(&source);
+    }
     validate(&source, path, overlays).context("cannot format invalid WGT source")?;
     let tokens = tokenize(&source)?;
     let output = layout(&tokens);

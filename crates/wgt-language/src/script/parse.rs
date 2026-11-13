@@ -105,7 +105,14 @@ pub struct Function {
     pub signature: Option<OperationSignature>,
     /// Pure tensor function contract when at least one port has multiple axes.
     pub tensor_signature: Option<TensorSignature>,
+    /// Explicit pure Forward contract, selected only by tuple return syntax.
+    pub forward_signature: Option<ForwardSignature>,
     pub body: Vec<Statement>,
+}
+#[derive(Clone, Debug)]
+pub struct ForwardSignature {
+    pub inputs: Vec<Vec<usize>>,
+    pub outputs: Vec<Vec<usize>>,
 }
 #[derive(Clone, Debug)]
 pub struct TensorSignature {
@@ -126,7 +133,7 @@ struct Token {
     quoted: bool,
 }
 
-pub fn parse_functions(source: &str) -> Result<Program> {
+fn tokenize(source: &str) -> Result<Vec<Token>> {
     const MAX_SCRIPT_BYTES: usize = 4 * 1024 * 1024;
     const MAX_TOKENS: usize = 100_000;
     ensure!(
@@ -255,6 +262,35 @@ pub fn parse_functions(source: &str) -> Result<Program> {
             quoted,
         });
     }
+    Ok(tokens)
+}
+
+/// Reserve actual identifiers, never substrings inside comments or strings.
+/// Scan complete user source before lowering so storage names are covered too.
+pub(crate) fn validate_forward_compiler_names(source: &str) -> Result<()> {
+    validate_forward_compiler_tokens(&tokenize(source)?)
+}
+fn validate_forward_compiler_tokens(tokens: &[Token]) -> Result<()> {
+    for token in tokens {
+        ensure!(token.quoted || !(token.text.starts_with("wgt_multi_") || token.text == "wgt_forward_exact"),
+            "reserved pure forward compiler identifier: {}", token.text);
+    }
+    Ok(())
+}
+
+pub fn parse_functions(source: &str) -> Result<Program> {
+    parse_functions_impl(source, false)
+}
+
+/// Only compiler-generated packed Forward source may use reserved generated
+/// identities. The ordinary __ identifier restriction applies in both modes.
+pub(crate) fn parse_packed_forward_functions(source: &str) -> Result<Program> {
+    parse_functions_impl(source, true)
+}
+
+fn parse_functions_impl(source: &str, packed_forward: bool) -> Result<Program> {
+    let tokens = tokenize(source)?;
+    if !packed_forward { validate_forward_compiler_tokens(&tokens)?; }
     let mut parser = Parser {
         tokens,
         pos: 0,
@@ -301,9 +337,32 @@ pub fn parse_functions(source: &str) -> Result<Program> {
         }
         parser.expect(")")?;
         let has_return = parser.take("->");
-        let output = if has_return { Some(parser.tensor_shape()?) } else { None };
+        let mut forward_signature = None;
+        let tuple_output = has_return && parser.take("(");
+        let output = if tuple_output {
+            ensure!(name == "forward", "tuple return signatures are supported only on pure forward");
+            ensure!(!is_async, "pure forward must be synchronous");
+            ensure!(!args.is_empty() && input_types.iter().all(Option::is_some),
+                "pure forward requires explicitly typed f32 tensor inputs");
+            let mut outputs = Vec::new();
+            let mut tuple_comma = false;
+            loop {
+                ensure!(!parser.is("(") && !parser.is(")"), "forward return requires a nonempty flat tensor tuple");
+                outputs.push(parser.tensor_shape()?);
+                ensure!(outputs.len() <= 16, "forward tuple supports at most 16 outputs");
+                if !parser.take(",") { break; }
+                tuple_comma = true;
+                if parser.is(")") { break; }
+            }
+            parser.expect(")")?;
+            ensure!(outputs.len() > 1 || tuple_comma, "single-output forward tuple requires a trailing comma");
+            forward_signature = Some(ForwardSignature {
+                inputs: input_types.iter().flatten().cloned().collect(), outputs,
+            });
+            None
+        } else if has_return { Some(parser.tensor_shape()?) } else { None };
         let mut tensor_signature = None;
-        let signature = if has_return || input_types.iter().any(Option::is_some) {
+        let signature = if tuple_output { None } else if has_return || input_types.iter().any(Option::is_some) {
             ensure!(input_types.iter().all(Option::is_some), "function arguments must all declare tensor types");
             let inputs: Vec<Vec<usize>> = input_types.into_iter().flatten().collect();
             let multiple_axes = inputs.iter().any(|shape| shape.len() > 1)
@@ -336,6 +395,7 @@ pub fn parse_functions(source: &str) -> Result<Program> {
                         args,
                         signature,
                         tensor_signature,
+                    forward_signature,
                         body
                     }
                 )
@@ -353,15 +413,32 @@ struct Parser {
     depth: usize,
 }
 impl Parser {
-    fn tensor_shape(&mut self) -> Result<Vec<usize>> {
+    fn shape_extents(&mut self, symbolic: bool) -> Result<Vec<ShapeExtent>> {
         self.expect("f32")?;
         self.expect("[")?;
         let mut shape = Vec::new();
         loop {
-            shape.push(self.next()?.text.parse::<usize>().context("tensor dimension must be a fixed integer")?);
+            let token = self.next()?;
+            ensure!(!token.quoted, "tensor dimension cannot be a string");
+            let extent = if let Ok(value) = token.text.parse::<usize>() {
+                ensure!((1..=crate::tensor::MAX_EXTENT).contains(&value), "invalid tensor dimension: {value}");
+                ShapeExtent::Fixed(value)
+            } else {
+                ensure!(symbolic && super::operators::identifier(&token.text), "tensor dimension must be a fixed integer");
+                ShapeExtent::Symbol(token.text.clone())
+            };
+            shape.push(extent);
+            ensure!(shape.len() <= crate::tensor::MAX_RANK, "tensor rank exceeds 8");
             if !self.take(",") { break; }
         }
         self.expect("]")?;
+        Ok(shape)
+    }
+    fn tensor_shape(&mut self) -> Result<Vec<usize>> {
+        let shape = self.shape_extents(false)?.into_iter().map(|extent| match extent {
+            ShapeExtent::Fixed(value) => value,
+            ShapeExtent::Symbol(_) => unreachable!(),
+        }).collect::<Vec<_>>();
         crate::tensor::TensorType::unnamed(crate::tensor::DType::F32, shape.clone(), crate::tensor::ShapeLimits::REGISTER)?;
         Ok(shape)
     }
@@ -456,6 +533,7 @@ impl Parser {
                 args,
                 signature: None,
                 tensor_signature: None,
+                forward_signature: None,
                 body: vec![Statement {
                     line,
                     kind: Stmt::Return(Expr::BuiltinCall(builtin.into(), values)),
@@ -570,6 +648,7 @@ impl Parser {
         if self.take("(") {
             let line = self.line();
             let mut names = Vec::new();
+            let mut tuple_comma = false;
             loop {
                 let name = self.name()?;
                 ensure!(!names.contains(&name), "duplicate tuple binding: {name}");
@@ -577,8 +656,10 @@ impl Parser {
                 ensure!(names.len() <= 16, "tuple supports at most 16 fields");
                 if self.take(")") { break; }
                 self.expect(",")?;
+                tuple_comma = true;
+                if self.take(")") { break; }
             }
-            ensure!(names.len() >= 2, "tuple binding requires at least two fields");
+            ensure!(names.len() > 1 || tuple_comma, "single-field tuple binding requires a trailing comma");
             self.expect("=")?;
             let value = self.expr(0)?;
             self.expect(";")?;
@@ -1078,7 +1159,7 @@ impl Parser {
                     let e = self.expr(0)?;
                     if self.take(",") {
                         let mut fields = vec![e];
-                        loop {
+                        while !self.take(")") {
                             fields.push(self.expr(0)?);
                             ensure!(fields.len() <= 16, "tuple supports at most 16 fields");
                             if self.take(")") { break; }
@@ -1268,5 +1349,155 @@ impl Parser {
         }
         self.expect(end)?;
         Ok(values)
+    }
+}
+
+/// Unbound extents used only by model-template signature extraction.
+#[derive(Clone, Debug)]
+pub(crate) enum ShapeExtent { Fixed(usize), Symbol(String) }
+
+/// Extract ordered, named input shapes without binding symbolic dimensions or
+/// interpreting the body. Concrete shape, effects and return checks occur when
+/// ModelTemplate binds the source through ModelDefinition's shared frontend.
+pub(crate) fn template_forward_inputs(source: &str) -> Result<Vec<(String, Vec<ShapeExtent>)>> {
+    let mut parser = Parser { tokens: tokenize(source)?, pos: 0, loops: 0, depth: 0 };
+    let mut inputs = None;
+    let mut names = std::collections::HashSet::new();
+    while parser.pos < parser.tokens.len() {
+        let is_async = parser.take("async");
+        parser.expect("fn")?;
+        let name = parser.name()?;
+        ensure!(names.insert(name.clone()), "duplicate function: {name}");
+        parser.expect("(")?;
+        let mut arguments = Vec::new();
+        let mut argument_names = std::collections::HashSet::new();
+        if !parser.is(")") {
+            loop {
+                let arg = parser.name()?;
+                ensure!(argument_names.insert(arg.clone()), "duplicate argument: {arg}");
+                if name == "forward" {
+                    parser.expect(":")?;
+                    arguments.push((arg, parser.shape_extents(true)?));
+                } else if parser.take(":") {
+                    parser.shape_extents(true)?;
+                }
+                if !parser.take(",") { break; }
+            }
+        }
+        parser.expect(")")?;
+        if name == "forward" {
+            ensure!(!is_async, "model templates require a synchronous typed forward");
+            ensure!(!arguments.is_empty(), "model templates require at least one typed forward input");
+            parser.expect("->")?;
+            if parser.take("(") {
+                let mut outputs = 0;
+                let mut tuple_comma = false;
+                loop {
+                    ensure!(!parser.is("(") && !parser.is(")"), "forward return requires a nonempty flat tensor tuple");
+                    parser.shape_extents(true)?;
+                    outputs += 1;
+                    ensure!(outputs <= 16, "forward tuple supports at most 16 outputs");
+                    if !parser.take(",") { break; }
+                    tuple_comma = true;
+                    if parser.is(")") { break; }
+                }
+                parser.expect(")")?;
+                ensure!(outputs > 1 || tuple_comma, "single-output forward tuple requires a trailing comma");
+            } else {
+                parser.shape_extents(true)?;
+            }
+            inputs = Some(arguments);
+        } else if parser.take("->") {
+            // Non-forward helpers retain the existing single-tensor grammar.
+            parser.shape_extents(true)?;
+        }
+        parser.expect("{")?;
+        let mut depth = 1usize;
+        while depth != 0 {
+            let token = parser.next()?;
+            if !token.quoted {
+                match token.text.as_str() {
+                    "{" => { depth += 1; ensure!(depth <= 128, "template block nesting exceeds 128"); }
+                    "}" => depth -= 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+    inputs.context("model templates require a typed forward; sequential and operation-only models are unsupported")
+}
+
+#[cfg(test)]
+mod template_signature_tests {
+    use super::*;
+
+    // Function-parser units carry the same version header as source::split's
+    // functions output. A bare fn would test header rejection, not signatures.
+    fn source(functions: &str) -> String {
+        format!("wgt 0.5\n{functions}\n")
+    }
+
+    #[test]
+    fn extracts_multiple_logical_inputs_and_flat_tuple_return() {
+        let inputs = template_forward_inputs(&source(
+            "fn forward(x: f32[N,2], hidden: f32[H]) -> (f32[N,2], f32[H]) { return (x,hidden); }"
+        )).unwrap();
+        assert_eq!(inputs.iter().map(|(name,_)| name.as_str()).collect::<Vec<_>>(), ["x", "hidden"]);
+        assert!(matches!(&inputs[0].1[..], [ShapeExtent::Symbol(n), ShapeExtent::Fixed(2)] if n == "N"));
+        assert!(matches!(&inputs[1].1[..], [ShapeExtent::Symbol(n)] if n == "H"));
+    }
+
+    #[test]
+    fn generalized_extraction_preserves_single_and_multiple_input_counts() {
+        for (function, count) in [
+            ("fn forward(x: f32[N]) -> f32[N] { return x; }", 1),
+            ("fn forward(x: f32[N]) -> (f32[N], f32[N]) { return (x,x); }", 1),
+            ("fn forward(x: f32[N], h: f32[H]) -> (f32[N], f32[H]) { return (x,h); }", 2),
+        ] {
+            assert_eq!(template_forward_inputs(&source(function)).unwrap().len(), count);
+        }
+    }
+
+    #[test]
+    fn malformed_symbolic_signatures_fail_before_binding() {
+        for (function, expected) in [
+            ("fn forward(x: f32[N], x: f32[H]) -> (f32[N], f32[H]) {}", "duplicate argument"),
+            ("fn forward(x: f32[N], h) -> (f32[N], f32[H]) {}", "expected :"),
+            ("fn forward() -> (f32[1], f32[1]) {}", "at least one typed forward input"),
+            ("fn forward(x: f32[N]) -> ((f32[N], f32[N]), f32[N]) {}", "flat tensor tuple"),
+            ("fn forward(x: f32[N]) -> (f32[N]) {}", "trailing comma"),
+            ("fn forward(x: f32[N]) -> (f32[N], i32[N]) {}", "expected f32"),
+            ("async fn forward(x: f32[N]) -> (f32[N], f32[N]) {}", "synchronous"),
+        ] {
+            let error = template_forward_inputs(&source(function)).unwrap_err().to_string();
+            assert!(error.contains(expected), "{function}: {error}");
+        }
+    }
+
+    #[test]
+    fn extraction_skips_body_strings_and_nested_control_flow() {
+        let functions = r#"fn helper(x) { return x; }
+fn forward(x: f32[N], h: f32[H]) -> (f32[N], f32[H]) {
+    if true { let label = "}"; }
+    return (x,h);
+}"#;
+        assert_eq!(template_forward_inputs(&source(functions)).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn generated_name_admission_never_relaxes_private_identifier_guard() {
+        let generated = source("fn forward(x) { return wgt_forward_exact(x,[1]); }");
+        assert!(parse_functions(&generated).unwrap_err().to_string().contains("reserved pure forward compiler identifier"));
+        assert!(parse_packed_forward_functions(&generated).is_ok());
+        for name in ["__forward_exact", "__arbitrary"] {
+            let unit = source(&format!("fn forward(x) {{ return {name}(x); }}"));
+            assert!(parse_functions(&unit).unwrap_err().to_string().contains("reserved compiler identifier"));
+            assert!(parse_packed_forward_functions(&unit).unwrap_err().to_string().contains("reserved compiler identifier"));
+        }
+        let observed = source(r#"# wgt_multi_input
+fn forward(x) { return observe("wgt_forward_exact", x); }"#);
+        validate_forward_compiler_names(&observed).unwrap();
+        parse_functions(&observed).unwrap();
+        assert!(template_forward_inputs(&source("fn forward(x: f32[N]) -> (f32[N],) { return (x,); }")).is_ok());
     }
 }

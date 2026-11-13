@@ -63,6 +63,15 @@ enum Edge {
         x: usize,
         kind: Unary,
     },
+    Concat { a: usize, b: usize, outer: usize, left: usize, right: usize },
+    Gather {
+        x: usize,
+        indices: usize,
+        padding_idx: Option<usize>,
+        outer: usize,
+        axis: usize,
+        inner: usize,
+    },
     Slice {
         x: usize,
         start: usize,
@@ -246,6 +255,17 @@ impl Tape {
                     b: b.map(|b| self.reg(b)).transpose()?,
                 },
             ),
+            Op::Concat(r, a, b, outer, left, right) =>
+                (r, Edge::Concat { a: self.reg(a)?, b: self.reg(b)?, outer, left, right }),
+            Op::Gather(r, x, ids, outer, axis, inner, padding_idx) => {
+                let indices = self.reg(ids)?;
+                (r, Edge::Gather { x: self.reg(x)?, indices, padding_idx, outer, axis, inner })
+            }
+            Op::DynamicSlice(r, x, start, length) => {
+                let x = self.reg(x)?;
+                let start = super::runtime_index(self.nodes[self.reg(start)?].value[0], self.nodes[x].value.len() - length + 1)?;
+                (r, Edge::Slice { x, start })
+            }
             Op::Slice(r, x, start) => (
                 r,
                 Edge::Slice {
@@ -617,6 +637,24 @@ impl ForwardPass {
                         gradients[a][i] += g * probability;
                         if let Some(b) = b {
                             gradients[b][i] += g * (1. - probability);
+                        }
+                    }
+                }
+                Edge::Concat { a, b, outer, left, right } => {
+                    for o in 0..outer {
+                        for i in 0..left { gradients[a][o * left + i] += gradient[o * (left + right) + i]; }
+                        for i in 0..right { gradients[b][o * right + i] += gradient[o * (left + right) + left + i]; }
+                    }
+                }
+                Edge::Gather { x, indices, padding_idx, outer, axis, inner } => {
+                    let indices = &before[indices].value;
+                    for o in 0..outer {
+                        for (j, &index) in indices.iter().enumerate() {
+                            let index = super::runtime_index(index, axis)?;
+                            if padding_idx == Some(index) { continue; }
+                            for k in 0..inner {
+                                gradients[x][(o * axis + index) * inner + k] += gradient[(o * indices.len() + j) * inner + k];
+                            }
                         }
                     }
                 }

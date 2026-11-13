@@ -36,6 +36,7 @@ def _compile(
     compiler: str | os.PathLike[str] | None,
     timeout: float,
     dimensions: dict[str, int] | None,
+    input_shapes: dict[str, tuple[int, ...] | list[int]] | None,
     directory: Path | None = None,
 ) -> dict[str, Any]:
     command = [_compiler(compiler)]
@@ -46,6 +47,12 @@ def _compile(
         if not isinstance(name, str) or type(value) is not int or not 1 <= value <= 16384:
             raise ValueError("dimensions must map declared names to integers in 1..=16384")
         command.extend(["--dim", f"{name}={value}"])
+    for name, shape in (input_shapes or {}).items():
+        if (not isinstance(name, str) or not name or not isinstance(shape, (tuple, list))
+                or not 1 <= len(shape) <= 8
+                or any(type(axis) is not int or not 1 <= axis <= 16384 for axis in shape)):
+            raise ValueError("input_shapes must map input names to 1..8 positive integer extents in 1..=16384")
+        command.extend(["--input-shape", f"{name}={','.join(map(str, shape))}"])
     try:
         result = subprocess.run(
             command, input=text, capture_output=True, text=True, encoding="utf-8",
@@ -71,16 +78,19 @@ def compile(
     compiler: str | os.PathLike[str] | None = None,
     timeout: float = 30,
     dimensions: dict[str, int] | None = None,
+    input_shapes: dict[str, tuple[int, ...] | list[int]] | None = None,
 ) -> dict[str, Any]:
     """Compile a model.wgt file to portable JSON data without executing forward.
 
     Relative pure-computation imports resolve beside the source file. No model
-    service, optimizer, Python callback, or training loop is started.
+    service, optimizer, Python callback, or training loop is started. Logical
+    input_shapes infer declared dimensions in Rust before concrete compilation;
+    they do not change the resulting module's fixed input contract.
     """
     source = Path(path).expanduser().resolve(strict=True)
     if not source.is_file():
         raise ValueError(f"Expected a WGT source file: {source}")
-    return _compile(str(source), text=None, compiler=compiler, timeout=timeout, dimensions=dimensions, directory=source.parent)
+    return _compile(str(source), text=None, compiler=compiler, timeout=timeout, dimensions=dimensions, input_shapes=input_shapes, directory=source.parent)
 
 
 def compile_source(
@@ -89,8 +99,9 @@ def compile_source(
     compiler: str | os.PathLike[str] | None = None,
     timeout: float = 30,
     dimensions: dict[str, int] | None = None,
+    input_shapes: dict[str, tuple[int, ...] | list[int]] | None = None,
 ) -> dict[str, Any]:
     """Compile inline WGT source through stdin. Use compile(path) for local imports."""
     if not isinstance(source, str):
         raise TypeError("source must be a WGT source string")
-    return _compile("-", text=source, compiler=compiler, timeout=timeout, dimensions=dimensions)
+    return _compile("-", text=source, compiler=compiler, timeout=timeout, dimensions=dimensions, input_shapes=input_shapes)

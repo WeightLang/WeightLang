@@ -40,3 +40,29 @@ test('matrix function input and output contracts are canonical', () => {
   assert.deepEqual(sourceProblems(source), []);
   assert.deepEqual(markdownProblems('```wgt\n' + source + '\n```'), []);
 });
+
+
+test('explicit PyTorch target keeps tensor methods and rejects retired frontends', () => {
+  assert.deepEqual(sourceProblems('wgt 0.5\ntarget torch\nreturn x.reshape(2,2);'), []);
+  assert.deepEqual(sourceProblems('wgt 0.3\nbackend torch-dynamic'), [1,2]);
+  assert.deepEqual(markdownProblems('```wgt\nwgt 0.5\ntarget torch\nreturn x.reshape(2,2);\n```'), []);
+});
+
+test('tuple explicit hidden and dynamic matrix ports retain canonical syntax', () => {
+  const source = [
+    'wgt 0.5',
+    'dim ROWS = 2',
+    'model DynamicHidden',
+    'parameter weight: f32[2,2] = [0.2,-0.1,0.3,0.4]',
+    'fn forward(x: f32[ROWS,2], hidden: f32[1,2]) -> (f32[ROWS,2], f32[1,2]) {',
+    '    let y = x @ (weight as [2,2]);',
+    '    let next_hidden = hidden + (scale([1,1], sum(y)) as [1,2]);',
+    '    return (y, next_hidden);',
+    '}',
+  ].join('\n');
+  assert.deepEqual(sourceProblems(source), []);
+  assert.deepEqual(sourceProblems(source.split('\n').map(line => '# ' + line).join('\n')), []);
+  assert.deepEqual(markdownProblems('```wgt\n' + source + '\n```'), []);
+  assert.deepEqual(sourceProblems('# return (reshape(x,[1,2]), hidden);'), [1]);
+  assert.deepEqual(markdownProblems('```wgt\nreturn (x, read(hidden));\n```'), [2]);
+});

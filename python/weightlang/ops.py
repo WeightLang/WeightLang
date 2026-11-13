@@ -476,3 +476,62 @@ def probabilities(value: torch.Tensor) -> torch.Tensor:
     )
     torch._assert_async(valid, "probabilities must be finite, in [0,1], and sum to 1 within 1e-5")
     return value
+
+
+def _runtime_indices(indices: torch.Tensor, bound: int) -> torch.Tensor:
+    indices = indices.detach()
+    if not bool(torch.all(torch.isfinite(indices) & (indices >= 0) & (indices == torch.trunc(indices)) & (indices.to(torch.float64) < bound))):
+        raise ValueError("runtime index must be a finite exact nonnegative integer within bounds")
+    return indices.to(dtype=torch.long)
+
+
+def gather(value: torch.Tensor, indices: torch.Tensor, axis: int = 0,
+           rank: int | None = None) -> torch.Tensor:
+    rank = value.ndim if rank is None else rank
+    prefix = value.shape[:-rank]
+    logical = value.shape[-rank:]
+    ids = _runtime_indices(indices, logical[axis])
+    batch = torch.broadcast_shapes(prefix, ids.shape[:-1])
+    value = value.expand(*batch, *logical)
+    ids = ids.expand(*batch, ids.shape[-1])
+    shape = [1] * rank
+    shape[axis] = ids.shape[-1]
+    ids = ids.reshape(*batch, *shape)
+    output = list(logical)
+    output[axis] = shape[axis]
+    ids = ids.expand(*batch, *output)
+    return torch.gather(value, len(batch) + axis, ids)
+
+
+def dynamic_slice(value: torch.Tensor, start: torch.Tensor, length: int) -> torch.Tensor:
+    ids = _runtime_indices(start, value.shape[-1] - length + 1)
+    offsets = torch.arange(length, device=value.device)
+    return gather(value, ids + offsets, rank=1)
+
+
+def concat(left: torch.Tensor, right: torch.Tensor, axis: int = 0,
+           rank: int | None = None) -> torch.Tensor:
+    rank = left.ndim if rank is None else rank
+    batch = torch.broadcast_shapes(left.shape[:-rank], right.shape[:-rank])
+    return torch.cat((left.expand(*batch, *left.shape[-rank:]),
+                      right.expand(*batch, *right.shape[-rank:])), dim=len(batch) + axis)
+
+
+def embedding(table: torch.Tensor, indices: torch.Tensor,
+              padding_idx: int | None = None) -> torch.Tensor:
+    """Row gather with optional gradient-only padding; negative rows wrap once.
+
+    Leading host batch dimensions broadcast as for gather. Forward values always
+    come from the original table, including a nonzero padding row.
+    """
+    if table.ndim < 2 or indices.ndim < 1:
+        raise ValueError("embedding requires rank-2 table and rank-1 indices")
+    if padding_idx is not None:
+        rows = table.shape[-2]
+        if type(padding_idx) is not int or not -rows <= padding_idx < rows:
+            raise ValueError("invalid embedding padding_idx")
+        if padding_idx < 0:
+            padding_idx += rows
+        padding = torch.arange(table.shape[-2], device=table.device).unsqueeze(-1) == padding_idx
+        table = torch.where(padding, table.detach(), table)
+    return gather(table, indices, axis=0, rank=2)

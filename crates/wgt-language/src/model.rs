@@ -14,6 +14,29 @@ pub struct ModelInterface {
     pub output_type: VectorType,
     pub target: Option<usize>,
 }
+/// One named logical f32 input within the packed native vector ABI.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForwardInput {
+    pub name: String,
+    pub shape: Vec<usize>,
+    pub offset: usize,
+    pub width: usize,
+}
+/// One positional logical f32 output; tuple order is its stable identity.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForwardOutput {
+    pub shape: Vec<usize>,
+    pub offset: usize,
+    pub width: usize,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForwardInterface {
+    pub inputs: Vec<ForwardInput>,
+    pub outputs: Vec<ForwardOutput>,
+    pub input: usize,
+    pub output: usize,
+    pub tuple: bool,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ParameterSchema {
     pub name: String,
@@ -35,6 +58,7 @@ pub struct ModelDefinition {
     source: String,
     name: String,
     interface: Option<ModelInterface>,
+    forward_interface: Option<ForwardInterface>,
     parameters: Vec<ParameterSchema>,
     operations: Vec<crate::operations::OperationSchema>,
     states: Vec<crate::operations::StateSchema>,
@@ -55,29 +79,50 @@ pub enum ModelPlan {
 impl ModelDefinition {
     /// Bind named dimensions before validating a reusable model definition.
     pub fn parse_with_dimensions(text: &str, dimensions: &crate::dimensions::Dimensions) -> Result<Self> {
+        crate::backend::preflight_source(text, crate::backend::Backend::Rust)?;
         Self::parse(&crate::dimensions::specialize(text, dimensions)?)
     }
     /// File imports remain relative to the original file; dimensions are bound
     /// only in that file, not injected into separately imported libraries.
     pub fn from_file_with_dimensions(path: impl AsRef<Path>, dimensions: &crate::dimensions::Dimensions) -> Result<Self> {
         let path = path.as_ref();
-        let text = crate::dimensions::specialize(&crate::model_modules::read(path)?, dimensions)?;
+        let text = crate::model_modules::read(path)?;
+        crate::backend::preflight_source(&text, crate::backend::Backend::Rust)?;
+        let text = crate::dimensions::specialize(&text, dimensions)?;
         let (source, _) = crate::model_modules::resolve(&text, Some(path))?;
         Self::parse_resolved(&source)
     }
     pub fn parse(text: &str) -> Result<Self> {
+        crate::backend::preflight_source(text, crate::backend::Backend::Rust)?;
         let (source, _) = crate::model_modules::resolve(text, None)?;
         Self::parse_resolved(&source)
     }
     pub(crate) fn parse_resolved(text: &str) -> Result<Self> {
+        Self::parse_resolved_impl(text, false)
+    }
+    // Admission is private and used exclusively for output of lower_forward;
+    // stored/serialized definitions always re-enter the ordinary source guards.
+    fn parse_resolved_impl(text: &str, packed_forward: bool) -> Result<Self> {
+        crate::backend::preflight_source(text, crate::backend::Backend::Rust)?;
         ensure!(text.len() <= MAX_SOURCE_BYTES, "model definition exceeds 1 MiB source limit");
         let unit = source::split(text)?;
-        let functions = script::parse::parse_functions(&unit.functions)?;
+        let functions = if packed_forward {
+            script::parse::parse_packed_forward_functions(&unit.functions)?
+        } else { script::parse::parse_functions(&unit.functions)? };
+        if functions.get("forward").is_some_and(|f| f.forward_signature.is_some()) {
+            let (lowered, ports) = crate::model_syntax::lower_forward(text)?;
+            let mut definition = Self::parse_resolved_impl(&lowered, true)?;
+            // Serialization reparses this resolved source to recover the exact
+            // logical ports; generated packed code is never the source of truth.
+            definition.source = text.into();
+            definition.forward_interface = Some(ports);
+            return Ok(definition);
+        }
         if functions.values().any(|f| f.signature.is_some()) || unit.declarations.lines().any(|l| l.trim().starts_with("state ")) || (!functions.contains_key("forward") && functions.values().any(|f| f.args.is_empty())) {
             let names: Vec<_> = unit.declarations.lines().filter_map(|line| line.split('#').next().unwrap_or("").trim().strip_prefix("model ")).collect();
             ensure!(names.len() == 1 && script::operators::identifier(names[0].trim()), "model definition requires one valid model name");
             let plan = crate::operations::lower(text, false)?;
-            return Ok(Self { source: text.into(), name: names[0].trim().into(), interface: None, parameters: plan.parameter_schemas(), states: plan.state_schemas(), operations: plan.entries.into_iter().map(|(schema,_)|schema).collect() });
+            return Ok(Self { source: text.into(), name: names[0].trim().into(), interface: None, forward_interface: None, parameters: plan.parameter_schemas(), states: plan.state_schemas(), operations: plan.entries.into_iter().map(|(schema,_)|schema).collect() });
         }
         for (name, function) in &functions {
             ensure!(name != "main" && !name.starts_with("__"), "model definitions cannot contain application entrypoints or agent/environment declarations: {name}");
@@ -126,7 +171,7 @@ impl ModelDefinition {
             let output=graph.layers.last().context("model requires layers")?.output;
             (ModelInterface{input:graph.input,output,output_type:graph.output_type,target:None},parameters)
         };
-        Ok(Self {source:text.into(),name,interface:Some(interface),parameters,operations:Vec::new(),states:Vec::new()})
+        Ok(Self {source:text.into(),name,interface:Some(interface),forward_interface:None,parameters,operations:Vec::new(),states:Vec::new()})
     }
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self> {
         Self::from_file_with_dependencies(path).map(|(definition, _)| definition)
@@ -136,6 +181,7 @@ impl ModelDefinition {
     pub fn from_file_with_dependencies(path: impl AsRef<Path>) -> Result<(Self, Vec<std::path::PathBuf>)> {
         let path = path.as_ref();
         let source = crate::model_modules::read(path)?;
+        crate::backend::preflight_source(&source, crate::backend::Backend::Rust)?;
         let (source, dependencies) = crate::model_modules::resolve(&source, Some(path))?;
         let definition = Self::parse_resolved(&source).with_context(|| path.display().to_string())?;
         Ok((definition, dependencies))
@@ -143,6 +189,7 @@ impl ModelDefinition {
     pub fn name(&self) -> &str { &self.name }
     /// Legacy single-forward interface. For typed models use operations().
     pub fn interface(&self) -> Option<&ModelInterface> { self.interface.as_ref() }
+    pub fn forward_interface(&self) -> Option<&ForwardInterface> { self.forward_interface.as_ref() }
     pub fn legacy_interface(&self) -> Option<&ModelInterface> { self.interface.as_ref() }
     pub fn operations(&self) -> &[crate::operations::OperationSchema] { &self.operations }
     pub fn states(&self) -> &[crate::operations::StateSchema] { &self.states }
@@ -161,12 +208,21 @@ impl ModelDefinition {
     }
     /// Lower architecture and initializer recipes without generating weights.
     pub fn compile_plan_with_modules(&self) -> Result<(ModelPlan, Vec<adaptive::ModuleSchema>)> {
-        let unit = source::split(&self.source)?;
-        let functions = script::parse::parse_functions(&unit.functions)?;
+        let lowered;
+        let source = if self.forward_interface.is_some() {
+            lowered = crate::model_syntax::lower_forward(&self.source)?.0;
+            lowered.as_str()
+        } else { self.source.as_str() };
+        let unit = source::split(source)?;
+        let functions = if self.forward_interface.is_some() {
+            script::parse::parse_packed_forward_functions(&unit.functions)?
+        } else { script::parse::parse_functions(&unit.functions)? };
         if !self.operations.is_empty() {
             Ok((ModelPlan::Operations(crate::operations::lower(&self.source, false)?), Vec::new()))
         } else if functions.contains_key("forward") {
-            let (program, modules) = adaptive::compile_with_metadata(&self.source)?;
+            let (program, modules) = if self.forward_interface.is_some() {
+                adaptive::compile_packed_forward_with_metadata(source)?
+            } else { adaptive::compile_with_metadata(source)? };
             Ok((ModelPlan::Forward(program), modules))
         } else {
             let mut graph = source::graph(&self.source)?.1;

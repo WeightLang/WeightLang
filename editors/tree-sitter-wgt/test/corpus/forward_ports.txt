@@ -1,0 +1,266 @@
+================================================================================
+examples/native_training/explicit_hidden/model.wgt
+================================================================================
+
+wgt 0.5
+model ExplicitHidden
+# Two features and two hidden channels use independent host-provided vectors.
+# The initialized gain is shared by the prediction and next-hidden equations;
+# initialization is explicit instance creation, not compilation or training.
+parameter gain: f32[2] = full(0.5)
+
+# Both outputs retain their logical vector shape. Hidden state belongs to the
+# host: pass next_hidden into a later call, or detach it at a training boundary.
+# No fn loss is declared: a host loss/output seed chooses which outputs matter.
+fn forward(x: f32[2], hidden: f32[2]) -> (f32[2], f32[2]) {
+    let prediction = x * gain + hidden;
+    let next_hidden = hidden * gain + x;
+    return (prediction, next_hidden);
+}
+
+---
+
+(source_file
+  (directive
+    (number))
+  (model_declaration
+    (identifier))
+  (comment)
+  (comment)
+  (comment)
+  (directive
+    (qualified_name
+      (identifier))
+    (punctuation)
+    (qualified_name
+      (identifier))
+    (array
+      (number))
+    (operator)
+    (call
+      (qualified_name
+        (identifier))
+      (arguments
+        (number))))
+  (comment)
+  (comment)
+  (comment)
+  (function_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (qualified_name
+        (identifier))
+      (array
+        (number))
+      (punctuation)
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (qualified_name
+        (identifier))
+      (array
+        (number)))
+    (tuple_type
+      (tensor_type
+        (learn_shape
+          (number)))
+      (tensor_type
+        (learn_shape
+          (number))))
+    (body
+      (script_keyword)
+      (parameter
+        (identifier))
+      (qualified_name
+        (identifier))
+      (operator)
+      (qualified_name
+        (identifier))
+      (operator)
+      (qualified_name
+        (identifier))
+      (script_keyword)
+      (parameter
+        (identifier))
+      (qualified_name
+        (identifier))
+      (operator)
+      (qualified_name
+        (identifier))
+      (operator)
+      (qualified_name
+        (identifier))
+      (script_keyword)
+      (arguments
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (qualified_name
+          (identifier))))))
+
+================================================================================
+examples/native_training/dynamic_hidden/model.wgt
+================================================================================
+
+wgt 0.5
+dim B = 2
+model DynamicHidden
+# B is an activation-only row axis. This scalar gate is shared by every row and
+# every call; changing B must preserve its value, identity and optimizer history.
+parameter gain: f32[1] = [0.5]
+
+# x and hidden have matching logical rows. The host owns hidden and explicitly
+# chooses which output contributes loss; neither output is persistent state.
+# Repeated calls can have different B, while each return retains its own shape.
+fn forward(x: f32[B,1], hidden: f32[B,1]) -> (f32[B,1], f32[B,1]) {
+    let prediction = scale(x, gain) + hidden;
+    let next_hidden = scale(hidden, gain) + x;
+    return (prediction, next_hidden);
+}
+
+---
+
+(source_file
+  (directive
+    (number))
+  (dimension_declaration
+    (identifier)
+    (operator)
+    (number))
+  (model_declaration
+    (identifier))
+  (comment)
+  (comment)
+  (directive
+    (qualified_name
+      (identifier))
+    (punctuation)
+    (qualified_name
+      (identifier))
+    (array
+      (number))
+    (operator)
+    (array
+      (number)))
+  (comment)
+  (comment)
+  (comment)
+  (function_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (qualified_name
+        (identifier))
+      (array
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (number))
+      (punctuation)
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (qualified_name
+        (identifier))
+      (array
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (number)))
+    (tuple_type
+      (tensor_type
+        (tensor_shape
+          (identifier)
+          (number)))
+      (tensor_type
+        (tensor_shape
+          (identifier)
+          (number))))
+    (body
+      (script_keyword)
+      (parameter
+        (identifier))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (qualified_name
+            (identifier))))
+      (operator)
+      (qualified_name
+        (identifier))
+      (script_keyword)
+      (parameter
+        (identifier))
+      (call
+        (qualified_name
+          (identifier))
+        (arguments
+          (qualified_name
+            (identifier))
+          (punctuation)
+          (qualified_name
+            (identifier))))
+      (operator)
+      (qualified_name
+        (identifier))
+      (script_keyword)
+      (arguments
+        (qualified_name
+          (identifier))
+        (punctuation)
+        (qualified_name
+          (identifier))))))
+
+================================================================================
+editors/tree-sitter-wgt/test/fixtures/tuple_single/model.wgt
+================================================================================
+
+wgt 0.5
+model SingleTuple
+# One row, two features; the trailing comma preserves a one-field tuple.
+# This parameter-free identity is a definition, with no initialization state.
+fn forward(x: f32[1,2]) -> (f32[1,2],) {
+    return (x,);
+}
+
+---
+
+(source_file
+  (directive
+    (number))
+  (model_declaration
+    (identifier))
+  (comment)
+  (comment)
+  (function_declaration
+    (identifier)
+    (arguments
+      (qualified_name
+        (identifier))
+      (punctuation)
+      (qualified_name
+        (identifier))
+      (array
+        (number)
+        (punctuation)
+        (number)))
+    (tuple_type
+      (tensor_type
+        (tensor_shape
+          (number)
+          (number))))
+    (body
+      (script_keyword)
+      (arguments
+        (qualified_name
+          (identifier))
+        (punctuation)))))

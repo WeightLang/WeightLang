@@ -37,7 +37,8 @@ fn tensor_helpers_are_hygienic_differentiable_and_portable() {
 #[test]
 fn helper_validation_rejects_capture_recursion_effects_and_shape_errors() {
     let nested = format!("{}x{}", "twice(".repeat(40), ")".repeat(40));
-    assert!(parse(&SOURCE.replace("custom(a,gain)", &nested)).is_err());
+    let error = parse(&SOURCE.replace("custom(a,gain)", &nested)).unwrap_err();
+    assert!(format!("{error:#}").contains("operator expansion depth exceeded"), "{error:#}");
     for body in [
         "return gain;",
         "return twice(a);",

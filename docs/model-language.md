@@ -89,3 +89,18 @@ fn forward(x: f32[2,3]) -> f32[2,4] {
 纯 helper 的形状签名会保留到本地算子导入、闭合源码和模型定义序列化中。已有全 rank-1 typed 操作保持原有分类与无 AD 合同。此语法随工具包 0.5.4 发布，执行验证范围见下文的原生与 Python 定点检查。
 
 本地执行验证已覆盖原生 CPU、compiled-forward、自定义 loss 训练、真实 wgtime IPC 前向与训练，以及 Python CPU/f32 前向和一阶梯度。语言回归还覆盖逐轴不匹配拒绝、本地库导入、定义序列化、formatter/LSP 与全仓示例。
+
+
+## PyTorch 专用兼容模型目标
+
+本地 `target torch` 是依赖 Python/PyTorch 语义的兼容扩展，仅由 PyTorch 执行；不属于 Rust 原生可执行的共享模型计划。完整语法、Python API、制品与验收边界见[动态 PyTorch 模型](torch-models.md)。
+
+## 共享模型与输入形状绑定（本地新增）
+
+普通 WGT 定义可由 Rust 原生服务和 Python SDK 使用，后端通过命令或宿主选择。`wgt check --target rust|torch` 明确检查方言边界，Torch 专用源码不能用于 Rust。`ModelTemplate::parse` / `from_file` 与 `bind_input_shapes` 按带签名 forward 的逻辑输入形状推导维度，最后仍由现有前端校验并生成具体模型定义；不初始化或执行。CLI 的可重复 `--input-shape NAME=D1,D2` 和 Python `compile` / `compile_source` / `load` / `loads` 的可选 `input_shapes` 映射使用同一实现，默认不启用形状推导。输入推导覆盖维度默认值，与显式绑定冲突则拒绝；输入名、rank、固定轴、重复符号及现有大小限制均检查。保存制品不能重新绑定形状。
+
+`bind_input_shapes` 自身仍产生固定定义；单实例变长和显式 hidden 跨调用求导使用下文新增动态 API，既有 typed 操作与 dtype 合同不变。`std/recurrent.gru_cell` 以共享张量公式表达可微循环单元，所有七个 `f32[H]` 参数必填、完全同形，无默认值或广播，返回同形向量；宿主拥有投影参数和 hidden 调度。完整 API、形状冲突规则、GRU 公式和可运行例子见[共享模型](shared-models.md)。
+
+## 共享动态执行与显式状态 AD（本地新增）
+
+同一原生实例可重绑定激活几何并保留参数、SGD/Adam 状态；Python 动态模块的各形状图共享同一批 Parameter。显式 tuple-return forward 提供可微多输入、多输出，但不改变旧 typed operation 的无 AD 合同。有界跨调用 hidden 求导使用明确的 StateLink、监督输出范围和 targets，失败不提交优化器更新。运行时 `gather`、`dynamic_slice` 和 `concat` 的源级签名、索引检查、VJP、解释执行回退、大小与序列预算，见[动态模型与显式状态](dynamic-models.md)。本地能力尚未发布，不表示通用整数子图、持久 state AD 或全部 LightNest 模型已经迁移。

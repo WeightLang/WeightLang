@@ -117,3 +117,7 @@ fn gated_residual(input, gate, value) {
 旧宿主 native prelude、OpenResponses harness、带 main 的数学演示和旧图占位不属于模型标准库。原宿主注册元数据若仍被退役代码的构建引用，只是内部迁移设施，不是新模型 API。标准库不提供完整 Transformer、卷积、RoPE、环境、优化器或网络框架占位；新增架构计算必须有真实形状、参数所有权、状态和梯度合同及行为验证。
 
 多轴纯函数可在参数和返回值上声明 `f32[M,K]` 等固定形状，导入后在每次调用展开时逐轴检查。所有参数与返回值须标注，`dim` 仍由所属编译单元绑定。完整合同见[矩阵函数形状签名](model-language.md#矩阵函数形状签名本地新增)。
+
+## 循环单元（本地新增）
+
+`import recurrent from "std/recurrent"` 提供 `gru_cell(xr, xz, xn, hr, hz, hn, hidden) -> f32[H]`。七个参数均为完全同形 `f32[H]`，H=1..16384；全部必填，无默认值或广播。前三项是输入投影加偏置，后三项是 hidden 投影加偏置，顺序 reset/update/new；reset 门作用于包含偏置的完整 hidden candidate 投影，返回新的 hidden。模块是纯公式，不创建参数或存储状态；参数共享、初始化和训练由模型及宿主显式管理。Rust CPU/Python 复用同一前端和可微原语；不由此获得原生动态序列或跨调用状态 AD。公式、双步共享参数示例与后端边界见[共享模型](shared-models.md#共享循环模型)。

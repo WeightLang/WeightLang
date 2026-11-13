@@ -6,7 +6,7 @@ pub use contracts::{OperatorContract, OPERATOR_CONTRACTS};
 pub use conv::{ConvGeometry, Pool2dGeometry};
 pub use source::{parse, parse_with_functions, parse_with_metadata};
 pub(crate) use source::{validate_definition, lower_operation, analyze_definition};
-pub(crate) use source::compile_with_metadata;
+pub(crate) use source::{compile_with_metadata, compile_packed_forward_with_metadata};
 pub(crate) type InferredTypes = std::collections::BTreeMap<
     String, std::collections::BTreeMap<String, crate::tensor::TensorType>,
 >;
@@ -256,6 +256,32 @@ pub enum Instruction {
         when_one: bool,
         target: String,
     },
+    Concat {
+        out: String,
+        left: String,
+        right: String,
+        axis: usize,
+    },
+    /// Rank-2 row gather with embedding-only padding gradient suppression.
+    Embedding {
+        out: String,
+        table: String,
+        indices: String,
+        #[serde(default)]
+        padding_idx: Option<usize>,
+    },
+    Gather {
+        out: String,
+        input: String,
+        indices: String,
+        axis: usize,
+    },
+    DynamicSlice {
+        out: String,
+        input: String,
+        start: String,
+        length: usize,
+    },
     Slice {
         out: String,
         input: String,
@@ -317,7 +343,8 @@ impl Instruction {
             | Mean { out, input }
             | Slice { out, input, .. } =>
                 (Some(out), [Some(input), None, None], None),
-            Matmul { out, left, right }
+            Concat { out, left, right, .. }
+            | Matmul { out, left, right }
             | BatchMatmul { out, left, right }
             | Add { out, left, right }
             | Mul { out, left, right }
@@ -325,6 +352,12 @@ impl Instruction {
             | Div { out, left, right }
             | Minimum { out, left, right } =>
                 (Some(out), [Some(left), Some(right), None], None),
+            Embedding { out, table, indices, .. } =>
+                (Some(out), [Some(table), Some(indices), None], None),
+            Gather { out, input, indices, .. } =>
+                (Some(out), [Some(input), Some(indices), None], None),
+            DynamicSlice { out, input, start, .. } =>
+                (Some(out), [Some(input), Some(start), None], None),
             ScaleBy { out, input, scalar } =>
                 (Some(out), [Some(input), Some(scalar), None], None),
             Constant { out, .. } | Read { out, .. } | ResourceState { out } =>

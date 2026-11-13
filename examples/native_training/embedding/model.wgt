@@ -1,0 +1,14 @@
+wgt 0.5
+model TokenEmbedding
+input token_ids:f32[4]
+output vectors:f32[8]
+parameter table:f32[3,2]=[11,12,21,22,31,32]
+# Three vocabulary rows each hold a two-feature vector. This is initialized,
+# untrained storage. Runtime token IDs are exact nonnegative integer f32 values.
+fn forward(token_ids) {
+    # [3,2] with four IDs becomes [4,2]. Row zero deliberately has nonzero
+    # values: padding preserves them in forward but suppresses its table VJP.
+    # Repeated nonpadding IDs accumulate gradients; token IDs never receive AD.
+    let vectors = embedding(table as [3,2],token_ids,0);
+    return vectors as [8];
+}

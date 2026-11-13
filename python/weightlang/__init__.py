@@ -1,6 +1,7 @@
 """Describe models in WeightLang. Train, infer, and inspect them with PyTorch."""
 
 from .api import from_ir, load, loads, save, select_device
+from .dynamic import DynamicModule, load_dynamic, loads_dynamic
 from .compiler import CompilationError, compile, compile_source
 from .inspection import summary, trace, visualize
 from .training import bind_optimizer
@@ -10,6 +11,7 @@ from .weights import Plan, WeightRef, WeightSet, restore
 
 __version__ = "0.5.4"
 __all__ = [
+    "DynamicModule", "load_dynamic", "loads_dynamic",
     "CompilationError", "compile", "compile_source", "from_ir", "load", "loads",
     "inspect", "attribute", "circuit", "Research", "Activation", "Intervention",
     "Attribution", "AttributionReport", "Circuit", "SparseAutoencoder", "feature_effects", "save", "select_device", "summary", "trace", "visualize", "bind_optimizer",

@@ -723,3 +723,18 @@ VJP/激活乘梯度归因、单事件消融电路发现和稀疏字典特征干�
 `fn project(x: f32[M,K], w: f32[K,N]) -> f32[M,N]` 显式声明输入、输出的各轴尺寸。`M/K/N` 由顶层 `dim` 在构造时绑定；也可直接写正整数字面量。至少一个端口为多轴张量时使用纯张量形状合同，所有参数及返回值必须标注。每次调用展开检查实参和返回值的完整 shape，相同元素数的不同形状也拒绝。函数中的 `@`、`.T`、`as [...]` 与已有算子继续使用共享张量前端和梯度规则。
 
 完整可解析示例、固定 shape 上限、helper 纯度、单向量宿主 ABI、矩阵 forward/loss 与既有 typed 操作的合同见[矩阵函数形状签名](model-language.md#矩阵函数形状签名本地新增)。检查/编译不会初始化、执行或训练模型。未调用的多轴 helper 也使用声明形状检查函数体，调用处再次校验实参。此语法随工具包 0.5.4 发布。
+
+
+## PyTorch 专用兼容模型目标
+
+本地 `target torch` 是依赖 Python/PyTorch 语义的兼容扩展，仅由 PyTorch 执行；不属于 Rust 原生可执行的共享模型计划。完整语法、Python API、制品与验收边界见[动态 PyTorch 模型](torch-models.md)。
+
+## 共享模型与输入形状绑定（本地新增）
+
+普通 WGT 定义可由 Rust 原生服务和 Python SDK 使用，后端通过命令或宿主选择。`wgt check --target rust|torch` 明确检查方言边界，Torch 专用源码不能用于 Rust。`ModelTemplate::parse` / `from_file` 与 `bind_input_shapes` 按带签名 forward 的逻辑输入形状推导维度，最后仍由现有前端校验并生成具体模型定义；不初始化或执行。CLI 的可重复 `--input-shape NAME=D1,D2` 和 Python `compile` / `compile_source` / `load` / `loads` 的可选 `input_shapes` 映射使用同一实现，默认不启用形状推导。输入推导覆盖维度默认值，与显式绑定冲突则拒绝；输入名、rank、固定轴、重复符号及现有大小限制均检查。保存制品不能重新绑定形状。
+
+`bind_input_shapes` 自身仍产生固定定义；单实例变长和显式 hidden 跨调用求导使用下文新增动态 API，既有 typed 操作与 dtype 合同不变。`std/recurrent.gru_cell` 以共享张量公式表达可微循环单元，所有七个 `f32[H]` 参数必填、完全同形，无默认值或广播，返回同形向量；宿主拥有投影参数和 hidden 调度。完整 API、形状冲突规则、GRU 公式和可运行例子见[共享模型](shared-models.md)。
+
+## 共享动态执行与显式状态 AD（本地新增）
+
+同一原生实例可重绑定激活几何并保留参数、SGD/Adam 状态；Python 动态模块的各形状图共享同一批 Parameter。显式 tuple-return forward 提供可微多输入、多输出，但不改变旧 typed operation 的无 AD 合同。有界跨调用 hidden 求导使用明确的 StateLink、监督输出范围和 targets，失败不提交优化器更新。运行时 `gather`、`dynamic_slice` 和 `concat` 的源级签名、索引检查、VJP、解释执行回退、大小与序列预算，见[动态模型与显式状态](dynamic-models.md)。本地能力尚未发布，不表示通用整数子图、持久 state AD 或全部 LightNest 模型已经迁移。

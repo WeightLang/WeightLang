@@ -3033,6 +3033,100 @@
         "max": 2
       },
       "shape": "Optional first argument is an explicit dimension list; otherwise the declared target shape is used."
+    },
+    {
+      "name": "gather",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Tensor gather: rank 1..8; rank-1 f32 indices, finite exact nonnegative integers within the selected axis; output replaces axis by indices length; repeated indices scatter-add VJP; no index gradient. Named axes preserve unselected input axes and replace the selected axis name with the indices axis name; duplicate result names are rejected.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/tensor-geometry.md",
+      "position": "expression",
+      "signature": "gather(input,indices,axis=0)",
+      "defaults": {
+        "axis": 0
+      },
+      "arity": {
+        "min": 2,
+        "max": 3
+      },
+      "operator_arity": {
+        "min": 2,
+        "max": 3
+      }
+    },
+    {
+      "name": "dynamic_slice",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Rank-1 tensor slice: start f32[1], finite exact nonnegative integer; positive compile-time length; start+length <= input length. Only input receives gradients. Preserves the input axis name.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/tensor-geometry.md",
+      "position": "expression",
+      "signature": "dynamic_slice(input,start,length)",
+      "defaults": {},
+      "arity": {
+        "min": 3,
+        "max": 3
+      },
+      "operator_arity": {
+        "min": 3,
+        "max": 3
+      }
+    },
+    {
+      "name": "concat",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Tensor concatenation: equal ranks 1..8 and equal non-axis dimensions; compile-time nonnegative axis; gradients split to both inputs. Axis names merge positionally from either operand, including the concatenation axis; conflicts and duplicate result names are rejected.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/tensor-geometry.md",
+      "position": "expression",
+      "signature": "concat(a,b,axis=0)",
+      "defaults": {
+        "axis": 0
+      },
+      "arity": {
+        "min": 2,
+        "max": 3
+      },
+      "operator_arity": {
+        "min": 2,
+        "max": 3
+      }
+    },
+    {
+      "name": "embedding",
+      "kind": "intrinsic",
+      "contexts": [
+        "tensor_forward",
+        "tensor_loss"
+      ],
+      "purpose": "Rank-2 table row gather with rank-1 runtime finite exact nonnegative integer f32 indices. Omitted padding_idx means None/no padding; explicit signed integer literals must be in [-rows,rows), with negatives normalized by adding rows. Returns [count,width] with original padding row values; VJP scatter-adds repeated rows except padding; no index gradients. Named axes are [indices axis, table feature axis]; duplicate result names are rejected.",
+      "implementation": "crates/wgt-language/src/adaptive/source.rs",
+      "documentation": "docs/tensor-geometry.md",
+      "position": "expression",
+      "signature": "embedding(table,indices,padding_idx=None)",
+      "defaults": {
+        "padding_idx": null
+      },
+      "arity": {
+        "min": 2,
+        "max": 3
+      },
+      "operator_arity": {
+        "min": 2,
+        "max": 3
+      }
     }
   ]
 }

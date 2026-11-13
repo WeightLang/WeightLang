@@ -1,6 +1,6 @@
 # Python SDK：用 PyTorch 运行 WGT 架构
 
-0.5.2 的命名维度绑定、签名式 forward/loss 以及兼容限制见[模型语言](model-language.md)。维度在构造时固定，不改变当前执行 dtype、batch 或状态求导合同。
+0.5.2 的命名维度绑定、签名式 forward/loss 以及兼容限制见[模型语言](model-language.md)。普通 load/loads 的 dimensions 在构造时固定，不改变既有执行 dtype、batch 或 typed 状态求导合同；单实例变长使用本文新增的 load_dynamic。
 
 WeightLang 描述模型内部的参数、张量计算、分支、循环和状态。Python 负责数据、训练循环、推理调用与可视化。SDK 复用 Rust 前端，把模型加载为标准 `torch.nn.Module`：纯张量模型使用 FX 图，含动态控制或状态的模型按原生中间指令执行 PyTorch 张量计算。
 
@@ -418,3 +418,18 @@ WGT 稀疏自编码器通过普通 PyTorch 优化器和自身 model.loss 训练�
 ### 多轴函数签名（本地新增）
 
 共享前端支持在纯函数和根级 forward/loss 上声明固定矩阵形状，见[形状签名](model-language.md#矩阵函数形状签名本地新增)。SDK 继续接收和返回原有固定宽度向量（以及 SDK 已有的宿主 batch），由编译后的 reshape 在模型内部恢复形状。多轴注解不会自动改变宿主的输入输出维度约定。
+
+
+## PyTorch 专用兼容模型目标
+
+本地 `target torch` 是依赖 Python/PyTorch 语义的兼容扩展，仅由 PyTorch 执行；不属于 Rust 原生可执行的共享模型计划。完整语法、Python API、制品与验收边界见[动态 PyTorch 模型](torch-models.md)。
+
+## 共享模型与输入形状绑定（本地新增）
+
+普通 WGT 定义可由 Rust 原生服务和 Python SDK 使用，后端通过命令或宿主选择。`wgt check --target rust|torch` 明确检查方言边界，Torch 专用源码不能用于 Rust。`ModelTemplate::parse` / `from_file` 与 `bind_input_shapes` 按带签名 forward 的逻辑输入形状推导维度，最后仍由现有前端校验并生成具体模型定义；不初始化或执行。CLI 的可重复 `--input-shape NAME=D1,D2` 和 Python `compile` / `compile_source` / `load` / `loads` 的可选 `input_shapes` 映射使用同一实现，默认不启用形状推导。输入推导覆盖维度默认值，与显式绑定冲突则拒绝；输入名、rank、固定轴、重复符号及现有大小限制均检查。保存制品不能重新绑定形状。
+
+`bind_input_shapes` 自身仍产生固定定义；单实例变长和显式 hidden 跨调用求导使用下文新增动态 API，既有 typed 操作与 dtype 合同不变。`std/recurrent.gru_cell` 以共享张量公式表达可微循环单元，所有七个 `f32[H]` 参数必填、完全同形，无默认值或广播，返回同形向量；宿主拥有投影参数和 hidden 调度。完整 API、形状冲突规则、GRU 公式和可运行例子见[共享模型](shared-models.md)。
+
+## 共享动态执行与显式状态 AD（本地新增）
+
+同一原生实例可重绑定激活几何并保留参数、SGD/Adam 状态；Python 动态模块的各形状图共享同一批 Parameter。显式 tuple-return forward 提供可微多输入、多输出，但不改变旧 typed operation 的无 AD 合同。有界跨调用 hidden 求导使用明确的 StateLink、监督输出范围和 targets，失败不提交优化器更新。运行时 `gather`、`dynamic_slice` 和 `concat` 的源级签名、索引检查、VJP、解释执行回退、大小与序列预算，见[动态模型与显式状态](dynamic-models.md)。本地能力尚未发布，不表示通用整数子图、持久 state AD 或全部 LightNest 模型已经迁移。

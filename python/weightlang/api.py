@@ -13,6 +13,7 @@ from torch import nn
 
 from .compiler import compile, compile_source
 from .runtime import build_module
+from .ports import wrap_forward
 
 MODEL_FORMAT = "weightlang.model.v1"
 
@@ -41,7 +42,7 @@ def from_ir(
     Parameters start from declared initializers. Training and checkpoint restore
     are separate operations. Inputs must be tensors on the model's device.
     """
-    return build_module(definition).to(device=select_device(device), dtype=dtype)
+    return wrap_forward(build_module(definition)).to(device=select_device(device), dtype=dtype)
 
 
 def loads(
@@ -52,9 +53,10 @@ def loads(
     compiler: str | os.PathLike[str] | None = None,
     timeout: float = 30,
     dimensions: dict[str, int] | None = None,
+    input_shapes: dict[str, tuple[int, ...] | list[int]] | None = None,
 ) -> nn.Module:
     """Compile inline WGT and initialize an ordinary, trainable PyTorch module."""
-    return from_ir(compile_source(source, compiler=compiler, timeout=timeout, dimensions=dimensions), device=device, dtype=dtype)
+    return from_ir(compile_source(source, compiler=compiler, timeout=timeout, dimensions=dimensions, input_shapes=input_shapes), device=device, dtype=dtype)
 
 
 def load(
@@ -65,6 +67,7 @@ def load(
     compiler: str | os.PathLike[str] | None = None,
     timeout: float = 30,
     dimensions: dict[str, int] | None = None,
+    input_shapes: dict[str, tuple[int, ...] | list[int]] | None = None,
 ) -> nn.Module:
     """Load .wgt source, compiled .json, or a .pt/.pth model saved by save().
 
@@ -76,9 +79,9 @@ def load(
     path = Path(path).expanduser()
     suffix = path.suffix.lower()
     if suffix == ".wgt":
-        return from_ir(compile(path, compiler=compiler, timeout=timeout, dimensions=dimensions), device=device, dtype=dtype)
-    if dimensions:
-        raise ValueError("dimensions only apply to WGT source, not compiled or saved models")
+        return from_ir(compile(path, compiler=compiler, timeout=timeout, dimensions=dimensions, input_shapes=input_shapes), device=device, dtype=dtype)
+    if dimensions or input_shapes:
+        raise ValueError("dimensions and input_shapes only apply to WGT source, not compiled or saved models")
     if suffix == ".json":
         with path.open(encoding="utf-8") as stream:
             return from_ir(json.load(stream), device=device, dtype=dtype)
@@ -91,7 +94,7 @@ def load(
         raise ValueError("Saved WeightLang model requires a definition and state_dict")
     # Reuse the exact registration layout, but allocate no parameter/state data
     # and execute no declared initializer before binding the saved values.
-    model = build_module(bundle["definition"], _schema_only=True)
+    model = wrap_forward(build_module(bundle["definition"], _schema_only=True))
     # assign preserves saved tensor precision; create optimizers after loading.
     model.load_state_dict(bundle["state_dict"], strict=True, assign=True)
     from .initialization import parameter_specs
@@ -116,15 +119,23 @@ def save(
     The destination must end in .pt or .pth. Parent directories are created.
     Existing files are preserved unless overwrite=True is explicitly supplied.
     Use torch.save directly when also saving optimizer or application state.
+    DynamicModule is rejected: use its parameter-only state_dict, or explicitly
+    save(model.base, path) to export the initial-shape static model.
     """
     # torch.compile wraps the original module and prefixes state_dict keys.
     # Persist the architecture's own parameters, independent of that wrapper.
     original = getattr(model, "_orig_mod", None)
     if isinstance(original, nn.Module):
         model = original
+    from .dynamic import DynamicModule
+    if isinstance(model, DynamicModule):
+        raise TypeError("save does not support DynamicModule; use parameter-only state_dict and recreate from source, or save(model.base, path) for the initial-shape static model")
     definition = getattr(model, "definition", None)
     if not isinstance(definition, dict):
         raise TypeError("save expects an unmodified WeightLang module with its compiled definition")
+    # A packed research base still carries port metadata. Normalize its state
+    # layout too, so saving it cannot produce an unloadable unprefixed bundle.
+    model = wrap_forward(model)
     path = Path(path).expanduser()
     if path.suffix.lower() not in {".pt", ".pth"}:
         raise ValueError("Saved SDK models use a .pt or .pth extension")
@@ -144,3 +155,7 @@ def save(
     finally:
         temporary_path.unlink(missing_ok=True)
     return path
+
+
+# Public entrypoints live separately to keep dynamic graph ownership isolated.
+from .dynamic import load_dynamic, loads_dynamic  # noqa: E402,F401

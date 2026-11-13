@@ -670,6 +670,10 @@
           {
             "type": "tensor_type",
             "named": true
+          },
+          {
+            "type": "tuple_type",
+            "named": true
           }
         ]
       }
@@ -1562,6 +1566,25 @@
     }
   },
   {
+    "type": "tensor_shape",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "tensor_type",
     "named": true,
     "fields": {
@@ -1590,6 +1613,10 @@
       "types": [
         {
           "type": "learn_shape",
+          "named": true
+        },
+        {
+          "type": "tensor_shape",
           "named": true
         }
       ]
@@ -1934,6 +1961,22 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "tuple_type",
+    "named": true,
+    "fields": {
+      "element": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "tensor_type",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {

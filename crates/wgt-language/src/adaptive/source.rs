@@ -26,6 +26,13 @@ pub(crate) fn compile_with_metadata(source: &str) -> Result<(Program, Vec<Module
     let functions = crate::script::parse::parse_functions(&unit.functions)?;
     parse_definition_with_metadata(source, &functions, false)
 }
+/// Internal packed Forward source has one compiler-generated exact-shape call;
+/// ordinary parse/compile entrypoints must keep rejecting reserved source names.
+pub(crate) fn compile_packed_forward_with_metadata(source: &str) -> Result<(Program, Vec<ModuleSchema>)> {
+    let unit = crate::source::split(source)?;
+    let functions = crate::script::parse::parse_packed_forward_functions(&unit.functions)?;
+    parse_definition_with_metadata(source, &functions, false)
+}
 pub fn parse_with_functions(
     source: &str,
     functions: &crate::script::parse::Program,
@@ -916,8 +923,107 @@ impl Lower {
         self.unavailable.remove(out);
         Ok(())
     }
+    // This frame is entered only for runtime indexing operations. In debug builds,
+    // their tensor metadata/error temporaries otherwise enlarge every recursive
+    // helper argument frame before operator's depth-32 guard can reject it.
+    #[inline(never)]
+    fn assign_indexing(&mut self, out: &str, op: &str, args: &[Expr]) -> Result<()> {
+        let tensor = match (op, args) {
+                ("embedding", [table, indices]) | ("embedding", [table, indices, _]) => {
+                    let table = self.value(table)?;
+                    let indices = self.value(indices)?;
+                    let shape = self.shape(&table)?;
+                    ensure!(shape.len() == 2 && self.shape(&indices)?.len() == 1,
+                        "embedding requires rank-2 table and rank-1 indices");
+                    let padding_idx = if args.len() == 2 { None } else {
+                        let padding = match &args[2] {
+                            Expr::Number(n) => *n,
+                            Expr::Unary(op, value) if op == "-" => match value.as_ref() {
+                                Expr::Number(n) => -*n,
+                                _ => bail!("embedding padding_idx must be a signed integer literal"),
+                            },
+                            _ => bail!("embedding padding_idx must be a signed integer literal"),
+                        };
+                        let rows = shape[0] as f64;
+                        ensure!(padding.is_finite() && padding.fract() == 0.
+                            && padding >= -rows && padding < rows,
+                            "embedding padding_idx must be a signed integer in [-rows, rows)");
+                        Some(if padding < 0. { (padding + rows) as usize } else { padding as usize })
+                    };
+                    let table_type = self.tensor_type(&table)?;
+                    let indices_type = self.tensor_type(&indices)?;
+                    let tensor = TensorType::new(DType::F32, vec![self.size(&indices)?, shape[1]],
+                        vec![indices_type.axes()[0].clone(), table_type.axes()[1].clone()], ShapeLimits::REGISTER)?;
+                    Some((I::Embedding { out: out.into(), table, indices, padding_idx }, tensor))
+                }
+                ("concat", [a, b]) | ("concat", [a, b, _]) => {
+                    let left = self.value(a)?;
+                    let right = self.value(b)?;
+                    let axis = if args.len() == 3 { self.static_index(&args[2])? } else { 0 };
+                    let mut shape = self.shape(&left)?.to_vec();
+                    let other = self.shape(&right)?;
+                    ensure!(shape.len() == other.len() && axis < shape.len(), "concat rank/axis mismatch");
+                    ensure!(shape.iter().zip(&other).enumerate().all(|(i,(a,b))| i == axis || a == b), "concat non-axis dimensions mismatch");
+                    shape[axis] = shape[axis].checked_add(other[axis]).context("concat dimension overflow")?;
+                    let left_type = self.tensor_type(&left)?;
+                    let right_type = self.tensor_type(&right)?;
+                    let axes = left_type.axes().iter().zip(right_type.axes()).map(|(a,b)| {
+                        ensure!(a.is_none() || b.is_none() || a == b, "concat axis name mismatch");
+                        Ok(a.clone().or_else(|| b.clone()))
+                    }).collect::<Result<Vec<_>>>()?;
+                    let tensor = TensorType::new(DType::F32, shape, axes, ShapeLimits::REGISTER)?;
+                    Some((I::Concat { out: out.into(), left, right, axis }, tensor))
+                }
+                ("gather", [x, indices]) | ("gather", [x, indices, _]) => {
+                    let input = self.value(x)?;
+                    let indices = self.value(indices)?;
+                    let axis = if args.len() == 3 { self.static_index(&args[2])? } else { 0 };
+                    let mut shape = self.shape(&input)?.to_vec();
+                    ensure!(axis < shape.len() && self.shape(&indices)?.len() == 1, "gather requires rank-1 indices and a valid axis");
+                    shape[axis] = self.size(&indices)?;
+                    let mut axes = self.tensor_type(&input)?.axes().to_vec();
+                    axes[axis] = self.tensor_type(&indices)?.axes()[0].clone();
+                    let tensor = TensorType::new(DType::F32, shape, axes, ShapeLimits::REGISTER)?;
+                    Some((I::Gather { out: out.into(), input, indices, axis }, tensor))
+                }
+                ("dynamic_slice", [x, start, length]) => {
+                    let input = self.value(x)?;
+                    let start = self.value(start)?;
+                    let length = self.static_index(length)?;
+                    ensure!(self.shape(&input)?.len() == 1 && self.shape(&start)? == [1], "dynamic_slice requires vector input and f32[1] start");
+                    ensure!(length > 0 && length <= self.size(&input)?, "dynamic_slice length must be in 1..=input length");
+                    let tensor = TensorType::new(DType::F32, vec![length],
+                        self.tensor_type(&input)?.axes().to_vec(), ShapeLimits::REGISTER)?;
+                    Some((I::DynamicSlice { out: out.into(), input, start, length }, tensor))
+                }
+            _ => None,
+        };
+        let (instruction, tensor) = tensor
+            .with_context(|| format!("unsupported tensor expression or arity: {op}"))?;
+        self.register_tensor(out, tensor)?;
+        self.program.version = 3;
+        self.types.insert(out.into(), crate::categorical::VectorType::F32);
+        self.program.instructions.push(instruction);
+        Ok(())
+    }
     fn assign_inner(&mut self, out: &str, expr: &Expr) -> Result<()> {
         if let Expr::Call(name, args) = expr {
+            // Compiler-generated tuple boundary check. Unlike reshape, equal
+            // element counts do not make different logical port shapes valid.
+            if name == "wgt_forward_exact" {
+                let [value, Expr::List(dimensions)] = args.as_slice() else {
+                    bail!("invalid pure forward shape check");
+                };
+                let input = self.value(value)?;
+                let expected = dimensions.iter().map(|dimension| {
+                    let Expr::Number(n) = dimension else { bail!("invalid forward dimension"); };
+                    ensure!(n.is_finite() && n.fract() == 0. && (1. ..=16384.).contains(n), "invalid forward dimension");
+                    Ok(*n as usize)
+                }).collect::<Result<Vec<_>>>()?;
+                ensure!(self.shape(&input)? == expected,
+                    "pure forward output shape mismatch: expected {:?}, got {:?}", expected, self.shape(&input)?);
+                return self.assign(out, &Expr::Name(input));
+            }
             if name == "observe" && !self.functions.contains_key(name) {
                 let [Expr::Text(label), value] = args.as_slice() else {
                     bail!("observe requires a literal name and a tensor");
@@ -1426,6 +1532,10 @@ impl Lower {
             _ => None,
         };
         if let Some((op, args)) = tensor_call {
+            // Keep indexing temporaries out of the recursive helper lowering frame.
+            if matches!(op, "embedding" | "concat" | "gather" | "dynamic_slice") {
+                return self.assign_indexing(out, op, args);
+            }
             let tensor = match (op, args) {
                 ("reshape", [x, Expr::List(dims)]) => {
                     let x = self.value(x)?;

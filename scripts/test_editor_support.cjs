@@ -21,11 +21,30 @@ files.push(path.join(root, 'editors/vscode/media/example.wgt'),
   path.join(root, 'editors/tree-sitter-wgt/test/fixtures/forward.wgt'),
   path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_control.wgt'));
 files.push(path.join(root, 'examples/native_training/signature_dimensions/model.wgt'));
+// Include real tuple models, not only historical fixed-vector examples.
+const forwardPorts = [
+  'examples/native_training/explicit_hidden/model.wgt',
+  'examples/native_training/dynamic_hidden/model.wgt',
+  'editors/tree-sitter-wgt/test/fixtures/tuple_single/model.wgt',
+];
+files.push(...forwardPorts.map(file => path.join(root, file)),
+  path.join(root, 'examples/native_training/matrix_signatures/model.wgt'));
 const operations = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/model_operations.wgt');
 files.push(operations);
 const tensorLearning = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/tensor_learning/model.wgt');
 files.push(tensorLearning);
 run('tree-sitter', ['parse', '--quiet', ...files], grammar);
+const portCorpus = fs.readFileSync(path.join(grammar, 'test/corpus/forward_ports.txt'), 'utf8');
+for (const file of forwardPorts) {
+  const source = fs.readFileSync(path.join(root, file), 'utf8');
+  assert(portCorpus.includes(source.trim()), `${file}: corpus must retain the actual complete source`);
+  const tree = run('tree-sitter', ['parse', path.join(root, file)], grammar);
+  assert(tree.includes('return_type: (tuple_type'), `${file}: tuple return must have a structured return_type`);
+  assert(tree.includes('element: (tensor_type'), `${file}: tuple fields must retain tensor types`);
+  if (file.includes('dynamic_hidden') || file.includes('tuple_single')) {
+    assert(tree.includes('(tensor_shape'), `${file}: multi-axis output shape must retain its structure`);
+  }
+}
 const operationsTree = run('tree-sitter', ['parse', operations], grammar);
 for (const node of ['state_declaration', 'tensor_type', 'function_declaration']) {
   assert(operationsTree.includes(`(${node}`), `${node}: missing model operation structure`);
@@ -46,6 +65,9 @@ for (const [capture, text] of [
     `${text}: missing modern tensor ${capture} capture`);
 }
 const sample = path.join(root, 'editors/tree-sitter-wgt/test/fixtures/editor_current.wgt');
+const textmate = JSON.parse(fs.readFileSync(path.join(root, 'editors/vscode/syntaxes/wgt.tmLanguage.json'), 'utf8'));
+assert(textmate.patterns.some(pattern => pattern.name === 'meta.torch.model.wgt'));
+assert(textmate.repository.torch_extensions.patterns.some(pattern => pattern.name === 'string.quoted.single.wgt'));
 const vocabulary = JSON.parse(fs.readFileSync(path.join(root, 'editors/vocabulary.json'), 'utf8'));
 assert(vocabulary.keywords.includes('against'), 'against must be highlighted as a training keyword');
 for (const keyword of ['blend', 'repeat', 'indexed', 'carrying', 'as', 'dim']) {

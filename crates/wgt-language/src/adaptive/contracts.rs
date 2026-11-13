@@ -144,6 +144,32 @@ impl Program {
                         same(out, yes)?; same(yes, no)?;
                         ensure!(reg(probability)?.shape == [1] || reg(probability)?.shape == reg(yes)?.shape, "route shape mismatch");
                     }
+                    I::Concat { out, left, right, axis } => {
+                        let a = &reg(left)?.shape;
+                        let b = &reg(right)?.shape;
+                        ensure!(a.len() == b.len() && *axis < a.len(), "concat rank/axis mismatch");
+                        ensure!(a.iter().zip(b).enumerate().all(|(i,(a,b))| i == *axis || a == b), "concat non-axis dimensions mismatch");
+                        let mut shape = a.clone();
+                        shape[*axis] = a[*axis].checked_add(b[*axis]).context("concat dimension overflow")?;
+                        ensure!(reg(out)?.shape == shape, "concat output shape mismatch");
+                    }
+                    I::Embedding { out, table, indices, padding_idx } => {
+                        let shape = &reg(table)?.shape;
+                        ensure!(shape.len() == 2 && reg(indices)?.shape.len() == 1,
+                            "embedding requires rank-2 table and rank-1 indices");
+                        ensure!(padding_idx.is_none_or(|row| row < shape[0]), "embedding padding_idx out of bounds");
+                        ensure!(reg(out)?.shape == [reg(indices)?.len, shape[1]], "embedding output shape mismatch");
+                    }
+                    I::Gather { out, input, indices, axis } => {
+                        let mut shape = reg(input)?.shape.clone();
+                        ensure!(*axis < shape.len() && reg(indices)?.shape.len() == 1, "gather requires rank-1 indices and a valid axis");
+                        shape[*axis] = reg(indices)?.len;
+                        ensure!(reg(out)?.shape == shape, "gather output shape mismatch");
+                    }
+                    I::DynamicSlice { out, input, start, length } => {
+                        ensure!(reg(input)?.shape.len() == 1 && reg(start)?.shape == [1], "dynamic_slice requires vector input and f32[1] start");
+                        ensure!(*length > 0 && *length <= reg(input)?.len && reg(out)?.shape == [*length], "dynamic_slice length/output mismatch");
+                    }
                     I::Slice { out, input, start } => {
                         let input_len = reg(input)?.len;
                         ensure!(reg(out)?.shape.len() == 1 && start.checked_add(reg(out)?.len).is_some_and(|end| end <= input_len), "slice shape/range mismatch");

@@ -374,7 +374,9 @@ class _Builder:
         shape = self.shapes[out]
         if out == next(iter(self.values)):
             raise ValueError("forward instructions cannot overwrite model input")
-        input_keys = ["input", "left", "right", "gamma", "beta", "scalar"]
+        input_keys = ["input", "left", "right", "gamma", "beta", "scalar", "indices", "table"]
+        if op == "dynamic_slice":
+            input_keys.append("start")
         if op == "conv":
             input_keys += ["kernel", "bias"]
         inputs = [item[key] for key in input_keys if key in item]
@@ -470,6 +472,36 @@ class _Builder:
             axes = tuple(range(-len(source_shape("input")), 0))
             node = self.graph.call_function(ops.sum if op == "sum" else ops.mean, (value("input"), axes))
             node = self.graph.call_method("unsqueeze", (node, -1))
+        elif op == "embedding":
+            table, ids, padding = source_shape("table"), source_shape("indices"), item.get("padding_idx")
+            if len(table) != 2 or len(ids) != 1:
+                raise ValueError("embedding requires rank-2 table and rank-1 indices")
+            if padding is not None and (type(padding) is not int or not 0 <= padding < table[0]):
+                raise ValueError("invalid embedding padding_idx")
+            self.equal(shape, (ids[0], table[1]), op)
+            node = self.graph.call_function(ops.embedding, (value("table"), value("indices"), padding))
+        elif op == "gather":
+            previous, ids, axis = source_shape("input"), source_shape("indices"), item["axis"]
+            if type(axis) is not int or not 0 <= axis < len(previous) or len(ids) != 1:
+                raise ValueError("invalid gather axis/indices")
+            expected = list(previous)
+            expected[axis] = ids[0]
+            self.equal(shape, tuple(expected), op)
+            node = self.graph.call_function(ops.gather, (value("input"), value("indices"), axis, len(previous)))
+        elif op == "dynamic_slice":
+            previous, length = source_shape("input"), item["length"]
+            if len(previous) != 1 or source_shape("start") != (1,) or type(length) is not int or not 0 < length <= previous[0]:
+                raise ValueError("invalid dynamic_slice contract")
+            self.equal(shape, (length,), op)
+            node = self.graph.call_function(ops.dynamic_slice, (value("input"), value("start"), length))
+        elif op == "concat":
+            left, right, axis = source_shape("left"), source_shape("right"), item["axis"]
+            if type(axis) is not int or not 0 <= axis < len(left) or len(left) != len(right) or any(a != b for i, (a,b) in enumerate(zip(left,right)) if i != axis):
+                raise ValueError("invalid concat contract")
+            expected = list(left)
+            expected[axis] += right[axis]
+            self.equal(shape, tuple(expected), op)
+            node = self.graph.call_function(ops.concat, (value("left"), value("right"), axis, len(left)))
         elif op == "slice":
             previous = source_shape("input")
             start = item["start"]

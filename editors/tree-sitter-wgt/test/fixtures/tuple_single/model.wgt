@@ -1,0 +1,7 @@
+wgt 0.5
+model SingleTuple
+# One row, two features; the trailing comma preserves a one-field tuple.
+# This parameter-free identity is a definition, with no initialization state.
+fn forward(x: f32[1,2]) -> (f32[1,2],) {
+    return (x,);
+}

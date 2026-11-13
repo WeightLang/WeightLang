@@ -12,7 +12,26 @@ pub fn specialize(source: &str, bindings: &Dimensions) -> Result<String> {
         source.len() <= 4 * 1024 * 1024,
         "model source exceeds 4 MiB"
     );
+    let (declarations, stripped) = declarations(source)?;
     let mut dimensions = Dimensions::new();
+    for (name, default) in declarations {
+        let value = bindings.get(&name).copied().or(default).with_context(|| {
+            format!("unbound dimension: {name}; supply a construction-time binding")
+        })?;
+        validate(value)?;
+        dimensions.insert(name, value);
+    }
+    for name in bindings.keys() {
+        ensure!(dimensions.contains_key(name), "unknown dimension binding: {name}");
+    }
+    if dimensions.is_empty() { return Ok(source.to_owned()); }
+    substitute(&stripped, &dimensions)
+}
+
+/// Read root declarations without requiring their values to be bound.
+pub(crate) fn declarations(source: &str) -> Result<(BTreeMap<String, Option<usize>>, String)> {
+    ensure!(source.len() <= 4 * 1024 * 1024, "model source exceeds 4 MiB");
+    let mut dimensions = BTreeMap::new();
     let mut stripped = String::new();
     let mut depth = 0isize;
     let mut header = false;
@@ -57,11 +76,7 @@ pub fn specialize(source: &str, bindings: &Dimensions) -> Result<String> {
                     Ok(value)
                 })
                 .transpose()?;
-            let value = bindings.get(name).copied().or(default).with_context(|| {
-                format!("unbound dimension: {name}; supply a construction-time binding")
-            })?;
-            validate(value)?;
-            dimensions.insert(name.to_owned(), value);
+            dimensions.insert(name.to_owned(), default);
             // Keep physical lines for diagnostics, including any attached comment.
             if let Some((_, comment)) = line.split_once('#') {
                 stripped.push('#');
@@ -95,15 +110,10 @@ pub fn specialize(source: &str, bindings: &Dimensions) -> Result<String> {
         }
         stripped.push('\n');
     }
-    for name in bindings.keys() {
-        ensure!(
-            dimensions.contains_key(name),
-            "unknown dimension binding: {name}"
-        );
-    }
-    if dimensions.is_empty() {
-        return Ok(source.to_owned());
-    }
+    Ok((dimensions, stripped))
+}
+
+fn substitute(stripped: &str, dimensions: &Dimensions) -> Result<String> {
     let mut output = String::new();
     let mut chars = stripped.chars().peekable();
     while let Some(c) = chars.next() {

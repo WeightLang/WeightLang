@@ -1,0 +1,15 @@
+wgt 0.5
+model ExplicitHidden
+# Two features and two hidden channels use independent host-provided vectors.
+# The initialized gain is shared by the prediction and next-hidden equations;
+# initialization is explicit instance creation, not compilation or training.
+parameter gain: f32[2] = full(0.5)
+
+# Both outputs retain their logical vector shape. Hidden state belongs to the
+# host: pass next_hidden into a later call, or detach it at a training boundary.
+# No fn loss is declared: a host loss/output seed chooses which outputs matter.
+fn forward(x: f32[2], hidden: f32[2]) -> (f32[2], f32[2]) {
+    let prediction = x * gain + hidden;
+    let next_hidden = hidden * gain + x;
+    return (prediction, next_hidden);
+}

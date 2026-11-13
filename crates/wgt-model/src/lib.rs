@@ -6,11 +6,19 @@ pub use anyhow::Result;
 use std::{cell::RefCell, fs::OpenOptions, path::Path, rc::Rc};
 use wgtime::Request;
 pub use wgt_language::dimensions::Dimensions;
-pub use wgt_language::model::{ModelDefinition, ModelInterface, ParameterSchema};
+pub use wgt_language::model_template::ModelTemplate;
+pub use wgt_language::model::{ModelDefinition, ModelInterface, ParameterSchema, ForwardInterface, ForwardInput, ForwardOutput};
 pub use wgt_model_macros::{model, include_model};
 pub use wgt_language::operations::{ArgumentSchema, Effects, OperationSchema, StateSchema};
 pub mod evolution;
 pub mod weights;
+mod dynamic;
+pub use dynamic::DynamicModel;
+/// Flat f32 state and supervised-output ranges for explicit recurrent host scheduling.
+#[derive(Clone, Copy, Debug)]
+pub struct StateLink { pub input_offset: usize, pub output_offset: usize, pub width: usize }
+#[derive(Clone, Copy, Debug)]
+pub struct OutputSlice { pub offset: usize, pub width: usize }
 /// ContinuousOnly conservatively rejects every model containing bool/int parameters.
 #[derive(Clone, Copy, Debug)]
 pub enum DifferentiationPolicy { ContinuousOnly, StraightThrough }
@@ -72,6 +80,20 @@ impl Client {
 pub struct Model { connection: Rc<RefCell<wgtime::Client>>, handle: Option<u64>, definition: ModelDefinition, interface: Option<ModelInterface>, operations: Vec<OperationSchema>, backend: String }
 impl Model {
     fn handle(&self)->Result<u64> { self.handle.context("model is closed") }
+    /// Replace activation geometry while retaining the service handle, weights and optimizer.
+    /// Only pure forward plans with identical parameter contracts are accepted.
+    pub fn rebind_geometry(&mut self, definition: &ModelDefinition) -> Result<()> {
+        ensure!(definition.name() == self.definition.name(), "geometry rebinding requires the same model name");
+        ensure!(definition.interface().is_some() && definition.operations().is_empty(), "geometry rebinding requires a differentiable forward model");
+        let reply = self.connection.borrow_mut().call(Request::RebindDefinition {
+            handle: self.handle()?, source: definition.source().to_owned(),
+        })?;
+        let backend = reply["backend"].as_str().context("missing rebound execution backend")?.to_owned();
+        self.definition = definition.clone();
+        self.interface = definition.interface().cloned();
+        self.backend = backend;
+        Ok(())
+    }
     pub fn definition(&self)->&ModelDefinition { &self.definition }
     pub fn interface(&self)->Option<&ModelInterface> { self.interface.as_ref() }
     pub fn operations(&self)->&[OperationSchema] { &self.operations }
@@ -149,6 +171,17 @@ impl Model {
         })
     }
 
+    /// Execute the pure tuple-return forward with logical f32 ports. Buffers are
+    /// row-major; exact logical shapes are declared by forward_interface().
+    pub fn forward_ports(&self, inputs: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
+        let ports = self.definition.forward_interface().context("model has no tuple forward interface")?;
+        ensure!(inputs.len() == ports.inputs.len() && inputs.iter().zip(&ports.inputs)
+            .all(|(value,port)| value.len() == port.width && value.iter().all(|v|v.is_finite())),
+            "forward input ports do not match their contracts");
+        let input = inputs.iter().flatten().copied().collect::<Vec<_>>();
+        let output = self.forward(&input)?;
+        Ok(ports.outputs.iter().map(|port|output[port.offset..port.offset+port.width].to_vec()).collect())
+    }
     /// Execute one input and commit explicit forward writes on success.
     pub fn forward(&self, input:&[f32])->Result<Vec<f32>> {
         let interface=self.interface.as_ref().context("typed model requires an explicit named operation call")?;
@@ -157,6 +190,21 @@ impl Model {
         let output:Vec<f32>=serde_json::from_value(reply.get("output").context("missing output")?.clone())?;
         ensure!(output.len()==interface.output && output.iter().all(|n|n.is_finite()),"invalid service output");
         Ok(output)
+    }
+    /// Backpropagate through explicit hidden links across up to 1024 calls, then
+    /// commit one optimizer update. Only selected outputs/timesteps are supervised.
+    pub fn train_recurrent(&self, inputs: &[Vec<f32>], targets: &[Option<Vec<f32>>],
+        link: StateLink, supervised: OutputSlice, options: TrainOptions) -> Result<f32> {
+        ensure!(matches!(options.loss,Loss::Mse), "recurrent training currently requires explicit MSE output supervision");
+        let reply=self.connection.borrow_mut().call(Request::TrainRecurrent {
+            handle:self.handle()?,inputs:inputs.to_vec(),targets:targets.to_vec(),
+            input_offset:link.input_offset,output_offset:link.output_offset,state_width:link.width,
+            supervised_offset:supervised.offset,supervised_width:supervised.width,
+            rate:options.rate,clip:options.clip,
+        })?;
+        let loss=reply["loss"].as_f64().context("missing recurrent loss")? as f32;
+        ensure!(loss.is_finite(),"nonfinite recurrent service loss");
+        Ok(loss)
     }
     /// CPU SGD/Adam only, selected explicitly at initialization or weight binding.
     pub fn train(&self, inputs:&[Vec<f32>], targets:Targets<'_>, options:TrainOptions)->Result<f32> {

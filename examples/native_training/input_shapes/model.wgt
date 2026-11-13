@@ -1,0 +1,18 @@
+wgt 0.5
+dim ROWS = 2
+dim FEATURES = 3
+dim OUTPUTS = 2
+model ShapeBoundProjection
+
+# ROWS is a logical input axis supplied by the host at instance creation.
+# FEATURES can be inferred from the input too; OUTPUTS uses its explicit default
+# unless the host binds it. The same definition serves Rust and Python.
+# This recipe describes an untrained model; compilation never samples weights.
+parameter weight: f32[FEATURES,OUTPUTS] = full(0.25)
+
+# Project each row's feature vector. The contraction must match FEATURES;
+# different row counts create separate fixed-shape instances, not a shape cache
+# or shared optimizer. Hosts pass/receive flattened row-major vectors at the ABI.
+fn forward(x: f32[ROWS,FEATURES]) -> f32[ROWS,OUTPUTS] {
+    return x @ (weight as [FEATURES,OUTPUTS]);
+}

@@ -172,6 +172,12 @@ enum Cmd {
     Metadata,
     /// Strictly parse and validate a WGT model definition without initializing it
     Check { source: Option<PathBuf>,
+        /// Check the selected execution backend; omit to preserve source-dialect checking
+        #[arg(long, value_enum)]
+        target: Option<CompileTarget>,
+        /// Infer declared dimensions from a logical input shape (repeatable NAME=D1,D2)
+        #[arg(long = "input-shape")]
+        input_shapes: Vec<String>,
         /// Bind a declared model dimension (repeatable NAME=VALUE)
         #[arg(long = "dim")]
         dimensions: Vec<String>,
@@ -195,6 +201,9 @@ enum Cmd {
         /// New architecture file; omit to write the generated target to stdout
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Infer declared dimensions from a logical input shape (repeatable NAME=D1,D2)
+        #[arg(long = "input-shape")]
+        input_shapes: Vec<String>,
         /// Rust facade dependency path, for example renamed_wgt (default: ::wgt)
         #[arg(long)]
         crate_path: Option<String>,
@@ -363,13 +372,13 @@ fn execute(cli: Cli) -> Result<u8> {
         return weightlang_wgt::format::run(&base, sources, *check);
     }
     // Checking must return before toolchain dispatch or dependency preparation.
-    if let Cmd::Check { source, dimensions } = &command {
+    if let Cmd::Check { source, dimensions, target, input_shapes } = &command {
         let project = manifest::project(&base).unwrap_or_else(|_| base.clone());
         let path = if let Some(source) = source {
             base.join(source)
         } else if let Some(config) = manifest::ProjectConfig::read(&project)? {
             if config.python.is_some() {
-                ensure!(dimensions.is_empty(), "--dim requires an explicit WGT source, not a Python starter configuration");
+                ensure!(dimensions.is_empty() && input_shapes.is_empty() && target.is_none(), "--dim, --input-shape and --target require a WGT model, not a Python starter configuration");
                 python_env::check(&config)?;
                 println!(
                     "ok: Python starter configuration; no downloads, initialization or execution"
@@ -384,8 +393,25 @@ fn execute(cli: Cli) -> Result<u8> {
         } else {
             base.join("model.wgt")
         };
-        wgt_language::model::ModelDefinition::from_file_with_dimensions(&path, &dimension_bindings(dimensions)?)
-            .with_context(|| format!("invalid model definition {}", path.display()))?;
+        let source = wgt_language::source::read_model_source(&path)?;
+        if let Some(target) = target {
+            wgt_language::backend::preflight_source(&source, backend(*target))?;
+        }
+        if wgt_language::torch_model::is_torch_model(&source) {
+            ensure!(input_shapes.is_empty(), "--input-shape requires shared WGT tensor signatures; Torch compatibility models use constructor arguments");
+            ensure!(dimensions.is_empty(), "torch module dimensions are constructor arguments");
+            wgt_language::torch_model::parse(&source)?;
+            println!("ok: PyTorch-target model syntax; no initialization or execution");
+            return Ok(0);
+        }
+        let bindings = dimension_bindings(dimensions)?;
+        if input_shapes.is_empty() {
+            wgt_language::model::ModelDefinition::from_file_with_dimensions(&path, &bindings)
+                .with_context(|| format!("invalid model definition {}", path.display()))?;
+        } else {
+            wgt_language::model_template::ModelTemplate::from_file(&path)?
+                .bind_input_shapes(&input_shape_bindings(input_shapes)?, &bindings)?;
+        }
         println!("ok: WGT model definition; no initialization or execution");
         return Ok(0);
     }
@@ -397,6 +423,7 @@ fn execute(cli: Cli) -> Result<u8> {
             output,
             crate_path,
             dimensions,
+            input_shapes,
         } => {
             let dimensions = dimension_bindings(dimensions)?;
             ensure!(
@@ -413,13 +440,25 @@ fn execute(cli: Cli) -> Result<u8> {
             } else {
                 None
             };
+            let (text, dimensions, template_fingerprint) = if input_shapes.is_empty() {
+                (text, dimensions, None)
+            } else {
+                let template = if let Some(text) = &text {
+                    wgt_language::model_template::ModelTemplate::parse(text)?
+                } else {
+                    wgt_language::model_template::ModelTemplate::from_file(base.join(source))?
+                };
+                let definition = template.bind_input_shapes(&input_shape_bindings(input_shapes)?, &dimensions)?;
+                (Some(definition.source().to_owned()), Default::default(), Some(template.source_fingerprint()?))
+            };
             match target {
                 CompileTarget::Torch => {
-                    let architecture = if let Some(text) = text {
+                    let mut architecture = if let Some(text) = text {
                         weightlang_wgt::torch_export::compile_source_with_dimensions(&text, &dimensions)?
                     } else {
                         weightlang_wgt::torch_export::compile_with_dimensions(&base.join(source), &dimensions)?
                     };
+                    architecture.template_fingerprint = template_fingerprint;
                     if let Some(output) = output {
                         weightlang_wgt::torch_export::write(&architecture, &base.join(output))?;
                     } else {
@@ -1198,4 +1237,24 @@ fn dimension_bindings(values: &[String]) -> Result<wgt_language::dimensions::Dim
         ensure!(bindings.insert(name.to_owned(), value).is_none(), "duplicate dimension binding: {name}");
     }
     Ok(bindings)
+}
+
+fn backend(target: CompileTarget) -> wgt_language::backend::Backend {
+    match target {
+        CompileTarget::Rust => wgt_language::backend::Backend::Rust,
+        CompileTarget::Torch => wgt_language::backend::Backend::Torch,
+    }
+}
+
+fn input_shape_bindings(values: &[String]) -> Result<std::collections::BTreeMap<String, Vec<usize>>> {
+    let mut shapes = std::collections::BTreeMap::new();
+    for value in values {
+        let (name, axes) = value.split_once('=').context("--input-shape requires NAME=D1,D2")?;
+        ensure!(!name.is_empty(), "--input-shape requires an input name");
+        let shape = axes.split(',').map(|axis| axis.parse::<usize>().context("--input-shape extents must be positive integers"))
+            .collect::<Result<Vec<_>>>()?;
+        wgt_language::tensor::validate_shape(&shape, wgt_language::tensor::ShapeLimits::REGISTER)?;
+        ensure!(shapes.insert(name.to_owned(), shape).is_none(), "duplicate input shape: {name}");
+    }
+    Ok(shapes)
 }

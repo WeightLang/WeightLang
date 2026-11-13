@@ -34,7 +34,7 @@ _BINARY = {"add": torch.add, "mul": torch.mul, "minimum": torch.minimum,
            "ge": ops.ge, "div": ops.div}
 _GEOMETRY = {"conv", "max_pool2d", "avg_pool2d", "reshape", "transpose", "permute",
              "matmul", "batch_matmul", "layer_norm", "softmax_axis", "scale",
-             "ge", "div", "sqrt", "scale_by"}
+             "ge", "div", "sqrt", "scale_by", "embedding", "gather", "dynamic_slice", "concat"}
 _FIELDS = {
     **{name: "out input" for name in _UNARY},
     **{name: "out left right" for name in _BINARY},
@@ -52,6 +52,9 @@ _FIELDS = {
     "resource_state": "out", "read": "out parameter", "write": "parameter value",
     "linear": "out input weight bias", "gate": "out probability input",
     "route": "out probability yes no", "inference_skip": "probability when_one target",
+    "embedding": "out table indices padding_idx",
+    "gather": "out input indices axis", "dynamic_slice": "out input start length",
+    "concat": "out left right axis",
     "slice": "out input start", "label": "name", "branch": "condition positive otherwise",
     "jump": "target", "return": "value",
 }
@@ -256,6 +259,8 @@ class ProgramExecutor:
             actual = set(item)
             if op == "linear" and "bias" not in actual:
                 actual.add("bias")
+            if op == "embedding" and "padding_idx" not in actual:
+                actual.add("padding_idx")
             _require(actual == required, f"invalid fields for {op}")
             _require(program["version"] >= 3 or op not in _GEOMETRY, f"{op} requires IR version 3")
             _require(program["version"] >= 2 or op != "validate_probabilities", "probability validation requires IR version 2")
@@ -381,6 +386,31 @@ class ProgramExecutor:
             if op == "route":
                 _require(shape == reg("no"), "route candidate shape mismatch")
             _require(reg("probability") in {(1,), shape}, "gate/route probability shape mismatch")
+        elif op == "embedding":
+            table, ids, padding = reg("table"), reg("indices"), item.get("padding_idx")
+            _require(len(table) == 2 and len(ids) == 1, "embedding requires rank-2 table and rank-1 indices")
+            _require(padding is None or type(padding) is int and 0 <= padding < table[0], "invalid embedding padding_idx")
+            _require(shape == (ids[0], table[1]), "embedding output shape mismatch")
+            return 1 + math.prod(shape)
+        elif op == "gather":
+            previous, ids, axis = reg("input"), reg("indices"), item["axis"]
+            _require(type(axis) is int and 0 <= axis < len(previous) and len(ids) == 1, "invalid gather axis/indices")
+            expected = list(previous)
+            expected[axis] = ids[0]
+            _require(shape == tuple(expected), "gather output shape mismatch")
+            return 1 + math.prod(shape)
+        elif op == "dynamic_slice":
+            previous, length = reg("input"), item["length"]
+            _require(len(previous) == 1 and reg("start") == (1,) and type(length) is int and 0 < length <= previous[0] and shape == (length,), "invalid dynamic_slice contract")
+            return 1 + math.prod(shape)
+        elif op == "concat":
+            left, right, axis = reg("left"), reg("right"), item["axis"]
+            _require(type(axis) is int and 0 <= axis < len(left) and len(left) == len(right), "invalid concat axis/rank")
+            _require(all(a == b for i, (a, b) in enumerate(zip(left, right)) if i != axis), "concat shape mismatch")
+            expected = list(left)
+            expected[axis] += right[axis]
+            _require(shape == tuple(expected), "concat output shape mismatch")
+            return 1 + math.prod(shape)
         elif op == "slice":
             previous, start = reg("input"), item["start"]
             _require(len(shape) == len(previous) == 1 and type(start) is int and start >= 0 and start + shape[0] <= previous[0], "slice outside vector")
@@ -559,6 +589,14 @@ class ProgramExecutor:
                         out = ops.clip(get("input"), item["low"], item["high"])
                     elif op in {"sum", "mean"}:
                         out = (ops.sum(get("input")) if op == "sum" else ops.mean(get("input"))).reshape(1)
+                    elif op == "embedding":
+                        out = ops.embedding(get("table"), get("indices"), item.get("padding_idx"))
+                    elif op == "gather":
+                        out = ops.gather(get("input"), get("indices"), item["axis"])
+                    elif op == "dynamic_slice":
+                        out = ops.dynamic_slice(get("input"), get("start"), item["length"])
+                    elif op == "concat":
+                        out = ops.concat(get("left"), get("right"), item["axis"])
                     elif op == "slice":
                         start = item["start"]
                         out = get("input")[start:start + self.shapes[item["out"]][0]]

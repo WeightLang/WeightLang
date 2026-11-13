@@ -241,6 +241,10 @@ parameter w:f32[4,4]=[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]
 parameter b:f32[4]=[0,0,0,0]
 parameter state:f32[4]=[0,0,0,0]
 fn forward(x) {
+    let joined=concat(x,x);
+    let gathered=gather(w as [4,4],[0,2]);
+    let selected=dynamic_slice(x,[1],2);
+    let embedded=embedding(w as [4,4],[0,2],0);
     let image=x as [1,2,2];
     let kernel=[1] as [1,1,1,1];
     let convolved=conv(image,kernel,[0],[1,1],[0,0],[1,1],1);
@@ -518,4 +522,18 @@ fn cli_dimension_binding_is_checked_and_both_export_targets_are_concrete() {
         let output = cli(scratch.path()).args(["check", source.to_str().unwrap()]).args(args).output().unwrap();
         assert!(!output.status.success());
     }
+}
+
+#[test]
+fn explicit_torch_module_target_compiles_and_checks_without_python() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = "wgt 0.5\ntarget torch\nhost example.host\nextern nn\nmodel Example extends Module {\ninit(self) {\nraise RuntimeError('must not execute');\n}\nfn forward(self, x) {\nreturn x;\n}\n}\n";
+    fs::write(directory.path().join("model.wgt"), source).unwrap();
+    let exported = compile(source);
+    assert_eq!(exported["kind"], "torch_module");
+    assert_eq!(exported["torch_module"]["models"], json!(["Example"]));
+    assert!(exported["parameters"].as_array().unwrap().is_empty());
+    assert!(cli(directory.path()).args(["check", "model.wgt"]).output().unwrap().status.success());
+    assert!(cli(directory.path()).args(["compile", "model.wgt", "--target", "torch"]).output().unwrap().status.success());
+    assert!(!cli(directory.path()).args(["compile", "model.wgt", "--target", "rust"]).output().unwrap().status.success());
 }

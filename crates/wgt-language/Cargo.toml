@@ -12,6 +12,8 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 safetensors = "0.8"
+sha2 = "0.10"
+rustpython-parser = { version = "0.4", default-features = false, features = ["location", "num-bigint"] }
 
 [build-dependencies]
 serde_json = "1"

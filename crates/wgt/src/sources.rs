@@ -15,14 +15,23 @@ pub fn std_source(module: &str) -> Option<&'static str> {
         .map(|(_, text)| *text)
 }
 
-/// Modules named by `use` lines, e.g. `use std/recurrent as r` → `std/recurrent`.
-fn uses(text: &str) -> impl Iterator<Item = &str> {
-    text.lines().filter_map(|line| {
+/// Resolve current pure-model imports with the shared source parser. Legacy
+/// `use std/...` remains readable for older graph artifacts. Unknown packages
+/// never trigger filesystem/network resolution: collect only uses STD_SOURCES.
+fn uses(text: &str) -> Vec<String> {
+    let mut modules = wgt_language::script::operators::imports(text)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect::<Vec<_>>();
+    modules.extend(text.lines().filter_map(|line| {
         line.trim_start()
             .strip_prefix("use ")?
             .split_whitespace()
             .next()
-    })
+            .map(str::to_owned)
+    }));
+    modules
 }
 
 /// `{"model": <source.wgt>, "std/...": <module>, ...}`; empty when the artifact
@@ -35,13 +44,13 @@ pub fn collect(root: &Path, manifest: &Value) -> BTreeMap<String, String> {
     let Ok(model) = std::fs::read_to_string(root.join(file)) else {
         return sources;
     };
-    let mut pending: Vec<&str> = uses(&model).collect();
+    let mut pending = uses(&model);
     while let Some(module) = pending.pop() {
-        if sources.contains_key(module) {
+        if sources.contains_key(&module) {
             continue;
         }
-        if let Some(text) = std_source(module) {
-            sources.insert(module.to_owned(), text.to_owned());
+        if let Some(text) = std_source(&module) {
+            sources.insert(module, text.to_owned());
             pending.extend(uses(text));
         }
     }
@@ -86,23 +95,60 @@ mod tests {
     }
 
     #[test]
-    fn collects_model_and_transitive_std_uses() {
+    fn collects_model_and_current_std_imports_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = "wgt 0.5\n# Explicit host-owned hidden state.\nimport recurrent from \"std/recurrent\"\nimport activation from \"std/activation\"\nimport duplicate from \"std/recurrent\"\nimport external from \"external/nn\"\nimport local from \"./private.wgt\"\nimport absent from \"std/nn\"\nmodel m\n";
+        std::fs::write(dir.path().join("source.wgt"), model).unwrap();
+        // A local dependency must not be embedded, even when readable.
+        std::fs::write(dir.path().join("private.wgt"), "private source").unwrap();
+        let manifest = serde_json::json!({"source": {"file": "source.wgt"}});
+        let sources = collect(dir.path(), &manifest);
+        assert_eq!(sources["model"], model);
+        for module in ["std/recurrent", "std/activation"] {
+            assert_eq!(sources[module], std_source(module).unwrap());
+        }
+        // These real modules currently have no transitive imports. Duplicates
+        // collapse, and absent std/local/third-party paths are not followed.
+        assert_eq!(sources.len(), 3);
+        assert!(collect(dir.path(), &serde_json::json!({})).is_empty());
+        assert!(
+            collect(
+                dir.path(),
+                &serde_json::json!({"source": {"file": "missing.wgt"}})
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn legacy_use_still_embeds_an_existing_std_module() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("source.wgt"),
-            "wgt 0.5\n# Tiny decoder.\nuse std/transformer\nmodel m\n",
+            "wgt 0.5\nuse std/attention as attention\nmodel m\n",
         )
         .unwrap();
-        let manifest = serde_json::json!({"source": {"file": "source.wgt"}});
-        let sources = collect(dir.path(), &manifest);
-        assert!(sources["model"].contains("# Tiny decoder."));
-        // std/transformer uses std/nn, which must come along for nested block comments.
-        assert!(sources.contains_key("std/transformer") && sources.contains_key("std/nn"));
-        assert!(collect(dir.path(), &serde_json::json!({})).is_empty());
-        assert!(collect(
+        let sources = collect(
             dir.path(),
-            &serde_json::json!({"source": {"file": "missing.wgt"}})
-        )
-        .is_empty());
+            &serde_json::json!({"source": {"file": "source.wgt"}}),
+        );
+        assert_eq!(
+            sources["std/attention"],
+            std_source("std/attention").unwrap()
+        );
+        assert_eq!(sources.len(), 2);
+    }
+
+    #[test]
+    fn commented_or_quoted_imports_do_not_embed_std_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = "wgt 0.5\n# import activation from \"std/activation\"\nmodel m\nfn forward(x) { let label = \"import recurrent from \\\"std/recurrent\\\"\"; return x; }\n";
+        std::fs::write(dir.path().join("source.wgt"), source).unwrap();
+        let sources = collect(
+            dir.path(),
+            &serde_json::json!({"source": {"file": "source.wgt"}}),
+        );
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources["model"], source);
     }
 }

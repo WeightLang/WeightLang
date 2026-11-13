@@ -10,6 +10,8 @@ mod autodiff;
 pub use autodiff::ForwardPass;
 mod training;
 mod reload;
+mod geometry;
+pub mod recurrent;
 pub mod optimization;
 pub mod transport;
 pub(crate) mod workspace;
@@ -54,6 +56,9 @@ enum Op {
     Mean(usize, usize),
     Blend(usize, usize, usize, Option<usize>),
     InferenceSkip(usize, bool, usize),
+    Concat(usize, usize, usize, usize, usize, usize),
+    Gather(usize, usize, usize, usize, usize, usize, Option<usize>),
+    DynamicSlice(usize, usize, usize, usize),
     Slice(usize, usize, usize),
     Label,
     Branch(usize, usize, usize),
@@ -439,6 +444,24 @@ impl AdaptiveSession {
                         when_one,
                         target,
                     } => Op::InferenceSkip(reg(probability)?, *when_one, label(target)?),
+                    Instruction::Concat { out, left, right, axis } => {
+                        let (r, a, b) = (dest(out)?, reg(left)?, reg(right)?);
+                        let shape = &program.registers[a].shape;
+                        let inner: usize = shape[*axis + 1..].iter().product();
+                        Op::Concat(r, a, b, shape[..*axis].iter().product(), shape[*axis] * inner, program.registers[b].shape[*axis] * inner)
+                    }
+                    Instruction::Embedding { out, table, indices, padding_idx } => {
+                        let (r, x, ids) = (dest(out)?, reg(table)?, reg(indices)?);
+                        let shape = &program.registers[x].shape;
+                        Op::Gather(r, x, ids, 1, shape[0], shape[1], *padding_idx)
+                    }
+                    Instruction::Gather { out, input, indices, axis } => {
+                        let (r, x, ids) = (dest(out)?, reg(input)?, reg(indices)?);
+                        let shape = &program.registers[x].shape;
+                        Op::Gather(r, x, ids, shape[..*axis].iter().product(), shape[*axis], shape[*axis + 1..].iter().product(), None)
+                    }
+                    Instruction::DynamicSlice { out, input, start, length } =>
+                        Op::DynamicSlice(dest(out)?, reg(input)?, reg(start)?, *length),
                     Instruction::Slice { out, input, start } => {
                         let (r, x) = (dest(out)?, reg(input)?);
                         Op::Slice(r, x, *start)
@@ -531,12 +554,20 @@ impl AdaptiveSession {
         })
     }
 
-    /// Require native forward execution for this instance, including training tapes.
-    /// Compilation and workspace admission complete before changing execution mode.
+    /// Select compiled forward/tapes where kernels exist; runtime indexing uses
+    /// the Rust interpreter and reports that backend. Workspace admission precedes a mode change.
     pub fn enable_compiled(&mut self) -> Result<()> {
         self.ensure_idle()?;
         if self.compiled.is_some() { return Ok(()); }
+        // Runtime indexing deliberately uses the interpreter, including its tape.
+        // Report the actual backend through execution_backend/is_compiled.
+        if self.program.instructions.iter().chain(self.program.loss.iter().flat_map(|p| p.instructions.iter()))
+            .any(|i| matches!(i, Instruction::Embedding { .. } | Instruction::Concat { .. } | Instruction::Gather { .. } | Instruction::DynamicSlice { .. })) {
+            return Ok(());
+        }
+        let optimizer_bytes=self.optimizer_storage_bytes()?;
         let remaining = self.memory_limit.checked_sub(self.managed_bytes)
+            .and_then(|n| n.checked_sub(optimizer_bytes))
             .context("compiled workspace exceeds session memory budget")?;
         let compiled = crate::compiled_forward::CompiledForward::compile(&self.program, remaining)?;
         if let Some(loss) = &self.program.loss {
@@ -869,7 +900,7 @@ impl AdaptiveSession {
             let cost = match op {
                 Op::Conv(_,_,_,_,g) => g.work()? as u64,
                 Op::MaxPool2d(_,_,g) | Op::AvgPool2d(_,_,g) => g.work()? as u64,
-                Op::Reshape(r,_) | Op::Permute(r,..) => (self.program.registers[r].len as u64).saturating_add(1),
+                Op::Concat(r,..) | Op::Gather(r,..) | Op::DynamicSlice(r,..) | Op::Reshape(r,_) | Op::Permute(r,..) => (self.program.registers[r].len as u64).saturating_add(1),
                 Op::Transpose(_,_,m,n) => m.checked_mul(n).and_then(|v|v.checked_add(1)).context("transpose work overflow")? as u64,
                 Op::Matmul(_,_,_,m,k,n) => m.checked_mul(k).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("matmul work overflow")? as u64,
                 Op::BatchMatmul(_,_,_,batch,m,k,n) => batch.checked_mul(m).and_then(|v|v.checked_mul(k)).and_then(|v|v.checked_mul(n)).and_then(|v|v.checked_add(1)).context("batch_matmul work overflow")? as u64,
@@ -1159,6 +1190,37 @@ impl AdaptiveSession {
                         continue;
                     }
                 }
+                Op::Concat(r, a, b, outer, left, right) => {
+                    self.ready(a)?;
+                    self.ready(b)?;
+                    for o in 0..outer {
+                        let dst = o * (left + right);
+                        self.scratch[dst..dst + left].copy_from_slice(&self.registers[a][o * left..(o + 1) * left]);
+                        self.scratch[dst + left..dst + left + right].copy_from_slice(&self.registers[b][o * right..(o + 1) * right]);
+                    }
+                    output = Some(r);
+                }
+                Op::Gather(r, x, ids, outer, axis, inner, _) => {
+                    self.ready(x)?;
+                    self.ready(ids)?;
+                    let count = self.registers[ids].len();
+                    for o in 0..outer {
+                        for (j, &index) in self.registers[ids].iter().enumerate() {
+                            let index = runtime_index(index, axis)?;
+                            let src = (o * axis + index) * inner;
+                            let dst = (o * count + j) * inner;
+                            self.scratch[dst..dst + inner].copy_from_slice(&self.registers[x][src..src + inner]);
+                        }
+                    }
+                    output = Some(r);
+                }
+                Op::DynamicSlice(r, x, start, length) => {
+                    self.ready(x)?;
+                    self.ready(start)?;
+                    let start = runtime_index(self.registers[start][0], self.registers[x].len() - length + 1)?;
+                    self.scratch[..length].copy_from_slice(&self.registers[x][start..start + length]);
+                    output = Some(r);
+                }
                 Op::Slice(r, x, start) => {
                     self.ready(x)?;
                     let n = self.program.registers[r].len;
@@ -1240,4 +1302,10 @@ impl AdaptiveSession {
             self.pc += 1;
         }
     }
+}
+
+fn runtime_index(value: f32, bound: usize) -> Result<usize> {
+    ensure!(value.is_finite() && value >= 0. && value.fract() == 0. && f64::from(value) < bound as f64,
+        "runtime index must be a finite exact nonnegative integer within bounds");
+    Ok(value as usize)
 }

@@ -33,6 +33,13 @@ fn every_current_model_example_passes_the_shared_frontend() {
         if path.ends_with("crates/wgtime-core/tests/fixtures/ppo_legacy/model.wgt") {
             continue;
         }
+        let source = fs::read_to_string(&path).unwrap();
+        if wgt_language::torch_model::is_torch_model(&source) {
+            if let Err(error) = wgt_language::torch_model::parse(&source) {
+                failures.push(format!("{}: {error:#}", path.display()));
+            }
+            continue;
+        }
         let result = ModelDefinition::from_file(&path)
             .and_then(|model| model.compile_plan_with_modules().map(|_| ()));
         if let Err(error) = result {

@@ -807,6 +807,8 @@ impl<'a> Generator<'a> {
                         Self::literal(*max)?
                     );
                 }
+                I::Embedding { .. } | I::Concat { .. } | I::Gather { .. } | I::DynamicSlice { .. } =>
+                    bail!("runtime indexing requires the reference-interpreter backend"),
                 I::Slice {
                     out: o,
                     input: x,

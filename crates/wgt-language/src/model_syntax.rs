@@ -6,6 +6,12 @@ use anyhow::{Context, Result, ensure};
 pub(crate) fn normalize(source: &str) -> Result<String> {
     let unit = crate::source::split(source)?;
     let mut functions = parse::parse_functions(&unit.functions)?;
+    // Keep the explicit logical contract through import resolution and storage.
+    // ModelDefinition lowers it temporarily for validation/compilation instead.
+    if functions.get("forward").is_some_and(|f| f.forward_signature.is_some()) {
+        return Ok(source.to_owned());
+    }
+
     if let Some(contract) = functions
         .get("forward")
         .and_then(|f| f.tensor_signature.clone())
@@ -168,4 +174,129 @@ fn no_updates(statements: &[parse::Statement]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Lower an explicit tuple Forward without running initialization or losing the
+/// original source signature. The IR continues to have exactly one vector port.
+pub(crate) fn lower_forward(source: &str) -> Result<(String, crate::model::ForwardInterface)> {
+    use crate::model::{ForwardInput, ForwardInterface, ForwardOutput};
+    use parse::{Statement, Function};
+    parse::validate_forward_compiler_names(source)?;
+    let unit = crate::source::split(source)?;
+    let mut functions = parse::parse_functions(&unit.functions)?;
+    ensure!(!functions.contains_key("loss"),
+        "tuple forward does not yet support fn loss; use a Python host loss or native output gradient seeds");
+    let forward = functions.get("forward").context("missing pure forward")?;
+    let signature = forward.forward_signature.as_ref().context("missing tuple forward signature")?;
+    ensure!(functions.iter().all(|(name, f)| name == "forward" || (f.signature.is_none() && f.forward_signature.is_none())),
+        "pure forward cannot contain typed operations; use pure tensor helpers");
+    for line in unit.declarations.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        ensure!(!["input ", "output ", "target ", "state ", "layer "].iter().any(|p| line.starts_with(p)),
+            "tuple forward cannot mix root ports, persistent state or sequential layers");
+        if let Some((_, storage)) = line.split_once(' ') {
+            if let Some((name, _)) = storage.split_once(':') {
+                ensure!(!forward.args.iter().any(|arg| arg == name.trim()), "forward input shadows storage: {}", name.trim());
+            }
+        }
+    }
+    fn width(shape: &[usize], total: &mut usize) -> Result<usize> {
+        let width = crate::tensor::validate_shape(shape, crate::tensor::ShapeLimits::REGISTER)?;
+        *total = total.checked_add(width).context("forward packed width overflow")?;
+        ensure!(*total <= 16384, "forward packed ports exceed 16384 f32 elements");
+        Ok(width)
+    }
+    let mut interface = ForwardInterface { inputs: Vec::new(), outputs: Vec::new(), input: 0, output: 0, tuple: true };
+    for (name, shape) in forward.args.iter().zip(&signature.inputs) {
+        let offset = interface.input;
+        let width = width(shape, &mut interface.input)?;
+        interface.inputs.push(ForwardInput { name: name.clone(), shape: shape.clone(), offset, width });
+    }
+    for shape in &signature.outputs {
+        let offset = interface.output;
+        let width = width(shape, &mut interface.output)?;
+        interface.outputs.push(ForwardOutput { shape: shape.clone(), offset, width });
+    }
+    fn returns(body: &[Statement]) -> bool {
+        body.iter().any(|s| match &s.kind {
+            Stmt::Return(_) => true,
+            Stmt::If(_, yes, no) => returns(yes) && returns(no),
+            _ => false,
+        })
+    }
+    ensure!(returns(&forward.body), "pure forward must return its tensor tuple on every path");
+    let mut counter = 0usize;
+    fn rewrite_returns(body: &mut Vec<Statement>, outputs: &[ForwardOutput], counter: &mut usize) -> Result<()> {
+        let mut result = Vec::new();
+        for mut statement in std::mem::take(body) {
+            match &mut statement.kind {
+                Stmt::Return(expr) => {
+                    let id = *counter;
+                    *counter += 1;
+                    let names: Vec<_> = (0..outputs.len()).map(|i| format!("wgt_multi_return_{id}_{i}")).collect();
+                    result.push(Statement { line: statement.line, kind: Stmt::LetTuple(names.clone(), expr.clone()) });
+                    let mut packed = None;
+                    for (name, port) in names.iter().zip(outputs) {
+                        let checked = format!("{name}_checked");
+                        let shape = Expr::List(port.shape.iter().map(|n| Expr::Number(*n as f64)).collect());
+                        result.push(Statement { line: statement.line, kind: Stmt::Let(checked.clone(),
+                            Expr::Call("wgt_forward_exact".into(), vec![Expr::Name(name.clone()), shape])) });
+                        let flat = format!("{name}_flat");
+                        result.push(Statement { line: statement.line, kind: Stmt::Let(flat.clone(),
+                            Expr::Call("reshape".into(), vec![Expr::Name(checked), Expr::List(vec![Expr::Number(port.width as f64)])])) });
+                        packed = Some(match packed {
+                            None => flat,
+                            Some(previous) => {
+                                let joined = format!("{name}_joined");
+                                result.push(Statement { line: statement.line, kind: Stmt::Let(joined.clone(),
+                                    Expr::Call("concat".into(), vec![Expr::Name(previous), Expr::Name(flat), Expr::Number(0.)])) });
+                                joined
+                            }
+                        });
+                    }
+                    statement.kind = Stmt::Return(Expr::Name(packed.context("empty forward tuple")?));
+                }
+                Stmt::If(_, yes, no) => { rewrite_returns(yes, outputs, counter)?; rewrite_returns(no, outputs, counter)?; }
+                Stmt::While(_, body) => rewrite_returns(body, outputs, counter)?,
+                _ => {}
+            }
+            result.push(statement);
+        }
+        *body = result;
+        Ok(())
+    }
+    let mut forward: Function = forward.clone();
+    rewrite_returns(&mut forward.body, &interface.outputs, &mut counter)?;
+    let mut body = Vec::new();
+    for port in &interface.inputs {
+        let slice = format!("wgt_multi_arg_{}", body.len());
+        body.push(Statement { line: 1, kind: Stmt::Let(slice.clone(), Expr::Call("slice".into(), vec![
+            Expr::Name("wgt_multi_input".into()), Expr::Number(port.offset as f64), Expr::Number(port.width as f64)])) });
+        body.push(Statement { line: 1, kind: Stmt::Let(port.name.clone(), Expr::Call("reshape".into(), vec![
+            Expr::Name(slice), Expr::List(port.shape.iter().map(|n| Expr::Number(*n as f64)).collect())])) });
+    }
+    body.extend(forward.body);
+    forward.args = vec!["wgt_multi_input".into()];
+    forward.signature = None;
+    forward.tensor_signature = None;
+    forward.forward_signature = None;
+    forward.body = body;
+    functions.insert("forward".into(), forward);
+    let mut lowered = unit.declarations;
+    lowered.push_str(&format!("\ninput wgt_multi_input: f32[{}]\noutput wgt_multi_output: f32[{}]\n", interface.input, interface.output));
+    for (name, model) in &unit.models {
+        lowered.push_str(&format!("\nmodel {name} {{\n{}\n}}\n", model.lines().skip(2).collect::<Vec<_>>().join("\n")));
+    }
+    for (name, function) in functions.iter().collect::<std::collections::BTreeMap<_,_>>() {
+        crate::model_modules::emit_function(&mut lowered, name, function)?;
+    }
+    ensure!(lowered.len() <= 1024 * 1024, "packed forward source exceeds 1 MiB");
+    // Persistent writes can be hidden behind helper calls. Validate their actual
+    // lowered effects instead of relying only on surface assignment syntax.
+    let unit = crate::source::split(&lowered)?;
+    let functions = parse::parse_packed_forward_functions(&unit.functions)?;
+    let plan = crate::adaptive::validate_definition(&lowered, &functions)?;
+    ensure!(!plan.instructions.iter().any(|i| matches!(i, crate::adaptive::Instruction::Write { .. })),
+        "pure tuple forward cannot write persistent parameters/state; return next state explicitly");
+    Ok((lowered, interface))
 }

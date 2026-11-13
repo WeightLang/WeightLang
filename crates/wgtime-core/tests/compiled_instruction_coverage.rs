@@ -1,4 +1,4 @@
-//! The source frontend, C backend and reference executor share one instruction contract.
+//! The source frontend, C backend and explicit interpreter fallbacks share one instruction contract.
 //! Compilation coverage alone is insufficient: compare actual intermediate values and work.
 use std::collections::BTreeSet;
 use wgt_language::{
@@ -115,7 +115,7 @@ fn close(actual: &[f32], expected: &[f32], context: &str) {
 #[test]
 fn every_catalog_instruction_executes_and_tensor_values_match_the_reference() {
     let program = program(COMPLETE);
-    let actual: BTreeSet<_> = program
+    let mut actual: BTreeSet<_> = program
         .instructions
         .iter()
         .map(|i| i.contract().name)
@@ -128,11 +128,6 @@ fn every_catalog_instruction_executes_and_tensor_values_match_the_reference() {
         .iter()
         .map(|v| v["name"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        actual, expected,
-        "extend native coverage whenever the IR grows"
-    );
-    assert_eq!(actual, OPERATOR_CONTRACTS.iter().map(|c| c.name).collect());
     let parameters: Vec<_> = program
         .parameters
         .iter()
@@ -207,6 +202,67 @@ fn every_catalog_instruction_executes_and_tensor_values_match_the_reference() {
             );
         }
     }
+
+    // These instructions deliberately have no C kernel yet. Each straight-line
+    // model must execute its new instruction to produce the asserted return;
+    // add its catalog name only after both execution paths succeed.
+    for (name, body, expected_values) in [
+        (
+            "gather",
+            "return gather(x as [2,3],[2,0,2],1) as [6];",
+            vec![3.,1.,3.,6.,4.,6.],
+        ),
+        (
+            "dynamic_slice",
+            "return dynamic_slice(x,[3],2);",
+            vec![4.,5.],
+        ),
+        (
+            "concat",
+            "return concat(x[0:2] as [2,1],x[2:4] as [2,1],1) as [4];",
+            vec![1.,3.,2.,4.],
+        ),
+        (
+            "embedding",
+            "return embedding(x as [3,2],[2,0,2],0) as [6];",
+            vec![5.,6.,1.,2.,5.,6.],
+        ),
+    ] {
+        let source = format!(
+            "wgt 0.5\nmodel Fallback\ninput x:f32[6]\noutput y:f32[{}]\nfn forward(x) {{ {body} }}",
+            expected_values.len(),
+        );
+        let plan = self::program(&source);
+        assert_eq!(plan.instructions.iter().filter(|i| i.contract().name == name).count(), 1);
+        assert!(!plan.instructions.iter().any(|i| matches!(i,
+            I::Branch { .. } | I::Jump { .. } | I::InferenceSkip { .. })),
+            "coverage models must execute every instruction");
+        let error = CompiledForward::compile(&plan, 1024 * 1024)
+            .err().expect("indexing must explicitly reject direct C compilation");
+        assert!(error.to_string().contains("requires the reference-interpreter backend"), "{error:#}");
+
+        let mut baseline = reference(plan.clone(), available);
+        let mut requested = reference(plan.clone(), available);
+        assert!(!baseline.is_compiled());
+        assert_eq!(baseline.execution_backend(), "reference-interpreter");
+        requested.enable_compiled().unwrap();
+        assert!(!requested.is_compiled(), "{name} must report its actual fallback");
+        assert_eq!(requested.execution_backend(), "reference-interpreter");
+        let input = [1.,2.,3.,4.,5.,6.];
+        let expected_output = baseline.evaluate(&input, budget).unwrap();
+        let fallback_output = requested.evaluate(&input, budget).unwrap();
+        close(&fallback_output, &expected_output, name);
+        close(&fallback_output, &expected_values, name);
+        assert_eq!(requested.steps(), baseline.steps(), "{name} fallback work");
+        assert_eq!(requested.execution_backend(), "reference-interpreter");
+        // Only a successful execution earns this instruction's coverage entry.
+        actual.insert(plan.instructions.iter().find(|i| i.contract().name == name).unwrap().contract().name);
+    }
+    assert_eq!(
+        actual, expected,
+        "extend native coverage whenever the IR grows"
+    );
+    assert_eq!(actual, OPERATOR_CONTRACTS.iter().map(|c| c.name).collect());
 }
 
 #[test]

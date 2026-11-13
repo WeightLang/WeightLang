@@ -218,3 +218,7 @@ WGT 稀疏自编码器示例可以使用原生 Loss::Custom 训练，
 ### 多轴函数签名（本地新增）
 
 纯函数和根级 forward/loss 可以标明固定矩阵输入输出形状，见[形状签名](model-language.md#矩阵函数形状签名本地新增)。函数调用逐轴检查，原生服务的单向量边界使用行优先展平值，模型内部复用 reshape 与矩阵原语。模型定义检查不执行初始化或 forward。
+
+## 共享动态执行与显式状态 AD（本地新增）
+
+同一原生实例可重绑定激活几何并保留参数、SGD/Adam 状态；Python 动态模块的各形状图共享同一批 Parameter。显式 tuple-return forward 提供可微多输入、多输出，但不改变旧 typed operation 的无 AD 合同。有界跨调用 hidden 求导使用明确的 StateLink、监督输出范围和 targets，失败不提交优化器更新。运行时 `gather`、`dynamic_slice` 和 `concat` 的源级签名、索引检查、VJP、解释执行回退、大小与序列预算，见[动态模型与显式状态](dynamic-models.md)。本地能力尚未发布，不表示通用整数子图、持久 state AD 或全部 LightNest 模型已经迁移。

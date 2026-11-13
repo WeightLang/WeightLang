@@ -12,6 +12,10 @@ pub struct Diagnostic {
 
 pub fn check_file(path: &Path) -> Result<()> {
     let source = fs::read_to_string(path).with_context(|| path.display().to_string())?;
+    if wgt_language::torch_model::is_torch_model(&source) {
+        wgt_language::torch_model::parse(&source)?;
+        return Ok(());
+    }
     crate::script_dependencies::metadata(&source)?;
     if source.lines().any(|line| line.trim().starts_with("operators ")) {
         wgt_language::script::operators::library(&source)?;

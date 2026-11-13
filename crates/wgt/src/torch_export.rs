@@ -21,6 +21,11 @@ pub struct Architecture {
     pub parameters: Vec<ParameterSchema>,
     pub source: String,
     pub modules: Vec<ModuleSchema>,
+    /// Stable symbolic-source identity for per-shape compilation; not a weight digest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_interface: Option<wgt_language::model::ForwardInterface>,
     #[serde(flatten)]
     pub plan: Plan,
 }
@@ -28,6 +33,9 @@ pub struct Architecture {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Plan {
+    TorchModule {
+        torch_module: wgt_language::torch_model::TorchModel,
+    },
     Sequential {
         graph: Graph,
         graph_parameters: Vec<Parameter>,
@@ -62,6 +70,11 @@ pub fn compile(path: &Path) -> Result<Architecture> {
 }
 
 pub fn compile_with_dimensions(path: &Path, dimensions: &wgt_language::dimensions::Dimensions) -> Result<Architecture> {
+    let source = wgt_language::source::read_model_source(path)?;
+    wgt_language::backend::preflight_source(&source, wgt_language::backend::Backend::Torch)?;
+    if wgt_language::torch_model::is_torch_model(&source) {
+        return compile_source_with_dimensions(&source, dimensions);
+    }
     let definition = ModelDefinition::from_file_with_dimensions(path, dimensions)
         .with_context(|| format!("invalid model definition {}", path.display()))?;
     from_definition(definition)
@@ -73,6 +86,16 @@ pub fn compile_source(source: &str) -> Result<Architecture> {
 }
 
 pub fn compile_source_with_dimensions(source: &str, dimensions: &wgt_language::dimensions::Dimensions) -> Result<Architecture> {
+    wgt_language::backend::preflight_source(source, wgt_language::backend::Backend::Torch)?;
+    if wgt_language::torch_model::is_torch_model(source) {
+        anyhow::ensure!(dimensions.is_empty(), "torch module dimensions are explicit constructor arguments");
+        let module = wgt_language::torch_model::parse(source)?;
+        return Ok(Architecture {
+            format: FORMAT, name: module.models[0].clone(), interface: None,
+            parameters: Vec::new(), source: source.to_owned(), modules: Vec::new(), template_fingerprint: None, forward_interface: None,
+            plan: Plan::TorchModule { torch_module: module },
+        });
+    }
     from_definition(ModelDefinition::parse_with_dimensions(source, dimensions).context("invalid model definition")?)
 }
 
@@ -112,6 +135,8 @@ fn from_definition(definition: ModelDefinition) -> Result<Architecture> {
         parameters: definition.parameters().to_vec(),
         source: definition.source().to_owned(),
         modules,
+        template_fingerprint: None,
+        forward_interface: definition.forward_interface().cloned(),
         plan,
     })
 }

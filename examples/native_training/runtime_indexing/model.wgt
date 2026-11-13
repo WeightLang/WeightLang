@@ -1,0 +1,16 @@
+wgt 0.5
+model RuntimeIndexing
+input x:f32[3]
+output y:f32[8]
+parameter table:f32[4,2]=[1,2,3,4,5,6,7,8]
+# x contains three runtime token IDs, represented as exact integer f32 values.
+# Gather replaces the vocabulary axis: [4,2] -> [3,2]. Repeated IDs accumulate
+# table gradients; IDs have no gradient. Parameters are initialized, not trained.
+fn forward(x) {
+    let rows = gather(table as [4,2],x);
+    # Flatten token rows, select a runtime window and append it to the sequence.
+    # The start is a runtime scalar vector; length and result shapes stay static.
+    let flat = rows as [6];
+    let window = dynamic_slice(flat,[2],2);
+    return concat(flat,window);
+}

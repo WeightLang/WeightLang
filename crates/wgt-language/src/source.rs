@@ -4,6 +4,12 @@ use anyhow::{Context, Result, ensure};
 mod initialization;
 pub use initialization::initialization_random;
 
+/// Read a bounded regular model source file before choosing a source dialect.
+/// Reject devices/pipes and sources above 1 MiB before opening or allocating.
+pub fn read_model_source(path: impl AsRef<std::path::Path>) -> Result<String> {
+    crate::model_modules::read(path.as_ref())
+}
+
 pub struct Unit {
     pub declarations: String,
     pub functions: String,
@@ -49,7 +55,12 @@ pub fn split(source: &str) -> Result<Unit> {
         "WGT source exceeds 4 MiB limit"
     );
     let specialized = crate::dimensions::specialize(source, &Default::default())?;
-    let source = specialized.as_str();
+    split_unspecialized(&specialized)
+}
+
+/// Split a template before named dimensions have values.
+pub(crate) fn split_unspecialized(source: &str) -> Result<Unit> {
+    ensure!(source.len() <= 4 * 1024 * 1024, "WGT source exceeds 4 MiB limit");
     let mut declarations = Vec::new();
     let mut functions = Vec::new();
     let mut header = false;

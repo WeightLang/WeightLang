@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
+// Shared dynamic/multi-port forward and runtime indexing retain ordinary WGT model syntax.
 // Fixed multi-axis f32[M,K] function contracts and observe(name, tensor) retain canonical tensor syntax.
 const obsoleteSyntax = /\b(?:reshape|matmul|transpose)\s*\(|\binit\s+seed\s*=|\b(?:read|write)\s*\(/;
 const ignoredDirectories = new Set(['.git', '.cache', '.venv', 'node_modules', 'target', 'weights', 'dist', 'build']);
@@ -19,26 +20,32 @@ function files(directory) {
 }
 
 function sourceProblems(content) {
+  const torchTarget = /^target torch$/m.test(content);
   return content.split(/\r?\n/).flatMap((line, index) => {
     const trimmed = line.trimStart();
     // Prose may explain supported compatibility spellings. Commented-out code is still an example.
     if (trimmed.startsWith('#') && !/^#\s*(?:let\b|return\b|fn\b|init\b|[\w.]+\s*<-)/.test(trimmed)) {
       return [];
     }
-    return obsoleteSyntax.test(line) ? [index + 1] : [];
+    const retiredTarget = /^\s*(?:wgt 0\.[0-4]\b|backend torch-dynamic\b|module .*[):]|setup\s*\()/.test(line);
+    return retiredTarget || (!torchTarget && obsoleteSyntax.test(line)) ? [index + 1] : [];
   });
 }
 
 function markdownProblems(content) {
   let inWgtBlock = false;
+  let torchTarget = false;
   return content.split(/\r?\n/).flatMap((line, index) => {
     const fence = line.trim().match(/^(`{3,})(\w+)?\s*$/);
     if (fence) {
+      torchTarget = false;
       if (inWgtBlock) inWgtBlock = false;
       else inWgtBlock = /^(?:wgt|weightlang)$/i.test(fence[2] || '');
       return [];
     }
-    return inWgtBlock && obsoleteSyntax.test(line) ? [index + 1] : [];
+    if (inWgtBlock && line.trim() === 'target torch') torchTarget = true;
+    const retiredTarget = /^\s*(?:wgt 0\.[0-4]\b|backend torch-dynamic\b)/.test(line);
+    return inWgtBlock && (retiredTarget || (!torchTarget && obsoleteSyntax.test(line))) ? [index + 1] : [];
   });
 }
 

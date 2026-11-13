@@ -166,6 +166,17 @@ impl Connection {
             Request::InitializeDefinition { source, memory, optimizer } => {
                 self.initialize_definition(source, memory, optimizer, None, shared)
             }
+            Request::RebindDefinition { handle, source } => {
+                let definition = wgt_language::model::ModelDefinition::parse(&source)?;
+                let wgt_language::model::ModelPlan::Forward(program) = definition.compile_plan_with_modules()?.0 else {
+                    bail!("geometry rebinding requires a differentiable forward plan");
+                };
+                let Some(Session::Adaptive(session)) = self.sessions.get_mut(&handle) else {
+                    bail!("geometry rebinding requires an owned forward model");
+                };
+                session.rebind_geometry(program)?;
+                Ok(serde_json::json!({"backend":session.execution_backend(),"revision":session.revision()}))
+            }
             Request::CallOperation { handle, name, inputs } => {
                 let Some(Session::Operations(session)) = self.sessions.get_mut(&handle) else {
                     bail!("unknown operation model or foreign owner");
@@ -203,6 +214,17 @@ impl Connection {
                     _ => bail!("unknown model or foreign owner"),
                 };
                 Ok(serde_json::json!({"revision": revision}))
+            }
+            Request::TrainRecurrent { handle, inputs, targets, input_offset, output_offset,
+                state_width, supervised_offset, supervised_width, rate, clip } => {
+                let Some(Session::Adaptive(session)) = self.sessions.get_mut(&handle) else {
+                    bail!("recurrent differentiation requires an owned forward program");
+                };
+                let loss=session.train_recurrent(&inputs,&targets,
+                    wgtime_core::adaptive::recurrent::StateLink {input_offset,output_offset,width:state_width},
+                    wgtime_core::adaptive::recurrent::OutputSlice {offset:supervised_offset,width:supervised_width},
+                    rate,clip,&mut 1_000_000,64*1024*1024)?;
+                Ok(serde_json::json!({"loss":loss,"revision":session.revision()}))
             }
             Request::TrainStepWithPolicy { handle, inputs, targets, rate, loss, clip, straight_through } => {
                 ensure!(!matches!(self.sessions.get(&handle), Some(Session::Operations(_))), "typed operations do not support differentiation or gradients across state");

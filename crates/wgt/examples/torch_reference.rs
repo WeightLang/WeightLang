@@ -21,6 +21,18 @@ type Values = BTreeMap<String, Vec<f32>>;
 struct Request {
     source: String,
     #[serde(default)]
+    state_link: Option<wgtime_core::adaptive::recurrent::StateLink>,
+    #[serde(default)]
+    supervised: Option<wgtime_core::adaptive::recurrent::OutputSlice>,
+    #[serde(default)]
+    sequence_targets: Option<Vec<Option<Vec<f32>>>>,
+    #[serde(default)]
+    optimizer: Option<String>,
+    #[serde(default)]
+    dimensions: wgt_language::dimensions::Dimensions,
+    #[serde(default)]
+    input_shapes: BTreeMap<String, Vec<usize>>,
+    #[serde(default)]
     dictionary: Option<wgtime_core::adaptive::research::FeatureDictionary>,
     #[serde(default)]
     instruction: Option<usize>,
@@ -108,6 +120,28 @@ fn adaptive(program: Program, request: &Request) -> Result<Value> {
         let attribution = session.attribute(&request.input, seed, request.max_work, request.memory_bytes)?;
         let circuit = session.circuit(&request.input, seed, 32, request.max_work, request.memory_bytes, 1e-6)?;
         return Ok(json!({"attribution": attribution, "circuit": circuit}));
+    }
+    if matches!(request.mode.as_str(), "recurrent" | "train_recurrent") {
+        for (name, values) in &request.bindings { session.replace_parameter(name, values)?; }
+        let link = request.state_link.context("recurrent mode requires state_link")?;
+        let supervised = request.supervised.context("recurrent mode requires supervised output slice")?;
+        let inputs = request.inputs.as_deref().context("recurrent mode requires inputs")?;
+        let targets = request.sequence_targets.as_deref().context("recurrent mode requires sequence_targets")?;
+        if request.mode == "train_recurrent" {
+            session.set_optimizer(match request.optimizer.as_deref().unwrap_or("sgd") {
+                "sgd" => Optimizer::Sgd, "adam" => Optimizer::Adam,
+                _ => anyhow::bail!("recurrent optimizer must be sgd or adam"),
+            })?;
+            ensure!(request.steps > 0, "recurrent steps must be positive");
+            let mut loss=0.;
+            for _ in 0..request.steps {
+                loss=session.train_recurrent(inputs,targets,link,supervised,request.rate,None,
+                    &mut { request.max_work },request.memory_bytes)?;
+            }
+            return Ok(json!({"loss":loss,"parameters":parameters(session.program()),"revision":session.revision()}));
+        }
+        return Ok(serde_json::to_value(session.recurrent_gradients(inputs,targets,link,supervised,
+            &mut { request.max_work },request.memory_bytes)?)?);
     }
     if request.mode == "train" {
         for (name, values) in &request.bindings {
@@ -285,7 +319,12 @@ fn sequential(graph: wgt_language::source::Graph, request: &Request) -> Result<V
 
 fn main() -> Result<()> {
     let request: Request = serde_json::from_reader(io::stdin().lock())?;
-    let definition = ModelDefinition::parse(&request.source)?;
+    let definition = if request.input_shapes.is_empty() {
+        ModelDefinition::parse_with_dimensions(&request.source, &request.dimensions)?
+    } else {
+        wgt_language::model_template::ModelTemplate::parse(&request.source)?
+            .bind_input_shapes(&request.input_shapes, &request.dimensions)?
+    };
     let result = match definition.instantiate_plan()? {
         ModelPlan::Graph(graph) => sequential(graph, &request),
         ModelPlan::Forward(program) => adaptive(program, &request),
