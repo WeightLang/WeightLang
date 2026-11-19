@@ -20,6 +20,24 @@ Python 返回的张量是副本，Rust 返回只读借用；修改宿主张量�
 
 learn 参数按实际存储导出。`learn bool` 与 `learn int` 保留连续 shadow，不在快照、复制或恢复时先取整；可训练概率参数保存 logit，固定概率保存概率值。它们不同于 `update_parameters` 的外部离散候选合同。完整恢复会依照目标声明验证存储域，并保留合法的连续值。
 
+## 共享与复制成本
+
+Rust 通过 `Arc` 共享不可变 F32 存储，让候选计划复用已经训练的参数。共享对象各自持有存储所有权，原快照释放后，已经构造的克隆张量与计划仍有效；目标名称、形状和存储域校验照常执行。
+
+| Rust 操作 | 数值存储与构造成本 |
+| --- | --- |
+| `Tensor::clone`、`Tensor::reshape` | 共享已有 F32 值；reshape 校验目标形状并建立新的形状元数据 |
+| `WeightSet::clone` | 共享 F32 值和已编码 payload，复制快照元数据 |
+| `Plan::from_base`、`Plan::copy` | 共享所引用的 F32 值，校验目标合同并记录来源 |
+| `scaled`、`add`、`lerp`、`slice`、`concat`、`transpose` | 分配并计算独立的结果数据 |
+| `WeightSet::bindings` | 返回独立的可写 `Vec<f32>`；宿主修改这些值时保留原快照 |
+
+Python 在创建或完整验证快照后，只解析一次 safetensors 头，并缓存只读的“参数名 → 形状、字节区间”索引。`snapshot[name]` 和 `snapshot.ref(name).tensor()` 直接查索引，只复制所取张量的数据；返回张量可独立修改，且在快照释放后仍有效。索引只保存元数据，完整性校验仍覆盖整个 payload；`tensors()` 返回整组张量的独立副本。
+
+两端的 `Plan.build` 都会检查完整覆盖、执行已选择的初始化回调、验证结果，并序列化完整 safetensors、计算 revision。构造新快照仍需完整验证与编码，并为新 payload 分配空间；参数共享和按需读取减少的是准备计划、克隆及读取过程中的重复复制。
+
+共享与隔离回归分别见 [Rust 权重测试](../crates/wgt-model/tests/weights.rs) 和 [Python 权重测试](../python/tests/test_weights.py)。[快照基准](../python/benchmarks/weight_snapshots.py) 可分别测量逐参数读取和完整计划构造；计时与分配追踪分开运行，Python 可追踪分配峰值与包含运行时、输入构造的进程 RSS 分别报告。
+
 ## 固定引用与运行中共享
 
 Python 的 `snapshot.ref(name)` 和 Rust 的 `snapshot.reference(name)` 生成固定 `WeightRef`，携带 revision、完整参数名和对应值。即使磁盘路径后来发生变化，已经读入的引用也不跟随它改变。读取时可先指定 revision，再取得引用；Rust getter 为 `revision()`、`name()`、`tensor()`，Python 为 `.revision`、`.name`、`.tensor()`。

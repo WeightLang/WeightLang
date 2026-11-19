@@ -18,29 +18,21 @@ use wgt_language::weight_artifact::{self, TensorSchema};
 pub const FORMAT: &str = "weightlang.weights.v1";
 pub const MAX_BYTES: usize = 64 * 1024 * 1024;
 
-/// Owned, row-major F32 values. Construction and transformations reject nonfinite values.
+/// Immutable row-major F32 values. Clones and reshapes share storage; numerical transforms allocate.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tensor {
     shape: Vec<usize>,
-    data: Vec<f32>,
+    data: Arc<Vec<f32>>,
 }
 
 impl Tensor {
     pub fn new(shape: Vec<usize>, data: Vec<f32>) -> Result<Self> {
-        ensure!(
-            !shape.is_empty() && shape.len() <= 8 && shape.iter().all(|&d| d > 0 && d <= 16384),
-            "invalid weight shape"
-        );
-        let count = shape
-            .iter()
-            .try_fold(1usize, |n, d| n.checked_mul(*d))
-            .context("weight shape overflow")?;
-        ensure!(
-            count <= MAX_BYTES / 4 && count == data.len(),
-            "weight element count mismatch or budget exceeded"
-        );
+        validate_shape(&shape, data.len())?;
         ensure!(data.iter().all(|x| x.is_finite()), "nonfinite weight value");
-        Ok(Self { shape, data })
+        Ok(Self {
+            shape,
+            data: Arc::new(data),
+        })
     }
     pub fn shape(&self) -> &[usize] {
         &self.shape
@@ -64,7 +56,7 @@ impl Tensor {
             self.shape.clone(),
             self.data
                 .iter()
-                .zip(&other.data)
+                .zip(other.data.iter())
                 .map(|(a, b)| a + b)
                 .collect(),
         )
@@ -83,13 +75,17 @@ impl Tensor {
             self.shape.clone(),
             self.data
                 .iter()
-                .zip(&other.data)
+                .zip(other.data.iter())
                 .map(|(a, b)| (1.0 - alpha) * a + alpha * b)
                 .collect(),
         )
     }
     pub fn reshape(&self, shape: Vec<usize>) -> Result<Self> {
-        Self::new(shape, self.data.clone())
+        validate_shape(&shape, self.data.len())?;
+        Ok(Self {
+            shape,
+            data: Arc::clone(&self.data),
+        })
     }
     /// Select a nonempty half-open region on an explicit axis.
     pub fn slice(&self, axis: usize, start: usize, end: usize) -> Result<Self> {
@@ -191,7 +187,7 @@ impl WeightSet {
         );
         let parameters = tensors
             .iter()
-            .map(|(name, t)| (name.clone(), t.shape.clone(), t.data.clone()))
+            .map(|(name, t)| (name.clone(), t.shape.clone(), t.data.as_ref().clone()))
             .collect::<Vec<_>>();
         let bytes = weight_artifact::encode(&parameters, MAX_BYTES)?;
         let manifest = Manifest {
@@ -235,7 +231,7 @@ impl WeightSet {
     pub fn bindings(&self) -> BTreeMap<String, Vec<f32>> {
         self.tensors
             .iter()
-            .map(|(name, t)| (name.clone(), t.data.clone()))
+            .map(|(name, t)| (name.clone(), t.data.as_ref().clone()))
             .collect()
     }
     pub fn validate_for(&self, definition: &ModelDefinition) -> Result<()> {
@@ -513,7 +509,7 @@ impl Plan {
         }
     }
     /// Validate the complete plan before invoking any initializer, then validate
-    /// every resulting value before returning an independently owned snapshot.
+    /// every resulting value before returning an immutable snapshot.
     pub fn build(mut self) -> Result<WeightSet> {
         let preview = self.preview();
         ensure!(
@@ -533,6 +529,22 @@ impl Plan {
         }
         WeightSet::with_provenance(tensors, serde_json::json!({"bindings":self.sources}))
     }
+}
+
+fn validate_shape(shape: &[usize], elements: usize) -> Result<()> {
+    ensure!(
+        !shape.is_empty() && shape.len() <= 8 && shape.iter().all(|&d| d > 0 && d <= 16384),
+        "invalid weight shape"
+    );
+    let count = shape
+        .iter()
+        .try_fold(1usize, |n, d| n.checked_mul(*d))
+        .context("weight shape overflow")?;
+    ensure!(
+        count <= MAX_BYTES / 4 && count == elements,
+        "weight element count mismatch or budget exceeded"
+    );
+    Ok(())
 }
 
 fn validate_tensor(schema: &ParameterSchema, tensor: &Tensor) -> Result<()> {

@@ -177,3 +177,48 @@ fn matrix_transforms_use_explicit_axes_and_preserve_row_major_values() {
     assert!(matrix.reshape(vec![5]).is_err());
     assert!(matrix.slice(1, 0, 4).is_err());
 }
+
+#[test]
+fn immutable_clones_reshapes_and_plan_copies_share_values() {
+    let original = snapshot([1., 2.], [3., 4.]);
+    let cloned = original.clone();
+    let reshaped = original
+        .tensor("first")
+        .unwrap()
+        .reshape(vec![1, 2])
+        .unwrap();
+    let mut plan = Plan::from_base(&definition(), &original).unwrap();
+    plan.replace(
+        "second",
+        original.tensor("second").unwrap().scaled(2.).unwrap(),
+    )
+    .unwrap();
+    let derived = plan.build().unwrap();
+    let first = original.tensor("first").unwrap().values().as_ptr();
+    assert_eq!(cloned.tensor("first").unwrap().values().as_ptr(), first);
+    assert_eq!(reshaped.values().as_ptr(), first);
+    assert_eq!(derived.tensor("first").unwrap().values().as_ptr(), first);
+    assert_ne!(
+        derived.tensor("second").unwrap().values().as_ptr(),
+        original.tensor("second").unwrap().values().as_ptr()
+    );
+    assert_eq!(derived.tensor("second").unwrap().values(), [6., 8.]);
+    assert_eq!(original.tensor("second").unwrap().values(), [3., 4.]);
+    drop(original);
+    drop(cloned);
+    assert_eq!(reshaped.shape(), [1, 2]);
+    assert_eq!(reshaped.values(), [1., 2.]);
+    assert_eq!(derived.tensor("first").unwrap().values(), [1., 2.]);
+    let mut bindings = derived.bindings();
+    bindings.get_mut("first").unwrap()[0] = 99.;
+    assert_eq!(derived.tensor("first").unwrap().values(), [1., 2.]);
+}
+
+#[test]
+fn shared_reshape_preserves_shape_validation() {
+    let tensor = Tensor::new(vec![2, 2], vec![1., 2., 3., 4.]).unwrap();
+    for shape in [vec![], vec![0, 4], vec![16385], vec![1; 9], vec![3]] {
+        assert!(tensor.reshape(shape).is_err());
+    }
+    assert_eq!(tensor.reshape(vec![4]).unwrap().values(), [1., 2., 3., 4.]);
+}
