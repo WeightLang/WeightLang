@@ -213,3 +213,99 @@ def test_declared_recipes_are_explicit_and_preview_does_not_execute():
     plan.initialize(["gain"])
     assert plan.preview()["assignments"][0]["deferred"]
     torch.testing.assert_close(plan.build()["gain"], torch.full((2,), 3.))
+
+
+def test_selected_tensor_reads_do_not_decode_unrelated_weights(monkeypatch, tmp_path):
+    from weightlang import weights as storage
+
+    matrix = torch.arange(35, dtype=torch.float32).reshape(7, 5) - 17.
+    original = wgt.WeightSet({"a": torch.ones(128, 128), "selected": matrix,
+                              "z": torch.full((128, 128), 9.)})
+    loaded = wgt.WeightSet.load(original.save(tmp_path / "selected"))
+    revision = loaded.revision
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("selected weight read decoded the entire payload")
+
+    monkeypatch.setattr(storage, "decode_tensors", forbidden)
+    first = loaded.ref("selected").tensor()
+    second = loaded["selected"]
+    assert first.data_ptr() != second.data_ptr()
+    assert first.dtype == torch.float32 and first.is_contiguous()
+    torch.testing.assert_close(first, matrix)
+    first.zero_()
+    second.fill_(999.)
+    torch.testing.assert_close(loaded["selected"], matrix)
+    assert loaded.revision == revision
+    with pytest.raises(KeyError):
+        loaded["missing"]
+    # The returned tensor owns its selected bytes even after the snapshot drops.
+    detached = loaded["selected"]
+    del loaded
+    torch.testing.assert_close(detached, matrix)
+
+
+def test_complete_plan_reuses_snapshot_without_per_parameter_full_decode(monkeypatch):
+    from weightlang import weights as storage
+
+    original = wgt.WeightSet({f"p{i}": torch.full((4, 3), float(i)) for i in range(12)})
+    definition = schema(**{name: (4, 3) for name in original.names})
+    calls = []
+    decode = storage.decode_tensors
+
+    def counted(payload):
+        calls.append(len(payload))
+        return decode(payload)
+
+    monkeypatch.setattr(storage, "decode_tensors", counted)
+    plan = wgt.Plan(definition, base=original)
+    assert len(calls) == 1  # One complete schema/domain check at base binding.
+    result = plan.build()
+    assert len(calls) == 1
+    assert result.revision == original.revision
+    for name in original.names:
+        torch.testing.assert_close(result[name], original[name])
+    assert len(calls) == 1
+
+
+def test_snapshot_metadata_is_indexed_once_and_cannot_be_mutated(monkeypatch, tmp_path):
+    from weightlang import weights as storage
+
+    parsed_headers = []
+    loads = storage.json.loads
+
+    def observed_loads(value, *args, **kwargs):
+        result = loads(value, *args, **kwargs)
+        if isinstance(result, dict) and any(
+                isinstance(entry, dict) and "data_offsets" in entry for entry in result.values()):
+            parsed_headers.append(result)
+        return result
+
+    monkeypatch.setattr(storage.json, "loads", observed_loads)
+    snapshot = wgt.WeightSet({"z": torch.ones(2), "a": torch.arange(6, dtype=torch.float32).reshape(2, 3)})
+    assert len(parsed_headers) == 1
+    revision = snapshot.revision
+    assert snapshot.names == ("a", "z")
+    for _ in range(8):
+        assert snapshot.ref("a").source() == {"revision": revision, "name": "a"}
+        torch.testing.assert_close(snapshot["a"], torch.arange(6, dtype=torch.float32).reshape(2, 3))
+    assert len(parsed_headers) == 1
+    with pytest.raises(TypeError):
+        snapshot._index["a"] = ((6,), 0, 24)
+    public_metadata = snapshot.manifest
+    public_metadata["revision"] = "0" * 64
+    public_metadata["tensors"][0]["shape"][0] = 99
+    assert snapshot.revision == revision
+    assert tuple(snapshot["a"].shape) == (2, 3)
+    with pytest.raises(KeyError) as missing:
+        snapshot["missing"]
+    assert missing.value.args == ("missing",)
+    with pytest.raises(KeyError, match="unknown weight"):
+        snapshot.ref("missing")
+
+    loaded = wgt.WeightSet.load(snapshot.save(tmp_path / "indexed"), revision=revision)
+    assert len(parsed_headers) == 2
+    assert loaded.names == ("a", "z")
+    assert loaded.revision == revision
+    torch.testing.assert_close(loaded.ref("a").tensor(), snapshot["a"])
+    assert len(parsed_headers) == 2

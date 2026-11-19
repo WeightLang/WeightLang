@@ -12,7 +12,9 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sys
 import tempfile
+from types import MappingProxyType
 from typing import Any
 
 import torch
@@ -66,6 +68,18 @@ def _table(tensors: Mapping[str, torch.Tensor]) -> list[dict]:
     return result
 
 
+def _tensor_index(payload: bytes) -> Mapping[str, tuple[tuple[int, ...], int, int]]:
+    """Index an already validated F32 payload without retaining decoded tensors."""
+    header_size = int.from_bytes(payload[:8], "little")
+    header = json.loads(payload[8:8 + header_size])
+    offset = 8 + header_size
+    return MappingProxyType({
+        name: (tuple(entry["shape"]), offset + entry["data_offsets"][0],
+               offset + entry["data_offsets"][1])
+        for name, entry in sorted(header.items()) if name != "__metadata__"
+    })
+
+
 @dataclass(frozen=True, init=False)
 class WeightSet:
     """A value snapshot. Returned tensors are copies and cannot mutate its revision.
@@ -76,6 +90,8 @@ class WeightSet:
 
     _payload: bytes = field(repr=False)
     _metadata: str = field(repr=False)
+    _index: Mapping[str, tuple[tuple[int, ...], int, int]] = field(repr=False, compare=False)
+    _revision: str = field(repr=False, compare=False)
 
     def __init__(self, tensors: Mapping[str, torch.Tensor], *, provenance: dict | None = None):
         table = _table(tensors)
@@ -92,13 +108,15 @@ class WeightSet:
             raise ValueError("weight manifest exceeds 1 MiB")
         object.__setattr__(self, "_payload", payload)
         object.__setattr__(self, "_metadata", encoded)
+        object.__setattr__(self, "_index", _tensor_index(payload))
+        object.__setattr__(self, "_revision", metadata["revision"])
 
     def __repr__(self) -> str:
         return f"WeightSet(revision={self.revision!r}, parameters={len(self.names)})"
 
     @property
     def revision(self) -> str:
-        return self.manifest["revision"]
+        return self._revision
 
     @property
     def manifest(self) -> dict:
@@ -106,16 +124,28 @@ class WeightSet:
 
     @property
     def names(self) -> tuple[str, ...]:
-        return tuple(item["name"] for item in self.manifest["tensors"])
+        return tuple(self._index)
 
     def __getitem__(self, name: str) -> torch.Tensor:
-        return decode_tensors(self._payload)[name].clone()
+        # Metadata is indexed once after complete snapshot validation; each
+        # fixed reference copies only its selected tensor's immutable bytes.
+        shape, start, end = self._index[name]
+        data = bytearray(memoryview(self._payload)[start:end])
+        if sys.byteorder != "little":
+            from array import array
+            native = array("f")
+            native.frombytes(data)
+            native.byteswap()
+            data = native
+        # The fresh writable buffer is retained by the tensor, so callers may
+        # mutate their copy without touching the immutable snapshot bytes.
+        return torch.frombuffer(data, dtype=torch.float32).reshape(shape)
 
     def tensors(self) -> dict[str, torch.Tensor]:
         return {name: value.clone() for name, value in decode_tensors(self._payload).items()}
 
     def ref(self, name: str) -> WeightRef:
-        if name not in self.names:
+        if name not in self._index:
             raise KeyError(f"unknown weight {name!r}")
         return WeightRef(self, name)
 
@@ -162,6 +192,8 @@ class WeightSet:
         result = object.__new__(cls)
         object.__setattr__(result, "_payload", payload)
         object.__setattr__(result, "_metadata", _json(metadata))
+        object.__setattr__(result, "_index", _tensor_index(payload))
+        object.__setattr__(result, "_revision", metadata["revision"])
         return result
 
     def save(self, path: str | os.PathLike[str]) -> Path:
