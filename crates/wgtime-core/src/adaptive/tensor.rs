@@ -59,6 +59,18 @@ impl TensorView {
         Ok(self)
     }
 
+    /// Matrix operations only accept rank 2 or 3 after tensor validation.
+    /// Preserve the physical strides when a permutation moves the batch axis.
+    pub fn matrix_layout(self) -> super::matmul::Layout {
+        debug_assert!(matches!(self.rank, 2 | 3));
+        super::matmul::Layout {
+            offset: self.offset,
+            batch_stride: if self.rank == 3 { self.strides[0] } else { 0 },
+            row_stride: self.strides[self.rank - 2],
+            column_stride: self.strides[self.rank - 1],
+        }
+    }
+
     pub fn physical_index(self, mut logical_index: usize) -> usize {
         let mut offset = self.offset;
         for axis in (0..self.rank).rev() {

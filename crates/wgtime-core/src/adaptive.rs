@@ -16,6 +16,7 @@ pub mod optimization;
 pub mod transport;
 pub(crate) mod workspace;
 mod tensor;
+mod matmul;
 mod dropout;
 mod unary;
 use unary::Unary;
@@ -81,7 +82,8 @@ pub struct AdaptiveSession {
     /// Non-owning strided views over a canonical register; materialized lazily.
     views: Vec<Option<TensorView>>,
     initialized: Vec<bool>,
-    backup: Vec<Vec<f32>>,
+    /// Only parameters that the forward program can write need rollback storage.
+    backup: Vec<(usize, Vec<f32>)>,
     scratch: Vec<f32>,
     input: usize,
     output_len: usize,
@@ -172,8 +174,14 @@ impl AdaptiveSession {
         // Reject memory handles as tensor operands before tensor shape inference,
         // so invalid memory access cannot be obscured by an unrelated shape error.
         program.validate_tensor_contracts()?;
+        let mut writable = vec![false; program.parameters.len()];
+        for instruction in &program.instructions {
+            if let Instruction::Write { parameter, .. } = instruction {
+                writable[param(parameter)?] = true;
+            }
+        }
         let mut floats = 0usize;
-        for p in &program.parameters {
+        for (index, p) in program.parameters.iter().enumerate() {
             if let Some(domain) = &p.learn {
                 ensure!(p.shape.len()==1 && !p.probability && !p.frozen, "learn parameter must be a trainable vector");
                 ensure!(p.data.len() == p.shape[0], "learn shadow shape mismatch");
@@ -193,7 +201,8 @@ impl AdaptiveSession {
                 p.name
             );
             floats = floats
-                .checked_add(size.checked_mul(2).context("parameter size overflow")?)
+                .checked_add(size.checked_mul(if writable[index] { 2 } else { 1 })
+                    .context("parameter size overflow")?)
                 .context("budget overflow")?;
         }
         for instruction in &program.instructions {
@@ -529,7 +538,9 @@ impl AdaptiveSession {
         let backup = program
             .parameters
             .iter()
-            .map(|p| crate::zero_buffer(p.data.len()))
+            .enumerate()
+            .filter(|(index, _)| writable[*index])
+            .map(|(index, p)| Ok((index, crate::zero_buffer(p.data.len())?)))
             .collect::<Result<_>>()?;
         Ok(Self {
             workspace: workspace::Workspace::new(program.registers.len()),
@@ -710,7 +721,7 @@ impl AdaptiveSession {
     /// all weight writes. max_steps counts instruction work, including jumps and
     /// the N*D surcharge for allocating/accessing task-local memory.
     pub fn run(&mut self, input: &[f32], max_steps: u64) -> Result<&[f32]> {
-        if self.program.instructions.iter().any(|i| matches!(i, Instruction::Write { .. })) {
+        if !self.backup.is_empty() {
             self.ensure_mutable()?;
         }
         self.begin(input, max_steps)?;
@@ -788,16 +799,16 @@ impl AdaptiveSession {
         self.views.fill(None);
         self.initialized[self.input] = true;
         self.registers[self.input].copy_from_slice(input);
-        for (p, b) in self.program.parameters.iter().zip(&mut self.backup) {
-            b.copy_from_slice(&p.data);
+        for (index, backup) in &mut self.backup {
+            backup.copy_from_slice(&self.program.parameters[*index].data);
         }
         Ok(())
     }
 
     fn restore(&mut self) {
         self.workspace.clear();
-        for (p, b) in self.program.parameters.iter_mut().zip(&self.backup) {
-            p.data.copy_from_slice(b);
+        for (index, backup) in &self.backup {
+            self.program.parameters[*index].data.copy_from_slice(backup);
         }
     }
 
@@ -1032,30 +1043,24 @@ impl AdaptiveSession {
                 },
                 Op::Matmul(r,a,b,m,k,n) => {
                     self.ready_view(a)?; self.ready_view(b)?;
-                    for i in 0..m { for j in 0..n {
-                        let mut sum = 0f64;
-                        for q in 0..k {
-                            sum += f64::from(self.read_value(a,i*k+q)) * f64::from(self.read_value(b,q*n+j));
-                        }
-                        self.scratch[i*n+j] = sum as f32;
-                    } }
+                    let a = self.views[a].unwrap_or_else(|| TensorView::contiguous(a, &self.program.registers[a].shape));
+                    let b = self.views[b].unwrap_or_else(|| TensorView::contiguous(b, &self.program.registers[b].shape));
+                    matmul::multiply(
+                        &self.registers[a.base], a.matrix_layout(),
+                        &self.registers[b.base], b.matrix_layout(),
+                        [1, m, k, n], &mut self.scratch[..m * n],
+                    );
                     output = Some(r);
                 },
                 Op::BatchMatmul(r,a,b,batch,m,k,n) => {
                     self.ready_view(a)?; self.ready_view(b)?;
-                    for batch_index in 0..batch {
-                        let a_base = batch_index * m * k;
-                        let b_base = batch_index * k * n;
-                        let out_base = batch_index * m * n;
-                        for i in 0..m { for j in 0..n {
-                            let mut sum = 0f64;
-                            for q in 0..k {
-                                sum += f64::from(self.read_value(a,a_base+i*k+q))
-                                    * f64::from(self.read_value(b,b_base+q*n+j));
-                            }
-                            self.scratch[out_base+i*n+j] = sum as f32;
-                        } }
-                    }
+                    let a = self.views[a].unwrap_or_else(|| TensorView::contiguous(a, &self.program.registers[a].shape));
+                    let b = self.views[b].unwrap_or_else(|| TensorView::contiguous(b, &self.program.registers[b].shape));
+                    matmul::multiply(
+                        &self.registers[a.base], a.matrix_layout(),
+                        &self.registers[b.base], b.matrix_layout(),
+                        [batch, m, k, n], &mut self.scratch[..batch * m * n],
+                    );
                     output = Some(r);
                 },
                 Op::LayerNorm(r,x,gamma,beta,groups,epsilon) => {

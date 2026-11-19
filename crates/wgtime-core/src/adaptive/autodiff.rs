@@ -307,6 +307,8 @@ impl AdaptiveSession {
 
     /// Explicit initial-state/parameter bindings apply only to this evaluation,
     /// including read-only-in-program (`frozen`) controller parameters.
+    /// Temporary substituted values must fit the remaining session memory budget;
+    /// the gradient tape has a separate allowance.
     pub fn forward_with_parameters(
         &mut self,
         input: &[f32],
@@ -314,25 +316,47 @@ impl AdaptiveSession {
         max_steps: u64,
         tape_budget_bytes: usize,
     ) -> Result<ForwardPass> {
+        self.ensure_idle()?;
+        let mut replacements = Vec::with_capacity(bindings.len());
+        let mut binding_bytes = 0usize;
         for (name, value) in bindings {
-            let p = self
+            let (index, p) = self
                 .program
                 .parameters
                 .iter()
-                .find(|p| &p.name == name)
+                .enumerate()
+                .find(|(_, p)| &p.name == name)
                 .context("unknown parameter binding")?;
             ensure!(
                 value.len() == p.data.len() && value.iter().all(|v| v.is_finite()),
                 "invalid parameter binding: {name}"
             );
+            binding_bytes = binding_bytes.checked_add(crate::bytes(value.len())?)
+                .context("parameter binding size overflow")?;
+            replacements.push((index, value));
         }
+        // Read-only parameters have no persistent rollback copy. Admit only the
+        // explicitly substituted values, then swap their original allocations back
+        // on every exit. The tape remains an independent immutable snapshot.
+        if binding_bytes != 0 {
+            let optimizer_bytes = self.optimizer_storage_bytes()?;
+            let available = self.memory_limit.checked_sub(self.managed_bytes)
+                .and_then(|n| n.checked_sub(optimizer_bytes))
+                .context("parameter binding memory budget exceeded")?;
+            ensure!(binding_bytes <= available, "parameter binding memory budget exceeded");
+        }
+        let mut replacements = replacements.into_iter().map(|(index, value)| {
+            let mut data = crate::zero_buffer(value.len())?;
+            data.copy_from_slice(value);
+            Ok((index, data))
+        }).collect::<Result<Vec<_>>>()?;
         self.begin(input, max_steps)?;
+        let managed_bytes = self.managed_bytes;
+        self.managed_bytes += binding_bytes;
+        for (index, data) in &mut replacements {
+            std::mem::swap(&mut self.program.parameters[*index].data, data);
+        }
         let result = (|| {
-            for p in &mut self.program.parameters {
-                if let Some(value) = bindings.get(&p.name) {
-                    p.data.copy_from_slice(value);
-                }
-            }
             let mut tape = Tape::new(self, input, tape_budget_bytes)?;
             let initial = self
                 .program
@@ -360,6 +384,10 @@ impl AdaptiveSession {
             })
         })();
         self.restore();
+        for (index, data) in &mut replacements {
+            std::mem::swap(&mut self.program.parameters[*index].data, data);
+        }
+        self.managed_bytes = managed_bytes;
         result
     }
 }

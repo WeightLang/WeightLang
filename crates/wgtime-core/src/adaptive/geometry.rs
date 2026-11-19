@@ -31,9 +31,8 @@ fn managed(program: &Program) -> Result<usize> {
         Ok(())
     };
     for parameter in &program.parameters {
-        add(crate::elements(&parameter.shape)?
-            .checked_mul(2)
-            .context("geometry parameter size overflow")?)?;
+        // Geometry rebinding admits only pure programs, which need no rollback copy.
+        add(crate::elements(&parameter.shape)?)?;
     }
     for register in &program.registers {
         add(register.len)?;
