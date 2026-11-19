@@ -108,7 +108,7 @@ def main() -> None:
         "measurements": [],
     }
     for name, source in sources().items():
-        model = wgt.loads(source, device="cpu")
+        model = wgt.loads(source, backend="torch", device="cpu")
         value = torch.ones(1, dtype=torch.float32)
         for grad_enabled in (False, True):
             with torch.set_grad_enabled(grad_enabled):

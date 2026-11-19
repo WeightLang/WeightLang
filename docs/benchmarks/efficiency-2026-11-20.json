@@ -1,0 +1,939 @@
+{
+  "format": "weightlang.efficiency-evidence.v1",
+  "report_date": "2026-11-20",
+  "baseline_commit": "2e08ef04dd5c5d7f27d2e670d264f4fa02b971bb",
+  "sources": [
+    {
+      "path": "weights/efficiency-20261120/weight-snapshots-comparison.json",
+      "sha256": "1e20eee8e8c31337859f310dad9a3e6571e14178b5df70b59daf9b5c1ac13bf6",
+      "selection": "phase == 'before'"
+    },
+    {
+      "path": "weights/efficiency-20261120/weight-snapshots-indexed-after.json",
+      "sha256": "badd99050d721bf3460a90292af46f2b20e418a32925691dbb7f7b8c71af9d4d",
+      "selection": "phase == 'after_indexed' (all rows)"
+    },
+    {
+      "path": "weights/efficiency-20261120/strided-matmul.json",
+      "sha256": "d778bdfcc6773fcd92fb54cc08a03b96850ddd22f290e3f12c537da20f56023f",
+      "selection": "metadata and all five results; exclude temporary absolute executable paths and raw_stdout"
+    },
+    {
+      "path": "weights/efficiency-20261120/core-validation.json",
+      "sha256": "2c72877e485a6ea75af7ca5c9a062e5e0c8ef440467df8c9e0160b5d641a0f29",
+      "selection": "completed core regression validation"
+    },
+    {
+      "path": "weights/efficiency-20261120/core-regressions.log",
+      "sha256": "6fb7c4b869c84af2d5841ef4d3781f3ce4ee54f0036073d1453848048e383af1",
+      "selection": "completed core regression validation"
+    }
+  ],
+  "mechanisms": [
+    {
+      "name": "selective rollback and bounded temporary bindings",
+      "source_files": [
+        "crates/wgtime-core/src/adaptive.rs",
+        "crates/wgtime-core/src/adaptive/autodiff.rs"
+      ],
+      "measurement": null,
+      "limit": "Managed bytes describe f32 storage, not process RSS; no isolated wall-clock measurement."
+    },
+    {
+      "name": "stride-based Rust interpreter matrix kernel",
+      "source_files": [
+        "crates/wgtime-core/src/adaptive/matmul.rs"
+      ],
+      "measurement": "matrix"
+    },
+    {
+      "name": "immutable Rust weight-value sharing",
+      "source_files": [
+        "crates/wgt-model/src/weights.rs"
+      ],
+      "measurement": null,
+      "limit": "Arc shares values for structural operations; arithmetic and public bindings copy values, and Plan::build still fully serializes."
+    },
+    {
+      "name": "immutable Python metadata index and selected-tensor copy",
+      "source_files": [
+        "python/weightlang/weights.py"
+      ],
+      "measurement": "python",
+      "limit": "No decoded tensor cache; returned tensors own writable storage, and full Plan.build still materializes and serializes."
+    }
+  ],
+  "python": {
+    "optimized_change_commit": "fb7d3957951968d021c48421fd48ad798dc4ea9c",
+    "benchmark_source": "python/benchmarks/weight_snapshots.py",
+    "method": {
+      "paired": false,
+      "groups": [
+        "before",
+        "after_indexed"
+      ],
+      "processes_per_group_per_case": 3,
+      "timed_iterations_per_process": 4,
+      "aggregation": "median across three process elapsed_seconds/4 values; speed ratio is ratio of group medians",
+      "tracemalloc_during_timing": false,
+      "separate_traced_iterations_per_process": 1,
+      "torch_threads": 1,
+      "OMP_NUM_THREADS": 1,
+      "MKL_NUM_THREADS": 1,
+      "read_work": "Visit all 64 fixed WeightRefs, reading and consuming one tensor at a time; do not retain all returned tensors.",
+      "plan_work": "Build a complete Plan from the base snapshot and verify unchanged payload revision.",
+      "rss_scope": "Process lifetime high-water mark includes imports, fixture and runtime; no overall RSS improvement claim.",
+      "allocation_scope": "tracemalloc-visible Python allocations, not all native tensor memory.",
+      "limitation": "Baseline and final indexed implementation were collected in separate non-paired groups; three processes per case do not establish a general performance guarantee."
+    },
+    "samples": {
+      "before": [
+        {
+          "case": "read",
+          "checksum": 126.0,
+          "cpu_seconds": 0.37406201699999997,
+          "elapsed_seconds": 0.3766072299986263,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 342992,
+          "python_traced_peak_bytes": 16835520,
+          "seconds_per_iteration": 0.09415180749965657,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 1,
+          "phase": "before"
+        },
+        {
+          "case": "read",
+          "checksum": 126.0,
+          "cpu_seconds": 0.35860633900000005,
+          "elapsed_seconds": 0.36195877099817153,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 344452,
+          "python_traced_peak_bytes": 16835520,
+          "seconds_per_iteration": 0.09048969274954288,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 2,
+          "phase": "before"
+        },
+        {
+          "case": "read",
+          "checksum": 126.0,
+          "cpu_seconds": 0.46223941600000007,
+          "elapsed_seconds": 0.4750827690004371,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 343688,
+          "python_traced_peak_bytes": 16835520,
+          "seconds_per_iteration": 0.11877069225010928,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 3,
+          "phase": "before"
+        },
+        {
+          "case": "plan",
+          "checksum": 3.9375,
+          "cpu_seconds": 0.9488867400000001,
+          "elapsed_seconds": 1.0025937739992514,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 368720,
+          "python_traced_peak_bytes": 33801608,
+          "seconds_per_iteration": 0.25064844349981286,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 1,
+          "phase": "before"
+        },
+        {
+          "case": "plan",
+          "checksum": 3.9375,
+          "cpu_seconds": 0.8986683380000002,
+          "elapsed_seconds": 0.920875153002271,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 367996,
+          "python_traced_peak_bytes": 33801068,
+          "seconds_per_iteration": 0.23021878825056774,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 2,
+          "phase": "before"
+        },
+        {
+          "case": "plan",
+          "checksum": 3.9375,
+          "cpu_seconds": 0.8107317470000002,
+          "elapsed_seconds": 0.8158688580006128,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 369364,
+          "python_traced_peak_bytes": 33800528,
+          "seconds_per_iteration": 0.2039672145001532,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 3,
+          "phase": "before"
+        }
+      ],
+      "after_indexed": [
+        {
+          "case": "read",
+          "checksum": 126.0,
+          "cpu_seconds": 0.005870307999999991,
+          "elapsed_seconds": 0.005901964999793563,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 343468,
+          "python_traced_peak_bytes": 525498,
+          "seconds_per_iteration": 0.0014754912499483908,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 1,
+          "phase": "after_indexed"
+        },
+        {
+          "case": "read",
+          "checksum": 126.0,
+          "cpu_seconds": 0.005848988999999971,
+          "elapsed_seconds": 0.0058748310038936324,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 345928,
+          "python_traced_peak_bytes": 525498,
+          "seconds_per_iteration": 0.0014687077509734081,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 2,
+          "phase": "after_indexed"
+        },
+        {
+          "case": "read",
+          "checksum": 126.0,
+          "cpu_seconds": 0.005232880999999967,
+          "elapsed_seconds": 0.005294078997394536,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 344788,
+          "python_traced_peak_bytes": 525498,
+          "seconds_per_iteration": 0.001323519749348634,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 3,
+          "phase": "after_indexed"
+        },
+        {
+          "case": "plan",
+          "checksum": 3.9375,
+          "cpu_seconds": 0.316006196,
+          "elapsed_seconds": 0.31922194600338116,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 367280,
+          "python_traced_peak_bytes": 34055958,
+          "seconds_per_iteration": 0.07980548650084529,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 1,
+          "phase": "after_indexed"
+        },
+        {
+          "case": "plan",
+          "checksum": 3.9375,
+          "cpu_seconds": 0.38057596299999985,
+          "elapsed_seconds": 0.38414524999825517,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 366792,
+          "python_traced_peak_bytes": 34055958,
+          "seconds_per_iteration": 0.09603631249956379,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 2,
+          "phase": "after_indexed"
+        },
+        {
+          "case": "plan",
+          "checksum": 3.9375,
+          "cpu_seconds": 0.3917964329999999,
+          "elapsed_seconds": 0.39459377199818846,
+          "iterations": 4,
+          "parameters": 64,
+          "payload_values_bytes": 16777216,
+          "peak_process_rss_kib": 367228,
+          "python_traced_peak_bytes": 34055823,
+          "seconds_per_iteration": 0.09864844299954711,
+          "shape": [
+            256,
+            256
+          ],
+          "torch_version": "2.15.0",
+          "trial": 3,
+          "phase": "after_indexed"
+        }
+      ]
+    },
+    "summary": {
+      "read": {
+        "before": {
+          "seconds_per_iteration_median": 0.09415180749965657,
+          "seconds_per_iteration_min": 0.09048969274954288,
+          "seconds_per_iteration_max": 0.11877069225010928,
+          "python_traced_peak_bytes_median": 16835520,
+          "peak_process_rss_kib_median": 343688
+        },
+        "after_indexed": {
+          "seconds_per_iteration_median": 0.0014687077509734081,
+          "seconds_per_iteration_min": 0.001323519749348634,
+          "seconds_per_iteration_max": 0.0014754912499483908,
+          "python_traced_peak_bytes_median": 525498,
+          "peak_process_rss_kib_median": 344788
+        },
+        "median_time_ratio": 64.10520230267461,
+        "traced_peak_reduction_fraction": 0.96878635171352,
+        "checksum_all_samples": 126.0
+      },
+      "plan": {
+        "before": {
+          "seconds_per_iteration_median": 0.23021878825056774,
+          "seconds_per_iteration_min": 0.2039672145001532,
+          "seconds_per_iteration_max": 0.25064844349981286,
+          "python_traced_peak_bytes_median": 33801068,
+          "peak_process_rss_kib_median": 368720
+        },
+        "after_indexed": {
+          "seconds_per_iteration_median": 0.09603631249956379,
+          "seconds_per_iteration_min": 0.07980548650084529,
+          "seconds_per_iteration_max": 0.09864844299954711,
+          "python_traced_peak_bytes_median": 34055958,
+          "peak_process_rss_kib_median": 367228
+        },
+        "median_time_ratio": 2.3972056221089644,
+        "traced_peak_reduction_fraction": -0.007540885986206058,
+        "checksum_all_samples": 3.9375
+      }
+    }
+  },
+  "matrix": {
+    "recorded_at_utc": "2026-11-19T23:05:45.924189+00:00",
+    "compiler": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+    "cpu": "12th Gen Intel(R) Core(TM) i9-12900HX",
+    "affinity_cpus": 24,
+    "baseline_commit": "2e08ef04dd5c5d7f27d2e670d264f4fa02b971bb",
+    "paired_samples": 9,
+    "sample_order": "alternate legacy-first and optimized-first",
+    "statistic": "median microseconds per matrix product; each sample runs 8 products",
+    "validation": "all output f32 bit patterns match legacy before timing",
+    "scope": "standalone production-kernel microbenchmark, not end-to-end model speed or RSS; no Cargo rebuild",
+    "sample_detail": "harness reports medians; individual sample durations were not retained",
+    "files": {
+      "scripts/bench_strided_matmul.rs": "9052659e5419cb9e5a29910c642de1fb17340d10246409a4f75ec78c96455566",
+      "crates/wgtime-core/src/adaptive/matmul.rs": "aa5d0895c6db16927f758fcd404a533ef6e2f93a96f1ef0bafb7e7571076b84e"
+    },
+    "results": [
+      {
+        "case": "rank2-owned",
+        "batches": 1,
+        "rows": 64,
+        "inner": 96,
+        "columns": 48,
+        "iterations": 8,
+        "legacy_median_us": 449.496,
+        "kernel_median_us": 220.466,
+        "speedup": 2.039
+      },
+      {
+        "case": "rank2-reshape-view",
+        "batches": 1,
+        "rows": 64,
+        "inner": 96,
+        "columns": 48,
+        "iterations": 8,
+        "legacy_median_us": 2662.026,
+        "kernel_median_us": 212.281,
+        "speedup": 12.54
+      },
+      {
+        "case": "rank2-transposed",
+        "batches": 1,
+        "rows": 64,
+        "inner": 96,
+        "columns": 48,
+        "iterations": 8,
+        "legacy_median_us": 2925.445,
+        "kernel_median_us": 271.587,
+        "speedup": 10.772
+      },
+      {
+        "case": "rank2-offset-tail",
+        "batches": 1,
+        "rows": 31,
+        "inner": 65,
+        "columns": 33,
+        "iterations": 8,
+        "legacy_median_us": 548.482,
+        "kernel_median_us": 43.221,
+        "speedup": 12.69
+      },
+      {
+        "case": "rank3-permuted-batch",
+        "batches": 4,
+        "rows": 32,
+        "inner": 64,
+        "columns": 40,
+        "iterations": 8,
+        "legacy_median_us": 4073.714,
+        "kernel_median_us": 207.599,
+        "speedup": 19.623
+      }
+    ],
+    "exit_code": 0,
+    "measured_path": "Rust interpreter production matrix kernel only; not generated C or end-to-end model execution."
+  },
+  "reproduction": {
+    "working_directory": "repository root",
+    "python_environment": "Python with torch 2.15.0 and safetensors; PYTHONPATH=python OMP_NUM_THREADS=1 MKL_NUM_THREADS=1",
+    "python_optimized_argv": [
+      "python",
+      "python/benchmarks/weight_snapshots.py",
+      "--case",
+      "read|plan",
+      "--parameters",
+      "64",
+      "--side",
+      "256",
+      "--iterations",
+      "4"
+    ],
+    "python_process_repetitions_per_case": 3,
+    "python_baseline_loader": "import importlib.util, subprocess, sys, types\nname = 'weightlang._snapshot_baseline'\nbaseline = types.ModuleType(name)\nbaseline.__package__ = 'weightlang'\nsys.modules[name] = baseline\nsource = subprocess.check_output(['git', 'show', '2e08ef04dd5c5d7f27d2e670d264f4fa02b971bb:python/weightlang/weights.py'], text=True)\nexec(compile(source, 'baseline/weights.py', 'exec'), baseline.__dict__)\nspec = importlib.util.spec_from_file_location('snapshot_benchmark', 'python/benchmarks/weight_snapshots.py')\nbench = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(bench)\nbench.Plan, bench.WeightSet = baseline.Plan, baseline.WeightSet\nsys.argv = ['weight_snapshots.py', *sys.argv[1:]]\nbench.main()",
+    "python_baseline_invocation": "Pass python_baseline_loader as the python -c argument, then append --case read or --case plan and the same size/iteration arguments; repeat in three fresh processes.",
+    "matrix_compile_argv": [
+      "rustc",
+      "--edition=2024",
+      "-O",
+      "scripts/bench_strided_matmul.rs",
+      "-o",
+      "<temporary executable>"
+    ],
+    "matrix_run": "Run the compiled temporary executable once; it performs nine paired samples of eight products per case."
+  },
+  "integration_validation": {
+    "core_cargo": {
+      "status": "passed",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "wgtime-core",
+        "--no-default-features",
+        "-j",
+        "2",
+        "--test",
+        "selective_rollback",
+        "--test",
+        "strided_matmul",
+        "--test",
+        "adaptive",
+        "--test",
+        "adaptive_autodiff",
+        "--test",
+        "tensor_contracts",
+        "--test",
+        "dynamic_geometry",
+        "--test",
+        "compiled_semantics",
+        "--test",
+        "workspace",
+        "--test",
+        "custom_optimization"
+      ],
+      "exit_code": 0,
+      "result": {
+        "passed": 71,
+        "ignored": 0,
+        "suites": {
+          "adaptive": 9,
+          "adaptive_autodiff": 14,
+          "compiled_semantics": 7,
+          "custom_optimization": 9,
+          "dynamic_geometry": 7,
+          "selective_rollback": 4,
+          "strided_matmul": 4,
+          "tensor_contracts": 6,
+          "workspace": 11
+        }
+      },
+      "provenance": {
+        "record": "weights/efficiency-20261120/core-validation.json",
+        "log": "weights/efficiency-20261120/core-regressions.log",
+        "verification": "Read completed summary and independently count nine successful test results with 71 passed and no failed or ignored tests in retained log."
+      }
+    },
+    "complete_python": {
+      "status": "passed",
+      "passed": 32,
+      "failed": 0,
+      "skipped": 0,
+      "scope": [
+        "python/tests/test_weights.py",
+        "python/tests/test_model.py"
+      ],
+      "record": {
+        "command": [
+          "$WEIGHTLANG_ROOT/.cache/weightlang/native-python-validation/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "python/tests/test_weights.py",
+          "python/tests/test_model.py"
+        ],
+        "environment": {
+          "PYTHONPATH": "$WEIGHTLANG_ROOT/python",
+          "WGT_COMPILER": "$WEIGHTLANG_ROOT/target/debug/wgt",
+          "WGT_WEIGHT_BRIDGE": "$WEIGHTLANG_ROOT/target/debug/examples/weights_roundtrip",
+          "WGTIME_TEST_DAEMON": "$WEIGHTLANG_ROOT/target/debug/wgtime",
+          "OMP_NUM_THREADS": "1",
+          "MKL_NUM_THREADS": "1",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/weightlang"
+        },
+        "exit_code": 0,
+        "seconds": 7.332,
+        "log": "python-integration.log",
+        "source_commit": "072582a03a123b7d95c815d563689383033019d4",
+        "products": {
+          "target/debug/wgt": "d05d49a5515430580d1276e44d314b4edc7abc4a24ad59d3f69c7a4de714d51c",
+          "target/debug/wgtime": "4e690647b5644f2bb3de14c880edefe016d10a878ce034c28ad0dccea83ae6a5",
+          "target/debug/examples/weights_roundtrip": "94ac4a726149584bcc0417b474edbd8f450a2a94360f76d2befd7479c64e4ed6"
+        }
+      }
+    },
+    "lightnest_downstream": {
+      "status": "passed",
+      "commit": "a9c4e5732b4ce9168875669de321104a3f4f278d",
+      "record_url": "https://github.com/LIghtJUNction/lightnest/blob/a9c4e5732b4ce9168875669de321104a3f4f278d/docs/benchmarks/weightlang-efficiency-2026-11-20.json",
+      "record": {
+        "command": [
+          ".venv/bin/python",
+          "-m",
+          "unittest",
+          "-v",
+          "test_native_model.NativeModelTests.test_native_and_torch_forward_recurrent_gradients_and_training",
+          "test_native_model.NativeModelTests.test_complete_native_routed_attention_all_modes_and_parameter_update"
+        ],
+        "environment": {
+          "PYTHONPATH": "tests/architecture",
+          "WGT_COMPILER": "../WeightLang/WeightLang/target/debug/wgt",
+          "WGTIME_TEST_DAEMON": "../WeightLang/WeightLang/target/debug/wgtime",
+          "OMP_NUM_THREADS": "1",
+          "MKL_NUM_THREADS": "1",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TMPDIR": "/tmp/weightlang"
+        },
+        "exit_code": 0,
+        "seconds": 6.146,
+        "log": "native-regressions.log",
+        "source_commit": "6062f57badac913512ca0ac96a328ef6fbdd8275",
+        "weightlang_code_commit": "072582a03a123b7d95c815d563689383033019d4",
+        "products": {
+          "wgt": "d05d49a5515430580d1276e44d314b4edc7abc4a24ad59d3f69c7a4de714d51c",
+          "wgtime": "4e690647b5644f2bb3de14c880edefe016d10a878ce034c28ad0dccea83ae6a5"
+        },
+        "format": "lightnest.weightlang-efficiency.v1",
+        "test_count": 2,
+        "failed": 0,
+        "skipped": 0,
+        "raw_record_sha256": "cbe5d10d34092ab8757be8c976a46130e9c220bbc9eadbbe31159825ed57196a",
+        "raw_log_sha256": "e7b60fba6375c790cefbc526d0ebf2c29375ac28e3aaaff0f5a25a7d3bef5484",
+        "path_note": "Paths are repository-relative reproductions of the expanded absolute paths in the retained raw record.",
+        "test_output": "test_native_and_torch_forward_recurrent_gradients_and_training (test_native_model.NativeModelTests.test_native_and_torch_forward_recurrent_gradients_and_training) ... ok\ntest_complete_native_routed_attention_all_modes_and_parameter_update (test_native_model.NativeModelTests.test_complete_native_routed_attention_all_modes_and_parameter_update) ... ok\n\n----------------------------------------------------------------------\nRan 2 tests in 2.633s\n\nOK\n"
+      }
+    },
+    "benchmark_downstream": {
+      "status": "passed",
+      "commit": "319e9ab515adfa069e28a7f6dc95b4ede2bc3cb4",
+      "record_url": "https://github.com/WeightLang/benchmark/blob/319e9ab515adfa069e28a7f6dc95b4ede2bc3cb4/validation/sdk-refresh-20261120.json",
+      "weightlang_revision": "072582a03a123b7d95c815d563689383033019d4",
+      "checks": {
+        "rust_tests_passed": 4,
+        "python_protocol_tests_passed": 4,
+        "native_smoke": {
+          "executed_at_utc": "2026-11-19T23:37:01.585869+00:00",
+          "command": [
+            "python3",
+            "scripts/check_sdk_smoke.py",
+            "--binary",
+            "$BENCHMARK_ROOT/target/debug/weight-init-bench",
+            "--daemon",
+            "$WEIGHTLANG_ROOT/target/debug/wgtime",
+            "--report",
+            "$BENCHMARK_ROOT/validation/sdk-refresh-20261120-smoke.json"
+          ],
+          "exit_code": 0,
+          "wall_seconds": 1.532,
+          "weightlang_revision": "072582a03a123b7d95c815d563689383033019d4",
+          "backend": "native-cpu",
+          "executions": 6,
+          "families": [
+            "resnet"
+          ],
+          "tasks": [
+            "charlm",
+            "digits"
+          ],
+          "steps_per_execution": 1,
+          "batch_size": 1,
+          "train_samples": 96,
+          "test_samples": 96,
+          "report": "$BENCHMARK_ROOT/validation/sdk-refresh-20261120-smoke.json",
+          "report_sha256": "4fe67ddea6c875f71c81b25ba15feb29d8a161fe8243ed18e09acb2c59c9a1bb",
+          "daemon_path": "$WEIGHTLANG_ROOT/target/debug/wgtime",
+          "benchmark_sha256": "e3d31af8fb686b9cbc22e99258d3e28426097a2eb641b3edf0af36488104e252",
+          "wgtime_sha256": "4e690647b5644f2bb3de14c880edefe016d10a878ce034c28ad0dccea83ae6a5",
+          "log": "/tmp/weightlang/benchmark-sdk-20261120-smoke.log"
+        }
+      },
+      "scope": {
+        "rust_unit_models": [
+          "mlp",
+          "cnn",
+          "resnet",
+          "transformer"
+        ],
+        "native_smoke_models": [
+          "resnet"
+        ],
+        "native_smoke_covers": [
+          "snapshot save/load",
+          "forward evaluation",
+          "one Adam update per task/initializer pair"
+        ],
+        "toolchain_tested": "1.100.0",
+        "repository_toolchain_file": "1.99.0 (unchanged; not rebuilt in this run)",
+        "full_benchmark_budget_unchanged": true,
+        "harbor_oracle_nop_rerun": false,
+        "performance_comparison": false,
+        "historical_validation_preserved": [
+          "acceptance.json",
+          "oracle-report.json"
+        ]
+      },
+      "build_steps": [
+        {
+          "command": [
+            "cargo",
+            "+1.100.0",
+            "build",
+            "--offline",
+            "--target-dir",
+            "$WEIGHTLANG_ROOT/target",
+            "-j2"
+          ],
+          "exit_code": 0,
+          "wall_seconds": 230.622
+        },
+        {
+          "command": [
+            "cargo",
+            "+1.100.0",
+            "test",
+            "--offline",
+            "--locked",
+            "--target-dir",
+            "$WEIGHTLANG_ROOT/target",
+            "-j2"
+          ],
+          "exit_code": 0,
+          "wall_seconds": 29.273
+        },
+        {
+          "command": [
+            "python3",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-v"
+          ],
+          "exit_code": 0,
+          "wall_seconds": 0.278
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit_code": 0,
+          "wall_seconds": 0.031
+        }
+      ],
+      "source": {
+        "upstream_url": "https://github.com/WeightLang/WeightLang/commit/072582a03a123b7d95c815d563689383033019d4",
+        "source_method": "git archive of verified published commit; all file Git blob IDs, modes and symlink targets checked",
+        "before": {
+          "revision": "379729a3cd0a15ccace3962496edd3f1502eb18f",
+          "files": 679,
+          "bytes": 7285894,
+          "blob_modes_and_symlinks_verified": true
+        },
+        "after": {
+          "revision": "072582a03a123b7d95c815d563689383033019d4",
+          "files": 785,
+          "bytes": 8054092,
+          "blob_modes_and_symlinks_verified": true
+        }
+      },
+      "artifact_sha256": {
+        "Cargo.lock": "7c1fb7c6493a98e55f3313ed7ca4a7bbefe3d660a67a8fb381eb7d07378faa48",
+        "src/main.rs": "a58bef8089fd70dcfe9373c3d34928bd0b3010136411c00d410c10480aa97823",
+        "scripts/check_sdk_smoke.py": "8c6310160b03890f3a0871601231fd84c9ec466b2be4e82ef4dd8bd60d766956",
+        "tests/test_protocol.py": "2832d427ad638c07fa0a203499fd45b07beb15a37c28bfd1ad21450d81b812e3",
+        "tasks/weight-init/environment/manifest.json": "cab49f069adc9c22ef922e66aa02b4716f3280230bb7dc4109723ad867a38b97",
+        "validation/sdk-refresh-20261120-smoke.json": "4fe67ddea6c875f71c81b25ba15feb29d8a161fe8243ed18e09acb2c59c9a1bb"
+      }
+    },
+    "rust_weights_and_tools": {
+      "status": "passed",
+      "records": [
+        {
+          "name": "rust_weights",
+          "command": [
+            "cargo",
+            "test",
+            "--locked",
+            "-p",
+            "wgt-model",
+            "--test",
+            "weights",
+            "-j",
+            "2"
+          ],
+          "exit_code": 0,
+          "seconds": 479.587,
+          "log": "rust_weights.log"
+        },
+        {
+          "name": "daemon",
+          "command": [
+            "cargo",
+            "build",
+            "--locked",
+            "-p",
+            "wgtime-service",
+            "--bin",
+            "wgtime",
+            "-j",
+            "2"
+          ],
+          "exit_code": 0,
+          "seconds": 197.56,
+          "log": "daemon.log"
+        },
+        {
+          "name": "weight_bridge",
+          "command": [
+            "cargo",
+            "build",
+            "--locked",
+            "-p",
+            "wgt-model",
+            "--example",
+            "weights_roundtrip",
+            "-j",
+            "2"
+          ],
+          "exit_code": 0,
+          "seconds": 1.595,
+          "log": "weight_bridge.log"
+        },
+        {
+          "name": "default_export",
+          "command": [
+            "cargo",
+            "test",
+            "--locked",
+            "-p",
+            "weightlang-wgt",
+            "--test",
+            "rust_export",
+            "wgt_is_default_and_torch_and_rust_targets_are_explicit",
+            "-j",
+            "2"
+          ],
+          "exit_code": 0,
+          "seconds": 39.919,
+          "log": "default_export.log"
+        },
+        {
+          "name": "iris",
+          "command": [
+            "cargo",
+            "test",
+            "--locked",
+            "--offline",
+            "--manifest-path",
+            "packages/iris/Cargo.toml",
+            "--target-dir",
+            "$WEIGHTLANG_ROOT/target",
+            "-j",
+            "2"
+          ],
+          "exit_code": 0,
+          "seconds": 229.975,
+          "log": "iris.log"
+        },
+        {
+          "name": "gates",
+          "command": [
+            "cargo",
+            "test",
+            "--locked",
+            "--offline",
+            "--manifest-path",
+            "packages/gates/Cargo.toml",
+            "--target-dir",
+            "$WEIGHTLANG_ROOT/target",
+            "-j",
+            "2"
+          ],
+          "exit_code": 0,
+          "seconds": 1.607,
+          "log": "gates.log"
+        }
+      ],
+      "rust_weight_tests_passed": 9,
+      "default_export_tests_passed": 1,
+      "iris_test_count": 0,
+      "gates_test_count": 0,
+      "consumer_scope": "Independent locked Cargo builds; Iris and Gates contain no unit tests."
+    },
+    "installed_wheel": {
+      "status": "passed",
+      "record": {
+        "wheel": "/tmp/weightlang/efficiency-20261120-wheel-dist/weightlang-0.5.4-py3-none-any.whl",
+        "wheel_bytes": 92696,
+        "wheel_sha256": "238ba2fcb3ef0a3809be042341129239b80b9066add68d3d438b6d161639ea85",
+        "source_files_verified": 22,
+        "venv": "$WEIGHTLANG_ROOT/.cache/weightlang/efficiency-20261120-wheel",
+        "identity": {
+          "python": "$WEIGHTLANG_ROOT/.cache/weightlang/efficiency-20261120-wheel/bin/python",
+          "prefix": "$WEIGHTLANG_ROOT/.cache/weightlang/efficiency-20261120-wheel",
+          "imported_package": "$WEIGHTLANG_ROOT/.cache/weightlang/efficiency-20261120-wheel/lib/python3.14/site-packages/weightlang/__init__.py",
+          "runtime_version": "0.5.4",
+          "distribution_version": "0.5.4",
+          "torch_version": "2.15.0",
+          "safetensors_version": "0.7.0"
+        },
+        "smoke_exit_code": 0,
+        "smoke_stdout": "Verified installed weightlang 0.5.4: compiler, gradients, compiler-free reload",
+        "smoke_stderr": "",
+        "compiler": "$WEIGHTLANG_ROOT/target/debug/wgt",
+        "safetensors_reuse": "package and dist-info symlinks in new venv; no dependency installation"
+      },
+      "retained_wheel": "weights/efficiency-20261120/weightlang-0.5.4-py3-none-any.whl",
+      "scope": "Installed isolated wheel; explicit Torch compiler/gradients/checkpoint and IR reload."
+    }
+  },
+  "functional_commit": "072582a03a123b7d95c815d563689383033019d4",
+  "validation_summary": {
+    "automated_tests_passed": 123,
+    "native_benchmark_single_step_executions": 6,
+    "isolated_installed_wheel": "passed",
+    "iris_gates": "compiled; zero tests each",
+    "runtime_products_match_across_consumers": true
+  },
+  "integration_sources": [
+    {
+      "path": "weights/efficiency-20261120/build-validation.json",
+      "sha256": "9a7b712c9c6fa5c0a51f7c3ee95379c2fb5a96794482b68e92adae37c7cc3ede"
+    },
+    {
+      "path": "weights/efficiency-20261120/python-validation.json",
+      "sha256": "caa5cd9040bd90f6be6290afdf2ffa6590c2aa9c48d7d40528bcb2171d1cb302"
+    },
+    {
+      "path": "weights/efficiency-20261120/python-integration.log",
+      "sha256": "a0eab6e7ae4a15f95fe8f70ab839f87f1f535f462d03d52fe45f5b52a6f6e572"
+    },
+    {
+      "path": "weights/efficiency-20261120/installed-wheel-validation.json",
+      "sha256": "8affbfb8138fd093dc081720bce556e7134397e7282d7eab26a9dbb60374b919"
+    },
+    {
+      "path": "weights/efficiency-20261120/rust_weights.log",
+      "sha256": "e33289918cb7c3da87cbd56b9c530b424e20171613490ff9aae1f4d7d77bf126"
+    },
+    {
+      "path": "weights/efficiency-20261120/daemon.log",
+      "sha256": "ab31013d7a0034139b0e243284012ddcbf70709bcb6775f6bd7d75831903ec05"
+    },
+    {
+      "path": "weights/efficiency-20261120/weight_bridge.log",
+      "sha256": "5580f3378aa403fdb50e4f180ae81c7b9ce52f8b8dfd29d71d2318214ab0d9b6"
+    },
+    {
+      "path": "weights/efficiency-20261120/default_export.log",
+      "sha256": "85029b367aa040b1254ab93d97971e36cb8ba620b7bf7a4a1d5a2b8a0e76b69f"
+    },
+    {
+      "path": "weights/efficiency-20261120/iris.log",
+      "sha256": "4eded8ad8fd0d3aa00bddef0515f71d3cc6ef219c4006422c789d30b48aca1cf"
+    },
+    {
+      "path": "weights/efficiency-20261120/gates.log",
+      "sha256": "84b5fdb63d56e59621c3b9135bee1bb1b62ea0af5167910896d1b1e98a08cfd1"
+    }
+  ],
+  "path_note": "Named root placeholders replace developer absolute paths in integration summaries; retained raw records contain the expanded actual commands."
+}

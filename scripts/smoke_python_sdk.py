@@ -34,7 +34,7 @@ input x: f32[1]
 output y: f32[1]
 parameter gain: f32[1] = [2]
 fn forward(x) { return x * gain; }
-""", device="cpu")
+""", backend="torch", device="cpu")
     value = torch.tensor([3.0])
     expected = torch.tensor([6.0])
     torch.testing.assert_close(model(value), expected)
@@ -45,8 +45,8 @@ fn forward(x) { return x * gain; }
     with tempfile.TemporaryDirectory(prefix="installed-sdk-", dir=temporary_root) as directory:
         saved = wgt.save(model, Path(directory) / "model.pt")
         os.environ["WGT_COMPILER"] = str(Path(directory) / "missing-compiler")
-        torch.testing.assert_close(wgt.load(saved, device="cpu")(value), expected)
-        torch.testing.assert_close(wgt.from_ir(model.definition, device="cpu")(value), expected)
+        torch.testing.assert_close(wgt.load(saved, backend="torch", device="cpu")(value), expected)
+        torch.testing.assert_close(wgt.from_ir(model.definition, backend="torch", device="cpu")(value), expected)
     print(f"Verified installed weightlang {distribution.version}: compiler, gradients, compiler-free reload")
 
 

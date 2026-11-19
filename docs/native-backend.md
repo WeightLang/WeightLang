@@ -20,7 +20,7 @@ Rust 控制应用、数据准备、I/O、调度和训练循环；WGT 只描述�
 
 编译入口覆盖当前 [tensor_contracts.json](../language/tensor_contracts.json) 的完整 44 指令集合，包括普通 `Write`、工作内存分配/读写/释放与 `ResourceState`。推理保留 gate/route 端点惰性求值；训练前向使用相同原生入口并启用 trace hook，记录实际张量、参数重绑定与工作内存版本供既有反向 tape 使用。反向传播仍遍历梯度 tape，不等同于 compiled backward。普通 Rust `Model::forward` 成功时提交显式写入，失败整体回滚；训练前向只使用快照，不提交临时写入。typed 操作继续经过无 AD 的事务执行路径，见下文。完整清单、使用方式和验收命令见 [Rust SDK](rust-sdk.md)。
 
-固定 shape 张量几何合同包含局部 `f32[axis=size,...]` 类型注解、命名轴、`reshape`、rank-2 `transpose` / `.T`、rank-2 `matmul` / `@`、rank-3 等 batch 的 `batch_matmul`、通用 `permute`、多轴 `softmax` 和有限有符号字面量 `scale`。注解可把相同元素数的一维向量直接绑定为多轴 Shape；命名轴在编译期检查收缩/归约/置换关系。实际使用这些几何算子时使用 adaptive IR v3；旧 adaptive IR v1/v2 不因 AST 中出现新 intrinsic 而全定义升级。参数 `read` 与裸参数引用始终为 flat vector；局部类型注解或 reshape 显式确定矩阵几何。原生 CPU interpreter 使用 base/offset/shape/strides TensorView；Matmul 与 BatchMatmul 直接读取 strided 输入，不复制数据。其他算子按需物化；AOT compiled-forward 当前仍采用物化回退。既有 Rust forward 服务入口只接受单个 f32 向量；forward 的矩阵结果须 reshape 或以同元素数向量注解满足返回接口。typed 操作多输入的本地验收范围见下文。完整签名、轴范围与 attention fixture 见[固定 shape 张量几何](tensor-geometry.md)。指定范围的本地验证已通过：core 7 suites / 30 tests、真实 service 集成一项及 macro fixture 编译一项。service 的 native-cpu attention 路径训练 100 步，MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训及资源释放。debug 单机 1000 次 evaluate 为 2.033213 ms（约 2.03 μs/次，含返回 Vec）；managed tensor 计量 1128 B（参数 96 B、tape 1056 B），charged work 98。这些是单次运行记录，不是 benchmark 优势、进程 RSS 或真实峰值内存。kernel 使用朴素 f64 累加而非 BLAS，并复用 AxisGroups；let k=q 已验证输出和梯度相同且 work 更少。当前无全局 CSE 或活跃区间复用，compiled workspace 各 register 常驻且 session 保留 reference buffers，不宣称内存最优。核心补充 IR 安全校验后仍需回归；未验证完整 Transformer、多头 attention、动态 batch 或 GPU 路径。
+固定 shape 张量几何合同包含局部 `f32[axis=size,...]` 类型注解、命名轴、`reshape`、rank-2 `transpose` / `.T`、rank-2 `matmul` / `@`、rank-3 等 batch 的 `batch_matmul`、通用 `permute`、多轴 `softmax` 和有限有符号字面量 `scale`。注解可把相同元素数的一维向量直接绑定为多轴 Shape；命名轴在编译期检查收缩/归约/置换关系。实际使用这些几何算子时使用 adaptive IR v3；旧 adaptive IR v1/v2 不因 AST 中出现新 intrinsic 而全定义升级。参数 `read` 与裸参数引用始终为 flat vector；局部类型注解或 reshape 显式确定矩阵几何。原生 CPU interpreter 使用 base/offset/shape/strides TensorView；Matmul 与 BatchMatmul 直接读取 strided 输入，不复制数据。其他算子按需物化；AOT compiled-forward 当前仍采用物化回退。既有 Rust forward 服务入口只接受单个 f32 向量；forward 的矩阵结果须 reshape 或以同元素数向量注解满足返回接口。typed 操作多输入的本地验收范围见下文。完整签名、轴范围与 attention fixture 见[固定 shape 张量几何](tensor-geometry.md)。指定范围的本地验证已通过：core 7 suites / 30 tests、真实 service 集成一项及 macro fixture 编译一项。service 的 native-cpu attention 路径训练 100 步，MSE 从 0.046146184 降至 0.00000076705595，并覆盖权重 roundtrip、同 SGD 续训及资源释放。debug 单机 1000 次 evaluate 为 2.033213 ms（约 2.03 μs/次，含返回 Vec）；managed tensor 计量 1128 B（参数 96 B、tape 1056 B），charged work 98。这些是单次运行记录，不是 benchmark 优势、进程 RSS 或真实峰值内存。Matmul / BatchMatmul 的解释执行内核使用按步长寻址、按列展开的 f64 累加，不调用 BLAS；每个输出仍按原始收缩维顺序累加，并复用既有视图与 scratch。其他几何算子复用 AxisGroups；let k=q 已验证输出和梯度相同且 work 更少。当前无全局 CSE 或活跃区间复用，compiled workspace 各 register 常驻且 session 保留 reference buffers，不宣称内存最优。核心补充 IR 安全校验后仍需回归；未验证完整 Transformer、多头 attention、动态 batch 或 GPU 路径。
 
 `compiled_instruction_coverage` 将实际编译执行的指令与目录集合对应；`compiled_semantics` 检查状态、工作内存、梯度和预算。既有 `compiled_forward`、`compiled_training`、`compiled_control_flow` 继续检查编译加载、活参数和控制流。真实服务用例与生成 Rust 消费者另行执行，具体命令见 [Rust SDK 验证](rust-sdk.md#验证与边界)。
 
@@ -156,6 +156,18 @@ linear 节点字段为 `op=linear, weight=NAME, bias=NAME|null`；bias 可以省
 权重必须为 `[out,current_width]`，bias 必须为 `[out]`。
 其余节点只有 op。严格拒绝未知算子和字段。
 Rust 宿主的参数保存与恢复见[权重快照](weights.md)；模型定义不隐式创建制品。这里的 IR 存储形式不增加源码语法或 checkpoint 合同。
+
+## 自适应执行的回滚与临时绑定
+
+`AdaptiveSession` 只为前向程序中可能成为 `Write` 目标的参数分配回滚副本。这里的“只读”指本次前向程序不写入该参数；可训练参数不必声明为 `frozen` 才能省下副本。程序已通过校验，准备阶段收集写入目标；每次执行只备份、恢复这部分参数。成功的 `run` 提交显式写入，`evaluate` 和训练前向丢弃临时写入，失败路径恢复原值。
+
+若参数数据占 `P` 字节，可能写入的参数占 `W` 字节，参数与回滚副本的合计存储由 `2P` 降为 `P + W`。寄存器、scratch、工作内存、优化器和梯度 tape 仍有各自的存储成本；该公式不代表总内存或进程 RSS。纯计算模型的 `W = 0`；几何重绑定的预算预检采用相同计量，继续保留原参数分配及优化器状态。
+
+`forward_with_parameters` 可临时替换只读或 `frozen` 参数。它先验证全部绑定和预算，再为明确替换的值创建临时缓冲，通过交换缓冲保留原分配；成功、算术错误、工作预算耗尽及 tape 预算不足均恢复原值、原分配和会话计量。临时值须容纳于扣除常驻计量与优化器状态后的会话剩余预算；tape 继续使用独立额度并保存独立快照。普通前向没有绑定时，不承担这部分临时副本。
+
+解释执行的 `Matmul` / `BatchMatmul` 在进入内层乘加前提取 base、offset 与各轴步长，直接消费连续、转置和 batch 置换视图。当前优化范围是 Rust CPU 解释执行；生成的 C compiled-forward 矩阵内核未在本轮改变。别名输出仍经 scratch 和既有视图失效逻辑提交。回归覆盖输出与输入共享底层寄存器的情况，以及前向和梯度的一致性。
+
+可复查的测量条件、结果和验收范围见[效率迭代记录](efficiency-2026-11-20.md)。下节 `Session` 公式描述顺序执行器，不能代替上述自适应执行计量。
 
 ## 内存与生命周期契约
 

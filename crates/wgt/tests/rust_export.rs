@@ -140,7 +140,7 @@ fn rust_target_rejects_host_code_bad_definitions_and_invalid_facade_paths() {
 }
 
 #[test]
-fn torch_remains_default_and_rust_crate_path_is_explicit() {
+fn wgt_is_default_and_torch_and_rust_targets_are_explicit() {
     let directory = temporary_directory();
     fs::write(directory.path().join("model.wgt"), SCALE).unwrap();
     let result = cli(directory.path()).arg("compile").output().unwrap();
@@ -150,7 +150,20 @@ fn torch_remains_default_and_rust_crate_path_is_explicit() {
         String::from_utf8_lossy(&result.stderr)
     );
     let value: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(value["format"], "weightlang.wgt.v1");
+
+    let result = cli(directory.path())
+        .args(["compile", "--target", "torch"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let value: Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(value["format"], "weightlang.torch.v1");
+
     let result = cli(directory.path())
         .args(["compile", "--crate-path", "renamed_wgt"])
         .output()
